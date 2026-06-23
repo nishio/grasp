@@ -300,7 +300,7 @@ class SQLiteStoreTests(unittest.TestCase):
             finally:
                 store.close()
 
-    def test_search_multi_term_matches_terms_across_page_lines(self):
+    def test_search_boolean_mode_supports_line_and_page_scope(self):
         fixture = {
             "name": "fixture",
             "displayName": "fixture",
@@ -320,24 +320,24 @@ class SQLiteStoreTests(unittest.TestCase):
                     ],
                 },
                 {
-                    "title": "AlphaOnly",
+                    "title": "AOnly",
                     "id": "bbbbbbbbbbbbbbbbbbbbbbbb",
                     "created": 1,
                     "updated": 20,
                     "views": 90,
                     "lines": [
-                        {"text": "AlphaOnly", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "AOnly", "created": 1, "updated": 1, "userId": "u"},
                         {"text": "alpha appears here too", "created": 1, "updated": 2, "userId": "u"},
                     ],
                 },
                 {
-                    "title": "BetaOnly",
+                    "title": "BOnly",
                     "id": "cccccccccccccccccccccccc",
                     "created": 1,
                     "updated": 10,
                     "views": 80,
                     "lines": [
-                        {"text": "BetaOnly", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "BOnly", "created": 1, "updated": 1, "userId": "u"},
                         {"text": "beta appears here too", "created": 1, "updated": 2, "userId": "u"},
                     ],
                 },
@@ -352,12 +352,30 @@ class SQLiteStoreTests(unittest.TestCase):
 
             store = SQLiteStore(store_path)
             try:
-                hits = store.search("alpha beta", limit=10)
-                self.assertEqual([hit["source_title"] for hit in hits], ["Both", "Both"])
-                self.assertEqual([hit["line_index"] for hit in hits], [1, 2])
-                self.assertEqual(hits[0]["match_terms"], ["alpha"])
-                self.assertEqual(hits[1]["match_terms"], ["beta"])
-                self.assertEqual(hits[0]["match_mode"], "literal")
+                literal_hits = store.search("alpha beta", limit=10)
+                self.assertEqual(literal_hits, [])
+
+                page_and_hits = store.search("alpha AND beta", mode="boolean", scope="page", limit=10)
+                self.assertEqual([hit["source_title"] for hit in page_and_hits], ["Both", "Both"])
+                self.assertEqual([hit["line_index"] for hit in page_and_hits], [1, 2])
+                self.assertEqual(page_and_hits[0]["match_terms"], ["alpha"])
+                self.assertEqual(page_and_hits[1]["match_terms"], ["beta"])
+                self.assertEqual(page_and_hits[0]["match_mode"], "literal")
+
+                implicit_page_and_hits = store.search("alpha beta", mode="boolean", scope="page", limit=10)
+                self.assertEqual([hit["source_title"] for hit in implicit_page_and_hits], ["Both", "Both"])
+
+                line_hits = store.search("alpha AND appears", mode="boolean", scope="line", limit=10)
+                self.assertEqual([hit["source_title"] for hit in line_hits], ["Both", "AOnly"])
+
+                page_not_hits = store.search("alpha AND NOT beta", mode="boolean", scope="page", limit=10)
+                self.assertEqual([hit["source_title"] for hit in page_not_hits], ["AOnly"])
+
+                line_or_hits = store.search("alpha OR beta", mode="boolean", scope="line", limit=10)
+                self.assertEqual(
+                    [hit["source_title"] for hit in line_or_hits],
+                    ["Both", "Both", "AOnly", "BOnly"],
+                )
             finally:
                 store.close()
 

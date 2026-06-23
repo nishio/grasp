@@ -295,24 +295,32 @@ def build_parser() -> argparse.ArgumentParser:
         "search",
         help="Search page body lines and return line-level hits.",
         description=(
-            "Search stored line text. Single-term queries use literal line substring search; "
-            "whitespace-separated multi-term queries return lines from pages containing every term. "
-            "If literal search returns no hits, search retries with normalized fallback matching."
+            "Search stored line text. By default, the query is a literal line substring, "
+            "including spaces. Use --mode boolean for AND/OR/NOT expressions, and --scope "
+            "line or page to choose where the expression must hold. If literal search "
+            "returns no hits, search retries with normalized fallback matching."
         ),
-        returns="query, hits[], count_returned, offset, recovery_hints|null",
+        returns="query, mode, scope, hits[], count_returned, offset, recovery_hints|null",
         examples=[
             "grasp search 盲点 --limit 20",
-            "grasp search \"KJ法 表札\" --limit 20",
+            "grasp search \"weak ties\" --limit 20",
+            "grasp search \"KJ法 AND 表札\" --mode boolean --scope page --limit 20",
+            "grasp search \"(KJ法 OR 発想法) AND NOT 古い\" --mode boolean --scope line",
             "grasp search \"民主主義\" --limit 10 --offset 10",
             "grasp --json search Scrapbox --limit 5",
         ],
         notes=[
             "hits[] items: source_page_id, source_title, source_views, "
             "source_updated, line_id, line_index, line_text, match_mode, match_terms.",
-            "match_mode is literal for direct substring hits and normalized for loose fallback matches.",
+            "Default mode is literal: spaces are part of the searched string.",
+            "Boolean mode supports AND, OR, NOT, parentheses, quoted phrases, and implicit AND between adjacent terms.",
+            "--scope line evaluates the expression per line. --scope page evaluates it across all lines in a page, then returns matching lines from those pages.",
+            "match_mode is literal for direct substring hits and normalized for loose fallback matches. Normalized fallback applies to literal mode.",
         ],
     )
-    search_parser.add_argument("query", help="Substring or whitespace-separated terms to find in page text.")
+    search_parser.add_argument("query", help="Literal substring, or a boolean expression when --mode boolean is set.")
+    search_parser.add_argument("--mode", choices=["literal", "boolean"], default="literal", help="Query interpretation mode.")
+    search_parser.add_argument("--scope", choices=["line", "page"], default="line", help="Where the query must match.")
     search_parser.add_argument("--limit", type=int, default=50, help="Maximum line hits to return.")
     search_parser.add_argument("--offset", type=int, default=0, help="Number of ranked line hits to skip.")
 
@@ -638,9 +646,17 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             "suggestions": store.suggest(args.partial, limit=args.limit),
         }
     if args.command == "search":
-        hits = store.search(args.query, limit=args.limit, offset=args.offset)
+        hits = store.search(
+            args.query,
+            limit=args.limit,
+            offset=args.offset,
+            mode=args.mode,
+            scope=args.scope,
+        )
         return {
             "query": args.query,
+            "mode": args.mode,
+            "scope": args.scope,
             "hits": hits,
             "count_returned": len(hits),
             "offset": args.offset,
@@ -731,6 +747,8 @@ def format_result(command: str, result: Any) -> str:
             result["hits"],
             result.get("offset", 0),
             result.get("recovery_hints"),
+            mode=result.get("mode", "literal"),
+            scope=result.get("scope", "line"),
         )
     if command in {"export-ai", "export-for-ai"}:
         return format_export_ai(result)
@@ -1042,8 +1060,11 @@ def format_search(
     hits: list[dict[str, Any]],
     offset: int = 0,
     recovery_hints: dict[str, Any] | None = None,
+    *,
+    mode: str = "literal",
+    scope: str = "line",
 ) -> str:
-    parts = [f"# Search: {query}\n", f"offset: {offset}\n"]
+    parts = [f"# Search: {query}\n", f"mode: {mode}\n", f"scope: {scope}\n", f"offset: {offset}\n"]
     if not hits:
         parts.append("(none)\n")
     else:

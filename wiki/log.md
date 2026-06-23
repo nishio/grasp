@@ -1,5 +1,12 @@
 # Log
 
+## [2026-06-24 00:56] implementation | search を default literal + explicit boolean/scope に変更
+- nishio 指摘: 空白で query を刻んで AND 検索する既定は「クエリーを書けない人間向け」の interface で、英文 phrase を検索するなら既定は入力文字列通りの literal search が自然。AND / OR / NOT と行単位 / ページ単位を明示的に組み合わせられる方が良い。
+- `grasp search <query>` の既定を、空白も含む literal line substring に戻した。literal 0件時の normalized fallback は維持。
+- `--mode boolean` を追加。AND / OR / NOT、括弧、quoted phrase、隣接 term の implicit AND に対応。`--scope line|page` を追加し、式を同一行で評価するか同一ページ全体で評価するかを切り替える。旧「空白区切り page AND」は `--mode boolean --scope page "alpha beta"` で明示的に再現。
+- dogfood: `search "KJ法 表札"` は既定 literal なので `(none)`、`search "KJ法 AND 表札" --mode boolean --scope page --limit 3` は `Scrapboxベストプラクティス` / `KJ法` の該当行を返した。
+- store schema は v5 のまま、public compatibility version は `1.5.6`。検証: `python3 -m unittest discover -s tests` OK（27 tests）。
+
 ## [2026-06-24 00:33] implementation | `/ship-next` と Skill の日本語応答方針を反映
 - nishio 指摘「日本語で(skillも更新しといて)」を受け、`.claude/commands/ship-next.md` の最終 summary / "what's next?" を日本語で返す運用に更新。
 - `skills/grasp/SKILL.md` の回答形式に「ユーザの言語に合わせ、nishio/grasp の開発 wiki / ship loop は日本語 default」を追記。

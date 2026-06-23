@@ -91,13 +91,13 @@ AI consumer 観点の要件（出典 [[ai-consumer-feedback-2026-06-23]] Tier 4 
 
 ### search recall（AI consumer Tier 1 = 最優先, vector の前）
 
-出典: [[ai-consumer-feedback-2026-06-23]] Tier 1。現状 `search` は literal substring・単一行マッチで、`search "KJ法 表札"` が両語同一ページでも `(none)` を返す（silent false-negative）。AI は recall に依存し `(none)` の不在/不一致を区別できないため、これは retrieval を AI に食わせる最も危険な失敗モード（原理は [[ai-consumer-cost-and-trust]] 軸2）。embeddings 不要で今日から効く順:
+出典: [[ai-consumer-feedback-2026-06-23]] Tier 1。旧状では `search` は literal substring・単一行マッチで、`search "KJ法 表札"` が両語同一ページでも `(none)` を返す（silent false-negative）。AI は recall に依存し `(none)` の不在/不一致を区別できないため、これは retrieval を AI に食わせる最も危険な失敗モード（原理は [[ai-consumer-cost-and-trust]] 軸2）。
 
-- **2026-06-23 22:36 実装済み: page 単位の多語 AND**。空白区切り複数語は、同一行でなく同一ページに全語があれば返す。line 検索を page で集約し AND を取る。current facts は [[grasp-v1-implemented]]。
-- **未実装: OR**。スペース区切り AND は済み。明示 OR は別記法で要設計。
+- **2026-06-23 22:36 実装済み（後に surface 変更）: page 単位の多語 AND**。空白区切り複数語を、同一行でなく同一ページに全語があれば返すようにした。2026-06-24 に暗黙挙動ではなく `--mode boolean --scope page` で明示する surface へ変更。
+- **2026-06-24 00:56 実装済み: default literal + 明示 boolean**。空白区切りを暗黙 page AND にするのは「query を書けない人間向け」の interface で、英文 phrase を検索するには既定が入力文字列そのものの literal search である方が自然、という nishio 指摘を反映。`search` 既定は literal line substring に戻し、`--mode boolean` で AND/OR/NOT・括弧・quoted phrase・隣接 term の implicit AND、`--scope line|page` で評価単位を切り替える。旧 page AND は `--mode boolean --scope page "alpha beta"` で明示的に再現する。current facts は [[grasp-v1-implemented]]。
 - **2026-06-23 23:10 一部実装済み: normalized fallback**。literal 0件時に NFKC query 正規化＋長音除去を SQLite `REPLACE` で試す。例: `ﾕｰｻﾞﾃｽﾄ` が `ユーザテスト` / `ユーザーテスト` 行に hit し、text では `[normalized]`、JSON では `match_mode: "normalized"` を返す。store schema は変えない。完全なかな/カナ変換の Python scan は 50k lines 以下の小規模 store のみに制限（nishio 規模では 20s 級になるため）。
 - **未実装: 大規模 store での完全なかな/カナ・全半角本文正規化 index**。本文側を materialize した normalized column / FTS hybrid / trigram 等で持たない限り、完全な正規化 search は大規模 store で高コスト。
-- 順序: **recall（AND/正規化）を直してから** FTS5 速度最適化（recall と速度は別軸）。
+- 順序: **recall（boolean/page scope/正規化）を直してから** FTS5 速度最適化（recall と速度は別軸）。
 
 ### read の近傍 snippet 同梱（AI consumer Tier 2）
 

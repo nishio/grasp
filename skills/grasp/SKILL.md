@@ -56,8 +56,10 @@ description: >-
 
 ### テーマ・問いから探す（タイトル未確定）
 → `grasp search <query>` で**本文行**を検索（行レベル hit）し、良さそうな `source_title` を `grasp read` で開く。タイトルの当たりが付くなら `grasp suggest <partial>`（タイトル補完）。
-- `search` は単一語ならリテラル substring 検索。空白区切りの複数語は page 単位 AND になり、同じ行でなく同じページに全語があれば該当行を返す。OR 検索はまだ無い。
-- literal で0件の時は、NFKC と長音ゆれ（例: `ﾕｰｻﾞﾃｽﾄ` / `ユーザーテスト` / `ユーザテスト`）を緩く合わせる normalized fallback が走る。text 出力では該当行に `[normalized]` が付き、JSON では `match_mode: "normalized"` になる。大規模 store では完全なかな/カナ変換 scan は行わない。
+- `search` の既定は、空白も含めて入力文字列そのものを探す literal line substring 検索。英文 phrase や空白入り query はまずこの既定でよい。
+- 複数語を論理条件として探したい時は `--mode boolean` を付ける。AND / OR / NOT、括弧、quoted phrase、隣接 term の implicit AND が使える。例: `grasp search "KJ法 AND 表札" --mode boolean --scope page`。
+- `--scope line` は1行内で式を評価し、`--scope page` は同一ページ内の全行で式を評価してから該当行を返す。旧「空白区切り page AND」は `--mode boolean --scope page "alpha beta"` で明示的に再現する。
+- literal で0件の時は、NFKC と長音ゆれ（例: `ﾕｰｻﾞﾃｽﾄ` / `ユーザーテスト` / `ユーザテスト`）を緩く合わせる normalized fallback が走る。text 出力では該当行に `[normalized]` が付き、JSON では `match_mode: "normalized"` になる。大規模 store では完全なかな/カナ変換 scan は行わない。normalized fallback は literal mode 用。
 
 ### 長大ページ・ログページを読む
 → 親 conversation に長い `read` 出力を直接持ち込まない。まず探索用 subagent / Explore agent に任せ、subagent 側で `search` / `peek` / limit 付き `read` を使って読む。
@@ -105,7 +107,7 @@ description: >-
 | verb | 用途 |
 | --- | --- |
 | `read <title>` | 本文＋逆リンク＋related＋未解決を近傍同梱で（`--related-snippets` で related/source ページ冒頭も同梱） |
-| `search <query>` | 本文行を検索、単一語は line substring、複数語は page AND、0件時は NFKC/長音ゆれ fallback |
+| `search <query>` | 本文行を検索。既定は literal line substring、`--mode boolean` で AND/OR/NOT、`--scope line|page` で評価単位を切替 |
 | `suggest <partial>` | タイトル補完 |
 | `backlinks <title>` | 行レベル逆リンク（page なし target も） |
 | `related <title>` | 2-hop ページ / page なし target の source pages |

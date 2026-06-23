@@ -56,6 +56,8 @@ findings 表は feedback の faithful record。各候補への nishio の adjudi
 
 2026-06-23 22:36: Tier 1 のうち、空白区切り複数語の page 単位 AND と `search` 空結果の `recovery_hints` は実装済み。
 
-2026-06-23 23:10: literal 0件時の normalized fallback（NFKC query 正規化＋長音除去）を追加。`ﾕｰｻﾞﾃｽﾄ` が `ユーザテスト` / `ユーザーテスト` 行に hit し、`match_mode: "normalized"` を返す。大規模 store での完全なかな/カナ正規化 index、OR は未実装。current facts は [[grasp-v1-implemented]]、残課題は [[grasp-backlog]]。
+2026-06-23 23:10: literal 0件時の normalized fallback（NFKC query 正規化＋長音除去）を追加。`ﾕｰｻﾞﾃｽﾄ` が `ユーザテスト` / `ユーザーテスト` 行に hit し、`match_mode: "normalized"` を返す。大規模 store での完全なかな/カナ正規化 indexは未実装。current facts は [[grasp-v1-implemented]]、残課題は [[grasp-backlog]]。
+
+2026-06-24 00:56: 空白区切りを暗黙 page AND にする仕様をやめ、既定は空白を含む literal line substring に戻した。明示検索として `--mode boolean`（AND/OR/NOT/括弧/quoted phrase/implicit AND）と `--scope line|page` を追加。OR は実装済み。設計理由と現状は [[grasp-backlog]] / [[grasp-v1-implemented]]。
 
 2026-06-24 00:05: related 空結果 contract は実装済み。`path <A> <B>` も初期実装し、pages ∪ unresolved targets の bounded shortest path と根拠 line を返す。`path` は dogfood 継続（performance / ranking / 実用性評価）が残る。

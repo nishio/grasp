@@ -354,6 +354,87 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(len(result["hits"]), 1)
         self.assertEqual(result["hits"][0]["source_title"], "A")
         self.assertEqual(result["hits"][0]["match_mode"], "normalized")
+        self.assertEqual(result["mode"], "literal")
+        self.assertEqual(result["scope"], "line")
+        self.assertIsNone(result["recovery_hints"])
+
+    def test_search_boolean_json_supports_page_scope(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "Both",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 2,
+                    "views": 10,
+                    "lines": [
+                        {"text": "Both", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "alpha appears here", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "beta appears there", "created": 1, "updated": 1, "userId": "u"},
+                    ],
+                },
+                {
+                    "title": "AlphaOnly",
+                    "id": "bbbbbbbbbbbbbbbbbbbbbbbb",
+                    "created": 1,
+                    "updated": 1,
+                    "views": 9,
+                    "lines": [
+                        {"text": "AlphaOnly", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "alpha appears here", "created": 1, "updated": 1, "userId": "u"},
+                    ],
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--cosense",
+                    str(export_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "search",
+                    "alpha AND beta",
+                    "--mode",
+                    "boolean",
+                    "--scope",
+                    "page",
+                    "--json",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["mode"], "boolean")
+        self.assertEqual(result["scope"], "page")
+        self.assertEqual([hit["source_title"] for hit in result["hits"]], ["Both", "Both"])
+        self.assertEqual([hit["match_terms"] for hit in result["hits"]], [["alpha"], ["beta"]])
         self.assertIsNone(result["recovery_hints"])
 
     def test_related_empty_json_includes_recovery_hints(self):
