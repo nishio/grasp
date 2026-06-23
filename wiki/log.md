@@ -1,5 +1,14 @@
 # Log
 
+## [2026-06-23 20:04] implementation | Cosense Export for AI 風 bundle を CLI に追加
+- raw に置かれた `nishio-*.1hop.txt` / `.2hop.txt` をサンプルとして確認し、`grasp export-ai <title>`（alias `export-for-ai`）を追加。既存 page は main page + 1-hop pages、`--depth 2` で 2-hop pages まで、page が無い target は backlink source pages から始める。stdout が export 本文、`--output <path>` でファイル保存。
+- 1-hop ordering は outgoing existing pages を本文出現順で先に並べ、backlink source pages を補う。2-hop は direct pages と shared link target（unresolved target 含む）経由の pages。これにより raw sample の `巨人の肩に登るコストの減少 --depth 2 --direct-limit 5 --indirect-limit 4` は main + 5 direct + 4 indirect の title 列が一致。
+- SPEC と `skills/grasp/SKILL.md` の verb snapshot を更新。`python3 -m unittest discover -s tests` OK。
+
+## [2026-06-23 19:56] file back | global store の設計原理を canonical な store decision へ昇格
+- 19:53 の global 化を mechanics として log/delivery decision に書いたが、**「store は global に1個（per-project 複製しない）」という原理**は store の正典 [[persistence-custom-format]] に無かった。そこへ Update を追加: store は単一 AI 所有 knowledge store ＝ どこでも同じ1個（cwd cache でない）、置き場は `$GRASP_STORE → $GRASP_HOME/grasp.sqlite → ~/.grasp/grasp.sqlite`、store path は project state でなく user/agent state、別 knowledge set は `$GRASP_HOME` で home ごと差し替え。delivery の global skill 判断（[[delivery-cli-plus-skill]]）と同根＝「1つの外部脳=1つの store=どこからでも同じ skill」。
+- 同ページの stale な Open Q「Cosense export スキーマは Codex が実物で確認」を解決済みに（[[cosense-json-export]] が 25791 pages で確定済み）。
+
 ## [2026-06-23 19:53] implementation | store と skill を global 化（per-project 複製しない）
 - nishio 判断「同一 Cosense を per-project に別々に持ちたいことはない → global に入れて DB も global」。`grasp/cli.py` の `default_store_path()` を cwd 相対（`./.grasp/grasp.sqlite`）から **`$GRASP_HOME or ~/.grasp` 配下**に変更、`grasp_home()` helper を追加。`default_export_path()` も `$GRASP_EXPORT → ~/.grasp/nishio.json → cwd raw/nishio.json` の順に。
 - 既存 store を `~/.grasp/grasp.sqlite` へ移動、seed を `~/.grasp/nishio.json -> repo raw/nishio.json` の symlink に。**`/tmp` から flag 無しの `grasp read/link-stats` が動作**。`python3 -m unittest discover -s tests` 11 OK（tests は default path 非依存）。

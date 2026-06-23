@@ -45,7 +45,15 @@ nishio の MVP イメージ（Cosense JSON export から始める）が指すの
 
 → 下の Open Q「on-disk か in-memory か」は **on-disk = yes** で解決。具体は SQLite（pages / lines / edges / unresolved_targets を materialize したテーブル）を起点に、必要なら専用構造へ。これが [[SPEC]] M2-1。JSON export は import adapter の**入力**にのみ使い、保存層では捨てる。store は後の差分更新（[[incremental-sync]]）のため **upsert 可能**に設計する。
 
+## Update (2026-06-23): store は global に1個（per-project に複製しない）
+
+nishio 判断「同一 Cosense を project ごとに別々に持ちたいことはない → global に入れて DB も global」。store は **単一 AI 所有の knowledge store ＝ どこで作業していても同じ1個**であって、cwd ごとの cache ではない。
+
+- 既定の置き場は global home: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。seed も `~/.grasp/nishio.json`（repo `raw/` への symlink）。`grasp/cli.py` の `default_store_path()` を cwd 相対 (`./.grasp/...`) から home 基準へ変更済み。
+- ∴ どの cwd からも flag 無しで同じ store を引く。これは delivery を global skill にした判断（[[delivery-cli-plus-skill]]）と同根 — **「1つの外部脳 = 1つの store = どこからでも同じ skill」**。`[[why-not-scrapbox-clone]]` の「単一 AI 所有」が永続層に降りた形。
+- 設計含意: store path は project state でなく user/agent state。repo を clone し直しても store は残る。複数の異なる knowledge set を切り替えるなら `$GRASP_HOME` で home ごと差し替える（per-project flag ではなく）。
+
 ## Open Questions
 
 - ~~独自 store を on-disk で持つか、MVP は in-memory か~~ → **解決: on-disk（SQLite or better）**（上 Update）。
-- Cosense export の正確なスキーマ（line-id の有無、リンク `[title]` 構文、メタデータ）は Codex が実物の export で確認。
+- ~~Cosense export の正確なスキーマ（line-id の有無、リンク `[title]` 構文、メタデータ）は Codex が実物の export で確認~~ → **解決: 実物 25791 pages で確定**（[[cosense-json-export]]）。line に安定 id 無し（grasp 採番）、link graph 未保存（text parse）、`[...]` overloaded。
