@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 02:21] file back | PR #1 Markdown mirror を main に merge
+- GitHub PR #1 `feat/read-only-markdown-mirror`（read-only Markdown mirror import）は draft / conflict 状態だったため、PR worktree で `origin/main` を merge し conflict を解消した。解消 commit は `bf206bf`。
+- conflict は version/current facts/log まわりで、package version と [[history]] の current version は `1.5.10` に統合した。`import --markdown` と `read --around-line` の両 surface を保持。
+- GitHub 上で PR を ready 化し、head SHA `bf206bf3ef6665bb96132c151fa65892add04886` 固定で merge。merge commit は `2a3972d`。`/Users/nishio/grasp` の `main` worktree は `origin/main` に fast-forward 済み。
+- 検証: conflict 解消前に PR worktree で `python3 -m unittest discover -s tests` OK（39 tests; sqlite ResourceWarning 1件）、`python3 scripts/lint_wiki.py` OK、`git diff --check --cached` OK。
+
 ## [2026-06-24 02:19] file back | log entry は current fact ではなく transition event
 - nishio 指摘「A→B→C と変わった時に `B になった` log だけを見ると誤答する」を受け、[[markdown-obsidian-indexed-mirror]] の log/event stream 節に current-state projection と stale-log guard を追記。
 - 判断: log entry は「その時点で起きた transition」であり、現在状態の主張ではない。現在状態は entity / decision / backlog などの current page、または event stream を fold して materialize した current projection から読む。
