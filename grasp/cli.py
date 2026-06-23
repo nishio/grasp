@@ -63,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
             Global examples:
               grasp --store .grasp/grasp.sqlite stats
               grasp --json read 盲点カード --backlinks-limit 5 --related-limit 5
-              grasp --export raw/nishio.json --store .grasp/grasp.sqlite import --force
+              grasp --store .grasp/grasp.sqlite import --cosense raw/nishio.json --force
 
             Output:
               Default output is compact text for agent reading.
@@ -76,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--export",
         type=Path,
         default=default_export_path(),
-        help="Cosense JSON export path for initial/import rebuilds. Defaults to $GRASP_EXPORT, then ~/.grasp/nishio.json, then ./raw/nishio.json.",
+        help="Global Cosense JSON export path for auto rebuilds and legacy import. Defaults to $GRASP_EXPORT, then ~/.grasp/nishio.json, then ./raw/nishio.json. Prefer `grasp import --cosense PATH` for explicit imports.",
     )
     parser.add_argument(
         "--store",
@@ -93,19 +93,27 @@ def build_parser() -> argparse.ArgumentParser:
         subparsers,
         "import",
         help="Import a Cosense JSON export into the SQLite store.",
-        description="Build or replace the SQLite graph store from --export.",
+        description="Build or replace the SQLite graph store from a Cosense JSON export.",
         returns=(
             "store, schema_version, current_schema_version, schema_ok, "
             "source_export, imported_at, pages, lines, edges, unresolved_targets"
         ),
         examples=[
-            "grasp import --force",
-            "grasp --export raw/nishio.json --store .grasp/grasp.sqlite import --force",
+            "grasp import --cosense raw/nishio.json --force",
+            "grasp --store .grasp/grasp.sqlite import --cosense raw/nishio.json --force",
         ],
         notes=[
-            "Uses global --export and --store. Put global options before `import`.",
+            "Uses --cosense for the Cosense JSON export path and global --store for the destination store.",
+            "If --cosense is omitted, falls back to global --export/default export discovery.",
             "Without --force, refuses to replace an existing store.",
         ],
+    )
+    import_parser.add_argument(
+        "--cosense",
+        dest="cosense_export",
+        type=Path,
+        default=argparse.SUPPRESS,
+        help="Cosense JSON export path to import.",
     )
     import_parser.add_argument("--force", action="store_true", help="Replace an existing store.")
 
@@ -399,13 +407,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "import":
-        if args.export is None:
-            parser.error("import requires --export or raw/nishio.json")
-        if not args.export.exists():
-            parser.error(f"export path does not exist: {args.export}")
+        export_path = getattr(args, "cosense_export", None) or args.export
+        if export_path is None:
+            parser.error("import requires import --cosense, global --export, or raw/nishio.json")
+        if not export_path.exists():
+            parser.error(f"export path does not exist: {export_path}")
         if args.store.exists() and not args.force:
             parser.error(f"store already exists: {args.store} (use import --force to replace it)")
-        result = import_export_to_sqlite(args.export, args.store)
+        result = import_export_to_sqlite(export_path, args.store)
         emit_result(args, result)
         return 0
 

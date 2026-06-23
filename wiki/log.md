@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-23 20:15] implementation | explicit import option を `--cosense` に変更
+- nishio 指摘「`grasp import --export your.json` は将来サポート対象が増えた時に何の export か混乱する。`--cosense` がよい」に合わせ、明示 import surface を `grasp import --cosense <json> --force` に変更。
+- global `--export` は auto rebuild / legacy fallback 用に残す。future adapter（Markdown / Obsidian 等）と区別するため、import subcommand 側は source 名 option を使う方針。
+- SPEC / Skill / [[grasp-cli-mvp]] に file back。
+
 ## [2026-06-23 20:09] implementation | `export-ai` default を depth 1・limit なしに変更
 - nishio 指示「デフォルトは `--depth 1` で limit なし」に合わせ、`grasp export-ai` の `--direct-limit` / `--indirect-limit` default を `None`（無制限）に変更。`--depth` は既に 1 が default。
 - SPEC と `skills/grasp/SKILL.md` に default semantics を明記。

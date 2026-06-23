@@ -51,7 +51,7 @@ sources:
 ## MVP（Codex 最初の一歩）
 
 **Cosense JSON export 1ファイルを読み取り専用で CLI から扱う**。書き込み・identity 層・Markdown adapter は後。
-- import: Cosense export → 正規化（page/line/edge、line-id 採番）→ in-memory（or 独自 store）
+- import: Cosense export → 正規化（page/line/edge、line-id 採番）→ in-memory（or 独自 store）。明示 import は `grasp import --cosense <json> --force`（future adapter と混同しないため source 名を option に出す）。global `--export` は auto rebuild / legacy fallback 用に残す。
 - 実装: Python package `grasp`。`python3 -m grasp ...`（または console script `grasp`）で起動。`--export` 未指定時は `$GRASP_EXPORT` → `raw/nishio.json` を探す。`--json` で機械可読出力。
 - 動詞: MVP 必須の `read`（近傍同梱）/ `backlinks`（行つき）/ `unresolved`（未解決 target ranking）に加え、read-only helper として `related` / `link-stats` / `peek` / `suggest` / `export-ai` も持つ。
 - read は lines[0]（Cosense title 行）を本文に残す。完全性と line-id 安定性を優先し、重複表示は formatter 側の問題として扱う。
