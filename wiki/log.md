@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-23 19:39] file back | 実装言語 × 配布チャネルの長期比較を decision 化
+- nishio の問い（Python/Node/Rust で native build／Claude Code は npm 更新／PyPI は pip）を新 decision [[language-and-distribution]] に distill。核心は**実装言語と配布チャネルは独立な2軸**で、混同（"Node でネイティブビルド"）を解いた。
+- **言語論点は session 内実測で溶けた**: warm store（238MB）で bare `python3` 起動 33ms / `import grasp` ~27ms（依存ゼロ）/ `read` 83ms / `backlinks` 52ms / `search` 178ms。重い仕事は全部 SQLite=言語非依存、固定 Python オーバーヘッドは ~30ms のみ。[[SPEC]] 原理1「graph を流れる体験」は既に sub-100ms で達成済み → native 化の latency 便益はほぼ無い。[[grasp-cli-mvp]] の旧「read 0.7s」は cold/最適化前と判明。
+- **∴ 長期の実体は配布チャネル**。決定: 当面 Python のまま（surface churning 中・依存ゼロ）、外部 consumer が出たら PyPI 公開 → `pipx install`（素の pip は PEP 668 で弾かれる）。**native(Go/Rust)→npm(optionalDependencies)+Homebrew は trigger 待ち**（Python 不可 agent 環境／warm でも latency 体感／SQLite を超える構造要求）。**SQLite store が言語非依存の契約**ゆえ hot read path だけ先に native 化する段階移行で de-risk。**Node-native は採らない**（SQLite 弱・runtime 依存・起動便益なし）。[[delivery-cli-plus-skill]] の CLI+Skill 境界が言語非依存である点とも整合（言語選択は delivery 決定に直交）。
+- index に decision 1 行を登録。
+
 ## [2026-06-23 19:30] implementation | Claude Code 用 Agent Skill `skills/grasp/SKILL.md` を実装
 - [[delivery-cli-plus-skill]] に従い、cosense-cli パターンで grasp Skill を作成。repo に `skills/grasp/SKILL.md`（SSoT）、`.claude/skills -> ../skills` / `.agents/skills -> ../skills` symlink で project skill 化。`pip install -e .`（依存ゼロ）で `grasp` を PATH に通し、別 cwd から `--store` 絶対指定で動くことを smoke 確認。
 - 薄く保った: 「いつ使うか」のケース分岐＋verb 一覧 snapshot のみ。各 verb の引数/戻り値は `grasp <cmd> --help`（mechanics SSoT）に委譲し二重化しない。read=近傍同梱ゆえ cosense の read-page.md 相当の traversal 手順書は不要（[[delivery-cli-plus-skill]] の予言通り SKILL.md 1枚で足りた）。
