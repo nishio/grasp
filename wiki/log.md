@@ -1,5 +1,9 @@
 # Log
 
+## [2026-06-23 22:00] file back | install path 検証中に schema auto-rebuild の live 観測
+- README/SKILL の install 3 ステップ（`pip install -e`→skill を `~/.claude/skills/grasp` に symlink→`import --cosense`）が nishio primary machine で end-to-end 成立済みと確認（CLI は pyenv 3.10.11 の `grasp`、skill symlink live、store 25791 pages）。install path 自体の dogfooding は persona1/2 test がカバーしていなかった面。
+- 検証中に偶発観測: `~/.grasp/grasp.sqlite` が code の `SCHEMA_VERSION` 3→5 に追従して最初の通常 command でサイレント再構築。可視副作用（edges 120693→125409 / unresolved 41750→42770 の drift、`imported_at` 更新、その 1 command だけ import latency）を「期待挙動・corruption でない」gotcha として [[grasp-v1-implemented]] の store 節に追記。rebuild の機構自体は既載なので side-effect の誤読防止だけ足した。
+
 ## [2026-06-23 21:54] lint | 長大ページ subagent 委譲 file back 後の検証
 - `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。
 - `python3 -m unittest discover -s tests` OK（20 tests）。`git diff --check` OK。

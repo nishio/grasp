@@ -56,6 +56,7 @@ v1 scope 外:
 - `stats` は store path, selected project, project list, schema version, source export, imported_at, counts などを返す。project 未指定かつ複数 project がある時は aggregate counts と `projects[]` を返す。store が存在しない場合も traceback/error ではなく `diagnostic.type=store_missing` と次アクションを返す。
 - import 済み JSON は store 横の `<store>.imports/` に project ごとの復旧用コピーとして保持する。manifest は project override と cached path を持つ。
 - 古い schema の store でも `stats` は診断用に読める。`read` / `peek` など通常 command は schema mismatch を検出すると、復旧用コピーからサイレントに current schema へ再構築してから続行する。復旧用コピーが無い古い store では、metadata の `last_source_export` / `source_export` が存在すればそれを fallback に使う。どちらも無ければ従来通り手動 `grasp import --cosense <json>` を促す。import cache は seed snapshot なので、hosted の最新差分は復旧後も `sync` の責務。
+- **2026-06-23 観測（nishio primary machine, install path 検証中に偶発）**: code の `SCHEMA_VERSION` が 3→5 に上がった後、`~/.grasp/grasp.sqlite`（schema 3 のまま）に対する最初の通常 command で import cache からサイレント再構築が実際に発火した。**可視な副作用**として stats の count が変わり（parser semantics 変更で edges 120693→125409, unresolved_targets 41750→42770）、`imported_at` も更新され、その **1 command だけは sub-second でなく import 相当の latency** を払う（[[grasp-cli-mvp]] の "初回 import は数秒〜十数秒" がここでも当てはまる）。これは corruption でも `sync` でもなく期待挙動。upgrade（`git pull` で schema bump）前後で `stats` を比べた AI / 人間が count drift や `imported_at` 更新を「壊れた / 同期された」と誤読しないこと。drift は parser が `#tag` / 数字 link を edge 化した結果で、本文・page 数（25791）は不変。
 
 ## commands
 
