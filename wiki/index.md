@@ -9,7 +9,7 @@ Codex が実装し、本 wiki が実装済み事実・backlog・設計判断・g
 |---|---|
 | [history](history.md) | release / store compatibility history。v1 系は `1.x.y` とし、store format / materialized index semantics が変わる時は `x`、それ以外は `y` を進める |
 | [grasp-v1-implemented](entities/grasp-v1-implemented.md) | ★ v1 リリース時点で実装済みの CLI surface / data model / parser / delivery。旧 SPEC / v1-todo の完了済み側を分離した current facts |
-| [grasp-backlog](grasp-backlog.md) | ★ 旧 SPEC / v1-todo にあったが v1 時点で未実装の項目。parser fidelity・UX・Markdown adapter・write/identity・search・sync・distribution |
+| [grasp-backlog](grasp-backlog.md) | ★ 旧 SPEC / v1-todo にあったが v1 時点で未実装の項目。parser fidelity・UX・Markdown adapter（navigation/log artifact handling 含む）・write/identity・search・sync・distribution |
 | [why-not-scrapbox-clone](decisions/why-not-scrapbox-clone.md) | なぜこの形か。Scrapbox 忠実 clone でなく identity-without-name を足したあるべき姿を作る（内部呼称 design B） |
 | [persistence-custom-format](decisions/persistence-custom-format.md) | 保存形式は独自フォーマット（Markdown ではない＝逆リンク維持の発生源）。読込は import adapter の別責務。on-disk store = SQLite（or better） |
 | [incremental-sync](decisions/incremental-sync.md) | 最新化は export 反復でなく初回 seed＋cosense-cli で最近更新ページのみ差分 upsert。cosense-cli は比較対象から freshness 経路へ昇格（post-MVP） |
@@ -17,7 +17,7 @@ Codex が実装し、本 wiki が実装済み事実・backlog・設計判断・g
 | [delivery-cli-plus-skill](decisions/delivery-cli-plus-skill.md) | AI に使わせる面 = CLI + Agent Skill（cosense-cli パターン）。旧 SPEC Open Q「純 CLI か MCP か」を決着。`--help`=mechanics SSoT / SKILL.md=いつ・どう使うか。read=近傍同梱が Skill を薄くする |
 | [language-and-distribution](decisions/language-and-distribution.md) | 実装言語と配布チャネルは別軸。言語論点は実測で溶ける（仕事は全部 SQLite、warm store で起動 ~30ms・read ~83ms）。当面 Python+pipx、native(Go/Rust)→npm は「Python 不要 agent 環境」trigger 待ち。SQLite store 契約が段階移行を de-risk |
 | [positioning-two-personas](decisions/positioning-two-personas.md) | audience は2層。driver=persona1（JP Cosense ヘビーユーザ＝nishio dogfooding）／upside-risk=persona2（世界の Markdown 束ユーザ）。substrate 共有・value prop と on-ramp は別。persona2 は addition（Markdown adapter＋英語 docs＋一般化 pitch）で狙い設計は曲げない。GTM=HN/Reddit、lede は「Markdown 束でなく local graph store」 |
-| [markdown-obsidian-indexed-mirror](decisions/markdown-obsidian-indexed-mirror.md) | persona2 向け Markdown / Obsidian folder 対応は read-only indexed mirror。Skill ではなく adapter/indexer が検索・リンク graph を materialize し、Skill は薄い利用層。pitch は faster grep でなく graph reader for LLM agents |
+| [markdown-obsidian-indexed-mirror](decisions/markdown-obsidian-indexed-mirror.md) | persona2 向け Markdown / Obsidian folder 対応は read-only indexed mirror。Skill ではなく adapter/indexer が検索・リンク graph を materialize し、Skill は薄い利用層。LLM Wiki の index/navigation/log は通常 edge でなく current projection / event stream として扱う |
 
 ## concepts/
 
