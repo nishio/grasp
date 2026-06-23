@@ -1,6 +1,6 @@
 ---
 type: entity
-summary: nishio Cosense の `KJ法` が 100+ backlink hub になり、リンク化を避けた裸の言及も大量にあることを grasp で実測した記録。exact link だけを読むと 144 pages だが、literal mention は 681 pages、本文の裸言及は 490 pages。対応は「全部リンク化」ではなく、代表 link・subtopic link・co-link slice・AI cluster handoff。
+summary: nishio Cosense の `KJ法` が 100+ backlink hub になり、リンク化を避けた裸の言及も大量にあることを grasp で実測した記録。exact link だけを読むと 144 pages だが、literal mention は 681 pages、本文の裸言及は 490 pages。対応は「全部リンク化」ではなく、root link・subtopic link・co-link slice・AI cluster handoff に分け、`KJ法` を巨大入口から分岐点に変える。
 sources:
   - `~/.grasp/grasp.sqlite` project `nishio`, schema v5, synced 2026-06-24
   - session query 2026-06-24: "KJ法" link hub audit
@@ -102,6 +102,41 @@ Manual clustering from title/text/co-link evidence:
 | 執筆・知的生産 | `エンジニアの知的生産術`, `知的生産術`, `執筆`, `反響まとめ` |
 
 This supports the existing decision that CLI-side `--cluster` is not the first move. The durable primitive should be: expose counts, ranked backlink lines, co-link slices, and enough source rows for AI to cluster per question.
+
+## Desired state
+
+The better state is not "more `[KJ法]` links". It is a graph where `KJ法` acts as a root / representative link and routine mentions route through narrower handles.
+
+Target link semantics:
+
+| link | role |
+|---|---|
+| `[KJ法]` | KJ法そのもの、川喜田二郎、原理、全体像 |
+| `[表札づくり]` | labels / name-making in KJ practice |
+| `[グループ編成]` | grouping cards / notes |
+| `[考える花火]` | divergent thinking / workshop practice |
+| `[Kozaneba]` | tool / implementation context |
+| `[探検ネット]` / `[こざね法]` | adjacent practice / derived method |
+| `[AIにKJ法を教える]` | LLM / AI application context |
+
+Preferred writing pattern:
+
+| avoid | prefer |
+|---|---|
+| `[KJ法]` で整理する | KJ法で `[表札づくり]` をする |
+| `[KJ法]` を使ったツール | KJ法を使った `[Kozaneba]` |
+| `[KJ法]` 的にグルーピングする | KJ法的に `[グループ編成]` する |
+
+Here `KJ法` may remain as bare text in the sentence. The link should mark the retrieval handle the reader will want later, not every occurrence of the word.
+
+Tool-level success criterion:
+
+- `gather KJ法` detects a huge hub and reports both graph and lexical surfaces: exact links, body bare mentions, pages with bare mention but no exact link, pages with no `KJ法`-related link, top co-link slices, representative samples, and omitted counts.
+- `co-links KJ法` ranks same-line slice handles (`考える花火`, `こざね法`, `グループ編成`, `探検ネット`, `表札*`, etc.).
+- `mentions KJ法 --unlinked` returns bare mention lines with enough page/link context to decide whether to add a narrower link.
+- AI clustering consumes this raw material and proposes 5-10 use clusters, but the durable page/link names remain human-reviewed.
+
+The practical success condition is: opening `[KJ法]` backlinks should no longer require reading the whole hub. The first view should expose a handful of use clusters and let the agent read only the relevant slice.
 
 ## Implications
 
