@@ -59,6 +59,7 @@ class CliHelpTests(unittest.TestCase):
         read_help = run_grasp_help("read")
         unresolved_help = run_grasp_help("unresolved")
         self.assertIn("--cosense", import_help)
+        self.assertIn("--markdown", import_help)
         self.assertNotIn("--force", import_help)
         self.assertIn("--unresolved-limit", read_help)
         self.assertIn("--around-line", read_help)
@@ -785,7 +786,7 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(result["diagnostic"]["type"], "store_missing")
         self.assertIn("grasp import --cosense <json>", result["diagnostic"]["next_actions"][0])
 
-    def test_importing_folder_reports_markdown_import_is_not_implemented(self):
+    def test_import_cosense_with_folder_points_to_markdown_import(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             completed = subprocess.run(
                 [
@@ -801,8 +802,64 @@ class CliHelpTests(unittest.TestCase):
             )
 
         self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("Markdown/Obsidian folder import is not implemented yet", completed.stderr)
+        self.assertIn("grasp import --markdown <folder>", completed.stderr)
         self.assertNotIn("Traceback", completed.stderr)
+
+    def test_import_markdown_folder_indexes_read_only_mirror(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nlinks to [[B]] and [[Missing]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nlinks to [[A]]\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            read_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "read",
+                    "A",
+                    "--backlinks-limit",
+                    "10",
+                    "--unresolved-limit",
+                    "10",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        import_result = json.loads(import_completed.stdout)
+        read_result = json.loads(read_completed.stdout)
+        self.assertEqual(import_result["pages"], 2)
+        self.assertEqual(import_result["edges"], 3)
+        self.assertEqual(read_result["page"]["title"], "A")
+        self.assertEqual(read_result["backlink_count_total"], 1)
+        self.assertEqual(read_result["unresolved_targets"][0]["title"], "Missing")
 
 
 if __name__ == "__main__":

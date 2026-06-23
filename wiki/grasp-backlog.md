@@ -46,18 +46,21 @@ sources:
 
 persona2 向け on-ramp。詳細決定は [[markdown-obsidian-indexed-mirror]]。
 
+2026-06-24 00:58: 最小 read-only Markdown mirror は実装済み。`grasp import --markdown <folder>` が `.md` files を既存 SQLite graph store に materialize し、file stem を title、`[[...]]` / `#tag` を edge として既存 `read` / `backlinks` / `related` surface で読める。2026-06-24 01:12 に frontmatter `title` / `id` / `aliases` / `tags` 対応、2026-06-24 01:45 に content-only 差分 index も追加済み。current facts は [[grasp-v1-implemented]]。
+
 未実装:
 
-- `index-md` / `import-md` / `import --format markdown <folder>` の surface 決定。
-- filename / first H1 / frontmatter title / aliases の title resolution。
-- frontmatter `id` / `aliases` / `tags` の扱い。
-- `[[Page]]`, `[[Page|alias]]`, `[[Page#Heading]]`, embeds, block refs, `#tag` の parser。
-- duplicate title / alias collision。
-- source folder を壊さない read-only indexed mirror としての差分 index。
+- `index-md` / `import-md` / `import --format markdown <folder>` を追加するかどうか。現状の実装 surface は `import --markdown <folder>`。
+- first H1 title resolution。
+- Obsidian block refs と heading anchors の line-id 対応。
+- duplicate title / alias collision の高度な解決（現状は import error）。
+- alias / title / id / file set 変更時のより細かい差分 index。現状は安全のため full rebuild に倒す。
 
 ### grasp 自身の wiki を最初の dogfood corpus にする
 
 2026-06-24 00:24: この grasp wiki（`wiki/`, Markdown + frontmatter + `[[...]]`）自体を mirror 層の最初のテスト corpus にする（nishio 動機, いつかのタイミングで）。狙いは「自分の設計判断グラフを近傍同梱で辿りながら次を実装する」ループを閉じること。段階は **read-only mirror が write 層より先**（write より小さく、すぐ価値が出る）。
+
+2026-06-24 00:58: dogfood seed として実装完了。`python3 -m grasp --store /tmp/grasp-wiki.sqlite import --markdown wiki --project grasp-wiki` で `wiki/` を index し、`read markdown-obsidian-indexed-mirror` などで本文＋逆リンク＋related＋未解決 target を読める。
 
 Cosense JSON export だけ見ていると気づけない設計判断が1つあぶり出される: **このwikiはリンク記法が2系統混在**しており、mirror parser は「どれを edge とみなすか」の policy が要る。
 

@@ -10,7 +10,14 @@ from textwrap import dedent
 from typing import Any
 
 from .cosense_cli import CosenseCliClient, acquire_from_cosense, sync_from_cosense
-from .sqlite_store import SCHEMA_VERSION, SQLiteStore, ensure_store_schema, import_export_to_sqlite, recover_store_from_import_cache
+from .sqlite_store import (
+    SCHEMA_VERSION,
+    SQLiteStore,
+    ensure_store_schema,
+    import_export_to_sqlite,
+    import_markdown_folder_to_sqlite,
+    recover_store_from_import_cache,
+)
 
 
 class GraspHelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
@@ -58,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
               grasp stats
               grasp read 盲点カード --json --backlinks-limit 5 --related-limit 5
               grasp import --cosense raw/nishio.json
+              grasp import --markdown wiki --project grasp-wiki
               grasp --project nishio:search acquire https://scrapbox.io/nishio/ --search "[nishio.icon]" --limit 20
 
             Output:
@@ -87,35 +95,44 @@ def build_parser() -> argparse.ArgumentParser:
     import_parser = add_command_parser(
         subparsers,
         "import",
-        help="Import a Cosense JSON export into the SQLite store.",
-        description="Build or replace the SQLite graph store from a Cosense JSON export.",
+        help="Import a Cosense JSON export or Markdown folder into the SQLite store.",
+        description="Build or replace one SQLite graph project from a Cosense JSON export or read-only Markdown folder mirror.",
         returns=(
             "store, project, project_count, projects[], schema_version, current_schema_version, schema_ok, "
-            "source_export, imported_at, pages, lines, edges, unresolved_targets"
+            "source_export, imported_at, pages, lines, edges, unresolved_targets, markdown_import|null"
         ),
         examples=[
             "grasp import --cosense raw/nishio.json",
+            "grasp import --markdown wiki --project grasp-wiki",
             "grasp --store /tmp/grasp-task.sqlite import --cosense raw/nishio.json",
         ],
         notes=[
-            "Uses --cosense for the Cosense JSON export path and global --store for the destination store.",
+            "Uses --cosense for a Cosense JSON export file, or --markdown for a read-only Markdown folder mirror.",
             "Import replaces only the selected project namespace. Other projects in the same store are preserved.",
-            "Project name defaults to the export's name field. Use --project to override.",
-            "A cached copy of each imported JSON is kept beside the store for automatic schema recovery.",
+            "Project name defaults to the export's name field or folder name. Use --project to override.",
+            "Markdown mirror v1 uses frontmatter title/id/aliases/tags when present, falls back to file stems, and parses [[wikilinks]] plus #tags as internal edges.",
+            "Markdown re-import uses a manifest: content-only file changes update incrementally; title/alias/id/file-set changes trigger a safe full rebuild.",
+            "A cached copy of each imported Cosense JSON is kept beside the store for automatic schema recovery.",
         ],
     )
     import_parser.add_argument(
         "--project",
         dest="import_project",
         default=None,
-        help="Project namespace to store this export under. Defaults to the export's name field.",
+        help="Project namespace to store this source under. Defaults to the export name or folder name.",
     )
-    import_parser.add_argument(
+    import_source = import_parser.add_mutually_exclusive_group(required=True)
+    import_source.add_argument(
         "--cosense",
         dest="cosense_export",
         type=Path,
-        required=True,
         help="Cosense JSON export path to import.",
+    )
+    import_source.add_argument(
+        "--markdown",
+        dest="markdown_folder",
+        type=Path,
+        help="Markdown folder to index as a read-only mirror.",
     )
 
     add_command_parser(
@@ -509,17 +526,25 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "import":
-        export_path = args.cosense_export
-        if not export_path.exists():
-            parser.error(f"export path does not exist: {export_path}")
-        if export_path.is_dir():
-            parser.error(
-                "import expects a Cosense JSON export file, not a folder. "
-                "Markdown/Obsidian folder import is not implemented yet; use a Cosense JSON export for now."
-            )
         project = args.import_project or args.project
         try:
-            result = import_export_to_sqlite(export_path, args.store, project_name=project)
+            if args.cosense_export is not None:
+                export_path = args.cosense_export
+                if not export_path.exists():
+                    parser.error(f"export path does not exist: {export_path}")
+                if export_path.is_dir():
+                    parser.error(
+                        "import --cosense expects a Cosense JSON export file, not a folder. "
+                        "Use `grasp import --markdown <folder>` for a read-only Markdown mirror."
+                    )
+                result = import_export_to_sqlite(export_path, args.store, project_name=project)
+            else:
+                markdown_folder = args.markdown_folder
+                if not markdown_folder.exists():
+                    parser.error(f"Markdown folder does not exist: {markdown_folder}")
+                if not markdown_folder.is_dir():
+                    parser.error(f"import --markdown expects a folder, not a file: {markdown_folder}")
+                result = import_markdown_folder_to_sqlite(markdown_folder, args.store, project_name=project)
         except ValueError as error:
             parser.error(str(error))
         emit_result(args, result)
@@ -543,7 +568,7 @@ def main(argv: list[str] | None = None) -> int:
             if not recover_store_from_import_cache(args.store):
                 parser.error(
                     f"store schema is {schema_version}, current is {SCHEMA_VERSION}; "
-                    "run `grasp import --cosense <json>` to rebuild"
+                    "run `grasp import --cosense <json>` or `grasp import --markdown <folder>` to rebuild"
                 )
             store = SQLiteStore(args.store, project=args.project)
         try:
@@ -578,10 +603,11 @@ def store_missing_stats(store_path: Path) -> dict[str, Any]:
             "message": f"store does not exist: {store_path}",
             "next_actions": [
                 "Create the store from a Cosense JSON export: grasp import --cosense <json>",
+                "Index a read-only Markdown folder mirror: grasp import --markdown <folder>",
                 "Acquire hosted pages without admin export: grasp acquire <project-url> --search <query>",
                 "Use another store path: grasp --store <path> stats",
             ],
-            "markdown_folder_import": "Markdown/Obsidian folder import is not implemented yet.",
+            "markdown_folder_import": "Markdown folder import is available as a read-only mirror: grasp import --markdown <folder>.",
         },
     }
 
@@ -590,9 +616,9 @@ def store_missing_error(store_path: Path) -> str:
     return (
         f"store does not exist: {store_path}\n"
         "Create it from a Cosense JSON export: grasp import --cosense <json>\n"
+        "Or index a read-only Markdown folder mirror: grasp import --markdown <folder>\n"
         "Or acquire hosted pages without admin export: grasp acquire <project-url> --search <query>\n"
-        "Or choose another store: grasp --store <path> <command>\n"
-        "Markdown/Obsidian folder import is not implemented yet."
+        "Or choose another store: grasp --store <path> <command>"
     )
 
 
@@ -831,6 +857,15 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
 
 
 def format_import(result: dict[str, Any]) -> str:
+    markdown_import = result.get("markdown_import")
+    markdown_section = ""
+    if markdown_import:
+        markdown_section = (
+            f"markdown_import: {markdown_import['mode']}\n"
+            f"changed_files: {markdown_import['changed_files']}\n"
+        )
+        if markdown_import.get("full_rebuild_reason"):
+            markdown_section += f"full_rebuild_reason: {markdown_import['full_rebuild_reason']}\n"
     return (
         f"store: {result['store']}\n"
         f"project: {result['project']}\n"
@@ -839,6 +874,7 @@ def format_import(result: dict[str, Any]) -> str:
         f"lines: {result['lines']}\n"
         f"edges: {result['edges']}\n"
         f"unresolved_targets: {result['unresolved_targets']}\n"
+        f"{markdown_section}"
     )
 
 

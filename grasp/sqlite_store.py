@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import quote
 
 from .cosense import CosenseStore, Edge, Line, Page, normalize_title, parse_cosense_links
+from .markdown import MarkdownMirror, MarkdownPageRecord
 
 
 SCHEMA_VERSION = "5"
@@ -238,7 +239,10 @@ def import_export_to_sqlite(
                     "schema_version": SCHEMA_VERSION,
                     "last_imported_project": project,
                     "last_source_export": str(export_path),
+                    "last_source_type": "cosense",
                     "last_imported_at": str(int(time.time())),
+                    f"project.{project}.source_type": "cosense",
+                    f"project.{project}.title_aliases": "{}",
                 },
             )
     finally:
@@ -248,6 +252,127 @@ def import_export_to_sqlite(
     store = SQLiteStore(store_path, project=project)
     try:
         return store.stats()
+    finally:
+        store.close()
+
+
+def import_markdown_folder_to_sqlite(
+    folder_path: str | Path,
+    store_path: str | Path,
+    *,
+    project_name: str | None = None,
+) -> dict[str, Any]:
+    folder_path = Path(folder_path)
+    store_path = Path(store_path)
+    source = MarkdownMirror.from_folder(folder_path)
+    project = normalize_project_name(project_name or source.project_name or folder_path.name)
+    if not project:
+        raise ValueError(f"could not determine project name for Markdown folder: {folder_path}")
+
+    ensure_store_schema(store_path)
+    connection = sqlite3.connect(store_path)
+    import_summary: dict[str, Any] = {}
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA synchronous = NORMAL")
+        with connection:
+            now = int(time.time())
+            metadata = _connection_metadata(connection)
+            old_manifest = _json_metadata(metadata, f"project.{project}.markdown_manifest")
+            old_aliases = _json_metadata(metadata, f"project.{project}.title_aliases") or {}
+            full_rebuild_reason = _markdown_full_rebuild_reason(
+                project_exists=_project_exists(connection, project),
+                old_source_type=metadata.get(f"project.{project}.source_type"),
+                old_manifest=old_manifest,
+                new_manifest=source.file_manifest,
+                old_aliases=old_aliases,
+                new_aliases=source.title_aliases,
+            )
+
+            if full_rebuild_reason is not None:
+                _delete_project(connection, project)
+                _insert_markdown_project(connection, project, source, folder_path, now)
+                rebuild_unresolved_targets(connection, project)
+                unresolved_count = connection.execute(
+                    "SELECT COUNT(*) FROM unresolved_targets WHERE project = ?",
+                    (project,),
+                ).fetchone()[0]
+                connection.execute(
+                    """
+                    UPDATE projects
+                    SET unresolved_targets = ?
+                    WHERE name = ?
+                    """,
+                    (unresolved_count, project),
+                )
+                import_summary = {
+                    "mode": "full",
+                    "changed_files": len(source.records),
+                    "full_rebuild_reason": full_rebuild_reason,
+                }
+            else:
+                changed_paths = _changed_markdown_paths(old_manifest, source.file_manifest)
+                records_by_path = {record.relative_path.as_posix(): record for record in source.records}
+                edges_by_page_id = _markdown_edges_by_page_id(source.edges)
+                for relative_path in changed_paths:
+                    record = records_by_path[relative_path]
+                    _replace_markdown_record(
+                        connection,
+                        project,
+                        record,
+                        edges_by_page_id.get(record.page.id, []),
+                    )
+                if changed_paths:
+                    rebuild_unresolved_targets(connection, project)
+                    _refresh_project_counts_sql(connection, project)
+                    connection.execute(
+                        """
+                        UPDATE projects
+                        SET display_name = ?, source_export = ?, imported_at = ?
+                        WHERE name = ?
+                        """,
+                        (source.display_name or project, str(folder_path), now, project),
+                    )
+                import_summary = {
+                    "mode": "incremental",
+                    "changed_files": len(changed_paths),
+                    "full_rebuild_reason": None,
+                }
+
+            _write_metadata(
+                connection,
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "last_imported_project": project,
+                    "last_source_export": str(folder_path),
+                    "last_source_type": "markdown",
+                    "last_imported_at": str(now),
+                    f"project.{project}.source_type": "markdown",
+                    f"project.{project}.title_aliases": json.dumps(
+                        source.title_aliases,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    f"project.{project}.markdown_manifest": json.dumps(
+                        source.file_manifest,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    f"project.{project}.markdown_last_import": json.dumps(
+                        import_summary,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                },
+            )
+    finally:
+        connection.close()
+
+    store = SQLiteStore(store_path, project=project)
+    try:
+        stats = store.stats()
+        stats["markdown_import"] = import_summary
+        return stats
     finally:
         store.close()
 
@@ -438,6 +563,221 @@ def _delete_project(connection: sqlite3.Connection, project: str) -> None:
     connection.execute("DELETE FROM projects WHERE name = ?", (project,))
 
 
+def _project_exists(connection: sqlite3.Connection, project: str) -> bool:
+    row = connection.execute(
+        "SELECT 1 FROM projects WHERE name = ?",
+        (project,),
+    ).fetchone()
+    return row is not None
+
+
+def _connection_metadata(connection: sqlite3.Connection) -> dict[str, str]:
+    try:
+        rows = connection.execute("SELECT key, value FROM metadata").fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    return {str(row[0]): str(row[1]) for row in rows}
+
+
+def _json_metadata(metadata: dict[str, str], key: str) -> dict[str, Any] | None:
+    raw = metadata.get(key)
+    if raw is None:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _insert_markdown_project(
+    connection: sqlite3.Connection,
+    project: str,
+    source: MarkdownMirror,
+    folder_path: Path,
+    imported_at: int,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO projects (
+          name,
+          display_name,
+          source_export,
+          exported,
+          imported_at,
+          pages,
+          lines,
+          edges,
+          unresolved_targets
+        )
+        VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 0)
+        """,
+        (
+            project,
+            source.display_name or project,
+            str(folder_path),
+            imported_at,
+            len(source.pages),
+            sum(page.line_count for page in source.pages),
+            len(source.edges),
+        ),
+    )
+    _insert_markdown_pages(connection, project, source.pages, source.edges)
+
+
+def _insert_markdown_pages(
+    connection: sqlite3.Connection,
+    project: str,
+    pages: list[Page],
+    edges: list[Edge],
+) -> None:
+    connection.executemany(
+        """
+        INSERT INTO pages (project, id, title, norm_title, created, updated, views, line_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            (
+                project,
+                page.id,
+                page.title,
+                page.norm_title,
+                page.created,
+                page.updated,
+                page.views,
+                page.line_count,
+            )
+            for page in pages
+        ),
+    )
+    connection.executemany(
+        """
+        INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            (
+                project,
+                line.line_id,
+                page.id,
+                line.index,
+                line.text,
+                line.created,
+                line.updated,
+                line.user_id,
+            )
+            for page in pages
+            for line in page.lines
+        ),
+    )
+    connection.executemany(
+        """
+        INSERT INTO edges (project, source_page_id, line_id, target_title, target_norm)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            (
+                project,
+                edge.source_page_id,
+                edge.line_id,
+                edge.target_title,
+                edge.target_norm,
+            )
+            for edge in edges
+        ),
+    )
+
+
+def _replace_markdown_record(
+    connection: sqlite3.Connection,
+    project: str,
+    record: MarkdownPageRecord,
+    edges: list[Edge],
+) -> None:
+    connection.execute(
+        "DELETE FROM pages WHERE project = ? AND id = ?",
+        (project, record.page.id),
+    )
+    _insert_markdown_pages(connection, project, [record.page], edges)
+
+
+def _markdown_edges_by_page_id(edges: list[Edge]) -> dict[str, list[Edge]]:
+    by_page_id: dict[str, list[Edge]] = {}
+    for edge in edges:
+        by_page_id.setdefault(edge.source_page_id, []).append(edge)
+    return by_page_id
+
+
+def _markdown_full_rebuild_reason(
+    *,
+    project_exists: bool,
+    old_source_type: str | None,
+    old_manifest: dict[str, Any] | None,
+    new_manifest: dict[str, Any],
+    old_aliases: dict[str, Any],
+    new_aliases: dict[str, str],
+) -> str | None:
+    if not project_exists:
+        return "project_missing"
+    if old_source_type != "markdown":
+        return "source_type_changed"
+    if not old_manifest or old_manifest.get("version") != new_manifest.get("version"):
+        return "manifest_missing"
+    if old_aliases != new_aliases:
+        return "alias_map_changed"
+    if _markdown_manifest_identity(old_manifest) != _markdown_manifest_identity(new_manifest):
+        return "identity_changed"
+    return None
+
+
+def _markdown_manifest_identity(manifest: dict[str, Any]) -> dict[str, Any]:
+    files = manifest.get("files")
+    if not isinstance(files, dict):
+        return {}
+    identity: dict[str, Any] = {}
+    for relative_path, item in files.items():
+        if not isinstance(item, dict):
+            continue
+        identity[str(relative_path)] = {
+            "page_id": item.get("page_id"),
+            "title": item.get("title"),
+            "norm_title": item.get("norm_title"),
+            "aliases": item.get("aliases") or [],
+        }
+    return identity
+
+
+def _changed_markdown_paths(old_manifest: dict[str, Any] | None, new_manifest: dict[str, Any]) -> list[str]:
+    if old_manifest is None:
+        return sorted((new_manifest.get("files") or {}).keys())
+    old_files = old_manifest.get("files") if isinstance(old_manifest.get("files"), dict) else {}
+    new_files = new_manifest.get("files") if isinstance(new_manifest.get("files"), dict) else {}
+    changed = []
+    for relative_path, item in new_files.items():
+        old_item = old_files.get(relative_path)
+        if not isinstance(item, dict) or not isinstance(old_item, dict):
+            changed.append(str(relative_path))
+            continue
+        if item.get("hash") != old_item.get("hash"):
+            changed.append(str(relative_path))
+    return sorted(changed)
+
+
+def _refresh_project_counts_sql(connection: sqlite3.Connection, project: str) -> None:
+    connection.execute(
+        """
+        UPDATE projects
+        SET
+          pages = (SELECT COUNT(*) FROM pages WHERE project = ?),
+          lines = (SELECT COUNT(*) FROM lines WHERE project = ?),
+          edges = (SELECT COUNT(*) FROM edges WHERE project = ?),
+          unresolved_targets = (SELECT COUNT(*) FROM unresolved_targets WHERE project = ?)
+        WHERE name = ?
+        """,
+        (project, project, project, project, project),
+    )
+
+
 class SQLiteStore:
     def __init__(self, path: str | Path, project: str | None = None):
         self.path = Path(path)
@@ -538,6 +878,30 @@ class SQLiteStore:
             return None
         return data if isinstance(data, dict) else None
 
+    def project_title_aliases(self, project: str | None = None) -> dict[str, str]:
+        project = self._require_project(project)
+        raw = self.metadata().get(f"project.{project}.title_aliases")
+        if raw is None:
+            return {}
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return {
+            str(alias_norm): str(title)
+            for alias_norm, title in data.items()
+            if isinstance(alias_norm, str) and isinstance(title, str)
+        }
+
+    def _resolve_title_norm(self, title: str, *, project: str) -> str:
+        norm_title = normalize_title(title)
+        alias_title = self.project_title_aliases(project).get(norm_title)
+        if alias_title is None:
+            return norm_title
+        return normalize_title(alias_title)
+
     def _selected_project_or_none(self) -> str | None:
         if self.project:
             return self.project
@@ -560,7 +924,7 @@ class SQLiteStore:
                 raise ValueError(f"project does not exist: {selected}; available projects: {available}")
             return selected
         if not names:
-            raise ValueError("store has no projects; run `grasp import --cosense <json>` first")
+            raise ValueError("store has no projects; run `grasp import --cosense <json>` or `grasp import --markdown <folder>` first")
         available = ", ".join(names)
         raise ValueError(f"multiple projects in store; specify --project <name> (available: {available})")
 
@@ -628,6 +992,8 @@ class SQLiteStore:
                 "last_acquired_project": project,
                 "last_acquired_source": source_export,
                 "last_acquired_at": str(now),
+                f"project.{project}.source_type": "cosense",
+                f"project.{project}.title_aliases": "{}",
             }
             if acquisition_metadata is not None:
                 metadata[f"project.{project}.acquisition"] = json.dumps(
@@ -661,6 +1027,7 @@ class SQLiteStore:
 
     def resolve_page(self, title: str) -> Page | None:
         project = self._require_project()
+        norm_title = self._resolve_title_norm(title, project=project)
         row = self.connection.execute(
             """
             SELECT * FROM pages
@@ -668,7 +1035,7 @@ class SQLiteStore:
             ORDER BY rowid
             LIMIT 1
             """,
-            (project, normalize_title(title)),
+            (project, norm_title),
         ).fetchone()
         return self._page_from_row(row) if row is not None else None
 
@@ -727,6 +1094,7 @@ class SQLiteStore:
 
     def backlinks(self, title: str, limit: int | None = None, offset: int = 0) -> list[Edge]:
         project = self._require_project()
+        norm_title = self._resolve_title_norm(title, project=project)
         query = """
             SELECT
               e.source_page_id,
@@ -744,7 +1112,7 @@ class SQLiteStore:
             WHERE e.project = ? AND e.target_norm = ?
             ORDER BY source.views DESC, COALESCE(source.updated, 0) DESC, source.title, line.line_index
         """
-        params: list[Any] = [project, normalize_title(title)]
+        params: list[Any] = [project, norm_title]
         if limit is not None and limit >= 0:
             query += " LIMIT ? OFFSET ?"
             params.extend([limit, offset])
@@ -755,8 +1123,8 @@ class SQLiteStore:
 
     def link_stats(self, title: str) -> dict[str, Any]:
         project = self._require_project()
-        norm = normalize_title(title)
         page = self.resolve_page(title)
+        norm = page.norm_title if page is not None else self._resolve_title_norm(title, project=project)
         if page is None:
             unresolved_target = self.connection.execute(
                 "SELECT * FROM unresolved_targets WHERE project = ? AND target_norm = ?",
