@@ -51,8 +51,8 @@ sources:
 ## MVP（Codex 最初の一歩）
 
 **Cosense JSON export 1ファイルを読み取り専用で CLI から扱う**。書き込み・identity 層・Markdown adapter は後。
-- import: Cosense export → 正規化（page/line/edge、line-id 採番）→ in-memory（or 独自 store）。明示 import は `grasp import --cosense <json> --force`（future adapter と混同しないため source 名を option に出す）。global `--export` は auto rebuild / legacy fallback 用に残す。
-- 実装: Python package `grasp`。`python3 -m grasp ...`（または console script `grasp`）で起動。`--export` 未指定時は `$GRASP_EXPORT` → `raw/nishio.json` を探す。`--json` で機械可読出力。
+- import: Cosense export → 正規化（page/line/edge、line-id 採番）→ SQLite store。明示 import は `grasp import --cosense <json> --force`（future adapter と混同しないため source 名を option に出す）。暗黙 seed / legacy `--export` は持たない。
+- 実装: Python package `grasp`。`python3 -m grasp ...`（または console script `grasp`）で起動。store は単一 AI 所有の global home に 1 個（default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`）。`--json` は root option（verb の前）で機械可読出力。
 - 動詞: MVP 必須の `read`（近傍同梱）/ `backlinks`（行つき）/ `unresolved`（未解決 target ranking）に加え、read-only helper として `related` / `link-stats` / `peek` / `suggest` / `export-ai` も持つ。
 - read は lines[0]（Cosense title 行）を本文に残す。完全性と line-id 安定性を優先し、重複表示は formatter 側の問題として扱う。
 - `link-stats` は existing page / unresolved target の両方に対して incoming `link_count`, `source_page_count`, `link_multiplicity` (`none` / `single` / `multi`) を返す。
@@ -66,7 +66,7 @@ sources:
 MVP（step 1）は実装・smoke 済み。`cosense` との実測比較（[[cosense-cli]]）で出た **2 つの差** を埋めるのが次。write / identity 層はまだ入れない（"before Co-" 維持）。優先順位はこの順。
 
 ### M2-1. on-disk store（SQLite or better）— latency 解消 ★最優先
-- Status 2026-06-23: **実装済み**。`.grasp/grasp.sqlite` default、`grasp import --force` と `--rebuild-store` で再構築。通常 command は store があれば JSON を parse しない。
+- Status 2026-06-23: **実装済み**。`~/.grasp/grasp.sqlite` global default、`grasp import --cosense <json> --force` で構築/再構築。通常 command は store があれば JSON を parse しない。`$GRASP_HOME` で home を差し替え可能。
 - 問題: 起動毎に 123MB JSON を full parse し、全コマンド一律 ~3.4s（cosense は 0.5–1.2s）。「AI が graph を流れるように体験する」中核体験を最も損なう。
 - やること: import（export → page/line/edge/unresolved_targets の materialize）を一度だけ実行し、**SQLite もしくはより良いデータ構造に永続**（pages / lines / edges / unresolved_targets のテーブル）。次回以降は store を読むだけで起動。**渡された JSON は import 入力にのみ使い保存層では捨てる**（JSON のまま持ち続けない）。
 - 位置づけ: これは [[persistence-custom-format]] の「独自 on-disk store」の最小実体 ＝ native store の seed。Open Q「in-memory のみ or on-disk」を **on-disk = SQLite** で解決。

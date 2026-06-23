@@ -17,25 +17,11 @@ class GraspHelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDes
 
 
 def grasp_home() -> Path:
-    """Single global home for the store/seed. One AI owns one store, not per-cwd."""
+    """Single global home for the store. One AI owns one store, not per-cwd."""
     env_home = os.environ.get("GRASP_HOME")
     if env_home:
         return Path(env_home)
     return Path.home() / ".grasp"
-
-
-def default_export_path() -> Path | None:
-    env_path = os.environ.get("GRASP_EXPORT")
-    if env_path:
-        return Path(env_path)
-
-    home_default = grasp_home() / "nishio.json"
-    if home_default.exists():
-        return home_default
-    cwd_default = Path.cwd() / "raw" / "nishio.json"
-    if cwd_default.exists():
-        return cwd_default
-    return None
 
 
 def default_store_path() -> Path:
@@ -73,18 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
         ).strip(),
     )
     parser.add_argument(
-        "--export",
-        type=Path,
-        default=default_export_path(),
-        help="Global Cosense JSON export path for auto rebuilds and legacy import. Defaults to $GRASP_EXPORT, then ~/.grasp/nishio.json, then ./raw/nishio.json. Prefer `grasp import --cosense PATH` for explicit imports.",
-    )
-    parser.add_argument(
         "--store",
         type=Path,
         default=default_store_path(),
         help="SQLite store path. Defaults to $GRASP_STORE or ~/.grasp/grasp.sqlite (one global store).",
     )
-    parser.add_argument("--rebuild-store", action="store_true", help="Rebuild the SQLite store from --export before running.")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
 
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="command")
@@ -104,7 +83,6 @@ def build_parser() -> argparse.ArgumentParser:
         ],
         notes=[
             "Uses --cosense for the Cosense JSON export path and global --store for the destination store.",
-            "If --cosense is omitted, falls back to global --export/default export discovery.",
             "Without --force, refuses to replace an existing store.",
         ],
     )
@@ -112,7 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--cosense",
         dest="cosense_export",
         type=Path,
-        default=argparse.SUPPRESS,
+        required=True,
         help="Cosense JSON export path to import.",
     )
     import_parser.add_argument("--force", action="store_true", help="Replace an existing store.")
@@ -407,9 +385,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "import":
-        export_path = getattr(args, "cosense_export", None) or args.export
-        if export_path is None:
-            parser.error("import requires import --cosense, global --export, or raw/nishio.json")
+        export_path = args.cosense_export
         if not export_path.exists():
             parser.error(f"export path does not exist: {export_path}")
         if args.store.exists() and not args.force:
@@ -418,19 +394,15 @@ def main(argv: list[str] | None = None) -> int:
         emit_result(args, result)
         return 0
 
-    if args.rebuild_store or not args.store.exists():
-        if args.export is None:
-            parser.error(f"store does not exist and no --export was found: {args.store}")
-        if not args.export.exists():
-            parser.error(f"export path does not exist: {args.export}")
-        import_export_to_sqlite(args.export, args.store)
+    if not args.store.exists():
+        parser.error(f"store does not exist: {args.store} (run `grasp import --cosense <json> --force` first)")
 
     store = SQLiteStore(args.store)
     try:
         if args.command != "stats" and not store.schema_ok():
             parser.error(
                 f"store schema is {store.schema_version()}, current is {SCHEMA_VERSION}; "
-                "run with --rebuild-store or `grasp import --force` to rebuild"
+                "run `grasp import --cosense <json> --force` to rebuild"
             )
         result = run_command(store, args)
     finally:

@@ -28,10 +28,8 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 ```
 
 - `import --cosense <json> --force`: Cosense JSON export を SQLite store に materialize。
-- `--export`: auto rebuild / legacy import fallback 用の global Cosense JSON export path。未指定時は `$GRASP_EXPORT` → `raw/nishio.json`。
-- `--store`: SQLite store path。未指定時は `$GRASP_STORE` → `.grasp/grasp.sqlite`。
+- `--store`: SQLite store path。未指定時は `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`（単一 AI が持つ global store）。
 - 通常 command は store が存在すれば JSON を再 parse しない。
-- `--rebuild-store`: command 実行前に export から store を再構築。
 - `--json`: 機械可読 JSON output。
 - `grasp <cmd> --help`: mechanics SSoT。各 command の arguments / `--json` return keys / examples / notes を持つ。Agent Skill 側は具体 schema を重複保持せず、使用直前にここを読む。
 - console script `grasp = grasp.cli:main` も定義済み（editable install すれば `grasp ...`）。

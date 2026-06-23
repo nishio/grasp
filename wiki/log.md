@@ -2,7 +2,7 @@
 
 ## [2026-06-23 20:15] implementation | explicit import option を `--cosense` に変更
 - nishio 指摘「`grasp import --export your.json` は将来サポート対象が増えた時に何の export か混乱する。`--cosense` がよい」に合わせ、明示 import surface を `grasp import --cosense <json> --force` に変更。
-- global `--export` は auto rebuild / legacy fallback 用に残す。future adapter（Markdown / Obsidian 等）と区別するため、import subcommand 側は source 名 option を使う方針。
+- リリース前なので互換性は取らず、global `--export` / `--rebuild-store` / store 不在時の暗黙 seed は削除。store 作成・再構築は `grasp import --cosense <json> --force` に一本化。
 - SPEC / Skill / [[grasp-cli-mvp]] に file back。
 
 ## [2026-06-23 20:09] implementation | `export-ai` default を depth 1・limit なしに変更

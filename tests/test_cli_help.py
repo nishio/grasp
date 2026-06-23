@@ -37,6 +37,8 @@ class CliHelpTests(unittest.TestCase):
         help_text = run_grasp_help()
         self.assertIn("Mechanics SSoT", help_text)
         self.assertIn("Global options must appear before the command", help_text)
+        self.assertNotIn("--export", help_text)
+        self.assertNotIn("--rebuild-store", help_text)
         for command in COMMANDS:
             self.assertIn(command, help_text)
 
