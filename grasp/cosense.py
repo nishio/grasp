@@ -29,7 +29,7 @@ def is_internal_cosense_link(content: str) -> bool:
         return False
     if token.startswith("/"):
         return False
-    if len(token) >= 2 and token[0] in "*-_" and token[1].isspace():
+    if is_decoration_token(token):
         return False
     if len(token) >= 2 and token[0] == "$" and token[1].isspace():
         return False
@@ -80,6 +80,13 @@ def parse_cosense_links(text: str) -> list[str]:
 
 def is_inside_inline_code(text: str, position: int) -> bool:
     return text[:position].count("`") % 2 == 1
+
+
+def is_decoration_token(token: str) -> bool:
+    index = 0
+    while index < len(token) and token[index] in "*-_":
+        index += 1
+    return index > 0 and index < len(token) and token[index].isspace()
 
 
 def is_ascii_index_syntax(text: str, start: int) -> bool:

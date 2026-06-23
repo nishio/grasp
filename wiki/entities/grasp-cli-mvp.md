@@ -63,12 +63,13 @@ MVP parser は以下を link としない:
 - inline backtick 内
 - ASCII index 風 `xs[i]`, `func()[0]`
 - 数字のみ `[1]`
+- 連続 `*`/`-`/`_` 装飾 `[** x]`, `[*** x]`
 
-この strict parser で `raw/nishio.json`: 25791 pages / 724981 lines / 123170 edges / 58944 distinct targets / 43344 wanted / normalized title collision 1。
+この strict parser で `raw/nishio.json`: 25791 pages / 724981 lines / 120693 edges / 41750 wanted / normalized title collision 1。
 
 ### 残る false-positive（2026-06-23 実測）
 
-`wanted` 上位に `** 深い思考`（count 59）が混入する。これは Cosense の見出し装飾 `[** 深い思考]`（複数 `*`）であってリンクではない。`is_internal_cosense_link` は `[* x]`（先頭 1 文字が `*-_` ＋空白）だけ除外し、2 文字目も `*` のケース（`[** x]` / `[*** x]`）を通すため漏れる。→ decoration 判定を「先頭の連続する `*` `-` `_` 群 ＋ 空白」に拡張すべき（[[SPEC]] M2-3）。それ以外のスポットチェックは正しく、例: `ニーチェ` は cosense の 1-hop にも無く真に赤リンク。
+~~`wanted` 上位に `** 深い思考`（count 59）が混入する~~ → M2-3 で修正済み。Cosense の見出し装飾 `[** 深い思考]`（複数 `*`）を decoration として除外する。`backlinks '** 深い思考'` は none。
 
 ## 検証
 
@@ -82,7 +83,7 @@ MVP parser は以下を link としない:
 
 - ~~on-disk store/cache ★最優先~~ → SQLite store 実装済み。edge/materialized wanted を on-disk 永続し、通常 read は JSON parse しない。
 - ~~本文検索 `search`~~ → 実装済み。SQLite `lines.text LIKE` で行本文を検索し、行レベル hits を返す。
-- parser false-positive 修正: `[** x]` 系装飾（`** 深い思考` count 59）が `wanted` を汚す。decoration 判定を複数 `*-_` 群対応に拡張。あわせて false-negative（短い英数字 title）監査。
+- ~~parser false-positive 修正~~ → `[** x]` 系装飾は除外済み。false-negative（短い英数字 title）監査は残る。
 - `#tag` を page link と同等に扱うか。
 - line context window: backlink は現状 hit line のみ。前後行を付けるか。
 - `wanted` ranking の重み調整: count/views/recency の順で十分かは利用で検証。

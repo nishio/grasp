@@ -14,6 +14,7 @@ class CosenseParsingTests(unittest.TestCase):
         text = (
             "[Page] [[bold only]] [https://example.com label] [label https://example.com] "
             "[person.icon] [photo.img] [* bold] [/ italic] [- strike] [_ underline] "
+            "[** heading] [*** deeper] [-- strike] [__ underline] "
             "[$ x+y] [/other/project] [Other Page] xs[i] paper.projects[1] func()[0] [2] `[Code]`"
         )
 

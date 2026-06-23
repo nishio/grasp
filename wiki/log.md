@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-23 18:15] implementation | M2-3 parser false-positive `[** x]` 系を修正
+- `is_internal_cosense_link` の decoration 判定を「先頭の連続する `*` / `-` / `_` 群 + 空白」に拡張。`[* x]` だけでなく `[** x]`, `[*** x]`, `[-- x]`, `[__ x]` を link としない。
+- 実データ再 import: 120693 edges / 41750 wanted。`backlinks '** 深い思考'` は none になり、wanted 上位から消えた。
+- 検証: `python3 -m unittest discover -s tests` OK。
+
 ## [2026-06-23 18:14] implementation | M2-2 行レベル本文検索 `search` を追加
 - `grasp search <query>` を追加。SQLite `lines.text LIKE` で本文行を検索し、`source_page_id/title/views/updated`, `line_id`, `line_index`, `line_text` を返す。text output は backlinks と同じ行リスト形式、`--json` 対応。
 - ranking は SPEC 通り暫定: page.views → updated → title → line_index。`suggest` は title 補完として維持。
