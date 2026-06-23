@@ -1,5 +1,16 @@
 # Log
 
+## [2026-06-23 19:46] user-test | persona2 視点で fresh onboarding を検証
+- [[persona2-user-test-2026-06-23]] を追加。persona2（世界の LLM Wiki / Markdown 束ユーザ）として、空 cwd + 空 `GRASP_HOME` + 最小 `notes/Alpha.md` から初回導線を試した。
+- 結果: persona2 active release としては fail。`grasp --help` / package description は Scrapbox/Cosense 寄りで persona2 の hook（Markdown 束より local graph store）を出していない。README/docs も無い。`grasp stats` は store/export 無しで onboarding にならず、`grasp import notes` は unrecognized args、`grasp --export notes import --force` は `IsADirectoryError` traceback。
+- 判断: MVP の persona1 dogfooding には問題ないが、persona2 を狙うなら Markdown import adapter は release gate。暫定でも directory export の friendly error、store missing の診断、英語 README / demo が必要。
+
+## [2026-06-23 19:43] file back | audience を2層 positioning に決定化、name=identity 欠陥を精密化
+- nishio の persona 観（JP Cosense ヘビーユーザは自分の一側面／世界の LLM Wiki・Markdown 束ユーザは upside risk として狙う／HN・Reddit 投稿もあり）を新 decision [[positioning-two-personas]] に distill。核心: **substrate は共有だが value prop と on-ramp が persona ごとに別**。driver=persona1（dogfooding）、persona2 は設計の再センタリングでなく **addition**（Markdown adapter＋英語 docs＋一般化 pitch）で狙う。罠＝dilution（read=近傍同梱が「graph DB を CLI で」との差を溶かさない）。
+- 設計含意を2つ固定: ①**Markdown import adapter は persona2 の on-ramp そのもの**（[[SPEC]] 入力節の "後で足せる" は persona1 都合で、persona2 を狙うなら re-rank 候補）。②identity-without-name は両 persona に別の言葉で刺さる。
+- **nishio 訂正で name=identity 欠陥を精密化**: 「Markdown と Scrapbox は同じバグ」は誤り。Scrapbox は rename でリンクを**書き換え or redirect** して生存させる（リンクは切れない）。欠陥は**そのリンク生存解が払うコスト**（書き換え＝文意破壊／redirect＝旧名 stub 累積）。3者で失敗モードが別物（Markdown=リンク切れ／Scrapbox=文意破壊 or stub 累積／grasp=どちらも無し）。[[why-not-scrapbox-clone]] の該当箇所も redirect コストを補って一段精密化。
+- index に decision 1 行を登録。
+
 ## [2026-06-23 19:42] file back | warm-store 再計測を実装現状ページへ伝播
 - [[language-and-distribution]] の一次データ（warm page cache・median of 5 の各 verb wall time）を、性能事実の source of truth である [[grasp-cli-mvp]] にも反映。`stats` 70ms / `backlinks` 54ms / `read`（近傍同梱）83ms / `unresolved` 52ms / `search` 178ms、固定オーバーヘッドは bare `python3` 33ms・`import grasp` ~free（依存ゼロ）。
 - entity ページに残っていた **stale な「read 約 0.7 秒 / wall 1.0 秒」を訂正**: あれは早い時点の cold/単発計測で、warm steady-state は 50–180ms。中核 read は既に sub-100ms、`search` 178ms だけ SQLite `LIKE` 全行スキャン律速（index が lever、host 言語ではない）。
