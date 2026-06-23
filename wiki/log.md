@@ -1,5 +1,9 @@
 # Log
 
+## [2026-06-24 00:12] tooling | `/ship-next` カスタムコマンドを追加
+- nishio 提案「file back, commit, push, what's next? までを一つのカスタムコマンドにする？」を受け、`.claude/commands/ship-next.md` を追加。
+- 目的: grasp の作業ループ（差分理解 → wiki file back → `unittest` / wiki lint / diff check → commit → push → 次実装候補提示）を毎回同じ形で閉じる。空差分なら empty commit せず、current backlog から "what's next?" だけ答える。
+
 ## [2026-06-24 00:05] implementation | related recovery hints と path 初期実装
 - `related <title>` の空結果に `recovery_hints` を追加し、`read` / `link-stats` / `search` と同じ negative-result contract に揃えた。JSON は `query, related[], recovery_hints|null`、text は空結果時に Recovery Hints を表示する。
 - `path <A> <B> --max-depth 4 --limit 3` を追加。pages ∪ unresolved targets を node、materialized internal links を無向 edge として bounded shortest path を返す。edge には source page / line-id / line text を同梱し、bridge の根拠を確認できる。
