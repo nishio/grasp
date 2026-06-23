@@ -5,9 +5,10 @@ sources:
   - llm-wiki 設計対話 2026-06-23
 ---
 
-# Decision: design B — 単一 AI 所有の Scrapbox 型グラフストア
+# Decision: Scrapbox を忠実 clone せず、identity-without-name を足した「あるべき姿」を作る
 
 決定: **B（あるべき姿を作る）**。Scrapbox 忠実 clone（A）ではない。
+（grasp = Scrapbox のグラフモデル − Co- + identity-without-name。以下、この選択を内部で **design B** と呼ぶ。）
 
 ## 文脈
 
