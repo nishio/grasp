@@ -51,7 +51,7 @@ sources:
 ## MVP（Codex 最初の一歩）
 
 **Cosense JSON export 1ファイルを読み取り専用で CLI から扱う**。書き込み・identity 層・Markdown adapter は後。
-- import: Cosense export → 正規化（page/line/edge、line-id 採番）→ SQLite store。明示 import は `grasp import --cosense <json> --force`（future adapter と混同しないため source 名を option に出す）。暗黙 seed / legacy `--export` は持たない。
+- import: Cosense export → 正規化（page/line/edge、line-id 採番）→ SQLite store。明示 import は `grasp import --cosense <json>`（future adapter と混同しないため source 名を option に出す）。既存 store は確認なしで置き換える。暗黙 seed / legacy `--export` は持たない。
 - 実装: Python package `grasp`。`python3 -m grasp ...`（または console script `grasp`）で起動。store は単一 AI 所有の global home に 1 個（default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`）。`--json` は root option（verb の前）で機械可読出力。
 - 動詞: MVP 必須の `read`（近傍同梱）/ `backlinks`（行つき）/ `unresolved`（未解決 target ranking）に加え、read-only helper として `related` / `link-stats` / `peek` / `suggest` / `search` / `export-ai` も持つ。
 - read は lines[0]（Cosense title 行）を本文に残す。完全性と line-id 安定性を優先し、重複表示は formatter 側の問題として扱う。
@@ -66,7 +66,7 @@ sources:
 MVP（step 1）は実装・smoke 済み。`cosense` との実測比較（[[cosense-cli]]）で出た差を M2-1〜M2-4 で埋め、persona1 dogfooding（[[persona1-user-test-2026-06-23]]）で出た CLI 体験の摩擦を M2-5 に積む。write / identity 層はまだ入れない（"before Co-" 維持）。
 
 ### M2-1. on-disk store（SQLite or better）— latency 解消 ★最優先
-- Status 2026-06-23: **実装済み**。`~/.grasp/grasp.sqlite` global default、`grasp import --cosense <json> --force` で構築/再構築。通常 command は store があれば JSON を parse しない。`$GRASP_HOME` で home を差し替え可能。
+- Status 2026-06-23: **実装済み**。`~/.grasp/grasp.sqlite` global default、`grasp import --cosense <json>` で構築/再構築し、既存 store は置き換える。通常 command は store があれば JSON を parse しない。`$GRASP_HOME` で home を差し替え可能。
 - 問題: 起動毎に 123MB JSON を full parse し、全コマンド一律 ~3.4s（cosense は 0.5–1.2s）。「AI が graph を流れるように体験する」中核体験を最も損なう。
 - やること: import（export → page/line/edge/unresolved_targets の materialize）を一度だけ実行し、**SQLite もしくはより良いデータ構造に永続**（pages / lines / edges / unresolved_targets のテーブル）。次回以降は store を読むだけで起動。**渡された JSON は import 入力にのみ使い保存層では捨てる**（JSON のまま持ち続けない）。
 - 位置づけ: これは [[persistence-custom-format]] の「独自 on-disk store」の最小実体 ＝ native store の seed。Open Q「in-memory のみ or on-disk」を **on-disk = SQLite** で解決。
@@ -86,6 +86,7 @@ MVP（step 1）は実装・smoke 済み。`cosense` との実測比較（[[cosen
 
 ### M2-4. cosense-cli 差分更新（freshness）
 - Status 2026-06-23: **実装済み**。`grasp sync <project-url>` が `cosense listPages` → changed page `readPage` → SQLite upsert を行う。`--dry-run` 対応。
+- 動作条件: `@helpfeel/cosense-cli` の `cosense` binary が install 済みで PATH にあり、対象 hosted project に認証済みであること。`--cosense-command` で binary 名 / path は差し替え可能。通常の read/search 系 command はこの依存を持たない。
 - 問題: export は重く（手動生成・123MB）頻繁な再取得に向かない。最新化を export 反復でやらない。
 - やること: 初回 export を seed にし、以降は `cosense listPages <project> --sort updated` で最近更新ページのみ取得 → `readPage` で本文 → store に upsert ＋ edge 再 materialize。決定と grounded メカニズム（last-sync カーソル / humanize 済み updated の扱い）は [[incremental-sync]]。
 - 位置づけ: "Co-" でなく単一所有 mirror の最新化（[[why-not-scrapbox-clone]] スコープ内）。import adapter が bulk seed と incremental delta の2モードになる。
@@ -113,7 +114,7 @@ write / transclude / rename（identity 層）・Markdown / Obsidian indexed mirr
 | `search <query>` | 本文行検索。`(page, line-id, 行テキスト)` のリスト | 全文検索 |
 | `export-ai <title>` | Cosense Export for AI 風に main/1-hop/2-hop page 本文を単一テキストへ展開（alias `export-for-ai`） | Export for AI |
 | `unresolved` | unresolved link target の ranked view | 赤リンク / unresolved target list |
-| `sync <project-url>` | cosense-cli で最近更新ページを差分 upsert | hosted freshness |
+| `sync <project-url>` | cosense-cli（要 `cosense` binary install + auth）で最近更新ページを差分 upsert | hosted freshness |
 | `write <title> <body>` | ページ作成 / 更新 ＋ グラフ自動更新 | 編集 |
 | `transclude <line-id>` | 行の埋め込み / 参照 | 行参照 |
 | `rename <id> <new-title>` | identity 保持で改名（リンク追従・文意保存） | name=identity 修正 |

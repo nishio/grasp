@@ -48,7 +48,7 @@ grasp related "Some Note"
 - links: `[[wikilink]]`, `[[note#heading]]`, `[[note|alias]]`, embeds, tags
 - backlinks: edges の逆読み
 - unresolved targets: link されているが対応 note が無い target
-- search index: FTS / trigram / fallback `LIKE` など。日本語・短い query・記号入り query の correctness は [[grasp-cli-mvp]] の FTS5 trigram 検証と同じ注意が要る。
+- search index: FTS / trigram / fallback `LIKE` など。日本語・短い query・記号入り query の correctness は [[fts5-trigram-search]] と同じ注意が要る。
 
 ## Obsidian compatibility scope
 
@@ -105,4 +105,4 @@ grasp related "Some Note"
 - duplicate title / alias collision の扱い。
 - heading / block ref を line-id とどう対応させるか。
 - `#tag` と wikilink を同一 edge type にするか。
-- search index は FTS5 trigram hybrid にするか、まず correctness 優先で `LIKE` にするか。
+- search index は FTS5 trigram hybrid にするか、まず correctness 優先で `LIKE` にするか（[[fts5-trigram-search]]）。

@@ -25,6 +25,8 @@ node: /Users/nishio/.nvm/versions/node/v24.16.0
 
 `cosense-cli` という binary 名ではなく `cosense`。
 
+`grasp sync <project-url>` を使う環境では、この `cosense` binary が PATH にあることが runtime 前提になる（または `--cosense-command` で path/name を指定する）。`read` / `search` など local store を読む command は cosense-cli を必要としない。
+
 ## commands visible in `cosense --help`
 
 - `login`, `whoami`, `listProjects`

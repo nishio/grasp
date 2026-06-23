@@ -57,7 +57,7 @@ hosted Cosense を生で操作したい時は `cosense` skill を使う（使い
 → `grasp export-ai <title>`。Cosense の "Export for AI" 風に main page + 1-hop pages を 1 テキストへ展開する。default は `--depth 1` かつ limit なし。2-hop まで欲しい時は `--depth 2`、ファイルへ保存する時は `--output <path>`。
 
 ### hosted の最新を取り込みたい（保守作業）
-→ `grasp sync <project-url>`（`cosense` CLI 経由で最近更新ページのみ差分 upsert。`--dry-run` あり）。認証が要る。通常の調査では不要。
+→ `grasp sync <project-url>`（`cosense` CLI 経由で最近更新ページのみ差分 upsert。`--dry-run` あり）。`@helpfeel/cosense-cli` の `cosense` binary が PATH にあり、対象 project に認証済みであることが必要。通常の調査では不要。
 
 ## verb 一覧（snapshot — 詳細は各 `grasp <cmd> --help`）
 
@@ -79,7 +79,7 @@ hosted Cosense を生で操作したい時は `cosense` skill を使う（使い
 
 - 形式: **`grasp <verb> ...`**。store は home に1個 `~/.grasp/grasp.sqlite`（global default）なので、**どの cwd からも flag 無しで動く**。
 - 未インストール環境では `/Users/nishio/grasp` から `python3 -m grasp <verb>`（`pip install -e /Users/nishio/grasp` 済みなら `grasp` が PATH）。
-- store が無ければ `grasp import --cosense <json> --force` で Cosense JSON export を import する。以降は sub-second。別パスは `--store` / `$GRASP_STORE`、別 home は `$GRASP_HOME`。
+- `grasp import --cosense <json>` で Cosense JSON export を import する。既存 store があってもそのまま置き換える。以降は sub-second。別パスは `--store` / `$GRASP_STORE`、別 home は `$GRASP_HOME`。
 - 機械可読が要る時は `--json`。**root option なので verb の前**に置く: `grasp --json read 民主主義 --backlinks-limit 3`。`--store` も同様に verb の前。
 - 空白・記号を含む title / query は shell でクォートする（`'...'`）。
 

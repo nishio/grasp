@@ -49,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
             Global examples:
               grasp --store .grasp/grasp.sqlite stats
               grasp --json read 盲点カード --backlinks-limit 5 --related-limit 5
-              grasp --store .grasp/grasp.sqlite import --cosense raw/nishio.json --force
+              grasp --store .grasp/grasp.sqlite import --cosense raw/nishio.json
 
             Output:
               Default output is compact text for agent reading.
@@ -78,12 +78,12 @@ def build_parser() -> argparse.ArgumentParser:
             "source_export, imported_at, pages, lines, edges, unresolved_targets"
         ),
         examples=[
-            "grasp import --cosense raw/nishio.json --force",
-            "grasp --store .grasp/grasp.sqlite import --cosense raw/nishio.json --force",
+            "grasp import --cosense raw/nishio.json",
+            "grasp --store .grasp/grasp.sqlite import --cosense raw/nishio.json",
         ],
         notes=[
             "Uses --cosense for the Cosense JSON export path and global --store for the destination store.",
-            "Without --force, refuses to replace an existing store.",
+            "If the destination store exists, import replaces it.",
         ],
     )
     import_parser.add_argument(
@@ -93,7 +93,6 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Cosense JSON export path to import.",
     )
-    import_parser.add_argument("--force", action="store_true", help="Replace an existing store.")
 
     add_command_parser(
         subparsers,
@@ -317,7 +316,7 @@ def build_parser() -> argparse.ArgumentParser:
             "grasp --store .grasp/grasp.sqlite sync https://scrapbox.io/nishio/ --cosense-command cosense",
         ],
         notes=[
-            "Requires a working cosense CLI login unless --dry-run stops before fetches.",
+            "Requires @helpfeel/cosense-cli's `cosense` binary in PATH and a working login.",
             "Global --store selects the local store to update.",
         ],
     )
@@ -388,21 +387,19 @@ def main(argv: list[str] | None = None) -> int:
         export_path = args.cosense_export
         if not export_path.exists():
             parser.error(f"export path does not exist: {export_path}")
-        if args.store.exists() and not args.force:
-            parser.error(f"store already exists: {args.store} (use import --force to replace it)")
         result = import_export_to_sqlite(export_path, args.store)
         emit_result(args, result)
         return 0
 
     if not args.store.exists():
-        parser.error(f"store does not exist: {args.store} (run `grasp import --cosense <json> --force` first)")
+        parser.error(f"store does not exist: {args.store} (run `grasp import --cosense <json>` first)")
 
     store = SQLiteStore(args.store)
     try:
         if args.command != "stats" and not store.schema_ok():
             parser.error(
                 f"store schema is {store.schema_version()}, current is {SCHEMA_VERSION}; "
-                "run `grasp import --cosense <json> --force` to rebuild"
+                "run `grasp import --cosense <json>` to rebuild"
             )
         result = run_command(store, args)
     finally:

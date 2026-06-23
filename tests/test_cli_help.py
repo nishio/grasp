@@ -54,12 +54,13 @@ class CliHelpTests(unittest.TestCase):
         read_help = run_grasp_help("read")
         unresolved_help = run_grasp_help("unresolved")
         self.assertIn("--cosense", import_help)
+        self.assertNotIn("--force", import_help)
         self.assertIn("--unresolved-limit", read_help)
         self.assertIn("unresolved_targets", read_help)
         self.assertIn("link_count", unresolved_help)
         self.assertNotIn("--wanted-limit", read_help)
 
-    def test_import_accepts_cosense_export_path(self):
+    def test_import_accepts_cosense_export_path_and_replaces_existing_store(self):
         fixture = {
             "name": "fixture",
             "displayName": "fixture",
@@ -76,12 +77,43 @@ class CliHelpTests(unittest.TestCase):
                 }
             ],
         }
+        replacement_fixture = {
+            **fixture,
+            "pages": [
+                *fixture["pages"],
+                {
+                    "title": "B",
+                    "id": "bbbbbbbbbbbbbbbbbbbbbbbb",
+                    "created": 1,
+                    "updated": 1,
+                    "views": 0,
+                    "lines": [{"text": "B", "created": 1, "updated": 1, "userId": "u"}],
+                },
+            ],
+        }
 
         with tempfile.TemporaryDirectory() as tmpdir:
             export_path = Path(tmpdir) / "export.json"
             store_path = Path(tmpdir) / "store.sqlite"
             export_path.write_text(json.dumps(fixture), encoding="utf-8")
 
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--cosense",
+                    str(export_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            export_path.write_text(json.dumps(replacement_fixture), encoding="utf-8")
             completed = subprocess.run(
                 [
                     sys.executable,
@@ -93,7 +125,6 @@ class CliHelpTests(unittest.TestCase):
                     "import",
                     "--cosense",
                     str(export_path),
-                    "--force",
                 ],
                 check=True,
                 text=True,
@@ -101,8 +132,8 @@ class CliHelpTests(unittest.TestCase):
             )
 
         result = json.loads(completed.stdout)
-        self.assertEqual(result["pages"], 1)
-        self.assertEqual(result["lines"], 1)
+        self.assertEqual(result["pages"], 2)
+        self.assertEqual(result["lines"], 2)
 
 
 if __name__ == "__main__":

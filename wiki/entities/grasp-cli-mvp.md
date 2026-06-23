@@ -27,7 +27,7 @@ python3 -m grasp stats
 python3 -m grasp --json backlinks 盲点 --limit 2
 ```
 
-- `import --cosense <json> --force`: Cosense JSON export を SQLite store に materialize。
+- `import --cosense <json>`: Cosense JSON export を SQLite store に materialize。既存 store は確認なしで置き換える。
 - `--store`: SQLite store path。未指定時は `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`（単一 AI が持つ global store）。
 - 通常 command は store が存在すれば JSON を再 parse しない。
 - `--json`: 機械可読 JSON output。
@@ -42,7 +42,7 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 - `unresolved`: unresolved target を ranking して返す。
 - `search <query>`: 本文行を substring 検索し、`(page, line-id, line_text)` を page.views 優先で返す。
 - `sync <project-url>`: `cosense` CLI で最近更新ページだけ取得し、SQLite store に upsert する。`--dry-run` あり。
-- `stats`: store path / schema version / current schema / counts を返す。古い schema の store を通常 command で開いた時は stderr に rebuild 警告を出す。
+- `stats`: store path / imported_at / schema version / current schema / counts を返す。古い schema の store を通常 command で開いた時は stderr に rebuild 警告を出す。README では人間向けに「件数・更新日時など」程度の概要に留め、返却キーの詳細は `grasp stats --help` とこの実装ページ側で保持する。
 - helper: `related`, `peek`, `suggest`。MVP 必須ではないが read-only なので追加。
 
 ## data model 実装
@@ -54,38 +54,12 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 - 実測（2026-06-23）: import 約 8 秒。store 利用時 `read 盲点カード` 約 0.7 秒、`unresolved --limit 3` 約 0.7 秒、`backlinks 盲点` 約 0.4 秒。
 - Update 2026-06-23: `unresolved_target_examples` を materialize して `unresolved --limit N` の example 取得を N 回 query しないようにした。Python 内部計測では unresolved target list 100 件が約 6ms。CLI wall time は Python 起動 + output 書き出し込みで約 1.0 秒。
 - Update 2026-06-23（warm-store 再計測）: warm page cache・median of 5 で各 verb の CLI wall time を測り直すと、`stats` 70ms / `backlinks 盲点 --limit 5` 54ms / `read 盲点カード`（近傍同梱）83ms / `unresolved --limit 10` 52ms / `search 民主主義 --limit 5` 178ms。**上の「0.7–1.0 秒」は早い時点の cold/単発計測で、warm steady-state は 50–180ms**。固定オーバーヘッドは bare `python3 -c pass` 33ms・`import grasp` は依存ゼロゆえ ~free（差は noise 内）。∴ 中核 read 体験は既に sub-100ms で、`search` の 178ms だけが SQLite `lines.text LIKE` 全行スキャン律速（言語非依存 → index が lever、host 言語ではない）。この再計測が [[language-and-distribution]]（実装言語論点は実測で溶ける／native 化の latency 便益はほぼ無い）の一次データ。
-- `search` は SQLite FTS5 trigram を試したが、2文字日本語 query（例: `盲点`）は `MATCH` に乗らず、FTS table `LIKE` は一部日本語 substring（例: `盲点カード`）の recall を落とした。現状は correctness 優先で `lines.text LIKE` を維持。
+- `search` は SQLite FTS5 trigram を試したが、2文字日本語 query・記号入り query・literal substring semantics に注意が必要。現状は correctness 優先で `lines.text LIKE` を維持。詳細は [[fts5-trigram-search]]。
 - Update 2026-06-23: 「link があるが page がない」こと自体は unresolved graph node と整理。互換性を考えず `wanted` command / JSON field / schema 名は削除し、`unresolved` / `unresolved_targets` に破壊的変更した。`link-stats` は missing target の 0/1/N を materialized `unresolved_targets` row から高速に返し、existing page は `edges.target_norm` index で count する。`related <missing-target>` は source pages を `relation=backlink-source` として返す。
 - Update 2026-06-23: argparse help を mechanics SSoT として拡張。root help は global options と SSoT 方針、各 subcommand help は arguments / Returns (`--json`) / Examples / Notes を持つ。`tests/test_cli_help.py` で全 command に Returns/Examples があることを固定。
-- Update 2026-06-23: store default を cwd-local `.grasp/grasp.sqlite` から `~/.grasp/grasp.sqlite` に寄せた。`$GRASP_HOME` で home を差し替え可能。理由は「単一 AI が所有する local graph store」というモデルに合わせ、どの cwd からも flag なしで同じ store を読むため。暗黙 seed は持たず、store 作成は `grasp import --cosense <json> --force` に一本化。
+- Update 2026-06-23: store default を cwd-local `.grasp/grasp.sqlite` から `~/.grasp/grasp.sqlite` に寄せた。`$GRASP_HOME` で home を差し替え可能。理由は「単一 AI が所有する local graph store」というモデルに合わせ、どの cwd からも flag なしで同じ store を読むため。暗黙 seed は持たず、store 作成は `grasp import --cosense <json>` に一本化。
+- Update 2026-06-23: `import` の `--force` を削除。既存 store がある時に拒否する UX は不要なので、同じ `grasp import --cosense <json>` が初回構築と再構築の両方を担う。実装は一時 DB 作成後に `os.replace` する既存の原子的置換を維持。
 - Update 2026-06-23: [[persona1-user-test-2026-06-23]] で dogfooding UX の摩擦を記録。価値の核（`read=近傍同梱`, page なし target を source pages で読む）は成立。残課題は (1) missing + 0 incoming 時の recovery hints（例: `ユーザテスト` vs `ユーザーテスト`）、(2) verb 後 `--json` の回復、(3) search hit line から周辺本文へ行く surface。
-
-### FTS5 trigram 検証メモ（2026-06-23）
-
-FTS5 trigram は **候補 prefilter としては有効**だが、`grasp search` の semantics（`line.text` に query が literal substring として含まれる行を返す）をそのまま満たすわけではない。
-
-実測（`raw/nishio.json` → SQLite store）:
-
-| query | 現行 `lines LIKE` best | hybrid (`MATCH` → `LIKE`) best |
-|---|---:|---:|
-| `盲点カード` | 0.121s | 0.001s |
-| `民主主義` | 0.128s | 0.013s |
-| `Scrapbox` | 0.127s | 0.029s |
-| `cosense` | 0.118s | 0.002s |
-| `関係性` | 0.125s | 0.003s |
-| `トップダウン` | 0.126s | 0.002s |
-
-ただし:
-- 2文字 query（`盲点`, `知識`, `AI` など）は trigram `MATCH` に乗らない。
-- 記号入り query（`[盲点カード]`, `C++`, `foo-bar`, `AI/LLM`）は FTS query syntax と衝突して error または別解釈になる。
-- `MATCH 'abc bcd'` は literal substring `abc bcd` だけでなく `abcd`, `abcde`, `abcXbcd` も返した。つまり `MATCH` は literal substring search ではない。
-
-従って、将来 hybrid を入れるなら:
-- `len(query) >= 3` かつ safe query（空白・記号・FTS syntax なし）の時だけ `MATCH` で候補 line_id を絞る。
-- その後に必ず `line.text LIKE '%query%'` をかけ、literal substring semantics を保証する。
-- 2文字 query / 記号入り query は現行 `lines.text LIKE` に fallback。
-
-この `LIKE` は全 lines ではなく FTS 候補集合にだけかかるため、速度メリットは残る。現段階では実装しない（特殊化であり、まず correctness を優先）。
 
 ## 実装判断
 

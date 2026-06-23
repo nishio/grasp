@@ -24,6 +24,7 @@ sources:
 
 `grasp sync <project-url>` を追加。`--limit` 件まで `cosense listPages --sort updated` を inspect し、store の `pages.updated` と remote `updated` を比較する。変更ページだけ `cosense readPage` で取得して SQLite store に upsert、最後に `unresolved_targets` を再 materialize する。
 
+- runtime 前提: `grasp sync` は optional freshness path なので、通常の read-only path と違って `@helpfeel/cosense-cli` の `cosense` binary が install 済みで PATH にあることが必要。対象 project への login / 認証も必要。binary 名や path は `--cosense-command` で差し替える。
 - `updated` は humanized suffix の前の ISO8601 部分を `datetime.fromisoformat` で epoch seconds に変換して比較する。
 - pinned page は updated が古くても停止条件にしない（`pin > 0` なら skip して次を見る）。
 - hosted line id は採用せず、grasp の既存方針 `page.id:line-index` を維持する。

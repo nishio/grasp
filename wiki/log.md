@@ -1,5 +1,42 @@
 # Log
 
+## [2026-06-23 20:52] lint | `stats` README 説明粒度 file back 後の wiki lint
+- `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。既存の孤立 `v1-todo` は index 登録済みのまま。
+
+## [2026-06-23 20:51] file back | README から `read` 生出力例を削除
+- nishio 指摘「こんな生データ、人間が直接みるわけじゃないから書かないでいい」に合わせ、README の `read` 出力サンプル節を削除。
+- README は人間向けの価値・install・AI Agent Skill 導線に絞り、出力フォーマット詳細は `grasp read --help` と `grasp --json read ...` に寄せる。これは `grasp <verb> --help` を mechanics SSoT にする [[delivery-cli-plus-skill]] の方針とも一致する。
+
+## [2026-06-23 20:51] verification | README / import UX 変更後の検証
+- `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。既存の孤立 `v1-todo` は index 登録済みのまま。
+- `python3 -m unittest discover -s tests` OK（12 tests）。`git diff --check` OK。
+
+## [2026-06-23 20:50] file back | README の `stats` 説明粒度を調整
+- nishio 判断: README の command 一覧では `stats` の詳細 schema まで書かず、「ストアの件数・更新日時など」程度の人間向け概要に留める。詳細は `grasp stats --help` と [[grasp-cli-mvp]] 側で保持する。
+- README の `stats` 行を「ストアの件数・更新日時などを確認」に変更し、[[grasp-cli-mvp]] に README/detail の役割分担を記録。
+
+## [2026-06-23 20:50] lint | `sync` runtime 前提 file back 後の wiki lint
+- `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。既存の孤立 `v1-todo` は index 登録済みのまま。
+
+## [2026-06-23 20:50] file back | `sync` の cosense-cli install 前提を明示
+- `grasp sync <project-url>` は hosted freshness path なので、通常の local read/search と違って `@helpfeel/cosense-cli` の `cosense` binary が install 済みで PATH にあり、対象 project に認証済みであることが動作条件。
+- [[SPEC]] M2-4 / CLI 動詞表、[[incremental-sync]]、[[cosense-cli]]、README、Skill の sync 説明に前提を反映。`--cosense-command` で binary 名 / path を差し替え可能であることも記録。
+
+## [2026-06-23 20:49] lint | import `--force` 削除後の wiki lint
+- `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。既存の孤立 `v1-todo` は index 登録済みのまま。
+
+## [2026-06-23 20:48] implementation | import の `--force` を削除し既存 store をそのまま置換
+- nishio 指摘「古い store がある時に拒否して欲しいことはない。`--force` は余計な option」に合わせ、`grasp import --cosense <json>` を初回構築・再構築兼用に変更。CLI は既存 store を拒否せず、import 成功時に置き換える。
+- 実装上は既存通り temp store を作成してから `os.replace` するため、再構築の途中失敗で既存 store を消す挙動にはしない。
+- SPEC / README / Skill / [[grasp-cli-mvp]] / help test を更新。
+
+## [2026-06-23 20:48] lint | FTS5 trigram 検証ページ切り出し後の wiki lint
+- `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。既存の孤立 `v1-todo` は index 登録済みのまま。
+
+## [2026-06-23 20:46] file back | FTS5 trigram 検証を独立 entity 化
+- [[grasp-cli-mvp]] 内の「FTS5 trigram 検証メモ」を新ページ [[fts5-trigram-search]] に移動。`grasp-cli-mvp` には現状判断（correctness 優先で `lines.text LIKE` 維持）とリンクだけを残した。
+- [[markdown-obsidian-indexed-mirror]] / [[language-and-distribution]] の FTS5 hybrid 参照を新ページへ差し替え、search index 設計上の注意点を一箇所に集約した。
+
 ## [2026-06-23 20:17] file back | 公式 cosense-cli との速度比較を再計測で更新
 - [[cosense-cli]] の実測比較を、旧 MVP（毎回 123MB JSON full parse で ~3.4s）から現行 SQLite warm store ベースへ更新。median of 5 で `grasp read` 67ms / `peek` 65ms / `related` 72ms / `search 盲点 --limit 100` 185ms、公式 `cosense` v1.4.4 は `browsePage` 578ms / `browseRelatedPages` 1169ms / `searchFullText` 875ms / `searchVector` 792ms。
 - 初回 seed は別枠として temp store import 8.3s。含意: **反復 read/search は grasp、freshness delta は cosense-cli**。`sync --limit 20 --dry-run` 695ms は `listPages --sort updated --limit 20` 636ms と同程度で、sync の律速が hosted network/API であることも明記。
