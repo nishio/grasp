@@ -33,12 +33,19 @@ description: >-
   ```
 
 - store が無い、または指定 JSON が見つからない場合は、勝手な別データで代用せず、JSON export path か store path を確認する。
-- ユーザが Markdown / Obsidian folder、またはこの repo の `wiki/` を調べたいだけの場合、現時点では Markdown mirror は未実装。`grasp import --cosense` に folder を渡して代用しない。通常の file/rg/lint で読む。将来 mirror が入る時、この repo の `wiki/` では `[[...]]` を grasp 内リンクの edge、バックティックのプレーン名を親 wiki 参照の非 edge として扱う方針。
+- ユーザが Markdown folder、またはこの repo の `wiki/` を調べたい場合は、必要に応じて task-local store へ read-only mirror として index する:
+
+  ```bash
+  grasp --store /tmp/grasp-wiki.sqlite import --markdown wiki --project grasp-wiki
+  grasp --store /tmp/grasp-wiki.sqlite --project grasp-wiki read grasp-v1-implemented
+  ```
+
+  最小 Markdown mirror は frontmatter `title` / `id` / `aliases` / `tags` を読み、無い場合は file stem を title にする。`[[...]]` と `#tag` を grasp 内 edge にする。バックティックのプレーン名（親 llm-wiki への cross-wiki 参照）は edge にしない。既存 Markdown folder へは書き戻さない。再 import は content-only 変更なら差分更新し、title / id / aliases / file set が変わった時は安全に full rebuild する。first H1 title resolution / Obsidian block refs はまだ未実装。
 
 ## grasp とはどういう物か
 
-- Scrapbox/Cosense の JSON export を取り込み、SQLite graph store にしたもの。
-- ページは**行ベース**。ページ間リンクは Cosense 記法 `[ページ名]`（単角括弧）と `#tag`。read 出力もこの原文のまま。
+- Scrapbox/Cosense の JSON export、または Markdown folder mirror を取り込み、SQLite graph store にしたもの。
+- ページは**行ベース**。Cosense では `[ページ名]`（単角括弧）と `#tag`、Markdown mirror では `[[ページ名]]` と `#tag` を edge にする。read 出力は元の行テキストのまま。
 - 中核は **read=近傍同梱**: `grasp read <title>` 一発で、本文 ＋ **行レベル逆リンク** ＋ **related（2-hop）** ＋ **そのページから出る未解決 target** が一緒に返る。`--related-snippets` を付けると related/source ページの先頭行も同梱でき、ブラウザで関連 pane を眺める所作を1コールで得る。
 - オフライン・即時（store があれば各コマンド sub-second）。
 
@@ -116,6 +123,7 @@ description: >-
 | `unresolved` | 未解決 target の rank view（TODO ではない） |
 | `peek <title>` | 本文行のみ |
 | `stats` | store の状態・件数 |
+| `import --cosense <json>` / `import --markdown <folder>` | Cosense JSON / Markdown folder mirror の取り込み・再構築 |
 | `export-ai <title>` | Export for AI 風の単一テキスト bundle（alias `export-for-ai`） |
 | `sync <url>` | hosted 差分取り込み（保守） |
 | `acquire <url>` | admin export なしの hosted 部分取得 seed |
@@ -123,10 +131,10 @@ description: >-
 ## 実行方法
 
 - 形式: **`grasp <verb> ...`**。store は既定では home に1個 `~/.grasp/grasp.sqlite`（global default）。
-- 1つの store に複数 project namespace を保持できる。`grasp import --cosense <json>` は export JSON の `name` を project 名として使い、同名 project だけを置き換える。project 名を明示する時は `grasp import --project <name> --cosense <json>`。
+- 1つの store に複数 project namespace を保持できる。`grasp import --cosense <json>` は export JSON の `name` を、`grasp import --markdown <folder>` は folder 名を project 名として使い、同名 project だけを置き換える。project 名を明示する時は `grasp import --project <name> --cosense <json>` / `grasp import --project <name> --markdown <folder>`。
 - 一回限りのユーザ指定 JSON を読む時は、必要に応じて `--store <task-local.sqlite>` を使い、既定 store に project を増やさない。
 - 未インストール環境では grasp repository root から `python3 -m grasp <verb>`（`pip install -e <grasp-repo>` 済みなら `grasp` が PATH）。
-- `grasp import --cosense <json>` で Cosense JSON export を import する。以降は sub-second。別パスは `--store` / `$GRASP_STORE`、別 home は `$GRASP_HOME`。
+- `grasp import --cosense <json>` で Cosense JSON export、`grasp import --markdown <folder>` で read-only Markdown mirror を import する。以降は sub-second。別パスは `--store` / `$GRASP_STORE`、別 home は `$GRASP_HOME`。
 - import 済み JSON は store 横の `<store>.imports/` に復旧用コピーとして保持される。通常 command が古い schema の store を見つけた時は、復旧用コピーからサイレントに current schema へ再構築して続行する。`stats` は診断用なので自動再構築しない。hosted の最新差分は復旧後も `sync` の責務。
 - 複数 project がある store で読む時は `grasp --project <name> read "ページタイトル"` のように project を指定する。project が1つだけなら省略可。
 - text 出力の `line_id` は既定で `P1:0` のような実行内ローカル別名に短縮され、先頭付近に `P1=<page-id>` の legend が出る。親へ根拠として返す時は、必要なら `source_title` とこの alias ではなく `--json` の完全 `line_id` を使う。
@@ -144,7 +152,7 @@ description: >-
 
 | | grasp（このスキル） | hosted Cosense / cosense CLI |
 | --- | --- | --- |
-| データ | ユーザ指定 JSON から作った local snapshot / local store（オフライン・即時） | hosted の生の最新状態 |
+| データ | ユーザ指定 JSON / Markdown folder から作った local snapshot / local store（オフライン・即時） | hosted の生の最新状態 |
 | 強み | 行レベル逆リンク・未解決 target 列挙・近傍同梱を1コール | hosted project の最新取得・編集 |
 | 向く時 | export 済みデータをグラフで辿る／逆リンク・関連を厚く見る | 最新の hosted 状態が要る／hosted project に書き込む |
 
