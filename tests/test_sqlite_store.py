@@ -140,11 +140,42 @@ class SQLiteStoreTests(unittest.TestCase):
                 self.assertEqual(read["page"]["title"], "A")
                 self.assertEqual(read["backlink_count_total"], 1)
                 self.assertEqual(read["unresolved_targets"][0]["examples"][0]["source_title"], "A")
+                self.assertNotIn("snippet_lines", read["related"][0])
+
+                read_with_snippets = store.read(
+                    "A",
+                    backlink_limit=10,
+                    related_limit=10,
+                    unresolved_limit=10,
+                    related_snippets=True,
+                    related_snippet_lines=1,
+                )
+                self.assertEqual(read_with_snippets["related"][0]["title"], "C")
+                self.assertEqual(
+                    [line["text"] for line in read_with_snippets["related"][0]["snippet_lines"]],
+                    ["C"],
+                )
+                self.assertTrue(read_with_snippets["related"][0]["snippet_truncated"])
 
                 missing_read = store.read("Missing", backlink_limit=10, related_limit=10, unresolved_limit=10)
                 self.assertIsNone(missing_read["page"])
                 self.assertEqual(missing_read["backlink_count_total"], 2)
                 self.assertEqual([item["title"] for item in missing_read["related"]], ["A", "C"])
+
+                missing_read_with_snippets = store.read(
+                    "Missing",
+                    backlink_limit=10,
+                    related_limit=10,
+                    unresolved_limit=10,
+                    related_snippets=True,
+                    related_snippet_lines=1,
+                )
+                self.assertIsNone(missing_read_with_snippets["page"])
+                self.assertEqual(
+                    [line["text"] for line in missing_read_with_snippets["related"][0]["snippet_lines"]],
+                    ["A"],
+                )
+                self.assertTrue(missing_read_with_snippets["related"][0]["snippet_truncated"])
 
                 export_1hop = store.export_ai("A", depth=1, direct_limit=10)
                 self.assertTrue(export_1hop["page_exists"])

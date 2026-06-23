@@ -47,7 +47,7 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.5.3`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.5.4`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -66,7 +66,7 @@ v1 scope 外:
 |---|---|
 | `import --cosense <json>` | Cosense JSON export を project namespace に構築・置換。他 project は保持。folder を渡した時は Markdown import 未実装を friendly に返す |
 | `stats` | store の schema / project list / metadata / count を表示。store missing 時は diagnostic と next actions を返す |
-| `read <title>` | existing page は本文 + backlinks + related + unresolved。missing linked target は link stats + backlinks + source pages。zero-hit 時は `recovery_hints` も返す |
+| `read <title>` | existing page は本文 + backlinks + related + unresolved。missing linked target は link stats + backlinks + source pages。zero-hit 時は `recovery_hints` も返す。`--related-snippets` で related/source pages の先頭 N 行（default 5）を `snippet_lines` として同梱する |
 | `backlinks <title>` | `(source page, line-id, line text)` の行レベル backlinks。missing target にも効く |
 | `related <title>` | existing page は page 間 edge の 2-hop pages。missing target は source pages |
 | `link-stats <title>` | incoming link count / source page count / none-single-multi を返す。zero-hit 時は `recovery_hints` も返す |

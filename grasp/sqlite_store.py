@@ -1210,10 +1210,15 @@ class SQLiteStore:
         backlink_limit: int = 20,
         related_limit: int = 20,
         unresolved_limit: int = 20,
+        related_snippets: bool = False,
+        related_snippet_lines: int = 5,
     ) -> dict[str, Any]:
         page = self.resolve_page(title)
         backlinks = self.backlinks(title, backlink_limit)
         link_stats = self.link_stats(title)
+        related = self.related(title if page is None else page.title, related_limit)
+        if related_snippets:
+            related = self._with_page_snippets(related, related_snippet_lines)
 
         if page is None:
             recovery_hints = link_stats.get("recovery_hints")
@@ -1226,7 +1231,7 @@ class SQLiteStore:
                 "backlinks": [edge.to_dict() for edge in backlinks],
                 "backlink_count_returned": len(backlinks),
                 "backlink_count_total": link_stats["link_count"],
-                "related": self.related(title, related_limit),
+                "related": related,
                 "unresolved_targets": [],
                 "recovery_hints": recovery_hints,
             }
@@ -1241,10 +1246,30 @@ class SQLiteStore:
             "backlinks": [edge.to_dict() for edge in backlinks],
             "backlink_count_returned": len(backlinks),
             "backlink_count_total": link_stats["link_count"],
-            "related": self.related(page.title, related_limit),
+            "related": related,
             "unresolved_targets": self.unresolved_targets_from_page(page, unresolved_limit),
             "recovery_hints": None,
         }
+
+    def _with_page_snippets(
+        self,
+        related: list[dict[str, Any]],
+        line_limit: int,
+    ) -> list[dict[str, Any]]:
+        limit = max(0, line_limit)
+        items: list[dict[str, Any]] = []
+        for item in related:
+            item_with_snippet = dict(item)
+            page = self._page_by_id(item["id"])
+            if page is None:
+                item_with_snippet["snippet_lines"] = []
+                item_with_snippet["snippet_truncated"] = False
+            else:
+                lines, truncated = self.page_lines(page, limit)
+                item_with_snippet["snippet_lines"] = [line.to_dict() for line in lines]
+                item_with_snippet["snippet_truncated"] = truncated
+            items.append(item_with_snippet)
+        return items
 
     def export_ai(
         self,

@@ -88,11 +88,15 @@ AI consumer 観点の要件（出典 [[ai-consumer-feedback-2026-06-23]] Tier 4 
 - **未実装: 大規模 store での完全なかな/カナ・全半角本文正規化 index**。本文側を materialize した normalized column / FTS hybrid / trigram 等で持たない限り、完全な正規化 search は大規模 store で高コスト。
 - 順序: **recall（AND/正規化）を直してから** FTS5 速度最適化（recall と速度は別軸）。
 
-### read の近傍 snippet 同梱（AI consumer Tier 2, nishio 採用）
+### read の近傍 snippet 同梱（AI consumer Tier 2）
 
 出典: [[ai-consumer-feedback-2026-06-23]] Tier 2。`read --related-snippets`（各 related ページの先頭 k 行 or 該当行を同梱）で hub 探索が 1 往復で済む。`export-ai --depth` が近いことをやっているので read 経路に snippet option を寄せる。round-trip を畳む原理は [[ai-consumer-cost-and-trust]] 軸1。
 
-2026-06-23 nishio: 採用方向。**実際の Cosense UI も related ページの先頭 5 行程度を表示する**ので、snippet の default は先頭 ~5 行＝Cosense parity を起点にする（該当行モードは別オプションでよい）。
+2026-06-23 23:42: `read --related-snippets` / `--related-snippet-lines N` は実装済み。default は先頭 5 行＝Cosense parity。existing page の related 2-hop と missing target の source pages の両方で、JSON は related/source item に `snippet_lines` / `snippet_truncated` を足し、text は related item 直下に行を表示する。current facts は [[grasp-v1-implemented]]。
+
+未実装:
+
+- 該当行モード（related/source ページの先頭ではなく、query に関係する backlink/source line 周辺を同梱）。
 
 ### high-level retrieval verb `gather`（設計テンションあり）
 

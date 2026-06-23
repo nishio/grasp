@@ -38,7 +38,7 @@ description: >-
 
 - Scrapbox/Cosense の JSON export を取り込み、SQLite graph store にしたもの。
 - ページは**行ベース**。ページ間リンクは Cosense 記法 `[ページ名]`（単角括弧）と `#tag`。read 出力もこの原文のまま。
-- 中核は **read=近傍同梱**: `grasp read <title>` 一発で、本文 ＋ **行レベル逆リンク** ＋ **related（2-hop）** ＋ **そのページから出る未解決 target** が一緒に返る。ブラウザで関連 pane を眺める所作を1コールで得る。
+- 中核は **read=近傍同梱**: `grasp read <title>` 一発で、本文 ＋ **行レベル逆リンク** ＋ **related（2-hop）** ＋ **そのページから出る未解決 target** が一緒に返る。`--related-snippets` を付けると related/source ページの先頭行も同梱でき、ブラウザで関連 pane を眺める所作を1コールで得る。
 - オフライン・即時（store があれば各コマンド sub-second）。
 
 ### グラフの読み解き方（Tips）
@@ -51,7 +51,7 @@ description: >-
 ## こういう時はこうする
 
 ### タイトルが分かっている / そのページを軸に調べたい
-→ `grasp read <title>`。本文＋逆リンク＋related＋未解決を一括取得。これが基本。逆リンクや related が切れていたら `--backlinks-limit` 等で広げる。
+→ `grasp read <title>`。本文＋逆リンク＋related＋未解決を一括取得。これが基本。related の見出しだけでは足りず冒頭本文も同時に見たい時は `--related-snippets`（既定 5 行、`--related-snippet-lines N` で調整）。逆リンクや related が切れていたら `--backlinks-limit` 等で広げる。
 
 ### テーマ・問いから探す（タイトル未確定）
 → `grasp search <query>` で**本文行**を検索（行レベル hit）し、良さそうな `source_title` を `grasp read` で開く。タイトルの当たりが付くなら `grasp suggest <partial>`（タイトル補完）。
@@ -100,7 +100,7 @@ description: >-
 
 | verb | 用途 |
 | --- | --- |
-| `read <title>` | 本文＋逆リンク＋related＋未解決を近傍同梱で（基本の入口） |
+| `read <title>` | 本文＋逆リンク＋related＋未解決を近傍同梱で（`--related-snippets` で related/source ページ冒頭も同梱） |
 | `search <query>` | 本文行を検索、単一語は line substring、複数語は page AND、0件時は NFKC/長音ゆれ fallback |
 | `suggest <partial>` | タイトル補完 |
 | `backlinks <title>` | 行レベル逆リンク（page なし target も） |

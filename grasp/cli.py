@@ -147,16 +147,19 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "query, page|null, link_stats, lines, lines_truncated, backlinks, "
-            "backlink_count_returned, backlink_count_total, related, unresolved_targets, recovery_hints|null"
+            "backlink_count_returned, backlink_count_total, related, unresolved_targets, recovery_hints|null; "
+            "with --related-snippets, related[] items also include snippet_lines[] and snippet_truncated"
         ),
         examples=[
             "grasp read 盲点カード",
             "grasp read 盲点カード --line-limit 20 --backlinks-limit 5 --related-limit 5 --unresolved-limit 5",
+            "grasp read 盲点カード --related-snippets --related-snippet-lines 5",
             "grasp --json read 民主主義 --backlinks-limit 3 --related-limit 5",
         ],
         notes=[
             "For missing targets, related[] contains source pages with relation=backlink-source.",
             "unresolved_targets[] is populated only for existing pages.",
+            "--related-snippets includes the first N lines of each related/source page, matching the Cosense related-pane reading pattern.",
         ],
     )
     read_parser.add_argument("title", help="Page title or missing linked target to open.")
@@ -164,6 +167,8 @@ def build_parser() -> argparse.ArgumentParser:
     read_parser.add_argument("--backlinks-limit", type=int, default=20, help="Maximum backlink lines to return.")
     read_parser.add_argument("--related-limit", type=int, default=20, help="Maximum related pages/source pages to return.")
     read_parser.add_argument("--unresolved-limit", type=int, default=20, help="Maximum page-local unresolved targets to return.")
+    read_parser.add_argument("--related-snippets", action="store_true", help="Include leading page lines for each related/source page.")
+    read_parser.add_argument("--related-snippet-lines", type=int, default=5, help="Number of leading lines per related/source page when --related-snippets is set.")
 
     backlinks_parser = add_command_parser(
         subparsers,
@@ -559,6 +564,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             backlink_limit=args.backlinks_limit,
             related_limit=args.related_limit,
             unresolved_limit=args.unresolved_limit,
+            related_snippets=args.related_snippets,
+            related_snippet_lines=args.related_snippet_lines,
         )
     if args.command == "backlinks":
         edges = store.backlinks(args.title, limit=args.limit, offset=args.offset)
@@ -849,6 +856,11 @@ def format_related_items(related: list[dict[str, Any]]) -> str:
             parts.append(f"- {item['title']} (links {item['score']}, views {item['views']}; target {via})\n")
         else:
             parts.append(f"- {item['title']} (score {item['score']}, views {item['views']}; via {via})\n")
+        if "snippet_lines" in item:
+            for line in item["snippet_lines"]:
+                parts.append(f"  {line['line_id']}  {line['text']}\n")
+            if item.get("snippet_truncated"):
+                parts.append("  ...\n")
     return "".join(parts)
 
 

@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-23 23:42] implementation | read related snippets を追加
+- [[grasp-backlog]] / [[ai-consumer-feedback-2026-06-23]] の Tier 2 に対応。`grasp read <title> --related-snippets` を追加し、related 2-hop / missing target の source pages に先頭 N 行（`--related-snippet-lines`, default 5）を同梱できるようにした。
+- JSON は related/source item に `snippet_lines` / `snippet_truncated` を opt-in で追加し、text 出力は related item 直下に行を表示する。未指定時の `related[]` shape は維持。
+- store schema は v5 のまま、public compatibility version は `1.5.4`。検証: `python3 -m pytest tests/test_sqlite_store.py tests/test_cli_help.py` OK、`python3 -m unittest discover -s tests` OK（24 tests）、`python3 scripts/lint_wiki.py` OK、`git diff --check` OK。
+
 ## [2026-06-23 23:10] implementation | search normalized fallback を追加
 - `search` の literal 0件時に normalized fallback を追加。NFKC query 正規化＋長音除去は SQLite `REPLACE` で実行し、`ﾕｰｻﾞﾃｽﾄ` が `ユーザテスト` / `ユーザーテスト` 行に hit する。text 出力は `[normalized]`、JSON は `match_mode: "normalized"` / `match_terms` を返す。
 - 完全なかな/カナ変換は Python 全行 scan になるため、50k lines 以下の小規模 store のみに制限。nishio 規模での zero-hit kana query は 20s 級だったため、大規模 store では schema/index なしに実行しない。

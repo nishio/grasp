@@ -216,7 +216,32 @@ class CliHelpTests(unittest.TestCase):
                     "created": 1,
                     "updated": 1,
                     "views": 0,
-                    "lines": [{"text": "A", "created": 1, "updated": 1, "userId": "u"}],
+                    "lines": [
+                        {"text": "A", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "links to [B]", "created": 1, "updated": 2, "userId": "u"},
+                    ],
+                },
+                {
+                    "title": "B",
+                    "id": "bbbbbbbbbbbbbbbbbbbbbbbb",
+                    "created": 1,
+                    "updated": 2,
+                    "views": 0,
+                    "lines": [
+                        {"text": "B", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "links to [A]", "created": 1, "updated": 2, "userId": "u"},
+                    ],
+                },
+                {
+                    "title": "C",
+                    "id": "cccccccccccccccccccccccc",
+                    "created": 1,
+                    "updated": 3,
+                    "views": 0,
+                    "lines": [
+                        {"text": "C", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "links to [B]", "created": 1, "updated": 2, "userId": "u"},
+                    ],
                 }
             ],
         }
@@ -252,6 +277,9 @@ class CliHelpTests(unittest.TestCase):
                     "--json",
                     "--line-limit",
                     "1",
+                    "--related-snippets",
+                    "--related-snippet-lines",
+                    "1",
                 ],
                 check=True,
                 text=True,
@@ -261,6 +289,9 @@ class CliHelpTests(unittest.TestCase):
         result = json.loads(completed.stdout)
         self.assertEqual(result["page"]["title"], "A")
         self.assertEqual(result["lines"][0]["text"], "A")
+        self.assertEqual(result["related"][0]["title"], "C")
+        self.assertEqual(result["related"][0]["snippet_lines"][0]["text"], "C")
+        self.assertTrue(result["related"][0]["snippet_truncated"])
 
     def test_search_json_includes_normalized_match_mode_for_loose_hits(self):
         fixture = {
