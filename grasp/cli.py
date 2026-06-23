@@ -8,7 +8,7 @@ import sys
 from typing import Any
 
 from .cosense_cli import CosenseCliClient, sync_from_cosense
-from .sqlite_store import SQLiteStore, import_export_to_sqlite
+from .sqlite_store import SCHEMA_VERSION, SQLiteStore, import_export_to_sqlite
 
 
 def default_export_path() -> Path | None:
@@ -50,6 +50,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     import_parser = subparsers.add_parser("import", help="Import a Cosense JSON export into the SQLite store.")
     import_parser.add_argument("--force", action="store_true", help="Replace an existing store.")
+
+    subparsers.add_parser("stats", help="Show SQLite store stats and schema status.")
 
     read_parser = subparsers.add_parser("read", help="Read a page with backlinks, 2-hop related pages, and red links.")
     read_parser.add_argument("title")
@@ -117,6 +119,12 @@ def main(argv: list[str] | None = None) -> int:
 
     store = SQLiteStore(args.store)
     try:
+        if args.command != "stats" and not store.schema_ok():
+            print(
+                f"warning: store schema is {store.schema_version()}, current is {SCHEMA_VERSION}; "
+                "run with --rebuild-store or `grasp import --force` to rebuild",
+                file=sys.stderr,
+            )
         result = run_command(store, args)
     finally:
         store.close()
@@ -133,6 +141,8 @@ def emit_result(args: argparse.Namespace, result: Any) -> None:
 
 
 def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
+    if args.command == "stats":
+        return store.stats()
     if args.command == "read":
         return store.read(
             args.title,
@@ -197,6 +207,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
 def format_result(command: str, result: Any) -> str:
     if command == "import":
         return format_import(result)
+    if command == "stats":
+        return format_stats(result)
     if command == "read":
         return format_read(result)
     if command == "backlinks":
@@ -220,6 +232,21 @@ def format_import(result: dict[str, Any]) -> str:
     return (
         f"store: {result['store']}\n"
         f"schema: {result['schema_version']}\n"
+        f"pages: {result['pages']}\n"
+        f"lines: {result['lines']}\n"
+        f"edges: {result['edges']}\n"
+        f"wanted: {result['wanted']}\n"
+    )
+
+
+def format_stats(result: dict[str, Any]) -> str:
+    return (
+        f"store: {result['store']}\n"
+        f"schema: {result['schema_version']}\n"
+        f"current_schema: {result['current_schema_version']}\n"
+        f"schema_ok: {result['schema_ok']}\n"
+        f"source_export: {result['source_export']}\n"
+        f"imported_at: {result['imported_at']}\n"
         f"pages: {result['pages']}\n"
         f"lines: {result['lines']}\n"
         f"edges: {result['edges']}\n"

@@ -57,6 +57,7 @@ class SQLiteStoreTests(unittest.TestCase):
             export_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
 
             stats = import_export_to_sqlite(export_path, store_path)
+            self.assertTrue(stats["schema_ok"])
             self.assertEqual(stats["pages"], 3)
             self.assertEqual(stats["lines"], 6)
             self.assertEqual(stats["edges"], 5)
@@ -67,6 +68,7 @@ class SQLiteStoreTests(unittest.TestCase):
                 page = store.resolve_page("a")
                 self.assertIsNotNone(page)
                 self.assertEqual(page.line_count, 2)
+                self.assertTrue(store.schema_ok())
 
                 lines, truncated = store.page_lines(page, limit=1)
                 self.assertEqual([line.text for line in lines], ["A"])

@@ -21,6 +21,7 @@ python3 -m grasp backlinks 盲点 --limit 5
 python3 -m grasp read 盲点カード --line-limit 8 --backlinks-limit 3 --related-limit 3 --wanted-limit 3
 python3 -m grasp search 盲点 --limit 5
 python3 -m grasp sync https://scrapbox.io/nishio/ --limit 20 --dry-run
+python3 -m grasp stats
 python3 -m grasp --json backlinks 盲点 --limit 2
 ```
 
@@ -38,6 +39,7 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 - `wanted`: 未作成 target を ranking して返す。
 - `search <query>`: 本文行を substring 検索し、`(page, line-id, line_text)` を page.views 優先で返す。
 - `sync <project-url>`: `cosense` CLI で最近更新ページだけ取得し、SQLite store に upsert する。`--dry-run` あり。
+- `stats`: store path / schema version / current schema / counts を返す。古い schema の store を通常 command で開いた時は stderr に rebuild 警告を出す。
 - helper: `related`, `peek`, `suggest`。MVP 必須ではないが read-only なので追加。
 
 ## data model 実装

@@ -188,13 +188,13 @@ class SQLiteStore:
         self.connection.close()
 
     def stats(self) -> dict[str, Any]:
-        metadata = {
-            row["key"]: row["value"]
-            for row in self.connection.execute("SELECT key, value FROM metadata")
-        }
+        metadata = self.metadata()
+        schema_version = metadata.get("schema_version")
         return {
             "store": str(self.path),
-            "schema_version": metadata.get("schema_version"),
+            "schema_version": schema_version,
+            "current_schema_version": SCHEMA_VERSION,
+            "schema_ok": schema_version == SCHEMA_VERSION,
             "source_export": metadata.get("source_export"),
             "imported_at": _int_or_none(metadata.get("imported_at")),
             "pages": self._count("pages"),
@@ -202,6 +202,18 @@ class SQLiteStore:
             "edges": self._count("edges"),
             "wanted": self._count("wanted"),
         }
+
+    def metadata(self) -> dict[str, str]:
+        return {
+            row["key"]: row["value"]
+            for row in self.connection.execute("SELECT key, value FROM metadata")
+        }
+
+    def schema_version(self) -> str | None:
+        return self.metadata().get("schema_version")
+
+    def schema_ok(self) -> bool:
+        return self.schema_version() == SCHEMA_VERSION
 
     def set_metadata(self, values: dict[str, str]) -> None:
         with self.connection:

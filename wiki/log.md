@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-23 18:31] implementation | store schema status を可視化
+- `grasp stats` を追加。store path, schema_version, current_schema_version, schema_ok, source_export, imported_at, pages/lines/edges/wanted を text/JSON で返す。
+- 通常 command で古い schema の store を開いた場合、stderr に `--rebuild-store` / `grasp import --force` を促す警告を出す。v1 store は fallback で動くが、schema v2 の `wanted_examples` 最適化を使うには rebuild が必要。
+- 検証: unit tests OK。実データ store で `stats` text/JSON を確認。metadata を一時的に schema 1 に書き換えた copy で warning 出力を確認。
+
 ## [2026-06-23 18:27] implementation | wanted examples を materialize、FTS search は見送り
 - `wanted_examples` table を追加し、import / sync 後の `rebuild_wanted` で各 wanted target の上位 5 example edge を materialize。`wanted --limit N` が N 回 example query を投げないようにした。schema_version は 2。
 - Python 内部計測では `wanted(limit=100)` 約 6ms。CLI wall time は Python 起動 + output 込みで約 1.0 秒。
