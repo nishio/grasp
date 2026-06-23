@@ -293,15 +293,20 @@ def build_parser() -> argparse.ArgumentParser:
         "peek",
         help="Show page lines only.",
         description="Preview the body lines of an existing page without backlinks or related context.",
-        returns="query, page|null, lines[], lines_truncated",
+        returns="query, page|null, line_offset, lines[], lines_truncated, lines_truncated_before, lines_truncated_after",
         examples=[
             "grasp peek 盲点カード --line-limit 12",
+            "grasp peek 盲点カード --line-offset 120 --line-limit 20",
             "grasp --json peek 盲点カード --line-limit 3",
         ],
-        notes=["For missing pages, page is null and lines[] is empty."],
+        notes=[
+            "For missing pages, page is null and lines[] is empty.",
+            "lines_truncated is kept for compatibility and has the same value as lines_truncated_after.",
+        ],
     )
     peek_parser.add_argument("title", help="Existing page title to preview.")
     peek_parser.add_argument("--line-limit", type=int, default=None, help="Maximum page lines to return; omit for all lines.")
+    peek_parser.add_argument("--line-offset", type=int, default=0, help="Number of page lines to skip before returning lines.")
 
     suggest_parser = add_command_parser(
         subparsers,
@@ -688,14 +693,27 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return store.link_stats(args.title)
     if args.command == "peek":
         page = store.resolve_page(args.title)
+        line_offset = max(0, args.line_offset)
         if page is None:
-            return {"query": args.title, "page": None, "lines": [], "lines_truncated": False}
-        lines, truncated = store.page_lines(page, args.line_limit)
+            return {
+                "query": args.title,
+                "page": None,
+                "line_offset": line_offset,
+                "lines": [],
+                "lines_truncated": False,
+                "lines_truncated_before": False,
+                "lines_truncated_after": False,
+            }
+        lines, truncated_after = store.page_lines(page, args.line_limit, offset=line_offset)
+        truncated_before = line_offset > 0
         return {
             "query": args.title,
             "page": page.to_summary(),
+            "line_offset": line_offset,
             "lines": [line.to_dict() for line in lines],
-            "lines_truncated": truncated,
+            "lines_truncated": truncated_after,
+            "lines_truncated_before": truncated_before,
+            "lines_truncated_after": truncated_after,
         }
     if args.command == "suggest":
         return {
@@ -1238,10 +1256,16 @@ def format_peek(result: dict[str, Any], aliases: LineIdAliases | None = None) ->
     if page is None:
         return f"# {result['query']}\npage: missing\n"
 
-    parts = [f"# {page['title']}\n", f"id: {page['id']}\nviews: {page['views']}\nlines: {page['line_count']}\n\n"]
+    parts = [f"# {page['title']}\n", f"id: {page['id']}\nviews: {page['views']}\nlines: {page['line_count']}\n"]
+    line_offset = result.get("line_offset", 0)
+    if line_offset:
+        parts.append(f"line_offset: {line_offset}\n")
+    parts.append("\n")
+    if result.get("lines_truncated_before"):
+        parts.append("...\n")
     for line in result["lines"]:
         parts.append(f"{aliases.format_line_id(line['line_id'])}  {line['text']}\n")
-    if result["lines_truncated"]:
+    if result.get("lines_truncated_after", result["lines_truncated"]):
         parts.append("...\n")
     return with_alias_legend("".join(parts), aliases)
 

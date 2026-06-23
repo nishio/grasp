@@ -99,6 +99,10 @@ class SQLiteStoreTests(unittest.TestCase):
                 self.assertEqual([line.text for line in lines], ["A"])
                 self.assertTrue(truncated)
 
+                lines, truncated = store.page_lines(page, limit=1, offset=1)
+                self.assertEqual([line.text for line in lines], ["links to [B] and [Missing]"])
+                self.assertFalse(truncated)
+
                 backlinks = store.backlinks("b")
                 self.assertEqual([edge.source_title for edge in backlinks], ["A", "C"])
 

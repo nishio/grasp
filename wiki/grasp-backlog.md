@@ -37,11 +37,9 @@ sources:
 
 2026-06-24 02:30: `search --context N` は実装済み。検索 semantics は変えず、各 hit に前後 N 行の `context_lines[]` と `context_window` を同梱する。text 出力でも hit 直下に bounded context を表示する。
 
-候補:
+2026-06-24 02:38: `peek --line-offset N` は実装済み。`--line-limit M` と組み合わせて本文行だけをページングし、JSON は `line_offset`, `lines_truncated_before`, `lines_truncated_after` を返す。
 
-- `peek --line-offset`
-
-これらは Skill/subagent 運用で不足が見えた時に足す bounded primitive。LLM 要約は CLI ではなく agent 層の責務。
+この系統は Skill/subagent 運用で不足が見えた時に足す bounded primitive。LLM 要約は CLI ではなく agent 層の責務。
 
 ## Markdown / Obsidian indexed mirror
 

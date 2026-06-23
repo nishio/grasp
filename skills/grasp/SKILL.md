@@ -73,7 +73,7 @@ description: >-
 → 親 conversation に長い `read` 出力を直接持ち込まない。まず探索用 subagent / Explore agent に任せ、subagent 側で `search` / `peek` / limit 付き `read` を使って読む。
 - 親に返すのは、結論・根拠ページ・該当 `line_id`・必要な短い引用/要約だけにする。中間の大量 stdout、長大本文、網羅的検索結果は subagent context に閉じ込める。
 - CLI 側は要約しない。grasp は LLM 依存の summarizer ではなく、行 ID 付きの deterministic graph reader。要約と取捨選択は Skill / subagent の責務。
-- 長大ページを直接開く必要がある時も、先に `grasp search <query> --context 2 --json` で hit line と短い周辺を読む。さらに広げる必要がある時だけ、完全 `line_id` を使って `grasp read --around-line <line-id> --line-context 5` で追加の周辺行を読む。ページ先頭だけで足りる時は `grasp read <title> --line-limit <N>` で範囲を絞る。親へ戻す時は再アクセスできる `source_title` と完全 `line_id` を残す。
+- 長大ページを直接開く必要がある時も、先に `grasp search <query> --context 2 --json` で hit line と短い周辺を読む。さらに広げる必要がある時だけ、完全 `line_id` を使って `grasp read --around-line <line-id> --line-context 5` で追加の周辺行を読む。ページ本文を順に見るだけなら `grasp peek <title> --line-offset N --line-limit M` でページングする。ページ先頭だけで足りる時は `grasp read <title> --line-limit <N>` で範囲を絞る。親へ戻す時は再アクセスできる `source_title` と完全 `line_id` を残す。
 
 ### 「この概念にどこで言及したか」
 → `grasp backlinks <title>`（`(source_title, line-id, 行テキスト)`）。`read` の Backlinks 節と同じものを単体で。page が無い概念にも効く。
@@ -92,7 +92,7 @@ description: >-
 - **これは「書くべき TODO リスト」ではない**。多参照の未解決 target は、本文が無くても**他ページの文脈で既に意味を持つ概念ノード**。「次に書く候補」や調査の起点として眺めるのはよいが、全部を埋めるべき穴と解釈しない。
 
 ### 本文だけ見たい（近傍は不要）
-→ `grasp peek <title>`。
+→ `grasp peek <title>`。長大ページでは `--line-offset N --line-limit M` で本文行だけをページングする。
 
 ### AI に渡す 1 ファイルの近傍 bundle が欲しい
 → `grasp export-ai <title>`。Cosense の "Export for AI" 風に main page + 1-hop pages を 1 テキストへ展開する。default は `--depth 1` かつ limit なし。2-hop まで欲しい時は `--depth 2`、ファイルへ保存する時は `--output <path>`。
@@ -122,7 +122,7 @@ description: >-
 | `path <A> <B>` | pages / page なし target 間の短いリンク経路（no-path 時も recovery hints） |
 | `link-stats <title>` | incoming link count と 0/1/N |
 | `unresolved` | 未解決 target の rank view（TODO ではない） |
-| `peek <title>` | 本文行のみ |
+| `peek <title>` | 本文行のみ。`--line-offset N --line-limit M` でページング |
 | `stats` | store の状態・件数 |
 | `import --cosense <json>` / `import --markdown <folder>` | Cosense JSON / Markdown folder mirror の取り込み・再構築 |
 | `export-ai <title>` | Export for AI 風の単一テキスト bundle（alias `export-for-ai`） |

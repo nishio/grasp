@@ -129,7 +129,7 @@ grasp read "<ページタイトル>"
 | `path <A> <B>` | 2つのページ / 未解決ターゲットがリンクグラフ上でどう繋がるかを短い経路で見る。経路なしでも related / backlinks などの recovery hints を返す |
 | `link-stats <title>` | incoming リンク数と 0 / 1 / N（none / single / multi）区別 |
 | `unresolved` | 本文の無いリンクターゲットをランク付けして一覧（後述の注意あり） |
-| `peek <title>` | 本文行のみ（近傍は返さない） |
+| `peek <title>` | 本文行のみ（`--line-offset N --line-limit M` で長大ページをページング） |
 | `export-ai <title>` | main + 1-hop / 2-hop ページ本文を 1 テキストへ展開（alias `export-for-ai`） |
 | `stats` | ストアの件数・更新日時などを確認 |
 | `import --cosense <json>` / `import --markdown <folder>` | Cosense JSON エクスポート、または read-only Markdown folder mirror を project namespace に取り込み・再構築 |

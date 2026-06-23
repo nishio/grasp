@@ -326,10 +326,12 @@ class CosenseStore:
     def resolve_page(self, title: str) -> Page | None:
         return self.pages_by_norm.get(normalize_title(title))
 
-    def page_lines(self, page: Page, limit: int | None = None) -> tuple[list[Line], bool]:
+    def page_lines(self, page: Page, limit: int | None = None, offset: int = 0) -> tuple[list[Line], bool]:
+        offset = max(0, offset)
         if limit is None or limit < 0:
-            return list(page.lines), False
-        return list(page.lines[:limit]), len(page.lines) > limit
+            return list(page.lines[offset:]), False
+        lines = list(page.lines[offset : offset + limit])
+        return lines, offset + len(lines) < len(page.lines)
 
     def backlinks(self, title: str, limit: int | None = None, offset: int = 0) -> list[Edge]:
         edges = sorted(self.backlinks_by_norm.get(normalize_title(title), []), key=edge_rank_key)

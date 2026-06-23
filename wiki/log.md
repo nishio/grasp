@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 02:38] file back | peek に line offset を追加
+- `peek --line-offset N` を追加し、`--line-limit M` と組み合わせて本文行だけをページングできるようにした。既定 offset は 0。
+- JSON は `line_offset`, `lines_truncated_before`, `lines_truncated_after` を返す。互換用の `lines_truncated` は後方省略（`lines_truncated_after`）と同じ値を維持する。text 出力は前方/後方省略を `...` で表示し、offset 指定時は `line_offset: N` を出す。
+- [[grasp-v1-implemented]] / [[history]] / [[grasp-backlog]] / README / skill を更新し、version は schema `5` compatible の `1.5.12` に上げた。
+- 検証: `python3 -m unittest discover -s tests` OK（42 tests）、`python3 scripts/lint_wiki.py` OK、skill validator OK。
+
 ## [2026-06-24 02:36] file back | KJ法 hub の desired state を明文化
 - [[kj-link-hub-audit-2026-06-24]] に、改善後の姿を「`[KJ法]` を増やす」ではなく **root link + 用途別 slice handle** に分岐することとして追記した。
 - 具体例: `[KJ法]` は KJ法そのもの・川喜田二郎・原理・全体像に残し、通常言及は `表札づくり` / `グループ編成` / `考える花火` / `Kozaneba` / `探検ネット` / `AIにKJ法を教える` へ逃がす。本文の `KJ法` は bare text のままでよく、link は後で読みたい retrieval handle に付ける。
