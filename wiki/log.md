@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-23 19:30] implementation | Claude Code 用 Agent Skill `skills/grasp/SKILL.md` を実装
+- [[delivery-cli-plus-skill]] に従い、cosense-cli パターンで grasp Skill を作成。repo に `skills/grasp/SKILL.md`（SSoT）、`.claude/skills -> ../skills` / `.agents/skills -> ../skills` symlink で project skill 化。`pip install -e .`（依存ゼロ）で `grasp` を PATH に通し、別 cwd から `--store` 絶対指定で動くことを smoke 確認。
+- 薄く保った: 「いつ使うか」のケース分岐＋verb 一覧 snapshot のみ。各 verb の引数/戻り値は `grasp <cmd> --help`（mechanics SSoT）に委譲し二重化しない。read=近傍同梱ゆえ cosense の read-page.md 相当の traversal 手順書は不要（[[delivery-cli-plus-skill]] の予言通り SKILL.md 1枚で足りた）。
+- 解釈ミス2点を skill content に封じた: `unresolved` は「TODO ではない概念ノード rank view」（実例 `民主主義` 82 links/78 pages/本文なし）、リンクは Cosense 原文 `[single]` 表記で grasp 読みでも `[[...]]` を使わない。`cosense` skill（hosted/最新/ベクトル検索）との使い分け表も付けた。
+- decision の install Open Q を解決済みに更新。残: user-level skill（`~/.claude/skills/grasp/`）化は未配置（in-repo のみ）。
+
 ## [2026-06-23 19:21] implementation | `grasp <cmd> --help` を mechanics SSoT として拡張
 - argparse help を拡張し、root help に global option の位置規則と mechanics SSoT 方針を追加。全 subcommand help に arguments / `--json` return keys / Examples / Notes を持たせた。
 - `tests/test_cli_help.py` を追加し、全 command help が `Returns (--json):` と `Examples:` を含むこと、`read` が `--unresolved-limit` / `unresolved_targets` を示し旧 `--wanted-limit` を含まないことを固定。
