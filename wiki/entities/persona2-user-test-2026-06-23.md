@@ -21,7 +21,7 @@ sources:
 
 **persona2 に active release する導線としては fail**。理由は、現状の CLI と docs が persona1（Cosense export を持つ nishio dogfooding）には正直だが、persona2 の唯一の入口である Markdown folder import が無く、初回エラーも「まだ未対応」と説明しないため。
 
-これは現 MVP の設計欠陥ではない。[[SPEC]] は Cosense JSON export first と明記している。ただし [[positioning-two-personas]] の通り persona2 を upside-risk target として狙うなら、Markdown adapter と英語 onboarding は nice-to-have ではなく release gate。
+これは現 MVP の設計欠陥ではない。v1 実装（[[grasp-v1-implemented]]）は Cosense JSON export first である。ただし [[positioning-two-personas]] の通り persona2 を upside-risk target として狙うなら、Markdown adapter と英語 onboarding は nice-to-have ではなく release gate。
 
 ## 観察
 
@@ -76,7 +76,7 @@ P1:
 
 P2:
 - identity-without-name の persona2 pitch を README に入れる。言葉は「filename=identity をやめるので rename で links が切れない」。
-- Markdown import の seed policy（filename title / frontmatter id / aliases / `[[wikilink]]` / `#tag`）を [[SPEC]] に昇格する。
+- Markdown import の seed policy（filename title / frontmatter id / aliases / `[[wikilink]]` / `#tag`）を [[grasp-backlog]] から実装計画へ昇格する。
 
 ## 判定
 

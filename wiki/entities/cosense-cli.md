@@ -41,6 +41,15 @@ node: /Users/nishio/.nvm/versions/node/v24.16.0
 - `cosense`: hosted Cosense project を読む・検索する・編集する。認証やネットワーク、共同編集された現在状態が関係する。
 - `grasp`: local export/native store を読む。AI 所有の graph memory substrate。逆リンク・2-hop・unresolved link target を local graph として materialize する。
 
+### 書き込みの分担（roadmap）
+
+write/edit も grasp と cosense-cli で **書き込み先によって棲み分ける**（nishio 2026-06-23, README roadmap）:
+
+- **hosted Cosense に書く ＝ cosense-cli**（`previewEdit` / `submitEdit`）。Scrapbox / Cosense ユーザが AI から自分の hosted project に書くときはこちらを想定する。grasp は hosted に書き戻さない。
+- **grasp の write 層（[[grasp-backlog]], v1 外）の目的は別もの**: (a) そもそも Cosense ユーザでない人、(b) オンライン Cosense でなく **ローカルに閉じて書きたい**ケース、のサポート。
+
+∴ grasp の write は cosense-cli の重複ではなく、書き込み先（hosted ↔ local-only）で分かれる。Cosense ユーザの hosted 編集は既存の cosense-cli が担うので、grasp が hosted write を実装する動機は無い。
+
 grasp の **MVP** では `cosense` を runtime dependency にしない（export が import 入力、hosted API は別系統）。**ただし post-MVP では cosense-cli が grasp の freshness 経路に昇格する**: 初回 export を seed にし、以降は `grasp sync <project-url>` が `cosense listPages` / `cosense readPage` を呼び、最近更新ページのみ差分取得して local store を最新化する（決定とメカニズムは [[incremental-sync]]）。比較対象から grasp の構成要素へ。
 
 ## 実測比較（2026-06-23, 同一ページ `君主道徳と奴隷道徳` 38 lines / 2113 views）

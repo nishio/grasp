@@ -33,7 +33,7 @@ sources:
 ## 帰結
 
 - import adapter は **2モード**: bulk seed（export）と incremental delta（cosense-cli）。native store（[[persistence-custom-format]]）はどちらの入力も同じ正規化先。
-- store は immutable index でなく **upsert 可能**でなければならない → [[SPEC]] M2-1 の store 設計（SQLite 等）に反映。
+- store は immutable index でなく **upsert 可能**でなければならない → v1 SQLite store（[[grasp-v1-implemented]]）に反映。
 - これは "Co-"（多人数リアルタイム協調）ではない。単一所有 mirror を最新に保つだけ ＝ [[why-not-scrapbox-clone]] のスコープ内。
 
 ## Open Questions

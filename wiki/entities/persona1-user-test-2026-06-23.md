@@ -3,7 +3,7 @@ type: entity
 summary: persona1（日本語Cosenseヘビーユーザ=nishio dogfooding）の視点で grasp CLI を実走したユーザテスト結果。read=近傍同梱と linked target without page の価値は成立。摩擦は表記ゆれ空振り、global option 位置、長大ページの出力量、テスト時点の store default docs drift
 sources:
   - [[positioning-two-personas]]
-  - [[SPEC]]
+  - [[grasp-v1-implemented]]
   - skills/grasp/SKILL.md
   - grasp CLI 実行 2026-06-23
 ---
@@ -28,7 +28,7 @@ sources:
 - `ユーザテスト` vs `ユーザーテスト` のような日本語表記ゆれで missing/0 links になる。
 - `--json` を subcommand 後に置く自然なミスが、回復案なしの argparse error になる。
 - 長大ログページの default `read` は CLI 一括出力としては多い。
-- テスト時点で root help と `skills/grasp/SKILL.md` は `~/.grasp/grasp.sqlite` default だが、[[SPEC]] / [[grasp-cli-mvp]] には repo-local store 前提の記述が残っていた（19:50 file back で同期済み）。
+- テスト時点で root help と `skills/grasp/SKILL.md` は `~/.grasp/grasp.sqlite` default だが、旧 `SPEC.md` / [[grasp-cli-mvp]] には repo-local store 前提の記述が残っていた（19:50 file back で同期済み）。
 
 ## 観察
 
@@ -44,7 +44,7 @@ sources:
 
 `grasp read 民主主義 --backlinks-limit 4 --related-limit 4` は `page: linked target without page` として、82 links / 78 source pages を返した。本文はなくても、リンク元の行文脈と source pages で意味が読める。
 
-`grasp read '自由と民主主義は両立しない' --line-limit 20 --backlinks-limit 3 --related-limit 5 --unresolved-limit 5` では、ページ本文から `[民主主義]` unresolved target と 2-hop related が同時に見えた。[[SPEC]] 原理の `read=近傍同梱` はここで明確に効く。
+`grasp read '自由と民主主義は両立しない' --line-limit 20 --backlinks-limit 3 --related-limit 5 --unresolved-limit 5` では、ページ本文から `[民主主義]` unresolved target と 2-hop related が同時に見えた。v1 実装の `read=近傍同梱`（[[grasp-v1-implemented]]）はここで明確に効く。
 
 ### 3. 表記ゆれで体験が切れる
 
@@ -68,11 +68,11 @@ Cosense browser ならスクロールできるが、CLI は一括出力なので
 
 ### 6. store default の source of truth が割れている
 
-観察時点の `grasp stats` は `/Users/nishio/.grasp/grasp.sqlite` を見た。root help と `skills/grasp/SKILL.md` も default store を `~/.grasp/grasp.sqlite` としていた。一方で [[SPEC]]・[[grasp-cli-mvp]] には `.grasp/grasp.sqlite` 前提の記述が残っていた。
+観察時点の `grasp stats` は `/Users/nishio/.grasp/grasp.sqlite` を見た。root help と `skills/grasp/SKILL.md` も default store を `~/.grasp/grasp.sqlite` としていた。一方で旧 `SPEC.md`・[[grasp-cli-mvp]] には `.grasp/grasp.sqlite` 前提の記述が残っていた。
 
 one global store は「単一 AI が一つの local store を持つ」設計に合う。採用済みなら wiki と skill を更新するべき。未決なら decision が必要。
 
-Update 2026-06-23 19:50: [[SPEC]] / [[grasp-cli-mvp]] / [[delivery-cli-plus-skill]] に `~/.grasp/grasp.sqlite` global default を file back 済み。
+Update 2026-06-23 19:50: 旧 `SPEC.md` / [[grasp-cli-mvp]] / [[delivery-cli-plus-skill]] に `~/.grasp/grasp.sqlite` global default を file back 済み。v1 current facts は [[grasp-v1-implemented]] に分離済み。
 
 ## 推奨
 
@@ -80,7 +80,7 @@ P0:
 
 - missing + zero incoming の `read` / `link-stats` に recovery hints を足す。候補は `suggest <query>` と `search <query> --limit 3` の summary。
 - `--json` を subcommand 後でも受ける、または argparse error に `use: grasp --json read ...` を出す。
-- store default の docs drift は 2026-06-23 19:50 に [[SPEC]] / [[grasp-cli-mvp]] / [[delivery-cli-plus-skill]] へ file back 済み。
+- store default の docs drift は 2026-06-23 19:50 に旧 `SPEC.md` / [[grasp-cli-mvp]] / [[delivery-cli-plus-skill]] へ file back 済み。残る help example drift は [[grasp-backlog]]。
 
 P1:
 

@@ -11,7 +11,7 @@ sources:
 
 ## 文脈
 
-[[why-not-scrapbox-clone]] / [[SPEC]] を書いた時点で「永続化を既存 Markdown 互換にすれば既存森を即読める」と Open Q に書いた。nishio が2点訂正:
+[[why-not-scrapbox-clone]] / 旧 `SPEC.md` を書いた時点で「永続化を既存 Markdown 互換にすれば既存森を即読める」と Open Q に書いた。nishio が2点訂正:
 
 1. **保存形式は独自であるべき。Markdown であることが逆リンクメンテのしがらみを生んでいる。**
 2. **「読める」こと自体は保存形式と独立**（Markdown を native にしなくても読める）。イメージは「まず Cosense の JSON エクスポートを1ファイル渡して CLI で読めるようにする」。
@@ -26,7 +26,7 @@ sources:
 
 ## 「独自」＝ゼロからの発明ではない
 
-nishio の MVP イメージ（Cosense JSON export から始める）が指すのは: **Cosense の export は既に line ベース＋リンク構造を持つ** → 独自フォーマットは *Cosense のグラフ/行モデルを正規化して native にする* こと。export から始める＝モデルから始める。Markdown はそのモデルを潰した lossy ダウングレードだった。
+nishio の MVP イメージ（Cosense JSON export から始める）が指すのは: **Cosense の export は line ベース本文と link 記法を持つ** → 独自フォーマットは *Cosense のグラフ/行モデルを正規化して native にする* こと。export から始める＝モデルから始める。Markdown はそのモデルを潰した lossy ダウングレードだった。
 
 ## 帰結: 三層に分離
 
@@ -37,13 +37,13 @@ nishio の MVP イメージ（Cosense JSON export から始める）が指すの
 ```
 
 - 「既存 wiki森 40+ を読める」利点は **Markdown import adapter** で達成（native を Markdown にしない）。
-- MVP の入力 = **Cosense JSON export 1ファイル**、読み取り専用（[[SPEC]] MVP 節）。
+- v1 の入力 = **Cosense JSON export 1ファイル**、読み取り専用（[[grasp-v1-implemented]]）。
 
 ## Update (2026-06-23): on-disk store = SQLite（or better）、JSON は持ち続けない
 
 実測比較（[[cosense-cli]]）で in-memory（export を毎回 full parse）が全コマンド一律 ~3.4s の律速と判明。nishio 判断: **渡された JSON はあくまで handoff 形式。JSON のまま保存し続ける必要はなく、SQLite もしくはより良いデータ構造で持ってよい**。
 
-→ 下の Open Q「on-disk か in-memory か」は **on-disk = yes** で解決。具体は SQLite（pages / lines / edges / unresolved_targets を materialize したテーブル）を起点に、必要なら専用構造へ。これが [[SPEC]] M2-1。JSON export は import adapter の**入力**にのみ使い、保存層では捨てる。store は後の差分更新（[[incremental-sync]]）のため **upsert 可能**に設計する。
+→ 下の Open Q「on-disk か in-memory か」は **on-disk = yes** で解決。具体は SQLite（pages / lines / edges / unresolved_targets を materialize したテーブル）を起点に、必要なら専用構造へ。v1 実装は [[grasp-v1-implemented]]。JSON export は import adapter の**入力**にのみ使い、保存層では捨てる。store は後の差分更新（[[incremental-sync]]）のため **upsert 可能**に設計する。
 
 ## Update (2026-06-23): store は global に1個（per-project に複製しない）
 

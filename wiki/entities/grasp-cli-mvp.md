@@ -11,7 +11,7 @@ sources:
 
 # entity: grasp CLI MVP implementation
 
-[[SPEC]] の MVP を Python package `grasp` として実装した現状。目的は「hosted Cosense を操作する CLI」ではなく、Cosense JSON export を local graph store seed として読み、AI が CLI だけで Scrapbox 型近傍を体験すること（区別は [[cosense-cli]]）。
+旧 `SPEC.md` の MVP 指示を Python package `grasp` として実装した時点の記録。v1 current facts は [[grasp-v1-implemented]] に分離済み。目的は「hosted Cosense を操作する CLI」ではなく、Cosense JSON export を local graph store seed として読み、AI が CLI だけで Scrapbox 型近傍を体験すること（区別は [[cosense-cli]]）。
 
 ## 実行 surface
 
@@ -94,7 +94,7 @@ MVP parser は以下を link としない:
 
 ## 次の実装課題
 
-[[cosense-cli]] との実測比較で優先順位が確定（→ [[SPEC]] 次マイルストーン）:
+[[cosense-cli]] との実測比較で優先順位が確定。未実装項目は [[grasp-backlog]] に分離済み:
 
 - ~~on-disk store/cache ★最優先~~ → SQLite store 実装済み。edge/materialized unresolved targets を on-disk 永続し、通常 read は JSON parse しない。
 - ~~本文検索 `search`~~ → 実装済み。SQLite `lines.text LIKE` で行本文を検索し、行レベル hits を返す。

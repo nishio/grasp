@@ -25,7 +25,7 @@ persona2 向けの lede は "faster grep" では弱い。小〜中規模の Mark
 
 > grep は文字列 hit を返す。grasp は **ページ本文 + 逆リンク行 + related + unresolved targets** を一回で返す。
 
-つまり persona2 向けの表現は **indexed graph reader for Markdown / Obsidian notes, optimized for LLM agents**。速度は副次的価値であり、本質は [[SPEC]] 原理1の **read = 近傍同梱** を Markdown / Obsidian assets に付与すること。
+つまり persona2 向けの表現は **indexed graph reader for Markdown / Obsidian notes, optimized for LLM agents**。速度は副次的価値であり、本質は v1 の中核挙動（[[grasp-v1-implemented]]）である **read = 近傍同梱** を Markdown / Obsidian assets に付与すること。
 
 ## 想定 CLI surface（案）
 

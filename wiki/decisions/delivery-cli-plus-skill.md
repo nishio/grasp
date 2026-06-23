@@ -1,15 +1,15 @@
 ---
 type: decision
-summary: grasp を AI に使わせる面（delivery）は CLI + Agent Skill。SPEC Open Q「純 CLI か MCP か」への決着。nishio の cosense-cli が実証したパターン（CLI は Skill 用、責任境界を cli-vs-skill で SSoT 分割）を踏襲。MCP は当面採らない（将来併設の余地は残す）
+summary: grasp を AI に使わせる面（delivery）は CLI + Agent Skill。旧 SPEC Open Q「純 CLI か MCP か」への決着。nishio の cosense-cli が実証したパターン（CLI は Skill 用、責任境界を cli-vs-skill で SSoT 分割）を踏襲。MCP は当面採らない（将来併設の余地は残す）
 sources:
   - nishio 指示 2026-06-23「Skills にする選択肢が出てないのはおかしい。cosense-cli の repo はあれは Skills」
   - /Users/nishio/monika-mentoring-wiki/work/cosense-cli（package.json="Agent Skill 用の CLI", docs/guidelines/cli-vs-skill.md, skills/cosense/）
-  - SPEC Open Q「Codex からの呼び方: 純 CLI か MCP server 化か」
+  - 旧 SPEC.md Open Q「Codex からの呼び方: 純 CLI か MCP server 化か」
 ---
 
 # Decision: delivery = CLI + Agent Skill（MCP ではない）
 
-決定: grasp を AI（＝設計上の「ユーザ」, [[why-not-scrapbox-clone]] 人間 UI なし）に使わせる面は **CLI ＋ Agent Skill**。SPEC Open Q「純 CLI か MCP server 化か」を **CLI+Skill** で決着。純 CLI 単体 / AGENTS.md 直書き指示 / MCP server 化はいずれも採らない（MCP は将来の併設余地のみ残す）。
+決定: grasp を AI（＝設計上の「ユーザ」, [[why-not-scrapbox-clone]] 人間 UI なし）に使わせる面は **CLI ＋ Agent Skill**。旧 `SPEC.md` の Open Q「純 CLI か MCP server 化か」を **CLI+Skill** で決着。純 CLI 単体 / AGENTS.md 直書き指示 / MCP server 化はいずれも採らない（MCP は将来の併設余地のみ残す）。
 
 ## 文脈: 「read 一発で近傍が返るエンジン」と「AI が使う導線」は別物
 
@@ -58,7 +58,7 @@ cosense の `read-page.md` が長いのは、hosted/多人数ゆえ **traversal 
 
 ### 2026-06-23: README/onboarding は「人間＝CLI operator」前提を外す
 
-nishio 指示「**主たるユーザは CLI を直接叩くのではなく、AI に Skill としてインストールして AI が CLI を使う**」。本 decision の「AI＝設計上のユーザ」（[[why-not-scrapbox-clone]] 人間 UI なし）を **human-facing copy に operationalize** したもの。F1 README（[[v1-todo]]）で反映:
+nishio 指示「**主たるユーザは CLI を直接叩くのではなく、AI に Skill としてインストールして AI が CLI を使う**」。本 decision の「AI＝設計上のユーザ」（[[why-not-scrapbox-clone]] 人間 UI なし）を **human-facing copy に operationalize** したもの。README v1 release で反映（[[grasp-v1-implemented]]）:
 
 - lede が「主たる使い方は `grasp` コマンドを叩くことではない」を明示。人間は (1) AI エージェント（Claude Code 等）に Skill を登録し、(2) 自然言語で AI に問いかける主体、(3) CLI は AI が裏で呼ぶ基盤、と位置づける。
 - install は「CLI を PATH に通す」＋「skill を `~/.claude/skills/grasp` に symlink」を first-class な2ステップに。quickstart の主経路は `grasp read` 直叩きでなく「AI に聞く」。
