@@ -52,6 +52,33 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 - Update 2026-06-23: `wanted_examples` を materialize して `wanted --limit N` の example 取得を N 回 query しないようにした。Python 内部計測では `wanted(limit=100)` が約 6ms。CLI wall time は Python 起動 + output 書き出し込みで約 1.0 秒。
 - `search` は SQLite FTS5 trigram を試したが、2文字日本語 query（例: `盲点`）は `MATCH` に乗らず、FTS table `LIKE` は一部日本語 substring（例: `盲点カード`）の recall を落とした。現状は correctness 優先で `lines.text LIKE` を維持。
 
+### FTS5 trigram 検証メモ（2026-06-23）
+
+FTS5 trigram は **候補 prefilter としては有効**だが、`grasp search` の semantics（`line.text` に query が literal substring として含まれる行を返す）をそのまま満たすわけではない。
+
+実測（`raw/nishio.json` → SQLite store）:
+
+| query | 現行 `lines LIKE` best | hybrid (`MATCH` → `LIKE`) best |
+|---|---:|---:|
+| `盲点カード` | 0.121s | 0.001s |
+| `民主主義` | 0.128s | 0.013s |
+| `Scrapbox` | 0.127s | 0.029s |
+| `cosense` | 0.118s | 0.002s |
+| `関係性` | 0.125s | 0.003s |
+| `トップダウン` | 0.126s | 0.002s |
+
+ただし:
+- 2文字 query（`盲点`, `知識`, `AI` など）は trigram `MATCH` に乗らない。
+- 記号入り query（`[盲点カード]`, `C++`, `foo-bar`, `AI/LLM`）は FTS query syntax と衝突して error または別解釈になる。
+- `MATCH 'abc bcd'` は literal substring `abc bcd` だけでなく `abcd`, `abcde`, `abcXbcd` も返した。つまり `MATCH` は literal substring search ではない。
+
+従って、将来 hybrid を入れるなら:
+- `len(query) >= 3` かつ safe query（空白・記号・FTS syntax なし）の時だけ `MATCH` で候補 line_id を絞る。
+- その後に必ず `line.text LIKE '%query%'` をかけ、literal substring semantics を保証する。
+- 2文字 query / 記号入り query は現行 `lines.text LIKE` に fallback。
+
+この `LIKE` は全 lines ではなく FTS 候補集合にだけかかるため、速度メリットは残る。現段階では実装しない（特殊化であり、まず correctness を優先）。
+
 ## 実装判断
 
 - lines[0]（Cosense title 行）は本文に残す。理由: 完全性と `page.id:line-index` の安定性を優先。重複表示は formatter の問題。
