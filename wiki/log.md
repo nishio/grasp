@@ -1,5 +1,20 @@
 # Log
 
+## [2026-06-23 19:53] implementation | store と skill を global 化（per-project 複製しない）
+- nishio 判断「同一 Cosense を per-project に別々に持ちたいことはない → global に入れて DB も global」。`grasp/cli.py` の `default_store_path()` を cwd 相対（`./.grasp/grasp.sqlite`）から **`$GRASP_HOME or ~/.grasp` 配下**に変更、`grasp_home()` helper を追加。`default_export_path()` も `$GRASP_EXPORT → ~/.grasp/nishio.json → cwd raw/nishio.json` の順に。
+- 既存 store を `~/.grasp/grasp.sqlite` へ移動、seed を `~/.grasp/nishio.json -> repo raw/nishio.json` の symlink に。**`/tmp` から flag 無しの `grasp read/link-stats` が動作**。`python3 -m unittest discover -s tests` 11 OK（tests は default path 非依存）。
+- skill を **user-level 化**: `~/.claude/skills/grasp -> /Users/nishio/grasp/skills/grasp`（SSoT 1本を symlink、全 project で発火）。SKILL.md「実行方法」を global default 前提に更新（別 cwd でも flag 不要）。`*.egg-info/` を gitignore。
+- file back: [[delivery-cli-plus-skill]] の install Open Q を「user-level skill＋global store 配置済み」に更新。SPEC は別セッションが既に global store 記述に追随済みで一致。
+
+## [2026-06-23 19:50] file back | persona1 user-test の設計含意を SPEC / entity へ伝播
+- [[persona1-user-test-2026-06-23]] の発見を [[SPEC]] と [[grasp-cli-mvp]] に反映。`~/.grasp/grasp.sqlite` global store default（`$GRASP_HOME` で差し替え）を current mechanics として明記し、repo-local `.grasp/grasp.sqlite` 前提の記述を更新。[[delivery-cli-plus-skill]] も「別 cwd では --store 必須」から「global store なので flag なしで読む」に更新。
+- SPEC に **M2-5 persona1 dogfooding UX fixes** を追加。zero-hit recovery（`ユーザテスト` vs `ユーザーテスト` などの表記ゆれ空振り）、verb 後 `--json` の回復、search hit line から周辺本文へ行く surface を read-only の次課題として固定。
+
+## [2026-06-23 19:47] user-test | persona1 dogfooding で CLI 体験を検証
+- [[persona1-user-test-2026-06-23]] を追加。persona1 を [[positioning-two-personas]] の定義通り「日本語 Cosense ヘビーユーザ = nishio dogfooding」として、`search` → `read` → missing target `read` → source page traversal を実走。
+- 結論: **read=近傍同梱**と **linked target without page を backlinks/source pages で読む体験**は persona1 に刺さる。`民主主義` のような page なし概念でも 82 links / 78 source pages で意味が読める。
+- 摩擦: `ユーザテスト` vs `ユーザーテスト` の表記ゆれで missing/0 links に落ちる、`--json` を subcommand 後に置くと回復案なしで argparse error、長大ログ page の default read が 513 lines / 66KB、current help/Skill の default store `~/.grasp/grasp.sqlite` と SPEC/entity の repo-local store 記述が drift。
+
 ## [2026-06-23 19:46] user-test | persona2 視点で fresh onboarding を検証
 - [[persona2-user-test-2026-06-23]] を追加。persona2（世界の LLM Wiki / Markdown 束ユーザ）として、空 cwd + 空 `GRASP_HOME` + 最小 `notes/Alpha.md` から初回導線を試した。
 - 結果: persona2 active release としては fail。`grasp --help` / package description は Scrapbox/Cosense 寄りで persona2 の hook（Markdown 束より local graph store）を出していない。README/docs も無い。`grasp stats` は store/export 無しで onboarding にならず、`grasp import notes` は unrecognized args、`grasp --export notes import --force` は `IsADirectoryError` traceback。

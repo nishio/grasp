@@ -49,7 +49,7 @@ cosense の `read-page.md` が長いのは、hosted/多人数ゆえ **traversal 
 
 ## Open Questions
 
-- ~~Skill を grasp repo にどう同梱・install するか~~ → **実装済み**: repo に `skills/grasp/SKILL.md`（SSoT）、`.claude/skills -> ../skills` と `.agents/skills -> ../skills` の symlink で project skill 化（cosense-cli と同型）。`pip install -e .`（依存ゼロ）で `grasp` を PATH に通し、別 cwd からは `--store` 絶対指定 or `$GRASP_STORE` で叩く。残: **全 project で使う user-level skill（`~/.claude/skills/grasp/`）にするか**は未配置（in-repo のみ）。長期の配布チャネル（PyPI/pipx/npm/native binary）と install 順序の決定は [[language-and-distribution]]（この delivery 決定に直交する implementation/distribution 層）。
+- ~~Skill を grasp repo にどう同梱・install するか~~ → **実装済み**: repo に `skills/grasp/SKILL.md`（SSoT）、`.claude/skills -> ../skills` と `.agents/skills -> ../skills` の symlink で project skill 化（cosense-cli と同型）。`pip install -e .`（依存ゼロ）で `grasp` を PATH に通す。store は `~/.grasp/grasp.sqlite` global default なので別 cwd からも flag なしで同じ store を読む（別 store は `--store` or `$GRASP_STORE`、別 home は `$GRASP_HOME`）。**user-level skill 配置済み**（`~/.claude/skills/grasp -> repo skills/grasp` の symlink、全 project で発火）。同一 Cosense を per-project に複製しない方針（nishio 判断）に合わせ store も global 1個。長期の配布チャネル（PyPI/pipx/npm/native binary）と install 順序の決定は [[language-and-distribution]]（この delivery 決定に直交する implementation/distribution 層）。
 - trigger 語の具体（「思い出して」「関連は」「何が未解決か」「この概念どこで言及した」等）。over-trigger と under-trigger の調整。
 - MCP を将来併設するか（cosense は CLI+Skill と MCP server の両方を持つ）。当面は不要。
 - write/identity 層が入った時の Skill 拡張（cosense の edit-page.md 相当。`[[...]]` write 記法の説明はここで初めて要る）。

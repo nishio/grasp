@@ -73,9 +73,9 @@ hosted Cosense を生で操作したい時は `cosense` skill を使う（使い
 
 ## 実行方法
 
-- 形式: **`grasp <verb> ...`**（`pip install -e /Users/nishio/grasp` 済みで PATH にある）。未インストール環境では `/Users/nishio/grasp` から `python3 -m grasp <verb>`。
-- store は `/Users/nishio/grasp/.grasp/grasp.sqlite`。無ければ最初のコマンドが `raw/nishio.json` から自動 build（約9秒）。以降は sub-second。
-- repo 以外の cwd から使う時は store を絶対指定: `grasp --store /Users/nishio/grasp/.grasp/grasp.sqlite <verb>`（または環境変数 `GRASP_STORE` を同パスに）。
+- 形式: **`grasp <verb> ...`**。store は home に1個 `~/.grasp/grasp.sqlite`（global default）なので、**どの cwd からも flag 無しで動く**。
+- 未インストール環境では `/Users/nishio/grasp` から `python3 -m grasp <verb>`（`pip install -e /Users/nishio/grasp` 済みなら `grasp` が PATH）。
+- store が無ければ最初のコマンドが seed（`~/.grasp/nishio.json` → 無ければ cwd の `raw/nishio.json`）から自動 build（約9秒）。以降は sub-second。別パスは `--store` / `$GRASP_STORE`、別 home は `$GRASP_HOME`。
 - 機械可読が要る時は `--json`。**root option なので verb の前**に置く: `grasp --json read 民主主義 --backlinks-limit 3`。`--store` / `--export` も同様に verb の前。
 - 空白・記号を含む title / query は shell でクォートする（`'...'`）。
 

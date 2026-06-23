@@ -16,11 +16,22 @@ class GraspHelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDes
     pass
 
 
+def grasp_home() -> Path:
+    """Single global home for the store/seed. One AI owns one store, not per-cwd."""
+    env_home = os.environ.get("GRASP_HOME")
+    if env_home:
+        return Path(env_home)
+    return Path.home() / ".grasp"
+
+
 def default_export_path() -> Path | None:
     env_path = os.environ.get("GRASP_EXPORT")
     if env_path:
         return Path(env_path)
 
+    home_default = grasp_home() / "nishio.json"
+    if home_default.exists():
+        return home_default
     cwd_default = Path.cwd() / "raw" / "nishio.json"
     if cwd_default.exists():
         return cwd_default
@@ -31,7 +42,7 @@ def default_store_path() -> Path:
     env_path = os.environ.get("GRASP_STORE")
     if env_path:
         return Path(env_path)
-    return Path.cwd() / ".grasp" / "grasp.sqlite"
+    return grasp_home() / "grasp.sqlite"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -65,13 +76,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--export",
         type=Path,
         default=default_export_path(),
-        help="Cosense JSON export path for initial/import rebuilds. Defaults to $GRASP_EXPORT or raw/nishio.json.",
+        help="Cosense JSON export path for initial/import rebuilds. Defaults to $GRASP_EXPORT, then ~/.grasp/nishio.json, then ./raw/nishio.json.",
     )
     parser.add_argument(
         "--store",
         type=Path,
         default=default_store_path(),
-        help="SQLite store path. Defaults to $GRASP_STORE or .grasp/grasp.sqlite.",
+        help="SQLite store path. Defaults to $GRASP_STORE or ~/.grasp/grasp.sqlite (one global store).",
     )
     parser.add_argument("--rebuild-store", action="store_true", help="Rebuild the SQLite store from --export before running.")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
