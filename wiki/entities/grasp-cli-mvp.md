@@ -32,6 +32,7 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 - `import --force`: export を SQLite store に materialize。通常 command は store が存在すれば JSON を再 parse しない。
 - `--rebuild-store`: command 実行前に export から store を再構築。
 - `--json`: 機械可読 JSON output。
+- `grasp <cmd> --help`: mechanics SSoT。各 command の arguments / `--json` return keys / examples / notes を持つ。Agent Skill 側は具体 schema を重複保持せず、使用直前にここを読む。
 - console script `grasp = grasp.cli:main` も定義済み（editable install すれば `grasp ...`）。
 
 ## 実装済み verbs
@@ -55,6 +56,7 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 - Update 2026-06-23: `unresolved_target_examples` を materialize して `unresolved --limit N` の example 取得を N 回 query しないようにした。Python 内部計測では unresolved target list 100 件が約 6ms。CLI wall time は Python 起動 + output 書き出し込みで約 1.0 秒。
 - `search` は SQLite FTS5 trigram を試したが、2文字日本語 query（例: `盲点`）は `MATCH` に乗らず、FTS table `LIKE` は一部日本語 substring（例: `盲点カード`）の recall を落とした。現状は correctness 優先で `lines.text LIKE` を維持。
 - Update 2026-06-23: 「link があるが page がない」こと自体は unresolved graph node と整理。互換性を考えず `wanted` command / JSON field / schema 名は削除し、`unresolved` / `unresolved_targets` に破壊的変更した。`link-stats` は missing target の 0/1/N を materialized `unresolved_targets` row から高速に返し、existing page は `edges.target_norm` index で count する。`related <missing-target>` は source pages を `relation=backlink-source` として返す。
+- Update 2026-06-23: argparse help を mechanics SSoT として拡張。root help は global options と SSoT 方針、各 subcommand help は arguments / Returns (`--json`) / Examples / Notes を持つ。`tests/test_cli_help.py` で全 command に Returns/Examples があることを固定。
 
 ### FTS5 trigram 検証メモ（2026-06-23）
 

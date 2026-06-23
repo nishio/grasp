@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-23 19:21] implementation | `grasp <cmd> --help` を mechanics SSoT として拡張
+- argparse help を拡張し、root help に global option の位置規則と mechanics SSoT 方針を追加。全 subcommand help に arguments / `--json` return keys / Examples / Notes を持たせた。
+- `tests/test_cli_help.py` を追加し、全 command help が `Returns (--json):` と `Examples:` を含むこと、`read` が `--unresolved-limit` / `unresolved_targets` を示し旧 `--wanted-limit` を含まないことを固定。
+- [[grasp-cli-mvp]] に、Agent Skill は schema を重複保持せず使用直前に `grasp <cmd> --help` を読む、と file back。
+
 ## [2026-06-23 19:20] decision | delivery = CLI + Agent Skill（純CLI/MCP でなく）
 - nishio 指摘:「Skills にする選択肢が出てないのはおかしい。cosense-cli の repo はあれは Skills」。実際 cosense-cli の `package.json` は自分を「Agent Skill 用の CLI」と定義し、`docs/guidelines/cli-vs-skill.md` が CLI/Skill 責任境界を SSoT 分割。
 - 新 decision [[delivery-cli-plus-skill]]: grasp の利用面 = **CLI + Agent Skill**。SPEC Open Q「純 CLI か MCP か」を CLI+Skill で決着（MCP は当面採らない／将来併設余地）。3 層: `grasp <cmd> --help`=mechanics SSoT / `SKILL.md`=いつ・どう使う＋verb 表 / `<手順>.md`=wisdom・観察指示。grasp 固有: read=近傍同梱（原理1）が cosense skill の traversal wisdom を CLI 出力に吸収 → SKILL.md は薄い。

@@ -5,10 +5,15 @@ import json
 import os
 from pathlib import Path
 import sys
+from textwrap import dedent
 from typing import Any
 
 from .cosense_cli import CosenseCliClient, sync_from_cosense
 from .sqlite_store import SCHEMA_VERSION, SQLiteStore, import_export_to_sqlite
+
+
+class GraspHelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
+    pass
 
 
 def default_export_path() -> Path | None:
@@ -30,7 +35,32 @@ def default_store_path() -> Path:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="grasp", description="Read a local Scrapbox/Cosense-style graph store.")
+    parser = argparse.ArgumentParser(
+        prog="grasp",
+        formatter_class=GraspHelpFormatter,
+        description=dedent(
+            """
+            Read a local Scrapbox/Cosense-style graph store.
+
+            Mechanics SSoT: `grasp <cmd> --help` is the authoritative reference
+            for command arguments, JSON return keys, text output shape, and examples.
+            Global options must appear before the command.
+            """
+        ).strip(),
+        epilog=dedent(
+            """
+            Global examples:
+              grasp --store .grasp/grasp.sqlite stats
+              grasp --json read 盲点カード --backlinks-limit 5 --related-limit 5
+              grasp --export raw/nishio.json --store .grasp/grasp.sqlite import --force
+
+            Output:
+              Default output is compact text for agent reading.
+              With --json, commands emit the return keys documented in each
+              `grasp <cmd> --help`.
+            """
+        ).strip(),
+    )
     parser.add_argument(
         "--export",
         type=Path,
@@ -46,59 +76,262 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rebuild-store", action="store_true", help="Rebuild the SQLite store from --export before running.")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
 
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command", required=True, metavar="command")
 
-    import_parser = subparsers.add_parser("import", help="Import a Cosense JSON export into the SQLite store.")
+    import_parser = add_command_parser(
+        subparsers,
+        "import",
+        help="Import a Cosense JSON export into the SQLite store.",
+        description="Build or replace the SQLite graph store from --export.",
+        returns=(
+            "store, schema_version, current_schema_version, schema_ok, "
+            "source_export, imported_at, pages, lines, edges, unresolved_targets"
+        ),
+        examples=[
+            "grasp import --force",
+            "grasp --export raw/nishio.json --store .grasp/grasp.sqlite import --force",
+        ],
+        notes=[
+            "Uses global --export and --store. Put global options before `import`.",
+            "Without --force, refuses to replace an existing store.",
+        ],
+    )
     import_parser.add_argument("--force", action="store_true", help="Replace an existing store.")
 
-    subparsers.add_parser("stats", help="Show SQLite store stats and schema status.")
+    add_command_parser(
+        subparsers,
+        "stats",
+        help="Show SQLite store stats and schema status.",
+        description="Inspect the configured SQLite store without requiring schema compatibility.",
+        returns=(
+            "store, schema_version, current_schema_version, schema_ok, "
+            "source_export, imported_at, pages, lines, edges, unresolved_targets"
+        ),
+        examples=[
+            "grasp stats",
+            "grasp --json stats",
+            "grasp --store /tmp/grasp.sqlite stats",
+        ],
+        notes=["For old stores, unresolved_targets may be null and schema_ok will be false."],
+    )
 
-    read_parser = subparsers.add_parser(
+    read_parser = add_command_parser(
+        subparsers,
         "read",
         help="Read a page with backlinks, related pages, and unresolved outgoing targets.",
+        description=(
+            "Open an existing page or missing linked target. Existing pages include "
+            "page lines, line-level backlinks, related pages, and page-local "
+            "unresolved targets. Missing targets include incoming link stats, "
+            "backlinks, and related source pages."
+        ),
+        returns=(
+            "query, page|null, link_stats, lines, lines_truncated, backlinks, "
+            "backlink_count_returned, backlink_count_total, related, unresolved_targets"
+        ),
+        examples=[
+            "grasp read 盲点カード",
+            "grasp read 盲点カード --line-limit 20 --backlinks-limit 5 --related-limit 5 --unresolved-limit 5",
+            "grasp --json read 民主主義 --backlinks-limit 3 --related-limit 5",
+        ],
+        notes=[
+            "For missing targets, related[] contains source pages with relation=backlink-source.",
+            "unresolved_targets[] is populated only for existing pages.",
+        ],
     )
-    read_parser.add_argument("title")
-    read_parser.add_argument("--line-limit", type=int, default=None)
-    read_parser.add_argument("--backlinks-limit", type=int, default=20)
-    read_parser.add_argument("--related-limit", type=int, default=20)
-    read_parser.add_argument("--unresolved-limit", type=int, default=20)
+    read_parser.add_argument("title", help="Page title or missing linked target to open.")
+    read_parser.add_argument("--line-limit", type=int, default=None, help="Maximum page lines to return; omit for all lines.")
+    read_parser.add_argument("--backlinks-limit", type=int, default=20, help="Maximum backlink lines to return.")
+    read_parser.add_argument("--related-limit", type=int, default=20, help="Maximum related pages/source pages to return.")
+    read_parser.add_argument("--unresolved-limit", type=int, default=20, help="Maximum page-local unresolved targets to return.")
 
-    backlinks_parser = subparsers.add_parser("backlinks", help="List line-level backlinks to a page or missing target.")
-    backlinks_parser.add_argument("title")
-    backlinks_parser.add_argument("--limit", type=int, default=50)
-    backlinks_parser.add_argument("--offset", type=int, default=0)
+    backlinks_parser = add_command_parser(
+        subparsers,
+        "backlinks",
+        help="List line-level backlinks to a page or missing target.",
+        description="Return source lines whose parsed links point at title.",
+        returns="query, backlinks[], count_returned, offset",
+        examples=[
+            "grasp backlinks 盲点 --limit 5",
+            "grasp backlinks 民主主義 --limit 20 --offset 20",
+            "grasp --json backlinks 盲点 --limit 2",
+        ],
+        notes=[
+            "backlinks[] items: source_page_id, source_title, source_views, "
+            "source_updated, line_id, line_index, line_text, target_title."
+        ],
+    )
+    backlinks_parser.add_argument("title", help="Target page title or missing linked target.")
+    backlinks_parser.add_argument("--limit", type=int, default=50, help="Maximum backlink lines to return.")
+    backlinks_parser.add_argument("--offset", type=int, default=0, help="Number of ranked backlink lines to skip.")
 
-    related_parser = subparsers.add_parser("related", help="List 2-hop pages, or source pages for a missing linked target.")
-    related_parser.add_argument("title")
-    related_parser.add_argument("--limit", type=int, default=50)
+    related_parser = add_command_parser(
+        subparsers,
+        "related",
+        help="List 2-hop pages, or source pages for a missing linked target.",
+        description=(
+            "For an existing page, return deterministic 2-hop related pages. "
+            "For a missing linked target, return source pages that link to it."
+        ),
+        returns="query, related[]",
+        examples=[
+            "grasp related 盲点カード --limit 10",
+            "grasp related 民主主義 --limit 5",
+            "grasp --json related 民主主義 --limit 5",
+        ],
+        notes=[
+            "Existing-page related[] items include score and via[].",
+            "Missing-target related[] items include relation=backlink-source and score=link count from that page.",
+        ],
+    )
+    related_parser.add_argument("title", help="Existing page title or missing linked target.")
+    related_parser.add_argument("--limit", type=int, default=50, help="Maximum related items to return.")
 
-    link_stats_parser = subparsers.add_parser("link-stats", help="Show incoming link count for an existing or missing target.")
-    link_stats_parser.add_argument("title")
+    link_stats_parser = add_command_parser(
+        subparsers,
+        "link-stats",
+        help="Show incoming link count for an existing or missing target.",
+        description="Classify a title as existing/missing and report incoming link multiplicity.",
+        returns=(
+            "query, title, normalized_title, page_exists, page|null, "
+            "link_count, source_page_count, link_multiplicity"
+        ),
+        examples=[
+            "grasp link-stats 盲点カード",
+            "grasp link-stats 民主主義",
+            "grasp --json link-stats 民主主義",
+        ],
+        notes=["link_multiplicity is one of: none, single, multi."],
+    )
+    link_stats_parser.add_argument("title", help="Existing page title or missing linked target.")
 
-    peek_parser = subparsers.add_parser("peek", help="Show page lines only.")
-    peek_parser.add_argument("title")
-    peek_parser.add_argument("--line-limit", type=int, default=None)
+    peek_parser = add_command_parser(
+        subparsers,
+        "peek",
+        help="Show page lines only.",
+        description="Preview the body lines of an existing page without backlinks or related context.",
+        returns="query, page|null, lines[], lines_truncated",
+        examples=[
+            "grasp peek 盲点カード --line-limit 12",
+            "grasp --json peek 盲点カード --line-limit 3",
+        ],
+        notes=["For missing pages, page is null and lines[] is empty."],
+    )
+    peek_parser.add_argument("title", help="Existing page title to preview.")
+    peek_parser.add_argument("--line-limit", type=int, default=None, help="Maximum page lines to return; omit for all lines.")
 
-    suggest_parser = subparsers.add_parser("suggest", help="Suggest page titles by partial text.")
-    suggest_parser.add_argument("partial")
-    suggest_parser.add_argument("--limit", type=int, default=20)
+    suggest_parser = add_command_parser(
+        subparsers,
+        "suggest",
+        help="Suggest page titles by partial text.",
+        description="Search normalized page titles by substring and rank prefix matches first.",
+        returns="query, suggestions[]",
+        examples=[
+            "grasp suggest 盲点 --limit 10",
+            "grasp --json suggest scrap --limit 5",
+        ],
+        notes=["suggestions[] items are page summaries: id, title, created, updated, views, line_count."],
+    )
+    suggest_parser.add_argument("partial", help="Partial page title text.")
+    suggest_parser.add_argument("--limit", type=int, default=20, help="Maximum title suggestions to return.")
 
-    search_parser = subparsers.add_parser("search", help="Search page body lines and return line-level hits.")
-    search_parser.add_argument("query")
-    search_parser.add_argument("--limit", type=int, default=50)
-    search_parser.add_argument("--offset", type=int, default=0)
+    search_parser = add_command_parser(
+        subparsers,
+        "search",
+        help="Search page body lines and return line-level hits.",
+        description="Literal substring search over stored line text. Results are line-level hits.",
+        returns="query, hits[], count_returned, offset",
+        examples=[
+            "grasp search 盲点 --limit 20",
+            "grasp search \"民主主義\" --limit 10 --offset 10",
+            "grasp --json search Scrapbox --limit 5",
+        ],
+        notes=[
+            "hits[] items: source_page_id, source_title, source_views, "
+            "source_updated, line_id, line_index, line_text."
+        ],
+    )
+    search_parser.add_argument("query", help="Literal substring to find in line text.")
+    search_parser.add_argument("--limit", type=int, default=50, help="Maximum line hits to return.")
+    search_parser.add_argument("--offset", type=int, default=0, help="Number of ranked line hits to skip.")
 
-    sync_parser = subparsers.add_parser("sync", help="Incrementally sync recently updated hosted Cosense pages into the store.")
-    sync_parser.add_argument("project_url")
+    sync_parser = add_command_parser(
+        subparsers,
+        "sync",
+        help="Incrementally sync recently updated hosted Cosense pages into the store.",
+        description=(
+            "Inspect hosted Cosense pages by updated time, fetch changed pages with "
+            "cosense readPage, upsert them into the store, and rebuild unresolved targets."
+        ),
+        returns=(
+            "project_url, dry_run, inspected, changed, updated, "
+            "skipped_nonpersistent[], stopped_at|null, changed_pages[]"
+        ),
+        examples=[
+            "grasp sync https://scrapbox.io/nishio/ --limit 20 --dry-run",
+            "grasp sync https://scrapbox.io/nishio/ --limit 100 --batch-size 100",
+            "grasp --store .grasp/grasp.sqlite sync https://scrapbox.io/nishio/ --cosense-command cosense",
+        ],
+        notes=[
+            "Requires a working cosense CLI login unless --dry-run stops before fetches.",
+            "Global --store selects the local store to update.",
+        ],
+    )
+    sync_parser.add_argument("project_url", help="Hosted Cosense/Scrapbox project URL, e.g. https://scrapbox.io/nishio/.")
     sync_parser.add_argument("--limit", type=int, default=100, help="Maximum listPages entries to inspect.")
     sync_parser.add_argument("--batch-size", type=int, default=100, help="listPages page size.")
     sync_parser.add_argument("--cosense-command", default="cosense", help="cosense CLI binary.")
     sync_parser.add_argument("--dry-run", action="store_true", help="List changed pages without fetching/upserting them.")
 
-    unresolved_parser = subparsers.add_parser("unresolved", help="List ranked unresolved link targets.")
-    unresolved_parser.add_argument("--limit", type=int, default=50)
+    unresolved_parser = add_command_parser(
+        subparsers,
+        "unresolved",
+        help="List ranked unresolved link targets.",
+        description=(
+            "List link targets that have incoming links but no page body. "
+            "This is a graph-structure view, not a TODO list."
+        ),
+        returns="unresolved_targets[]",
+        examples=[
+            "grasp unresolved --limit 10",
+            "grasp --json unresolved --limit 3",
+        ],
+        notes=[
+            "unresolved_targets[] items: title, normalized_title, link_count, "
+            "source_page_count, total_source_views, latest_source_updated, examples[]."
+        ],
+    )
+    unresolved_parser.add_argument("--limit", type=int, default=50, help="Maximum unresolved targets to return.")
 
     return parser
+
+
+def add_command_parser(
+    subparsers: argparse._SubParsersAction,
+    name: str,
+    *,
+    help: str,
+    description: str,
+    returns: str,
+    examples: list[str],
+    notes: list[str] | None = None,
+) -> argparse.ArgumentParser:
+    epilog_parts = [
+        "Returns (--json):",
+        f"  {returns}",
+        "",
+        "Examples:",
+        *(f"  {example}" for example in examples),
+    ]
+    if notes:
+        epilog_parts.extend(["", "Notes:", *(f"  {note}" for note in notes)])
+    return subparsers.add_parser(
+        name,
+        help=help,
+        description=description,
+        epilog="\n".join(epilog_parts),
+        formatter_class=GraspHelpFormatter,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
