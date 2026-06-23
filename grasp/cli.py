@@ -259,19 +259,24 @@ def build_parser() -> argparse.ArgumentParser:
         subparsers,
         "search",
         help="Search page body lines and return line-level hits.",
-        description="Literal substring search over stored line text. Results are line-level hits.",
-        returns="query, hits[], count_returned, offset",
+        description=(
+            "Search stored line text. Single-term queries use literal line substring search; "
+            "whitespace-separated multi-term queries return lines from pages containing every term."
+        ),
+        returns="query, hits[], count_returned, offset, recovery_hints|null",
         examples=[
             "grasp search 盲点 --limit 20",
+            "grasp search \"KJ法 表札\" --limit 20",
             "grasp search \"民主主義\" --limit 10 --offset 10",
             "grasp --json search Scrapbox --limit 5",
         ],
         notes=[
             "hits[] items: source_page_id, source_title, source_views, "
-            "source_updated, line_id, line_index, line_text."
+            "source_updated, line_id, line_index, line_text.",
+            "For multi-term queries, hits[] may also include match_terms[].",
         ],
     )
-    search_parser.add_argument("query", help="Literal substring to find in line text.")
+    search_parser.add_argument("query", help="Substring or whitespace-separated terms to find in page text.")
     search_parser.add_argument("--limit", type=int, default=50, help="Maximum line hits to return.")
     search_parser.add_argument("--offset", type=int, default=0, help="Number of ranked line hits to skip.")
 
@@ -592,6 +597,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             "hits": hits,
             "count_returned": len(hits),
             "offset": args.offset,
+            "recovery_hints": None if hits else store.recovery_hints(args.query, limit=3),
         }
     if args.command in {"export-ai", "export-for-ai"}:
         result = store.export_ai(
@@ -671,7 +677,12 @@ def format_result(command: str, result: Any) -> str:
     if command == "suggest":
         return format_suggest(result["query"], result["suggestions"])
     if command == "search":
-        return format_search(result["query"], result["hits"], result.get("offset", 0))
+        return format_search(
+            result["query"],
+            result["hits"],
+            result.get("offset", 0),
+            result.get("recovery_hints"),
+        )
     if command in {"export-ai", "export-for-ai"}:
         return format_export_ai(result)
     if command == "unresolved":
@@ -932,13 +943,19 @@ def format_suggest(query: str, suggestions: list[dict[str, Any]]) -> str:
     return "".join(parts)
 
 
-def format_search(query: str, hits: list[dict[str, Any]], offset: int = 0) -> str:
+def format_search(
+    query: str,
+    hits: list[dict[str, Any]],
+    offset: int = 0,
+    recovery_hints: dict[str, Any] | None = None,
+) -> str:
     parts = [f"# Search: {query}\n", f"offset: {offset}\n"]
     if not hits:
         parts.append("(none)\n")
     else:
         for hit in hits:
             parts.append(f"- {hit['source_title']} {hit['line_id']}: {hit['line_text']}\n")
+    parts.append(format_recovery_hints(query, recovery_hints))
     return "".join(parts)
 
 

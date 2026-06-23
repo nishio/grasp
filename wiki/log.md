@@ -1,5 +1,19 @@
 # Log
 
+## [2026-06-23 22:39] file back | path の Open Q（グラフモデル）を CLAUDE が解決
+- nishio が AI consumer feedback の `path <A> <B>` に「リンクとは？ ページがノード？」と問うた件への回答を [[grasp-backlog]] Graph-native primitives に file back。
+- 回答: **ノード = pages ∪ unresolved targets**（page-only にすると page-less の概念ハブ＝最も中心的な connector を落とす）、**エッジ = materialize 済み internal-link edges を無向で**。
+- 構造的含意: unresolved target は sink（incoming のみ）なので path の端点か hinge（`A→T←B` = co-cite）。∴ **`path` = `related` を 2-hop 超に一般化したもの**で、related のエッジ集合を再利用できる。
+- go/no-go: 密グラフでは大半の対が ≤2-hop（related が繋ぐ）ため path の純増価値は稀。**試作前に hop 距離分布を実測**して falsifiable に判定（>2-hop が稀なら工数を Tier-1 recall へ）。
+- 監査: 別 session の ai consumer ingest（22:18-22:31）を raw + 本 session の nishio adjudication と突き合わせて faithful と確認。code claim 2件も実機検証（backlinks は `source.views DESC` ランク済 sqlite_store.py:713 / `Page.to_summary` は `id` 含む cosense.py:186）。
+
+## [2026-06-23 22:36] implementation | search recall の page 単位 AND と空結果 recovery hints を実装
+
+- [[grasp-backlog]] / [[ai-consumer-feedback-2026-06-23]] の Tier 1 に対応。`grasp search "KJ法 表札"` のような空白区切り複数語 query は、同一行の literal substring ではなく **page 単位 AND** として、全語を含む page の該当行を返す。単一語 search は従来通り `lines.text LIKE` の line-level substring。
+- `search --json` の空結果に `recovery_hints` を追加し、`read` / `link-stats` と同じ negative-result contract へ寄せた。text output も空結果時に Recovery Hints を表示する。
+- SQLite schema / parser semantics は変えないため public compatibility version は `1.5.2`、internal `SCHEMA_VERSION` は `5` のまま。
+- 検証: `python3 -m unittest discover -s tests` OK（24 tests）。`python3 scripts/lint_wiki.py` OK（壊れた wikilink 0 / index 未登録 0 / frontmatter 不備 0）。`git diff --check` OK。実データで `grasp search "KJ法 表札"` が `(none)` ではなく `Scrapboxベストプラクティス` / `KJ法` の該当行を返すことを確認。
+
 ## [2026-06-23 22:31] file back | AI consumer feedback への nishio 採否を反映
 
 - 22:18 ingest した [[ai-consumer-feedback-2026-06-23]] の候補に nishio が adjudication。live status を [[grasp-backlog]] に、原理の訂正を [[ai-consumer-cost-and-trust]] に、event の採否要約を entity に反映。

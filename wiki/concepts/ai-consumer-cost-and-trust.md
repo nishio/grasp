@@ -39,10 +39,10 @@ AI にとって 1 回の `grasp` 呼び出しは:
 - **絶対的不在**: ストアにその概念が無い（→ ユーザに「書かれていない」と言える）
 - **マッチ失敗**: 有るが surface form / 検索意味論で取れなかった（→ 別の引き方を試すべき・断定してはいけない）
 
-grasp の `read` / `link-stats` の zero-hit は既に `recovery_hints` を返す（実装済み）。contract を `search` / `related` の空結果にも揃え、ヒントは command 文字列だけでなく **実データ**（近い title 候補・正規化で寄せた候補・部分一致 line）を載せると、1 往復節約＋判断材料になる。
+grasp の `read` / `link-stats` の zero-hit と `search` の空結果は既に `recovery_hints` を返す（実装済み）。contract を `related` の空結果にも揃え、ヒントは command 文字列だけでなく **実データ**（近い title 候補・正規化で寄せた候補・部分一致 line）を載せると、1 往復節約＋判断材料になる。
 
-これが **recall（page 単位 AND / OR / 正規化マッチ）を vector search より先に直す**理由でもある: 沈黙の偽陰性は AI には人間より危険なので、embeddings の前に AND/正規化/negative-contract で今日から底上げするのが AI 価値の順序。
+これが **recall（page 単位 AND / OR / 正規化マッチ）を vector search より先に直す**理由でもある: 沈黙の偽陰性は AI には人間より危険なので、embeddings の前に AND/正規化/negative-contract で底上げするのが AI 価値の順序。page 単位 AND と `search` 空結果の recovery hints は 2026-06-23 に実装済み。
 
 ## 根
 
-両軸の根は同じ — grasp は AI 消費者にとって **round-trip が実費で、沈黙が主張**。capability の絶対量でなく recall と往復コストに AI は依存する。この model が read=近傍同梱（implemented）を正当化し、Tier 1-2 backlog（recall・negative-contract・snippets・gather・token economy）の優先度を決める。dated な観測元は [[ai-consumer-feedback-2026-06-23]]。
+両軸の根は同じ — grasp は AI 消費者にとって **round-trip が実費で、沈黙が主張**。capability の絶対量でなく recall と往復コストに AI は依存する。この model が read=近傍同梱（implemented）を正当化し、Tier 1-2 backlog（remaining recall・negative-contract・snippets・gather・token economy）の優先度を決める。dated な観測元は [[ai-consumer-feedback-2026-06-23]]。

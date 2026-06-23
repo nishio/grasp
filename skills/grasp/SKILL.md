@@ -55,7 +55,7 @@ description: >-
 
 ### テーマ・問いから探す（タイトル未確定）
 → `grasp search <query>` で**本文行**を検索（行レベル hit）し、良さそうな `source_title` を `grasp read` で開く。タイトルの当たりが付くなら `grasp suggest <partial>`（タイトル補完）。
-- `search` はリテラル substring 検索。OR 検索は無いので、語を分けて複数回叩く。
+- `search` は単一語ならリテラル substring 検索。空白区切りの複数語は page 単位 AND になり、同じ行でなく同じページに全語があれば該当行を返す。OR 検索はまだ無い。
 
 ### 長大ページ・ログページを読む
 → 親 conversation に長い `read` 出力を直接持ち込まない。まず探索用 subagent / Explore agent に任せ、subagent 側で `search` / `peek` / limit 付き `read` を使って読む。
@@ -100,7 +100,7 @@ description: >-
 | verb | 用途 |
 | --- | --- |
 | `read <title>` | 本文＋逆リンク＋related＋未解決を近傍同梱で（基本の入口） |
-| `search <query>` | 本文行を検索、行レベル hit |
+| `search <query>` | 本文行を検索、単一語は line substring、複数語は page AND の行レベル hit |
 | `suggest <partial>` | タイトル補完 |
 | `backlinks <title>` | 行レベル逆リンク（page なし target も） |
 | `related <title>` | 2-hop ページ / page なし target の source pages |

@@ -889,6 +889,10 @@ class SQLiteStore:
 
     def search(self, query: str, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         project = self._require_project()
+        terms = _search_terms(query)
+        if len(terms) > 1:
+            return self._search_page_and(terms, limit=limit, offset=offset)
+
         like = f"%{_escape_like(query)}%"
         rows = self.connection.execute(
             """
@@ -917,6 +921,73 @@ class SQLiteStore:
                 "line_id": row["line_id"],
                 "line_index": row["line_index"],
                 "line_text": row["line_text"],
+            }
+            for row in rows
+        ]
+
+    def _search_page_and(self, terms: list[str], limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        project = self._require_project()
+        likes = [f"%{_escape_like(term)}%" for term in terms]
+        anchor_index = max(range(len(terms)), key=lambda index: len(terms[index]))
+        anchor_like = likes[anchor_index]
+        remaining_likes = [like for index, like in enumerate(likes) if index != anchor_index]
+        remaining_filters = "\n".join(
+            """
+              AND EXISTS (
+                SELECT 1
+                FROM lines other
+                WHERE other.project = ?
+                  AND other.page_id = anchor_pages.page_id
+                  AND other.text LIKE ? ESCAPE '\\'
+              )
+            """
+            for _ in remaining_likes
+        )
+        line_filters = " OR ".join("line.text LIKE ? ESCAPE '\\'" for _ in likes)
+        params: list[Any] = [project, anchor_like]
+        for like in remaining_likes:
+            params.extend([project, like])
+        params.extend([project, *likes, limit, offset])
+        rows = self.connection.execute(
+            f"""
+            WITH anchor_pages AS (
+              SELECT DISTINCT page_id
+              FROM lines
+              WHERE project = ? AND text LIKE ? ESCAPE '\\'
+            ),
+            matching_pages AS (
+              SELECT page_id
+              FROM anchor_pages
+              WHERE 1 = 1
+              {remaining_filters}
+            )
+            SELECT
+              page.id AS source_page_id,
+              page.title AS source_title,
+              page.views AS source_views,
+              page.updated AS source_updated,
+              line.line_id,
+              line.line_index,
+              line.text AS line_text
+            FROM lines line
+            JOIN pages page ON page.project = line.project AND page.id = line.page_id
+            JOIN matching_pages matched ON matched.page_id = line.page_id
+            WHERE line.project = ? AND ({line_filters})
+            ORDER BY page.views DESC, COALESCE(page.updated, 0) DESC, page.title, line.line_index
+            LIMIT ? OFFSET ?
+            """,
+            params,
+        ).fetchall()
+        return [
+            {
+                "source_page_id": row["source_page_id"],
+                "source_title": row["source_title"],
+                "source_views": row["source_views"],
+                "source_updated": row["source_updated"],
+                "line_id": row["line_id"],
+                "line_index": row["line_index"],
+                "line_text": row["line_text"],
+                "match_terms": _matched_search_terms(row["line_text"], terms),
             }
             for row in rows
         ]
@@ -1536,6 +1607,16 @@ def _write_metadata(connection: sqlite3.Connection, values: dict[str, str]) -> N
 
 def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _search_terms(query: str) -> list[str]:
+    normalized = normalize_title(query)
+    return [term for term in normalized.split(" ") if term]
+
+
+def _matched_search_terms(line_text: str, terms: list[str]) -> list[str]:
+    normalized_line = normalize_title(line_text)
+    return [term for term in terms if term in normalized_line]
 
 
 def loose_recovery_key(value: str) -> str:

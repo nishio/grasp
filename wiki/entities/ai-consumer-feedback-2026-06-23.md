@@ -53,3 +53,5 @@ findings 表は feedback の faithful record。各候補への nishio の adjudi
 ## 一言
 
 最大の一手は **search の recall（沈黙の偽陰性を消す）**。ベクトル検索より前に AND/正規化/negative-contract で today から直せる。提案はすべて「人間 UI を作らず AI が CLI でグラフを体験する」賭けを AI 側からさらに効かせる増分で、方向を曲げる提案は無い。
+
+2026-06-23 22:36: Tier 1 のうち、空白区切り複数語の page 単位 AND と `search` 空結果の `recovery_hints` は実装済み。残りは OR / より強い正規化 / related 空結果 contract。current facts は [[grasp-v1-implemented]]、残課題は [[grasp-backlog]]。

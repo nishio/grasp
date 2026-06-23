@@ -247,6 +247,66 @@ class SQLiteStoreTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_search_multi_term_matches_terms_across_page_lines(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "Both",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 30,
+                    "views": 100,
+                    "lines": [
+                        {"text": "Both", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "alpha appears here", "created": 1, "updated": 2, "userId": "u"},
+                        {"text": "beta appears later", "created": 1, "updated": 3, "userId": "u"},
+                    ],
+                },
+                {
+                    "title": "AlphaOnly",
+                    "id": "bbbbbbbbbbbbbbbbbbbbbbbb",
+                    "created": 1,
+                    "updated": 20,
+                    "views": 90,
+                    "lines": [
+                        {"text": "AlphaOnly", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "alpha appears here too", "created": 1, "updated": 2, "userId": "u"},
+                    ],
+                },
+                {
+                    "title": "BetaOnly",
+                    "id": "cccccccccccccccccccccccc",
+                    "created": 1,
+                    "updated": 10,
+                    "views": 80,
+                    "lines": [
+                        {"text": "BetaOnly", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "beta appears here too", "created": 1, "updated": 2, "userId": "u"},
+                    ],
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+
+            store = SQLiteStore(store_path)
+            try:
+                hits = store.search("alpha beta", limit=10)
+                self.assertEqual([hit["source_title"] for hit in hits], ["Both", "Both"])
+                self.assertEqual([hit["line_index"] for hit in hits], [1, 2])
+                self.assertEqual(hits[0]["match_terms"], ["alpha"])
+                self.assertEqual(hits[1]["match_terms"], ["beta"])
+            finally:
+                store.close()
+
     def test_zero_hit_recovery_hints_include_search_and_unresolved_candidates(self):
         fixture = {
             "name": "fixture",

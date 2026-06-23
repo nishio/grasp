@@ -82,9 +82,9 @@ AI consumer 観点の要件（出典 [[ai-consumer-feedback-2026-06-23]] Tier 4 
 
 出典: [[ai-consumer-feedback-2026-06-23]] Tier 1。現状 `search` は literal substring・単一行マッチで、`search "KJ法 表札"` が両語同一ページでも `(none)` を返す（silent false-negative）。AI は recall に依存し `(none)` の不在/不一致を区別できないため、これは retrieval を AI に食わせる最も危険な失敗モード（原理は [[ai-consumer-cost-and-trust]] 軸2）。embeddings 不要で今日から効く順:
 
-- **page 単位の多語 AND**。同一行でなく同一ページに両語があれば返す。line 検索を page で集約し AND を取るだけ。recall が大きく上がる。
-- **OR / 語分割**。スペース区切りを AND、明示 OR を別記法で。
-- **正規化マッチ**。resolve 側は既に case-insensitive＋whitespace folding なので、`search` 本文側にも正規化を効かせる。日本語のカナ/かな/全半角/長音の揺れに効く。
+- **2026-06-23 22:36 実装済み: page 単位の多語 AND**。空白区切り複数語は、同一行でなく同一ページに全語があれば返す。line 検索を page で集約し AND を取る。current facts は [[grasp-v1-implemented]]。
+- **未実装: OR**。スペース区切り AND は済み。明示 OR は別記法で要設計。
+- **未実装: より強い正規化マッチ**。multi-term split は `normalize_title` 相当の case-insensitive＋whitespace folding を query term に使うが、本文側は SQLite `LIKE` の semantics に依存する。日本語のカナ/かな/全半角/長音の揺れはまだ未対応。
 - 順序: **recall（AND/正規化）を直してから** FTS5 速度最適化（recall と速度は別軸）。
 
 ### read の近傍 snippet 同梱（AI consumer Tier 2, nishio 採用）
@@ -101,15 +101,19 @@ AI consumer 観点の要件（出典 [[ai-consumer-feedback-2026-06-23]] Tier 4 
 
 出典: [[ai-consumer-feedback-2026-06-23]] Tier 3。embeddings 無しでも純グラフ操作で「Markdown 束には出せない」価値が出る所。
 
-- **`path <A> <B>`**（nishio: experimental, 試作可）: 最短リンク経路（＋経路上ページ）。「KJ法 と 弱い紐帯 はどう繋がる？」型の問いに直結。2026-06-23 nishio: 研究的には筋が良いが**実用上有用かは未知**、試しに作ってみる価値はある。**Open Q: グラフモデルの定義** — ノードは page か（unresolved target も含むか）、エッジは materialize 済みの internal-link edges か。試作前にこれを確定する。
+- **`path <A> <B>`**（nishio: experimental, 試作可）: 最短リンク経路（＋経路上ページ）。「KJ法 と 弱い紐帯 はどう繋がる？」型の問いに直結。2026-06-23 nishio: 研究的には筋が良いが**実用上有用かは未知**、試しに作ってみる価値はある。
+  - **グラフモデル（CLAUDE 回答 — nishio の「リンクとは？ ページがノード？」への返答, 2026-06-23）**: **ノード = pages ∪ unresolved targets**（page-only にしない）。grasp は既に page-less target を first-class node 扱い（read/backlinks/related/link-stats が効く）で、しかも概念ハブは **page-less の方が多い**（unresolved 上位）。page-only にすると最も中心的な connector を落とす。**エッジ = materialize 済み internal-link edges**（page P の行に `[T]` → P→T。storage は line-level、path では page 隣接に畳む。「どう繋がる」用途なので無向で扱う）。
+  - **構造的含意**: unresolved target は incoming edge は持つが outgoing は無い（本文＝行が無い→出リンク無し）ので有向では sink。∴ path の**端点**か、無向では **hinge**（`A → T ← B` = A,B が概念 T を co-cite）にしかなれない。これは distance-2 の co-citation そのもので **`related` が既に計算している**。
+  - **∴ `path` = `related` を 2-hop 超に一般化したもの**。page-less 概念ノードが自然な bridge（related の "via"）になる。試作は related のエッジ集合をそのまま再利用できる。
+  - **go/no-go の実測基準（実用性懐疑への決着法）**: nishio のような密グラフでは大半の概念対が既に ≤2-hop（related が繋ぐ）。path の純増価値は「>2-hop 離れ かつ 共有近傍なし」の対だけ＝おそらく稀。**試作前にランダム概念対の hop 距離分布を測り**、大半が ≤2 なら marginal value は小さい → 工数は Tier-1 recall に回す。これで「作るか否か」を falsifiable に判定できる。
 - **backlinks の finer ranking**（nishio agree）: 既に `backlinks` は `source.views DESC, updated DESC, title, line_index` でランク済み（related と同じ primary signal、[[grasp-v1-implemented]]）。未済は **link 密度 / multiplicity / recency の重み付け**で「最も中心的な 20 件」精度を上げること。コア（views ランク）は済んでいる。
 - ~~**近傍クラスタリング `--cluster`**~~ → **却下（nishio 2026-06-23）**。クラスタリングは **AI がやるべき**（AI の方が賢い）＝grasp は raw＋ranking を返し AI が sub-theme に畳む（feedback 著者自身の「default raw、AI にクラスタさせる」選好とも一致、原理 [[ai-consumer-cost-and-trust]] の fidelity 方針）。CLI 側でやるなら **embeddings 導入後に雑な embedding クラスタリング**を optional で足す程度。そもそも **100+ リンクのハブは rare case** なので動機自体が稀。
 
 ## Negative-result contract（AI consumer 横断原理）
 
-出典: [[ai-consumer-feedback-2026-06-23]] / 原理 [[ai-consumer-cost-and-trust]] 軸2。AI に retrieval を食わせるツールは、空結果を「情報」として返さねばならない（絶対的不在 vs マッチ失敗の区別）。現状 `read` / `link-stats` の zero-hit は `recovery_hints` を返す（実装済み, [[grasp-v1-implemented]]）。未実装:
+出典: [[ai-consumer-feedback-2026-06-23]] / 原理 [[ai-consumer-cost-and-trust]] 軸2。AI に retrieval を食わせるツールは、空結果を「情報」として返さねばならない（絶対的不在 vs マッチ失敗の区別）。現状 `read` / `link-stats` の zero-hit と `search` の空結果は `recovery_hints` を返す（実装済み, [[grasp-v1-implemented]]）。未実装:
 
-- `search` / `related` の空結果にも同じ contract を揃える。
+- `related` の空結果にも同じ contract を揃える。
 - ヒントを command 文字列だけでなく **実データ**（近い title 候補・正規化で寄せた候補・部分一致 line）で載せる。1 往復節約＋断定の抑止。
 
 ## Output token economy（AI consumer Tier 2）

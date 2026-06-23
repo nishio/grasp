@@ -26,7 +26,7 @@ v1 = **エクスポート済み Scrapbox / Cosense JSON を、AI が CLI + Agent
 - 1つの SQLite store に複数 Cosense project を `project` namespace で保持する。project 内の graph は混ぜない。
 - `read` が本文だけでなく、行レベル backlinks・related・page-local unresolved targets を一体で返す。
 - page が存在しない linked target も graph node として扱い、`backlinks` / `related` / `link-stats` で source context を読める。
-- `read` / `link-stats` は missing + 0 incoming の zero-hit 時に recovery hints（`suggest`, `search --limit 3`, 近い unresolved target）を返す。
+- `read` / `link-stats` は missing + 0 incoming の zero-hit 時に recovery hints（`suggest`, `search --limit 3`, 近い unresolved target）を返す。`search` も空結果時に recovery hints を返す。
 - home 配下の global store 1 個を default にする。
 - AI 向け delivery は CLI + Agent Skill。詳細引数と JSON key は `grasp <cmd> --help` が mechanics SSoT。
 
@@ -47,7 +47,7 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.5.1`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.5.2`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -72,7 +72,7 @@ v1 scope 外:
 | `link-stats <title>` | incoming link count / source page count / none-single-multi を返す。zero-hit 時は `recovery_hints` も返す |
 | `peek <title>` | page lines のみ |
 | `suggest <partial>` | title 部分一致候補 |
-| `search <query>` | `lines.text LIKE` の literal substring search。行レベル hits を返す |
+| `search <query>` | 単一語は `lines.text LIKE` の literal substring search。空白区切り複数語は page 単位 AND で、全語を含む page から該当行 hits を返す。空結果時は `recovery_hints` も返す |
 | `export-ai <title>` / `export-for-ai` | main + 1-hop/2-hop page 本文を Cosense Export for AI 風に単一テキスト化 |
 | `sync <project-url>` | optional freshness path。`cosense` CLI で最近更新ページを取得し、SQLite store に upsert |
 | `acquire <project-url>` | admin export なしの hosted Cosense 初回 seed / partial corpus acquisition。`--search` / `--filter` / `--full-list` / `--from-page` / `--seed-file` |
@@ -116,7 +116,7 @@ parser が link から除外するもの:
 
 - `read` は sub-100ms。
 - `backlinks` / `unresolved` は約 50-80ms。
-- `search` は `LIKE` 全行 scan 律速で約 180ms。FTS5 trigram hybrid は [[fts5-trigram-search]] の通り未実装候補。
+- 単一語 `search` は `LIKE` 全行 scan 律速で約 180ms。空白区切り複数語は page 単位 AND の SQL query で、全語を含む page に絞って該当行を返す。FTS5 trigram hybrid は [[fts5-trigram-search]] の通り未実装候補。
 - 初回 import は 1 回だけ数秒から十数秒程度。
 
 ## source pages
