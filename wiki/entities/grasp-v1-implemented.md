@@ -102,7 +102,7 @@ v1 scope 外:
 
 ## import and parser facts
 
-- Cosense export の line には安定 id が無いので、v1 は `page.id:line-index` を `line-id` として採番する。text 出力では token 節約のため local alias に畳むが、JSON と `--full-ids` は完全 ID を出す。
+- Cosense export の line には安定 id が無いので、v1 は `page.id:line-index` を `line-id` として採番する。これは read-only snapshot 内の **positional locator** であり、行挿入や write / transclude を跨ぐ安定 line identity ではない。text 出力では token 節約のため local alias に畳むが、JSON と `--full-ids` は完全 ID を出す。stable line identity の設計要件は [[grasp-backlog]]。
 - link graph は export に保存されないため、line text から edge を materialize する。
 - title / link resolve は case-insensitive + whitespace folding。
 - Cosense title 行 `lines[0]` は本文に残す。完全性と line-id 安定性を優先する。

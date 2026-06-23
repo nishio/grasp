@@ -1,5 +1,29 @@
 # Log
 
+## [2026-06-24 02:19] file back | log entry は current fact ではなく transition event
+- nishio 指摘「A→B→C と変わった時に `B になった` log だけを見ると誤答する」を受け、[[markdown-obsidian-indexed-mirror]] の log/event stream 節に current-state projection と stale-log guard を追記。
+- 判断: log entry は「その時点で起きた transition」であり、現在状態の主張ではない。現在状態は entity / decision / backlog などの current page、または event stream を fold して materialize した current projection から読む。
+- query 方針: 既定の「今どうなっているか」は current state を読む。temporal / provenance query は event log を読む。log entry を返す時は同じ subject の later events を `superseded_by` / `later_events` として同梱し、中間状態を current fact と誤読させない。
+- [[grasp-backlog]] に未実装項目を追加: log entry subject extraction、stale-log guard、`read` と `history` の surface 分離、current projection と provenance links の分離。
+
+## [2026-06-24 02:18] file back | stable line ID は position と分離する
+- nishio 指摘「行を挿入した瞬間に後続行の ID が変わる設計は良くない」を受け、[[why-not-scrapbox-clone]] / [[grasp-v1-implemented]] / [[grasp-backlog]] に反映。
+- 判断: v1 の `page.id:line-index` は read-only snapshot 内の positional locator であり、write / transclude / 長期引用を跨ぐ安定 line identity ではない。current surface の「line-id」は歴史的呼称として残るが、identity 層では `line.id` と `line_index` を分ける。
+- 方針: stable line id は opaque に mint し、store / identity journal に保持する。外部 source に line id が無い場合も deterministic hash / line index に逃げず、sync / reimport では diff で同一判定できる line だけ id を引き継ぐ。挿入は新 id、削除は tombstone、split / merge / 曖昧一致は自動同一視しない。
+- 原則: **stable ID requires memory**。content hash は text=identity、line index は position=identity になり、identity-without-name の目的に反する。
+
+## [2026-06-24 02:12] file back | LLM Wiki log を event stream として扱う判断を記録
+- nishio の問い「LLM Wiki の `log.md` は並行エージェント衝突の話なのか」を受け、[[markdown-obsidian-indexed-mirror]] に `log.md` / `wiki/log/*.md` の扱いを追記。
+- 判断: 並行 agent が1ファイルへ追記して conflict する問題は運用上の理由だが、grasp 側の本筋は **log entry を巨大 page 内 section でなく first-class event record として materialize すること**。
+- 方針: 既存 `log.md` は header ごとに仮想 log-entry record へ split し、将来の record-per-file 形式も読む。log は search / provenance query 対象にはするが、既定の content graph edge / `related` / `path` の根拠ページとは分ける。
+- [[grasp-backlog]] に未実装項目を追加: log split importer、record-per-file importer、entry id policy、log artifact の graph 除外、`grasp log` / `grasp history <page>`、人間向け `log.md` 生成 surface。
+
+## [2026-06-24 02:08] file back | LLM Wiki index/navigation の grasp 境界を決定
+- nishio の問い「LLM Wiki の index を grasp の中に入れるのか外に別の仕組みをつけるのか」を受け、[[markdown-obsidian-indexed-mirror]] に判断を追記。
+- 決定: grasp に入れるのは pages / lines / content links / frontmatter summary などの substrate。`index.md` / `index.txt` / `forest-index.md` は通常の根拠ページでなく、store から生成できる projection / navigation layer として扱う。
+- 理由: `index.md` を ordinary graph edge として混ぜると巨大 hub になり、`related` / `path` が「全部 index 経由で近い」と壊れる。親 llm-wiki の「index は複製でなく射影にする」診断、kouchou pattern、`探索の地図と事実の分離` と整合。
+- [[grasp-backlog]] に未実装項目を追加: navigation artifact 分類、既定で navigation outgoing edges を content graph から除外、`--include-navigation` escape hatch、frontmatter summary からの catalog generation、wiki森 registry は外側 orchestration として保持。
+
 ## [2026-06-24 02:05] integration | Markdown mirror PR を main へ追従
 - PR #1 `feat/read-only-markdown-mirror` が main の `1.5.8` / `1.5.9` 変更（line-id alias / `read --around-line`）と version 履歴で conflict したため、Markdown mirror series を final `1.5.10` として統合した。
 - conflict は package version、[[history]]、[[grasp-v1-implemented]]、log の時系列だけ。実装 surface は `import --markdown` と `read --around-line` の両方を保持。

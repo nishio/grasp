@@ -1,10 +1,16 @@
 ---
 type: decision
-summary: persona2 向けの Markdown / Obsidian folder 対応は、既存 folder を read-only indexed mirror として SQLite store に materialize し、Skill はその CLI を使わせる薄い層にする。pitch は faster grep ではなく graph reader for LLM agents
+summary: persona2 向けの Markdown / Obsidian folder 対応は、既存 folder を read-only indexed mirror として SQLite store に materialize し、Skill はその CLI を使わせる薄い層にする。pitch は faster grep ではなく graph reader for LLM agents。LLM Wiki の index/navigation/log は通常の根拠ページでなく current projection / event stream として扱い、graph edge へ無条件に混ぜない
 sources:
   - nishio 質問 2026-06-23「既存のMarkdownの束 or Obsidian のfolderをpointし、それにgrepよりも高速な検索とリンクたどりの能力を付与するSkillという方向性はどうか」
   - [[positioning-two-personas]]
   - [[persona2-user-test-2026-06-23]]
+  - nishio 質問 2026-06-24「LLM Wikiのindexをgraspの中に入れるのか外に別の仕組みをつけるのか」
+  - /Users/nishio/llm-wiki/wiki/analyses/indexの健全性は複製か射影かで決まる-20260622.md
+  - /Users/nishio/llm-wiki/wiki/sources/kouchou-ai-index-txt-pattern-20260617.md
+  - /Users/nishio/llm-wiki/wiki/concepts/探索の地図と事実の分離.md
+  - nishio 質問 2026-06-24「LLM Wiki の log を grasp に入れる場合の運用。並行エージェント衝突より log entry の扱いが本筋か」
+  - nishio 質問 2026-06-24「A→B→C と変化した時、B になった log だけ見ると誤答する。どういう仕組みが必要か」
 ---
 
 # Decision: Markdown / Obsidian folder は read-only indexed mirror として取り込む
@@ -115,6 +121,72 @@ grasp related "Some Note"
 
 未実装のまま残すもの: first H1 title resolution、block refs、alias-aware なより細かい差分 rebuild、duplicate/alias collision の高度な解決。これらは [[grasp-backlog]] の継続項目。
 
+## Update: LLM Wiki index / navigation boundary
+
+2026-06-24 判断: **LLM Wiki の `index.md` を通常ページとして graph に混ぜるのではなく、grasp は index を生成できる substrate を持つ**。index は content の source-of-truth ではなく、frontmatter summary / path / page graph から作れる projection / navigation layer として扱う。
+
+責務分離:
+
+- grasp store に入れる: 各 wiki の pages / lines / content links / frontmatter `summary` / aliases / tags / unresolved targets / search materialization。
+- grasp store から生成する: wiki 内 full catalog（kouchou pattern の `index.txt` 相当）、必要なら人間向け `index.md` のたたき台。
+- grasp 外に残す: `wikis.yaml`, `forest-index.md`, `lint_next`, `draft_cycle` など wiki森の運用 orchestration。これは「どの wiki を読むか」の registry / scheduler であり、個別 wiki の graph substrate ではない。
+
+理由:
+
+- LLM Wiki の `index.md` は中央 catalog / navigation であり、多数ページへ意図的にリンクする。これを通常 content edge と同列に入れると、`index.md` が巨大 hub になり、`related` / `path` が「全ページが index 経由で近い」と誤る。
+- 親 llm-wiki 側の診断では、健全な index は source-of-truth の**射影**であり、壊れやすい index は知識の**複製**。grasp は native graph store を持つので、index を複製として保存するより projection として再生成する方が設計に合う。
+- `探索の地図と事実の分離` 原則に従い、navigation files are not evidence。AI が回答の根拠にすべきなのは target pages / raw / source-backed synthesis であって、index 行ではない。
+
+実装含意:
+
+- Markdown import は `wiki/index.md`, `wiki/index.txt`, `wiki/log.md`, `forest-index.md`, `maps/`, `views/` などを navigation artifact と分類できる必要がある。
+- navigation artifact は search には入れてよいが、既定では outgoing edges を `related` / `path` / backlink ranking の content graph から除外する。必要なら明示 flag（例: `--include-navigation`）で見る。
+- `grasp catalog` または `grasp export-index` 的な generated view は frontmatter `summary` を source-of-truth にする。index 行の手維持を source-of-truth にしない。
+- 複数 wiki は [[multi-project-store]] の通り project namespace を分ける。wiki森横断 registry は外側から複数 project を指す layer であり、別 wiki の同名ページを暗黙 merge しない。
+
+現状との差分: 2026-06-24 の最小 Markdown mirror は全 `.md` を同列に扱う。したがってこの navigation boundary は **未実装 policy** であり、[[grasp-backlog]] に実装候補として残す。
+
+## Update: LLM Wiki log / event stream boundary
+
+2026-06-24 判断: **LLM Wiki の `log.md` は知識ページではなく append-only event stream / provenance record** として扱う。並行エージェントが1ファイルへ追記して衝突する問題は現実の運用上の理由だが、grasp 側の本筋は「巨大な `log.md` を ordinary page として読むか、entry を first-class record として materialize するか」。
+
+運用判断:
+
+- 既存 Markdown LLM Wiki が `log.md` 1ファイルを使っていても、Markdown mirror は `## [YYYY-MM-DD HH:MM] op | summary` のような log header ごとに **仮想 log-entry record** へ split して扱える方がよい。
+- 将来の write / file back では `wiki/log/*.md` のような record-per-file 形式も許容する。これは並行 agent の衝突回避に効くが、設計上は「log entry が stable identity を持つ」ことが主目的。
+- `log.md` / `wiki/log/*.md` は search 対象にはしてよいが、既定の content graph edge / `related` / `path` の根拠ページとは分ける。log entry は「何が更新されたか」を示す provenance であり、current fact の source-of-truth ではない。
+- `log.md` 1本を人間向け時系列 view として残す場合は、record-per-file から生成される projection とみなす。手編集の正本をどちらにするかは wiki 運用の選択だが、grasp store では entry row として正規化する。
+
+実装含意:
+
+- Markdown import は navigation artifact とは別に log artifact / event stream を分類できる必要がある。
+- `log.md` split parser は header pattern, timestamp, op, summary, body, touched pages を抽出し、entry id を `source_path + timestamp + content_hash` などで安定化する。
+- record-per-file 形式では frontmatter `type: log-entry`, `date`, `op`, `pages`, `sources` を優先して materialize する。
+- `grasp log` / `grasp history <page>` のような surface は、content graph search ではなく event stream query として設計する。
+
+### Current-state projection and stale-log guard
+
+2026-06-24 追加判断: **log entry は現在状態の主張ではなく、過去の遷移イベント**として扱う。対象が A→B→C と変化した時、`B になった` という log entry は「その時点で A→B になった」という正しい event だが、現在状態の答えではない。LLM がその entry だけを読んで「今は B」と答える設計は壊れている。
+
+必要な分離:
+
+- current state: entity / decision / backlog などの current page、または event stream を fold して materialize した current projection。
+- event log: `at T1, A→B`, `at T2, B→C` のような transition history。
+- provenance: current state がなぜそうなったかを説明するために参照する log entries。
+
+query 方針:
+
+- 既定の「X は今どうなっているか」は current page / current projection を読む。log search hit 単独で答えない。
+- 「いつ B になったか」「T1 時点ではどうだったか」のような temporal / provenance query は event log を読む。
+- log entry を返す時、同じ subject にその entry より後の event があるなら `superseded_by` / `later_events` を同梱し、stale な中間状態を現在状態として読ませない。
+- record-per-file log では frontmatter `subjects` / `pages` / `supersedes` を優先する。`supersedes` を完全に手維持できなくても、最低限 `subjects` と `date` から後続 event を検出する。
+
+grasp における実装含意:
+
+- `read <page>` は current content を返し、`history <page>` は event stream を返す、という surface 分離が必要。
+- `search` が log artifact に hit した場合、text / JSON ともに「log entry は current fact ではない」ことと後続 event の有無を示す。
+- current projection を生成する場合、event log をそのまま根拠にせず、fold 後の state と provenance links を別々に保持する。
+
 ## Open Questions
 
 - CLI 名: 初期実装は `import --markdown <folder>`。将来 persona2 向けに `index-md` alias を足すか。
@@ -123,3 +195,6 @@ grasp related "Some Note"
 - heading / block ref を line-id とどう対応させるか。
 - `#tag` と wikilink を同一 edge type にするか。
 - search index は FTS5 trigram hybrid にするか、まず correctness 優先で `LIKE` にするか（[[fts5-trigram-search]]）。
+- navigation artifact の分類は path heuristic（`index.md`, `log.md` 等）で足りるか、frontmatter `role: navigation` / `layer: navigation` を要求するか。
+- log artifact の entry split は wiki ごとの header convention にどこまで対応するか。最低限は LLM Wiki / grasp wiki の `## [timestamp] op | summary`。
+- log entry の `subjects` 抽出をどこまで自動化するか。明示 frontmatter / touched page list が無い既存 `log.md` では body 中の wikilink と file path から推定するしかない。

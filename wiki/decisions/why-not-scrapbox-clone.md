@@ -3,6 +3,7 @@ type: decision
 summary: Scrapbox を Co-層とグラフモデル層に分解し、Co- を削いでグラフモデルだけを local・単一AI所有・CLI で再現する（design B）。Scrapbox 忠実 clone（A）でなく、Scrapbox が持たない identity-without-name 層を足す
 sources:
   - llm-wiki 設計対話 2026-06-23
+  - nishio 指摘 2026-06-24「行を挿入した瞬間に後続行の ID が変わる設計は良くない」
 ---
 
 # Decision: Scrapbox を忠実 clone せず、identity-without-name を足した「あるべき姿」を作る
@@ -59,3 +60,16 @@ shokai 製 `@helpfeel/cosense-cli` は *hosted な多人数 Cosense* への CLI 
 AI はユーザに答える時、根拠をページ単位で引用する（「`KJ法` ページより」）。将来 write/rename が入って title が動くと、**過去セッションで AI が出した引用が腐る**（指すページが別物 or 消失）。安定 id で cite できれば、AI の回答は edit を跨いでも検証可能なまま残る。
 
 ∴ identity-without-name は「rename で参照ページの文意が壊れない」（著者側）に加えて「**AI の引用が時間を跨いで安定する**」（消費者側）の価値を持つ。write 層設計時の要件: `read --json` が title と別に **安定 page-id を必ず含む**こと。これは read 出力 field としては既済（`Page.to_summary()` が `id` を含む、[[grasp-v1-implemented]]）。未済は id を rename を跨ぐ stable identity にする page-id policy（[[grasp-backlog]] write/identity）。横断原理は [[ai-consumer-cost-and-trust]]。
+
+### 2026-06-24: `page.id:line-index` は安定 line identity ではない
+
+nishio 指摘: 「行を挿入した瞬間に後続行の ID が変わる」設計は良くない。これにより v1 の `page.id:line-index` は **安定IDではなく positional locator** と整理する。read-only snapshot で行を指すには便利だが、write / transclude / 長期引用を跨ぐ identity ではない。
+
+安定 line identity の原則:
+
+- `line.id` は opaque stable id。
+- `line_index` は現在の表示順という属性であり、identity ではない。
+- 外部 source（Cosense export など）が line id を持たない場合、grasp が初回 import 時に line id を mint し、store / identity journal に保持する必要がある。
+- 再 import / sync では旧 lines と新 lines を diff し、同一と判定できる line だけ id を引き継ぐ。挿入行は新 id、削除行は tombstone、split / merge / 曖昧一致は勝手に同一視しない。
+
+要点: **stable ID requires memory**。source に line id が無いなら、content hash / line index / path から deterministic に作るのではなく、grasp 側が一度発行した identity を保存し続ける。content hash は本文編集で変わるため text=identity になり、line index は挿入で変わるため position=identity になる。どちらも identity-without-name の目的に反する。実装要件は [[grasp-backlog]] の Local write and identity layer に保持する。
