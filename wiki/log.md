@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-23 19:20] decision | delivery = CLI + Agent Skill（純CLI/MCP でなく）
+- nishio 指摘:「Skills にする選択肢が出てないのはおかしい。cosense-cli の repo はあれは Skills」。実際 cosense-cli の `package.json` は自分を「Agent Skill 用の CLI」と定義し、`docs/guidelines/cli-vs-skill.md` が CLI/Skill 責任境界を SSoT 分割。
+- 新 decision [[delivery-cli-plus-skill]]: grasp の利用面 = **CLI + Agent Skill**。SPEC Open Q「純 CLI か MCP か」を CLI+Skill で決着（MCP は当面採らない／将来併設余地）。3 層: `grasp <cmd> --help`=mechanics SSoT / `SKILL.md`=いつ・どう使う＋verb 表 / `<手順>.md`=wisdom・観察指示。grasp 固有: read=近傍同梱（原理1）が cosense skill の traversal wisdom を CLI 出力に吸収 → SKILL.md は薄い。
+- 私の skill content 案の解釈ミス2点を nishio が訂正、decision に封じた: ①「`unresolved`(旧wanted)＝自己宛TODO」は誤り（原理3 改訂で構造ノード扱い、TODO と決めつけない）。②「grasp のリンクは `[[...]]`」は誤り（read-only MVP は Cosense 原文 `[single]` 保持、`[[X]]` は未来の write 記法でスコープ外）。
+- [[SPEC]] Open Q「Codex からの呼び方」を解決済みに、index に decision を登録。次: `--help` 充実 → `skills/grasp/SKILL.md` 実装。
+
 ## [2026-06-23 19:03] implementation | `wanted` 互換を捨て `unresolved` に破壊的変更
 - ユーザ判断: まだ利用者はいないので互換性を考えず、設計語彙に合わせて変える。`wanted` command / JSON field / SQLite table 名を削除し、`unresolved` command / `unresolved_targets` field / `unresolved_targets` table に変更。schema_version は 3。
 - `read` option は `--wanted-limit` ではなく `--unresolved-limit`。`read` result から `red_link` field を削除し、page なし target の状態は `page: null` + `link_stats` + `related` で表す。

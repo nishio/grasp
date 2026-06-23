@@ -122,7 +122,7 @@ write / transclude / rename（identity 層）・Markdown import adapter・vector
 - **Cosense link parser の厳しさ**: code/list/decoration 由来の false positive を避けるため strict にしたが、短い英数字タイトルなどの false negative は未監査。
 - **page id をいつ振るか**: 「必要時のみ ＝ 意味判断」の運用ルールを誰がどう発火するか。
 - **行リンクの文脈窓**: 該当行だけか、前後数行か。
-- **Codex からの呼び方**: 純 CLI か MCP server 化か。
+- ~~Codex からの呼び方: 純 CLI か MCP server 化か~~ → **解決: CLI + Agent Skill**（[[delivery-cli-plus-skill]]）。MCP は当面採らない。`--help` を mechanics の SSoT、`skills/grasp/SKILL.md` が「いつ/どう使うか」を持つ。
 - **2-hop のコスト**: グラフが育ったとき related の計算量。
 
 ## 関連（親 llm-wiki の設計資産）
