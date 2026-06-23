@@ -6,6 +6,7 @@ sources:
   - 旧 wiki/v1-todo.md（一時 TODO, deleted after split）
   - grasp/cli.py
   - grasp/cosense.py
+  - grasp/markdown.py
   - grasp/sqlite_store.py
   - pyproject.toml
   - README.md
@@ -18,12 +19,13 @@ sources:
 
 ## v1 scope
 
-v1 = **エクスポート済み Scrapbox / Cosense JSON を、AI が CLI + Agent Skill から高速に読む read-only tool**。
+v1 = **エクスポート済み Scrapbox / Cosense JSON、または read-only Markdown mirror を、AI が CLI + Agent Skill から高速に読む read-only tool**。
 
 実装済み:
 
 - Cosense JSON export を `grasp import --cosense <json>` で SQLite store に materialize する。
-- 1つの SQLite store に複数 Cosense project を `project` namespace で保持する。project 内の graph は混ぜない。
+- Markdown folder を `grasp import --markdown <folder>` で read-only mirror として SQLite store に materialize する。
+- 1つの SQLite store に複数 project namespace を保持する。project 内の graph は混ぜない。
 - `read` が本文だけでなく、行レベル backlinks・related・page-local unresolved targets を一体で返す。
 - page が存在しない linked target も graph node として扱い、`backlinks` / `related` / `link-stats` で source context を読める。
 - `read` / `link-stats` は missing + 0 incoming の zero-hit 時に recovery hints（`suggest`, `search --limit 3`, 近い unresolved target）を返す。`search` と `related` も空結果時に recovery hints を返す。
@@ -34,7 +36,7 @@ v1 = **エクスポート済み Scrapbox / Cosense JSON を、AI が CLI + Agent
 v1 scope 外:
 
 - local write / rename / transclude。
-- Markdown / Obsidian folder import。
+- frontmatter title / aliases / Obsidian block refs などの full Obsidian compatibility。
 - vector search。
 - Web UI / realtime multi-user collaboration / sharing and permissions。
 
@@ -48,10 +50,11 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.5.5`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.5.6`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
+- `grasp import --markdown <folder>` は folder 名を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --markdown <folder>` で明示 override できる。既存 Markdown file へは書き戻さない。
 - current schema は v5。schema version は table shape だけでなく parser/index semantics の変更にも使う。v5 は `#tag` と数字 link を edge 化するため、v4 store は import cache から再構築される。
 - current schema store への import は他 project を保持する。古い schema の store に import する時は current schema として作り直す。
 - legacy `--export` / `--rebuild-store` / `--force` / 暗黙 seed は v1 surface には無い。
@@ -65,7 +68,8 @@ v1 scope 外:
 
 | command | v1 implemented behavior |
 |---|---|
-| `import --cosense <json>` | Cosense JSON export を project namespace に構築・置換。他 project は保持。folder を渡した時は Markdown import 未実装を friendly に返す |
+| `import --cosense <json>` | Cosense JSON export を project namespace に構築・置換。他 project は保持 |
+| `import --markdown <folder>` | Markdown folder を read-only mirror として project namespace に構築・置換。他 project は保持。file stem を title、`[[wikilink]]` / `#tag` を edge にする |
 | `stats` | store の schema / project list / metadata / count を表示。store missing 時は diagnostic と next actions を返す |
 | `read <title>` | existing page は本文 + backlinks + related + unresolved。missing linked target は link stats + backlinks + source pages。zero-hit 時は `recovery_hints` も返す。`--related-snippets` で related/source pages の先頭 N 行（default 5）を `snippet_lines` として同梱する |
 | `backlinks <title>` | `(source page, line-id, line text)` の行レベル backlinks。missing target にも効く |
@@ -104,6 +108,15 @@ v1 scope 外:
 - Cosense `[[...]]` は bold markup であり link ではない。v1 importer は link として扱わない。
 - `[2024]` のような数字のみ bracket token は valid internal link として扱う。`xs[0]` / `func()[1]` のように `[` の直前が ASCII 非空白の index 風 syntax は false positive として除外する。
 - `#tag` は `[tag]` と同等の internal link として edge 化する。`# ` は空 token なので除外し、`https://example.com/#fragment` のような URL fragment は hashtag boundary で除外する。
+
+Markdown mirror facts:
+
+- `grasp import --markdown <folder>` は再帰的に `.md` を読み、hidden path component 配下の file は除外する。
+- page title は file stem（`foo.md` → `foo`）。同一 normalized title の重複 file stem は import 時に error にする。frontmatter `title` / `aliases` はまだ title resolution に使わない。
+- page id は relative path の SHA-1 先頭 24 hex から作る。line id は Cosense import と同じく `<page-id>:<line-index>`。
+- Markdown line text は原文のまま保存する。frontmatter も本文行として残す。
+- `[[Page]]`, `[[Page|alias]]`, `[[Page#Heading]]`, `[[folder/Page.md]]`, `![[Embed]]`, `#tag` を internal edge として materialize する。heading / alias は target resolution からは落とし、path suffix は file stem に畳む。
+- inline backtick 内と fenced code block 内の `[[...]]` は edge にしない。この repo の `wiki/` ではバックティックのプレーン名を親 llm-wiki 参照として扱い、grasp 内 edge にしない方針と整合する。
 
 parser が link から除外するもの:
 

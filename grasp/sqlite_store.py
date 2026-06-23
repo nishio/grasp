@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import quote
 
 from .cosense import CosenseStore, Edge, Line, Page, normalize_title, parse_cosense_links
+from .markdown import MarkdownMirror
 
 
 SCHEMA_VERSION = "5"
@@ -244,6 +245,141 @@ def import_export_to_sqlite(
         connection.close()
 
     _cache_import_source(export_path, store_path, project)
+    store = SQLiteStore(store_path, project=project)
+    try:
+        return store.stats()
+    finally:
+        store.close()
+
+
+def import_markdown_folder_to_sqlite(
+    folder_path: str | Path,
+    store_path: str | Path,
+    *,
+    project_name: str | None = None,
+) -> dict[str, Any]:
+    folder_path = Path(folder_path)
+    store_path = Path(store_path)
+    source = MarkdownMirror.from_folder(folder_path)
+    project = normalize_project_name(project_name or source.project_name or folder_path.name)
+    if not project:
+        raise ValueError(f"could not determine project name for Markdown folder: {folder_path}")
+
+    ensure_store_schema(store_path)
+    connection = sqlite3.connect(store_path)
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA synchronous = NORMAL")
+        with connection:
+            _delete_project(connection, project)
+            now = int(time.time())
+            connection.execute(
+                """
+                INSERT INTO projects (
+                  name,
+                  display_name,
+                  source_export,
+                  exported,
+                  imported_at,
+                  pages,
+                  lines,
+                  edges,
+                  unresolved_targets
+                )
+                VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 0)
+                """,
+                (
+                    project,
+                    source.display_name or project,
+                    str(folder_path),
+                    now,
+                    len(source.pages),
+                    sum(page.line_count for page in source.pages),
+                    len(source.edges),
+                ),
+            )
+            connection.executemany(
+                """
+                INSERT INTO pages (project, id, title, norm_title, created, updated, views, line_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (
+                        project,
+                        page.id,
+                        page.title,
+                        page.norm_title,
+                        page.created,
+                        page.updated,
+                        page.views,
+                        page.line_count,
+                    )
+                    for page in source.pages
+                ),
+            )
+            connection.executemany(
+                """
+                INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (
+                        project,
+                        line.line_id,
+                        page.id,
+                        line.index,
+                        line.text,
+                        line.created,
+                        line.updated,
+                        line.user_id,
+                    )
+                    for page in source.pages
+                    for line in page.lines
+                ),
+            )
+            connection.executemany(
+                """
+                INSERT INTO edges (project, source_page_id, line_id, target_title, target_norm)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    (
+                        project,
+                        edge.source_page_id,
+                        edge.line_id,
+                        edge.target_title,
+                        edge.target_norm,
+                    )
+                    for edge in source.edges
+                ),
+            )
+            rebuild_unresolved_targets(connection, project)
+            unresolved_count = connection.execute(
+                "SELECT COUNT(*) FROM unresolved_targets WHERE project = ?",
+                (project,),
+            ).fetchone()[0]
+            connection.execute(
+                """
+                UPDATE projects
+                SET unresolved_targets = ?
+                WHERE name = ?
+                """,
+                (unresolved_count, project),
+            )
+            _write_metadata(
+                connection,
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "last_imported_project": project,
+                    "last_source_export": str(folder_path),
+                    "last_source_type": "markdown",
+                    "last_imported_at": str(now),
+                    f"project.{project}.source_type": "markdown",
+                },
+            )
+    finally:
+        connection.close()
+
     store = SQLiteStore(store_path, project=project)
     try:
         return store.stats()
@@ -559,7 +695,7 @@ class SQLiteStore:
                 raise ValueError(f"project does not exist: {selected}; available projects: {available}")
             return selected
         if not names:
-            raise ValueError("store has no projects; run `grasp import --cosense <json>` first")
+            raise ValueError("store has no projects; run `grasp import --cosense <json>` or `grasp import --markdown <folder>` first")
         available = ", ".join(names)
         raise ValueError(f"multiple projects in store; specify --project <name> (available: {available})")
 

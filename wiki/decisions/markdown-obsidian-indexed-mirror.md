@@ -98,10 +98,23 @@ grasp related "Some Note"
 - README / HN / Reddit では Scrapbox ではなく Markdown / Obsidian folder を入口に置く。
 - Agent Skill は adapter 実装後に persona2 用の探索手順を薄く足す。CLI mechanics は `grasp <cmd> --help` を SSoT に保つ。
 
+## Update: minimal mirror implemented
+
+2026-06-24: `grasp import --markdown <folder>` として最小 read-only mirror を実装した。`wiki/` を最初の dogfood corpus とし、既存 SQLite graph store に `.md` files を materialize する。初期 surface はこの decision の案のうち `index-md` ではなく既存 `import` に寄せた `import --markdown`。
+
+実装済み policy:
+
+- file stem を title にする。
+- `[[Page]]`, `[[Page|alias]]`, `[[Page#Heading]]`, `[[folder/Page.md]]`, `![[Embed]]`, `#tag` を edge にする。
+- inline backtick / fenced code block 内は edge にしない。
+- 既存 Markdown folder へは書き戻さない。
+
+未実装のまま残すもの: frontmatter title / aliases / `id` / tags、block refs、差分 index、duplicate/alias collision の高度な解決。これらは [[grasp-backlog]] の継続項目。
+
 ## Open Questions
 
-- CLI 名: `index-md`, `import-md`, or `import --format markdown <folder>`。
-- title resolution: filename stem, first H1, frontmatter title, aliases の優先順位。
+- CLI 名: 初期実装は `import --markdown <folder>`。将来 persona2 向けに `index-md` alias を足すか。
+- title resolution: 初期実装は file stem。first H1, frontmatter title, aliases の優先順位。
 - duplicate title / alias collision の扱い。
 - heading / block ref を line-id とどう対応させるか。
 - `#tag` と wikilink を同一 edge type にするか。

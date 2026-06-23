@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 00:58] implementation | read-only Markdown mirror の最小実装
+- `grasp import --markdown <folder>` を追加。Markdown folder を既存 SQLite graph store に read-only mirror として materialize し、file stem を title、relative path hash を page id、`[[wikilink]]` / `#tag` を edge として扱う。
+- `[[Page|alias]]`, `[[Page#Heading]]`, `[[folder/Page.md]]`, `![[Embed]]` は target title に畳んで edge 化する。inline backtick / fenced code block 内は edge にしないため、grasp wiki のバックティック親 llm-wiki 参照は graph に混ぜない。
+- Dogfood: `python3 -m grasp --store /tmp/grasp-wiki.sqlite import --markdown wiki --project grasp-wiki` で `wiki/` を 21 pages / 2072 lines / 248 edges / unresolved 0 として index。`read markdown-obsidian-indexed-mirror` が backlinks 7 / related を返した。
+- store schema は v5 のまま、public compatibility version は `1.5.6`。frontmatter title / aliases / Obsidian block refs / 差分 index は [[grasp-backlog]] に残す。
+
 ## [2026-06-24 00:33] implementation | `/ship-next` と Skill の日本語応答方針を反映
 - nishio 指摘「日本語で(skillも更新しといて)」を受け、`.claude/commands/ship-next.md` の最終 summary / "what's next?" を日本語で返す運用に更新。
 - `skills/grasp/SKILL.md` の回答形式に「ユーザの言語に合わせ、nishio/grasp の開発 wiki / ship loop は日本語 default」を追記。
