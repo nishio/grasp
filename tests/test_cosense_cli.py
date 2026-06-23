@@ -124,7 +124,7 @@ class CosenseCliSyncTests(unittest.TestCase):
                 self.assertEqual(page.updated, 20)
                 self.assertEqual(store.search("updated")[0]["source_title"], "A")
                 self.assertEqual(store.backlinks("Missing"), [])
-                self.assertEqual(store.wanted()[0]["title"], "D")
+                self.assertEqual(store.unresolved_targets()[0]["title"], "D")
             finally:
                 store.close()
 

@@ -182,7 +182,7 @@ class CosenseStore:
         self.backlinks_by_norm: dict[str, list[Edge]] = defaultdict(list)
         self.outgoing_by_page: dict[str, list[Edge]] = defaultdict(list)
         self.adjacency: dict[str, set[str]] = defaultdict(set)
-        self._wanted_stats: list[dict[str, Any]] | None = None
+        self._unresolved_target_stats: list[dict[str, Any]] | None = None
 
         for edge in edges:
             self.backlinks_by_norm[edge.target_norm].append(edge)
@@ -272,51 +272,72 @@ class CosenseStore:
             return edges[:limit]
         return edges
 
-    def wanted(self, limit: int | None = None) -> list[dict[str, Any]]:
-        stats = self._wanted_stats
+    def link_stats(self, title: str) -> dict[str, Any]:
+        norm = normalize_title(title)
+        page = self.resolve_page(title)
+        backlinks = self.backlinks_by_norm.get(norm, [])
+        if page is None:
+            title_counts = Counter(edge.target_title for edge in backlinks)
+            canonical_title = title_counts.most_common(1)[0][0] if title_counts else title
+        else:
+            canonical_title = page.title
+
+        return {
+            "query": title,
+            "title": canonical_title,
+            "normalized_title": norm,
+            "page_exists": page is not None,
+            "page": page.to_summary() if page is not None else None,
+            "link_count": len(backlinks),
+            "source_page_count": len({edge.source_page_id for edge in backlinks}),
+            "link_multiplicity": link_multiplicity(len(backlinks)),
+        }
+
+    def unresolved_targets(self, limit: int | None = None) -> list[dict[str, Any]]:
+        stats = self._unresolved_target_stats
         if stats is None:
             by_norm: dict[str, list[Edge]] = defaultdict(list)
             for edge in self.edges:
                 if edge.target_norm not in self.pages_by_norm:
                     by_norm[edge.target_norm].append(edge)
-            stats = [self._wanted_entry(norm, edges) for norm, edges in by_norm.items()]
+            stats = [self._unresolved_target_entry(norm, edges) for norm, edges in by_norm.items()]
             stats.sort(
                 key=lambda item: (
-                    -item["count"],
+                    -item["link_count"],
                     -item["source_page_count"],
                     -item["total_source_views"],
                     -(item["latest_source_updated"] or 0),
                     item["title"].casefold(),
                 )
             )
-            self._wanted_stats = stats
+            self._unresolved_target_stats = stats
         if limit is not None and limit >= 0:
             return stats[:limit]
         return stats
 
-    def wanted_from_page(self, page: Page, limit: int | None = None) -> list[dict[str, Any]]:
+    def unresolved_targets_from_page(self, page: Page, limit: int | None = None) -> list[dict[str, Any]]:
         by_norm: dict[str, list[Edge]] = defaultdict(list)
         for edge in self.outgoing_by_page.get(page.id, []):
             if edge.target_norm not in self.pages_by_norm:
                 by_norm[edge.target_norm].append(edge)
 
-        wanted = [self._wanted_entry(norm, edges) for norm, edges in by_norm.items()]
-        wanted.sort(
+        unresolved_targets = [self._unresolved_target_entry(norm, edges) for norm, edges in by_norm.items()]
+        unresolved_targets.sort(
             key=lambda item: (
-                -item["count"],
+                -item["link_count"],
                 -item["source_page_count"],
                 -item["total_source_views"],
                 item["title"].casefold(),
             )
         )
         if limit is not None and limit >= 0:
-            return wanted[:limit]
-        return wanted
+            return unresolved_targets[:limit]
+        return unresolved_targets
 
     def related(self, title: str, limit: int | None = None) -> list[dict[str, Any]]:
         page = self.resolve_page(title)
         if page is None:
-            return []
+            return self._related_missing_target(title, limit)
 
         direct = self.adjacency.get(page.id, set())
         scores: Counter[str] = Counter()
@@ -345,6 +366,28 @@ class CosenseStore:
             return related_pages[:limit]
         return related_pages
 
+    def _related_missing_target(self, title: str, limit: int | None = None) -> list[dict[str, Any]]:
+        source_edges: dict[str, list[Edge]] = defaultdict(list)
+        for edge in self.backlinks_by_norm.get(normalize_title(title), []):
+            source_edges[edge.source_page_id].append(edge)
+
+        related_pages = []
+        for source_page_id, edges in source_edges.items():
+            source_page = self.pages_by_id[source_page_id]
+            title_counts = Counter(edge.target_title for edge in edges)
+            related_pages.append(
+                {
+                    **source_page.to_summary(),
+                    "score": len(edges),
+                    "relation": "backlink-source",
+                    "via": [title_counts.most_common(1)[0][0]],
+                }
+            )
+        related_pages.sort(key=lambda item: (-item["score"], -item["views"], item["title"].casefold()))
+        if limit is not None and limit >= 0:
+            return related_pages[:limit]
+        return related_pages
+
     def suggest(self, partial: str, limit: int = 20) -> list[dict[str, Any]]:
         norm_partial = normalize_title(partial)
         candidates = [
@@ -368,38 +411,41 @@ class CosenseStore:
         line_limit: int | None = None,
         backlink_limit: int = 20,
         related_limit: int = 20,
-        wanted_limit: int = 20,
+        unresolved_limit: int = 20,
     ) -> dict[str, Any]:
         page = self.resolve_page(title)
         backlinks = self.backlinks(title, backlink_limit)
+        link_stats = self.link_stats(title)
 
         if page is None:
             return {
                 "query": title,
                 "page": None,
+                "link_stats": link_stats,
                 "lines": [],
                 "lines_truncated": False,
                 "backlinks": [edge.to_dict() for edge in backlinks],
                 "backlink_count_returned": len(backlinks),
-                "related": [],
-                "wanted": [],
-                "red_link": bool(backlinks),
+                "backlink_count_total": link_stats["link_count"],
+                "related": self.related(title, related_limit),
+                "unresolved_targets": [],
             }
 
         lines, lines_truncated = self.page_lines(page, line_limit)
         return {
             "query": title,
             "page": page.to_summary(),
+            "link_stats": link_stats,
             "lines": [line.to_dict() for line in lines],
             "lines_truncated": lines_truncated,
             "backlinks": [edge.to_dict() for edge in backlinks],
             "backlink_count_returned": len(backlinks),
+            "backlink_count_total": link_stats["link_count"],
             "related": self.related(page.title, related_limit),
-            "wanted": self.wanted_from_page(page, wanted_limit),
-            "red_link": False,
+            "unresolved_targets": self.unresolved_targets_from_page(page, unresolved_limit),
         }
 
-    def _wanted_entry(self, norm: str, edges: list[Edge]) -> dict[str, Any]:
+    def _unresolved_target_entry(self, norm: str, edges: list[Edge]) -> dict[str, Any]:
         title_counts = Counter(edge.target_title for edge in edges)
         source_page_ids = {edge.source_page_id for edge in edges}
         total_source_views = sum(self.pages_by_id[page_id].views for page_id in source_page_ids)
@@ -408,7 +454,7 @@ class CosenseStore:
         return {
             "title": title_counts.most_common(1)[0][0] if title_counts else norm,
             "normalized_title": norm,
-            "count": len(edges),
+            "link_count": len(edges),
             "source_page_count": len(source_page_ids),
             "total_source_views": total_source_views,
             "latest_source_updated": latest_source_updated,
@@ -427,3 +473,11 @@ def edge_rank_key(edge: Edge) -> tuple[int, int, str, int]:
         edge.source_title.casefold(),
         edge.line_index,
     )
+
+
+def link_multiplicity(link_count: int) -> str:
+    if link_count <= 0:
+        return "none"
+    if link_count == 1:
+        return "single"
+    return "multi"

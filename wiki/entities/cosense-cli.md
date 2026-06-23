@@ -36,7 +36,7 @@ node: /Users/nishio/.nvm/versions/node/v24.16.0
 ## grasp との使い分け
 
 - `cosense`: hosted Cosense project を読む・検索する・編集する。認証やネットワーク、共同編集された現在状態が関係する。
-- `grasp`: local export/native store を読む。AI 所有の graph memory substrate。逆リンク・2-hop・red link を local graph として materialize する。
+- `grasp`: local export/native store を読む。AI 所有の graph memory substrate。逆リンク・2-hop・unresolved link target を local graph として materialize する。
 
 grasp の **MVP** では `cosense` を runtime dependency にしない（export が import 入力、hosted API は別系統）。**ただし post-MVP では cosense-cli が grasp の freshness 経路に昇格する**: 初回 export を seed にし、以降は `grasp sync <project-url>` が `cosense listPages` / `cosense readPage` を呼び、最近更新ページのみ差分取得して local store を最新化する（決定とメカニズムは [[incremental-sync]]）。比較対象から grasp の構成要素へ。
 
@@ -50,7 +50,7 @@ grasp の **MVP** では `cosense` を runtime dependency にしない（export 
 |---|---|---|
 | ページ ＋ 近傍 | **3.4s / 1 コール** | `browsePage` 0.47s ＋ `browseRelatedPages` 1.25s ≈ **1.7s / 2 コール** |
 | 本文のみ | 3.4s | `readPage` 0.6s |
-| backlinks / wanted | 3.4–3.9s | 同等コマンド無し |
+| backlinks / unresolved | 3.4–3.9s | 同等コマンド無し |
 | 検索 | `suggest` 3.7s | `searchFullText` 0.9s |
 
 - grasp の latency はコマンド種別に依らずほぼ一定 ~3.4s で、内訳は **起動毎の 123MB JSON full parse**（user time ≈ wall time）。アルゴリズムでなく「毎回 export を読み直す」MVP 割り切りが律速 → on-disk index で解消見込み（[[grasp-cli-mvp]] / [[SPEC]] 次マイルストーン）。
@@ -60,8 +60,8 @@ grasp の **MVP** では `cosense` を runtime dependency にしない（export 
 
 grasp が出して cosense が出せない:
 - **行レベル逆リンク（行テキスト同梱）** — cosense `browseRelatedPages` は関連*タイトル*のみ（1hop/2hop）、文脈行が無い。grasp の「行リンク」原理が効く核心。
-- **`wanted`（赤リンク列挙）** — cosense に赤リンク一覧コマンドが**存在しない**。grasp の自己宛キューはここだけの機能。
-- **1 コールで近傍同梱**（本文 ＋ 行逆リンク ＋ 2hop ＋ wanted）。cosense は最低 2 コール、しかも赤リンクは作れない。
+- **`unresolved`（未解決 link target 列挙）** — cosense に project-wide の unresolved target 一覧コマンドが**存在しない**。grasp の local graph だから出せる機能。
+- **1 コールで近傍同梱**（本文 ＋ 行逆リンク ＋ 2hop/source pages ＋ unresolved targets）。cosense は最低 2 コール、しかも unresolved target list は作れない。
 - 完全オフライン・認証不要。
 
 cosense が出して grasp が（まだ）出せない:

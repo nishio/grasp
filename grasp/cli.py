@@ -61,7 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     read_parser.add_argument("--line-limit", type=int, default=None)
     read_parser.add_argument("--backlinks-limit", type=int, default=20)
     read_parser.add_argument("--related-limit", type=int, default=20)
-    read_parser.add_argument("--wanted-limit", type=int, default=20)
+    read_parser.add_argument("--unresolved-limit", type=int, default=20)
 
     backlinks_parser = subparsers.add_parser("backlinks", help="List line-level backlinks to a page or missing target.")
     backlinks_parser.add_argument("title")
@@ -95,8 +95,8 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser.add_argument("--cosense-command", default="cosense", help="cosense CLI binary.")
     sync_parser.add_argument("--dry-run", action="store_true", help="List changed pages without fetching/upserting them.")
 
-    wanted_parser = subparsers.add_parser("wanted", help="List ranked unresolved link targets.")
-    wanted_parser.add_argument("--limit", type=int, default=50)
+    unresolved_parser = subparsers.add_parser("unresolved", help="List ranked unresolved link targets.")
+    unresolved_parser.add_argument("--limit", type=int, default=50)
 
     return parser
 
@@ -126,10 +126,9 @@ def main(argv: list[str] | None = None) -> int:
     store = SQLiteStore(args.store)
     try:
         if args.command != "stats" and not store.schema_ok():
-            print(
-                f"warning: store schema is {store.schema_version()}, current is {SCHEMA_VERSION}; "
-                "run with --rebuild-store or `grasp import --force` to rebuild",
-                file=sys.stderr,
+            parser.error(
+                f"store schema is {store.schema_version()}, current is {SCHEMA_VERSION}; "
+                "run with --rebuild-store or `grasp import --force` to rebuild"
             )
         result = run_command(store, args)
     finally:
@@ -155,7 +154,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             line_limit=args.line_limit,
             backlink_limit=args.backlinks_limit,
             related_limit=args.related_limit,
-            wanted_limit=args.wanted_limit,
+            unresolved_limit=args.unresolved_limit,
         )
     if args.command == "backlinks":
         edges = store.backlinks(args.title, limit=args.limit, offset=args.offset)
@@ -196,9 +195,9 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             "count_returned": len(hits),
             "offset": args.offset,
         }
-    if args.command == "wanted":
+    if args.command == "unresolved":
         return {
-            "wanted": store.wanted(limit=args.limit),
+            "unresolved_targets": store.unresolved_targets(limit=args.limit),
         }
     if args.command == "sync":
         return sync_from_cosense(
@@ -231,8 +230,8 @@ def format_result(command: str, result: Any) -> str:
         return format_suggest(result["query"], result["suggestions"])
     if command == "search":
         return format_search(result["query"], result["hits"], result.get("offset", 0))
-    if command == "wanted":
-        return format_wanted(result["wanted"])
+    if command == "unresolved":
+        return format_unresolved_targets(result["unresolved_targets"])
     if command == "sync":
         return format_sync(result)
     return json.dumps(result, ensure_ascii=False, indent=2) + "\n"
@@ -245,7 +244,7 @@ def format_import(result: dict[str, Any]) -> str:
         f"pages: {result['pages']}\n"
         f"lines: {result['lines']}\n"
         f"edges: {result['edges']}\n"
-        f"wanted: {result['wanted']}\n"
+        f"unresolved_targets: {result['unresolved_targets']}\n"
     )
 
 
@@ -260,7 +259,7 @@ def format_stats(result: dict[str, Any]) -> str:
         f"pages: {result['pages']}\n"
         f"lines: {result['lines']}\n"
         f"edges: {result['edges']}\n"
-        f"wanted: {result['wanted']}\n"
+        f"unresolved_targets: {result['unresolved_targets']}\n"
     )
 
 
@@ -303,10 +302,10 @@ def format_read(result: dict[str, Any]) -> str:
         parts.append("(none)\n")
 
     if page is not None:
-        parts.append("\n## Wanted From This Page\n")
-        wanted = result["wanted"]
-        if wanted:
-            parts.append(format_wanted(wanted))
+        parts.append("\n## Unresolved Targets From This Page\n")
+        unresolved_targets = result["unresolved_targets"]
+        if unresolved_targets:
+            parts.append(format_unresolved_targets(unresolved_targets))
         else:
             parts.append("(none)\n")
 
@@ -433,14 +432,14 @@ def format_sync(result: dict[str, Any]) -> str:
     return "".join(parts)
 
 
-def format_wanted(wanted: list[dict[str, Any]]) -> str:
+def format_unresolved_targets(unresolved_targets: list[dict[str, Any]]) -> str:
     parts: list[str] = []
-    if not wanted:
+    if not unresolved_targets:
         return "(none)\n"
 
-    for item in wanted:
+    for item in unresolved_targets:
         parts.append(
-            f"- {item['title']} (count {item['count']}, pages {item['source_page_count']}, views {item['total_source_views']})\n"
+            f"- {item['title']} (links {item['link_count']}, pages {item['source_page_count']}, views {item['total_source_views']})\n"
         )
         for example in item["examples"][:2]:
             parts.append(f"  - {example['source_title']} {example['line_id']}: {example['line_text']}\n")

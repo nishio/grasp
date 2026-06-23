@@ -25,7 +25,7 @@ class CosenseParsingTests(unittest.TestCase):
 
 
 class CosenseStoreTests(unittest.TestCase):
-    def test_store_materializes_backlinks_wanted_and_related(self):
+    def test_store_materializes_backlinks_unresolved_targets_and_related(self):
         data = {
             "name": "fixture",
             "displayName": "fixture",
@@ -77,17 +77,17 @@ class CosenseStoreTests(unittest.TestCase):
         self.assertEqual([edge.source_title for edge in backlinks], ["A", "C"])
         self.assertEqual(backlinks[0].line_id, "aaaaaaaaaaaaaaaaaaaaaaaa:1")
 
-        wanted = store.wanted()
-        self.assertEqual(wanted[0]["title"], "Missing")
-        self.assertEqual(wanted[0]["count"], 1)
+        unresolved_targets = store.unresolved_targets()
+        self.assertEqual(unresolved_targets[0]["title"], "Missing")
+        self.assertEqual(unresolved_targets[0]["link_count"], 1)
 
         related = store.related("A")
         self.assertEqual(related[0]["title"], "C")
         self.assertEqual(related[0]["via"], ["B"])
 
-        read = store.read("A", backlink_limit=10, related_limit=10, wanted_limit=10)
+        read = store.read("A", backlink_limit=10, related_limit=10, unresolved_limit=10)
         self.assertEqual(read["page"]["title"], "A")
-        self.assertEqual(read["wanted"][0]["title"], "Missing")
+        self.assertEqual(read["unresolved_targets"][0]["title"], "Missing")
 
 
 if __name__ == "__main__":

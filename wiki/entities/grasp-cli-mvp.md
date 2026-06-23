@@ -1,6 +1,6 @@
 ---
 type: entity
-summary: 2026-06-23 時点の read-only Cosense JSON MVP 実装。`python3 -m grasp` で local export を読み、read/backlinks/wanted を近傍込みで返す。Codex が実装した現状と次の制約を保持する
+summary: 2026-06-23 時点の read-only Cosense JSON MVP 実装。`python3 -m grasp` で local export を読み、read/backlinks/unresolved を近傍込みで返す。Codex が実装した現状と次の制約を保持する
 sources:
   - grasp/cosense.py
   - grasp/cli.py
@@ -16,9 +16,9 @@ sources:
 ## 実行 surface
 
 ```
-python3 -m grasp wanted --limit 10
+python3 -m grasp unresolved --limit 10
 python3 -m grasp backlinks 盲点 --limit 5
-python3 -m grasp read 盲点カード --line-limit 8 --backlinks-limit 3 --related-limit 3 --wanted-limit 3
+python3 -m grasp read 盲点カード --line-limit 8 --backlinks-limit 3 --related-limit 3 --unresolved-limit 3
 python3 -m grasp link-stats 民主主義
 python3 -m grasp related 民主主義 --limit 5
 python3 -m grasp search 盲点 --limit 5
@@ -39,7 +39,7 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 - `read <title>`: 本文 lines + line-level backlinks + deterministic related + page-local unresolved targets。page がない target でも link stats と related source pages を返す。
 - `backlinks <title>`: `(source_page, line-id, line_text)`。page がない target にも効く。
 - `link-stats <title>`: existing page / unresolved target の incoming `link_count`, `source_page_count`, `link_multiplicity` (`none` / `single` / `multi`) を返す。
-- `wanted`: unresolved target を ranking して返す。構造名ではなく「次に書く候補」view。
+- `unresolved`: unresolved target を ranking して返す。
 - `search <query>`: 本文行を substring 検索し、`(page, line-id, line_text)` を page.views 優先で返す。
 - `sync <project-url>`: `cosense` CLI で最近更新ページだけ取得し、SQLite store に upsert する。`--dry-run` あり。
 - `stats`: store path / schema version / current schema / counts を返す。古い schema の store を通常 command で開いた時は stderr に rebuild 警告を出す。
@@ -50,11 +50,11 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 - `Page`: `id`, `title`, normalized title, created/updated/views, `lines`。
 - `Line`: `line_id`, line index, text, created/updated/userId。MVP の `line_id` は `page.id:line-index`。
 - `Edge`: source page + source line + target title/normalized title。forward/backward は同一 edge の両読み。
-- store は SQLite on-disk。`pages` / `lines` / `edges` / materialized `wanted` を保存する。起動ごとに 118MB JSON を parse しない。
-- 実測（2026-06-23）: import 約 8 秒。store 利用時 `read 盲点カード` 約 0.7 秒、`wanted --limit 3` 約 0.7 秒、`backlinks 盲点` 約 0.4 秒。
-- Update 2026-06-23: `wanted_examples` を materialize して `wanted --limit N` の example 取得を N 回 query しないようにした。Python 内部計測では `wanted(limit=100)` が約 6ms。CLI wall time は Python 起動 + output 書き出し込みで約 1.0 秒。
+- store は SQLite on-disk。schema v3 は `pages` / `lines` / `edges` / materialized `unresolved_targets` / `unresolved_target_examples` を保存する。起動ごとに 118MB JSON を parse しない。
+- 実測（2026-06-23）: import 約 8 秒。store 利用時 `read 盲点カード` 約 0.7 秒、`unresolved --limit 3` 約 0.7 秒、`backlinks 盲点` 約 0.4 秒。
+- Update 2026-06-23: `unresolved_target_examples` を materialize して `unresolved --limit N` の example 取得を N 回 query しないようにした。Python 内部計測では unresolved target list 100 件が約 6ms。CLI wall time は Python 起動 + output 書き出し込みで約 1.0 秒。
 - `search` は SQLite FTS5 trigram を試したが、2文字日本語 query（例: `盲点`）は `MATCH` に乗らず、FTS table `LIKE` は一部日本語 substring（例: `盲点カード`）の recall を落とした。現状は correctness 優先で `lines.text LIKE` を維持。
-- Update 2026-06-23: 「link があるが page がない」こと自体は `wanted` ではなく unresolved graph node と整理。`link-stats` は missing target の 0/1/N を materialized `wanted` row から高速に返し、existing page は `edges.target_norm` index で count する。`related <missing-target>` は source pages を `relation=backlink-source` として返す。
+- Update 2026-06-23: 「link があるが page がない」こと自体は unresolved graph node と整理。互換性を考えず `wanted` command / JSON field / schema 名は削除し、`unresolved` / `unresolved_targets` に破壊的変更した。`link-stats` は missing target の 0/1/N を materialized `unresolved_targets` row から高速に返し、existing page は `edges.target_norm` index で count する。`related <missing-target>` は source pages を `relation=backlink-source` として返す。
 
 ### FTS5 trigram 検証メモ（2026-06-23）
 
@@ -87,12 +87,12 @@ FTS5 trigram は **候補 prefilter としては有効**だが、`grasp search` 
 
 - lines[0]（Cosense title 行）は本文に残す。理由: 完全性と `page.id:line-index` の安定性を優先。重複表示は formatter の問題。
 - title resolve は Cosense に合わせて normalize（casefold + whitespace folding）。
-- `wanted` ranking は `count → source_page_count → total_source_views → latest_source_updated → title`。
+- `unresolved` ranking は `link_count → source_page_count → total_source_views → latest_source_updated → title`。
 - `related` は existing page なら page 間 edge の undirected adjacency から 2-hop score を出す。page がない target なら、その target に link している source pages を返す。`via` は deterministic order にした。
 
 ## parser 補正
 
-[[cosense-json-export]] の broad bracket 分類では内部リンク 133022 instance だったが、そのまま使うと code/list 由来の `[0]`, `[i]`, `[1]` が `wanted` 上位を汚す。
+[[cosense-json-export]] の broad bracket 分類では内部リンク 133022 instance だったが、そのまま使うと code/list 由来の `[0]`, `[i]`, `[1]` が unresolved target 上位を汚す。
 
 MVP parser は以下を link としない:
 - 外部 URL、icon/img、decoration、math、cross-project
@@ -106,22 +106,22 @@ MVP parser は以下を link としない:
 
 ### 残る false-positive（2026-06-23 実測）
 
-~~`wanted` 上位に `** 深い思考`（count 59）が混入する~~ → M2-3 で修正済み。Cosense の見出し装飾 `[** 深い思考]`（複数 `*`）を decoration として除外する。`backlinks '** 深い思考'` は none。
+~~unresolved target 上位に `** 深い思考`（link count 59）が混入する~~ → M2-3 で修正済み。Cosense の見出し装飾 `[** 深い思考]`（複数 `*`）を decoration として除外する。`backlinks '** 深い思考'` は none。
 
 ## 検証
 
 - `python3 -m unittest discover -s tests` OK。
 - `python3 scripts/lint_wiki.py` OK。
-- 実データ smoke: `wanted`, `backlinks 盲点`, `read 盲点カード`, `related 盲点カード`, `link-stats 民主主義`, `related 民主主義`, JSON output を確認。
+- 実データ smoke: `unresolved`, `backlinks 盲点`, `read 盲点カード`, `related 盲点カード`, `link-stats 民主主義`, `related 民主主義`, JSON output を確認。
 
 ## 次の実装課題
 
 [[cosense-cli]] との実測比較で優先順位が確定（→ [[SPEC]] 次マイルストーン）:
 
-- ~~on-disk store/cache ★最優先~~ → SQLite store 実装済み。edge/materialized wanted を on-disk 永続し、通常 read は JSON parse しない。
+- ~~on-disk store/cache ★最優先~~ → SQLite store 実装済み。edge/materialized unresolved targets を on-disk 永続し、通常 read は JSON parse しない。
 - ~~本文検索 `search`~~ → 実装済み。SQLite `lines.text LIKE` で行本文を検索し、行レベル hits を返す。
 - ~~parser false-positive 修正~~ → `[** x]` 系装飾は除外済み。false-negative（短い英数字 title）監査は残る。
 - **cosense-cli 差分更新**: `grasp sync` 実装済み。削除/rename tombstone は未対応。
 - `#tag` を page link と同等に扱うか。
 - line context window: backlink は現状 hit line のみ。前後行を付けるか。
-- `wanted` ranking の重み調整: count/views/recency の順で十分かは利用で検証。
+- `unresolved` ranking の重み調整: link count/views/recency の順で十分かは利用で検証。

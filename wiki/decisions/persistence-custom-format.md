@@ -33,7 +33,7 @@ nishio の MVP イメージ（Cosense JSON export から始める）が指すの
 ```
 [native store（独自・グラフ/行・エッジ保持）]
         ↑ import adapter（Cosense JSON / 後で Markdown）
-[CLI 動詞（read=近傍同梱 / backlinks / wanted ...）]
+[CLI 動詞（read=近傍同梱 / backlinks / unresolved ...）]
 ```
 
 - 「既存 wiki森 40+ を読める」利点は **Markdown import adapter** で達成（native を Markdown にしない）。
@@ -43,7 +43,7 @@ nishio の MVP イメージ（Cosense JSON export から始める）が指すの
 
 実測比較（[[cosense-cli]]）で in-memory（export を毎回 full parse）が全コマンド一律 ~3.4s の律速と判明。nishio 判断: **渡された JSON はあくまで handoff 形式。JSON のまま保存し続ける必要はなく、SQLite もしくはより良いデータ構造で持ってよい**。
 
-→ 下の Open Q「on-disk か in-memory か」は **on-disk = yes** で解決。具体は SQLite（pages / lines / edges / wanted を materialize したテーブル）を起点に、必要なら専用構造へ。これが [[SPEC]] M2-1。JSON export は import adapter の**入力**にのみ使い、保存層では捨てる。store は後の差分更新（[[incremental-sync]]）のため **upsert 可能**に設計する。
+→ 下の Open Q「on-disk か in-memory か」は **on-disk = yes** で解決。具体は SQLite（pages / lines / edges / unresolved_targets を materialize したテーブル）を起点に、必要なら専用構造へ。これが [[SPEC]] M2-1。JSON export は import adapter の**入力**にのみ使い、保存層では捨てる。store は後の差分更新（[[incremental-sync]]）のため **upsert 可能**に設計する。
 
 ## Open Questions
 

@@ -19,7 +19,7 @@ sources:
 
 2. **行リンク（line links）** — 逆リンクは「ページ単位」でなく `(page, line-id, 行テキスト)` で返す。"X に言及" でなく "この行で言及"。AI は逆リンクを全文 grep せず **文脈行だけ**受け取る ＝ retrieval が安い。Scrapbox 関連 pane の richness の正体。
 
-3. **未解決 link target は構造事実、wanted は解釈** — 書かれたが本文のない link target はまず **page 実体のない graph node** として扱う。`link-stats <title>` で incoming link が 0 / 1 / N のどれかを高速に識別し、N 件あるなら page 実体がなくても `related <title>` は source pages を返せる。`wanted` はその unresolved targets を「自分が次に書く候補」として rank する view であり、missing target すべてが TODO とは限らない。
+3. **未解決 link target は構造事実** — 書かれたが本文のない link target は **page 実体のない graph node** として扱う。`link-stats <title>` で incoming link が 0 / 1 / N のどれかを高速に識別し、N 件あるなら page 実体がなくても `related <title>` は source pages を返せる。`unresolved` は未解決 target を link count / source pages / views / recency で rank する view であり、missing target すべてを TODO と決めつけない。
 
 4. **identity ≠ name** — Scrapbox の name=identity 欠陥（rename で文意が変わる）を直す。ページは安定 `id`、行は `line-id`。**粒度分離: line-id は機械が自動採番（意味判断なし）／ page id は意味判断で必要な時だけ振る**（すべてに振る ＝ 早すぎる物化を避ける）。
 
@@ -39,25 +39,25 @@ sources:
 - **最新化は export 反復でなく cosense-cli 差分更新**: 初回 export を seed、以降は cosense-cli で最近更新ページだけ取得して upsert（[[incremental-sync]]）。∴ import adapter は bulk seed と incremental delta の2モード（M2-4）。
 - 後で Markdown adapter も足せる（既存 llm-wiki 森 40+ を読める）。← native を Markdown にしなくても達成。
 - 実物の export で確定（スキーマ詳細は [[cosense-json-export]]）: ① **lines に安定 id は無い** → import 時に grasp が line-id を採番（原理4 と整合）。② **link graph は export に保存されない** → line.text を parse してエッジを materialize。③ link 構文 `[...]` は overloaded（内部リンクは 62.7%、残りは外部 URL / icon / 装飾 `[* ]` / cross-project `[/p/x]`）。`[[...]]` は **bold でリンクでない**（grasp の `[[wikilink]]` と逆）。④ リンク解決は normalize（case-insensitive ＋ 空白畳み込み）。
-- MVP parser は上記に加え、実データで code/list/decoration 記法が `wanted` 上位を汚すため **inline backtick 内・ASCII index 風 `xs[i]` / `func()[0]`・数字のみ `[1]`・連続 `*`/`-`/`_` 装飾 `[** x]` を link としない**。この strict parser で `raw/nishio.json` は 120693 edge / unresolved target 41750（先の 133022 / 61613 / 45703 は broad bracket 分類）。
+- MVP parser は上記に加え、実データで code/list/decoration 記法が unresolved target 上位を汚すため **inline backtick 内・ASCII index 風 `xs[i]` / `func()[0]`・数字のみ `[1]`・連続 `*`/`-`/`_` 装飾 `[** x]` を link としない**。この strict parser で `raw/nishio.json` は 120693 edge / unresolved target 41750（先の 133022 / 61613 / 45703 は broad bracket 分類）。
 
 ## データモデル（暫定）
 
 - **page**: `id`（安定・不変, 必要時のみ採番）, `title`（表示・変更可, `aliases[]` 可）, `lines[]`
 - **line**: `line-id`（機械が自動採番・安定。MVP は `page.id:line-index`）, `text`（forward links は text から parse）
 - **link graph**: **エッジを native に保持**。forward / backward は同一エッジの両読み（backlinks の「維持」は不要、O(1)）。2-hop はグラフ隣接。
-- **unresolved link target**: link target だが page が存在しない node。`link_count` と `source_page_count` を持つ。`wanted` は unresolved target の ranking view であって、構造名ではない。
+- **unresolved link target**: link target だが page が存在しない node。`link_count` と `source_page_count` を持つ。
 
 ## MVP（Codex 最初の一歩）
 
 **Cosense JSON export 1ファイルを読み取り専用で CLI から扱う**。書き込み・identity 層・Markdown adapter は後。
 - import: Cosense export → 正規化（page/line/edge、line-id 採番）→ in-memory（or 独自 store）
 - 実装: Python package `grasp`。`python3 -m grasp ...`（または console script `grasp`）で起動。`--export` 未指定時は `$GRASP_EXPORT` → `raw/nishio.json` を探す。`--json` で機械可読出力。
-- 動詞: MVP 必須の `read`（近傍同梱）/ `backlinks`（行つき）/ `wanted`（unresolved target ranking）に加え、read-only helper として `related` / `link-stats` / `peek` / `suggest` も持つ。
+- 動詞: MVP 必須の `read`（近傍同梱）/ `backlinks`（行つき）/ `unresolved`（未解決 target ranking）に加え、read-only helper として `related` / `link-stats` / `peek` / `suggest` も持つ。
 - read は lines[0]（Cosense title 行）を本文に残す。完全性と line-id 安定性を優先し、重複表示は formatter 側の問題として扱う。
 - `link-stats` は existing page / unresolved target の両方に対して incoming `link_count`, `source_page_count`, `link_multiplicity` (`none` / `single` / `multi`) を返す。
 - `related <existing-page>` は既存 page 間 edge の 2-hop pages を返す。`related <unresolved-target>` は 2-hop ではなく、その target へ link している source pages を返す。
-- `wanted` ranking: count → source page count → total source views → latest source updated → title。`read` 内の wanted はその page から出る unresolved link に限定。
+- `unresolved` ranking: link count → source page count → total source views → latest source updated → title。`read` 内の unresolved targets はその page から出る unresolved link に限定。
 - これで「AI が CLI だけで Scrapbox グラフを体験する」中核仮説を **実データ（nishio の Cosense project: 25791 pages / 724981 lines / strict parser で edge 120693・unresolved target 41750）** で検証する（[[cosense-json-export]]）。
 
 ## 次のマイルストーン（post-MVP / step 2, なお read-only）
@@ -67,9 +67,9 @@ MVP（step 1）は実装・smoke 済み。`cosense` との実測比較（[[cosen
 ### M2-1. on-disk store（SQLite or better）— latency 解消 ★最優先
 - Status 2026-06-23: **実装済み**。`.grasp/grasp.sqlite` default、`grasp import --force` と `--rebuild-store` で再構築。通常 command は store があれば JSON を parse しない。
 - 問題: 起動毎に 123MB JSON を full parse し、全コマンド一律 ~3.4s（cosense は 0.5–1.2s）。「AI が graph を流れるように体験する」中核体験を最も損なう。
-- やること: import（export → page/line/edge/wanted の materialize）を一度だけ実行し、**SQLite もしくはより良いデータ構造に永続**（pages / lines / edges / wanted のテーブル）。次回以降は store を読むだけで起動。**渡された JSON は import 入力にのみ使い保存層では捨てる**（JSON のまま持ち続けない）。
+- やること: import（export → page/line/edge/unresolved_targets の materialize）を一度だけ実行し、**SQLite もしくはより良いデータ構造に永続**（pages / lines / edges / unresolved_targets のテーブル）。次回以降は store を読むだけで起動。**渡された JSON は import 入力にのみ使い保存層では捨てる**（JSON のまま持ち続けない）。
 - 位置づけ: これは [[persistence-custom-format]] の「独自 on-disk store」の最小実体 ＝ native store の seed。Open Q「in-memory のみ or on-disk」を **on-disk = SQLite** で解決。
-- 受け入れ: 2 回目以降の `read` / `backlinks` / `wanted` が sub-second。store は M2-4 の差分更新を見据え **upsert 可能**に設計する（immutable index にしない）。
+- 受け入れ: 2 回目以降の `read` / `backlinks` / `unresolved` が sub-second。store は M2-4 の差分更新を見据え **upsert 可能**に設計する（immutable index にしない）。
 
 ### M2-2. `search <query>` — 本文検索（cosense 比較で最大の機能差）
 - Status 2026-06-23: **実装済み**。SQLite `lines.text LIKE` で本文行を検索し、行レベル hits を返す。
@@ -80,7 +80,7 @@ MVP（step 1）は実装・smoke 済み。`cosense` との実測比較（[[cosen
 
 ### M2-3. parser false-positive 修正（小）
 - Status 2026-06-23: **実装済み**。連続 `*`/`-`/`_` 群 + 空白を decoration として除外。
-- `[** x]` / `[*** x]`（複数 `*` の見出し装飾）が link 扱いされ `wanted` 上位を汚す（実測 `** 深い思考` count 59）。
+- `[** x]` / `[*** x]`（複数 `*` の見出し装飾）が link 扱いされ unresolved target 上位を汚す（実測 `** 深い思考` link count 59）。
 - 修正: decoration 判定を「先頭の連続する `*` `-` `_` 群 ＋ 空白」に拡張（現状は先頭 1 文字のみ判定）。あわせて false-negative（短い英数字 title）の監査。
 
 ### M2-4. cosense-cli 差分更新（freshness）
@@ -104,7 +104,7 @@ write / transclude / rename（identity 層）・Markdown import adapter・vector
 | `peek <title>` | 本文だけ（飛ばずプレビュー） | リンク hover |
 | `suggest <partial>` | title 補完候補 | `[[` 補完 |
 | `search <query>` | 本文行検索。`(page, line-id, 行テキスト)` のリスト | 全文検索 |
-| `wanted` | unresolved link target の ranked view（自己宛キュー候補） | 赤リンク |
+| `unresolved` | unresolved link target の ranked view | 赤リンク / unresolved target list |
 | `sync <project-url>` | cosense-cli で最近更新ページを差分 upsert | hosted freshness |
 | `write <title> <body>` | ページ作成 / 更新 ＋ グラフ自動更新 | 編集 |
 | `transclude <line-id>` | 行の埋め込み / 参照 | 行参照 |
@@ -118,7 +118,7 @@ write / transclude / rename（identity 層）・Markdown import adapter・vector
 
 - ~~永続化形式~~ → **解決: 独自フォーマット**（[[persistence-custom-format]]）。読込は import adapter の責務に分離。
 - ~~独自 store の具体~~ → **SQLite store 実装済み**。MVP は in-memory から `.grasp/grasp.sqlite` へ移行。
-- **read の近傍境界**: MVP は `--backlinks-limit` / `--related-limit` / `--wanted-limit` の上位 N。ranking の妥当性（count/views/recency の重み）は実利用で調整。
+- **read の近傍境界**: MVP は `--backlinks-limit` / `--related-limit` / `--unresolved-limit` の上位 N。ranking の妥当性（link count/views/recency の重み）は実利用で調整。
 - **Cosense link parser の厳しさ**: code/list/decoration 由来の false positive を避けるため strict にしたが、短い英数字タイトルなどの false negative は未監査。
 - **page id をいつ振るか**: 「必要時のみ ＝ 意味判断」の運用ルールを誰がどう発火するか。
 - **行リンクの文脈窓**: 該当行だけか、前後数行か。

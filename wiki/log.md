@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-23 19:03] implementation | `wanted` 互換を捨て `unresolved` に破壊的変更
+- ユーザ判断: まだ利用者はいないので互換性を考えず、設計語彙に合わせて変える。`wanted` command / JSON field / SQLite table 名を削除し、`unresolved` command / `unresolved_targets` field / `unresolved_targets` table に変更。schema_version は 3。
+- `read` option は `--wanted-limit` ではなく `--unresolved-limit`。`read` result から `red_link` field を削除し、page なし target の状態は `page: null` + `link_stats` + `related` で表す。
+- `unresolved_targets` entries は `count` ではなく `link_count` を持つ。`stats` も `unresolved_targets` count を返す。旧 schema の通常 command は rebuild 必須で止める。
+
 ## [2026-06-23 18:53] implementation | missing link target の link stats と related source pages を追加
 - 「link があるが page がない」こと自体は `wanted` ではなく unresolved graph node と整理。[[SPEC]] の中核原理・データモデル・CLI surface を更新し、`wanted` は unresolved targets の ranked view と明記。
 - `grasp link-stats <title>` を追加。existing page / unresolved target の incoming `link_count`, `source_page_count`, `link_multiplicity` (`none` / `single` / `multi`) を返す。unresolved target は materialized `wanted` row、existing page は `edges.target_norm` index で数える。

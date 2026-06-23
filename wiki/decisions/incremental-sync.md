@@ -22,7 +22,7 @@ sources:
 
 ## Update (2026-06-23): 実装
 
-`grasp sync <project-url>` を追加。`--limit` 件まで `cosense listPages --sort updated` を inspect し、store の `pages.updated` と remote `updated` を比較する。変更ページだけ `cosense readPage` で取得して SQLite store に upsert、最後に `wanted` を再 materialize する。
+`grasp sync <project-url>` を追加。`--limit` 件まで `cosense listPages --sort updated` を inspect し、store の `pages.updated` と remote `updated` を比較する。変更ページだけ `cosense readPage` で取得して SQLite store に upsert、最後に `unresolved_targets` を再 materialize する。
 
 - `updated` は humanized suffix の前の ISO8601 部分を `datetime.fromisoformat` で epoch seconds に変換して比較する。
 - pinned page は updated が古くても停止条件にしない（`pin > 0` なら skip して次を見る）。

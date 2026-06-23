@@ -11,7 +11,7 @@ from typing import Any
 from .cosense import CosenseStore, Edge, Line, Page, normalize_title, parse_cosense_links
 
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 
 SCHEMA = """
@@ -53,16 +53,16 @@ CREATE TABLE edges (
   FOREIGN KEY(line_id) REFERENCES lines(line_id) ON DELETE CASCADE
 );
 
-CREATE TABLE wanted (
+CREATE TABLE unresolved_targets (
   target_norm TEXT PRIMARY KEY,
   title TEXT NOT NULL,
-  count INTEGER NOT NULL,
+  link_count INTEGER NOT NULL,
   source_page_count INTEGER NOT NULL,
   total_source_views INTEGER NOT NULL,
   latest_source_updated INTEGER NOT NULL
 );
 
-CREATE TABLE wanted_examples (
+CREATE TABLE unresolved_target_examples (
   target_norm TEXT NOT NULL,
   rank INTEGER NOT NULL,
   source_page_id TEXT NOT NULL,
@@ -77,8 +77,8 @@ CREATE INDEX idx_lines_page_index ON lines(page_id, line_index);
 CREATE INDEX idx_edges_target_norm ON edges(target_norm);
 CREATE INDEX idx_edges_source_page ON edges(source_page_id);
 CREATE INDEX idx_edges_line ON edges(line_id);
-CREATE INDEX idx_wanted_rank ON wanted(count DESC, source_page_count DESC, total_source_views DESC, latest_source_updated DESC, title);
-CREATE INDEX idx_wanted_examples_norm_rank ON wanted_examples(target_norm, rank);
+CREATE INDEX idx_unresolved_targets_rank ON unresolved_targets(link_count DESC, source_page_count DESC, total_source_views DESC, latest_source_updated DESC, title);
+CREATE INDEX idx_unresolved_target_examples_norm_rank ON unresolved_target_examples(target_norm, rank);
 """
 
 
@@ -149,7 +149,7 @@ def import_export_to_sqlite(export_path: str | Path, store_path: str | Path) -> 
                     for edge in source.edges
                 ),
             )
-            rebuild_wanted(connection)
+            rebuild_unresolved_targets(connection)
             _write_metadata(
                 connection,
                 {
@@ -159,7 +159,7 @@ def import_export_to_sqlite(export_path: str | Path, store_path: str | Path) -> 
                     "pages": str(len(source.pages)),
                     "lines": str(sum(page.line_count for page in source.pages)),
                     "edges": str(len(source.edges)),
-                    "wanted": str(
+                    "unresolved_targets": str(
                         len(
                             {
                                 edge.target_norm
@@ -197,10 +197,10 @@ class SQLiteStore:
             "schema_ok": schema_version == SCHEMA_VERSION,
             "source_export": metadata.get("source_export"),
             "imported_at": _int_or_none(metadata.get("imported_at")),
-            "pages": self._count("pages"),
-            "lines": self._count("lines"),
-            "edges": self._count("edges"),
-            "wanted": self._count("wanted"),
+            "pages": self._count_if_exists("pages"),
+            "lines": self._count_if_exists("lines"),
+            "edges": self._count_if_exists("edges"),
+            "unresolved_targets": self._count_if_exists("unresolved_targets"),
         }
 
     def metadata(self) -> dict[str, str]:
@@ -237,7 +237,7 @@ class SQLiteStore:
         with self.connection:
             for page in pages:
                 self._upsert_cosense_page(page)
-            rebuild_wanted(self.connection)
+            rebuild_unresolved_targets(self.connection)
 
     def resolve_page(self, title: str) -> Page | None:
         row = self.connection.execute(
@@ -305,13 +305,13 @@ class SQLiteStore:
         norm = normalize_title(title)
         page = self.resolve_page(title)
         if page is None:
-            wanted = self.connection.execute(
-                "SELECT * FROM wanted WHERE target_norm = ?",
+            unresolved_target = self.connection.execute(
+                "SELECT * FROM unresolved_targets WHERE target_norm = ?",
                 (norm,),
             ).fetchone()
-            link_count = int(wanted["count"]) if wanted is not None else 0
-            source_page_count = int(wanted["source_page_count"]) if wanted is not None else 0
-            canonical_title = wanted["title"] if wanted is not None else title
+            link_count = int(unresolved_target["link_count"]) if unresolved_target is not None else 0
+            source_page_count = int(unresolved_target["source_page_count"]) if unresolved_target is not None else 0
+            canonical_title = unresolved_target["title"] if unresolved_target is not None else title
         else:
             row = self.connection.execute(
                 """
@@ -336,38 +336,38 @@ class SQLiteStore:
             "link_multiplicity": link_multiplicity(link_count),
         }
 
-    def wanted(self, limit: int | None = None) -> list[dict[str, Any]]:
+    def unresolved_targets(self, limit: int | None = None) -> list[dict[str, Any]]:
         if limit is None or limit < 0:
             rows = self.connection.execute(
                 """
-                SELECT * FROM wanted
-                ORDER BY count DESC, source_page_count DESC, total_source_views DESC, latest_source_updated DESC, title
+                SELECT * FROM unresolved_targets
+                ORDER BY link_count DESC, source_page_count DESC, total_source_views DESC, latest_source_updated DESC, title
                 """
             ).fetchall()
         else:
             rows = self.connection.execute(
                 """
-                SELECT * FROM wanted
-                ORDER BY count DESC, source_page_count DESC, total_source_views DESC, latest_source_updated DESC, title
+                SELECT * FROM unresolved_targets
+                ORDER BY link_count DESC, source_page_count DESC, total_source_views DESC, latest_source_updated DESC, title
                 LIMIT ?
                 """,
                 (limit,),
             ).fetchall()
-        return self._wanted_materialized_rows_to_dicts(rows)
+        return self._unresolved_target_materialized_rows_to_dicts(rows)
 
-    def _wanted_dynamic(self, limit: int | None = None) -> list[dict[str, Any]]:
+    def _unresolved_targets_dynamic(self, limit: int | None = None) -> list[dict[str, Any]]:
         rows = self.connection.execute(
-            self._wanted_stats_sql(limit),
+            self._unresolved_target_stats_sql(limit),
             [] if limit is None or limit < 0 else [limit],
         ).fetchall()
-        return [self._wanted_row_to_dict(row) for row in rows]
+        return [self._unresolved_target_row_to_dict(row) for row in rows]
 
-    def wanted_from_page(self, page: Page, limit: int | None = None) -> list[dict[str, Any]]:
+    def unresolved_targets_from_page(self, page: Page, limit: int | None = None) -> list[dict[str, Any]]:
         rows = self.connection.execute(
-            self._wanted_stats_sql(limit, source_page_id=page.id),
+            self._unresolved_target_stats_sql(limit, source_page_id=page.id),
             [page.id] if limit is None or limit < 0 else [page.id, limit],
         ).fetchall()
-        return [self._wanted_row_to_dict(row, source_page_id=page.id) for row in rows]
+        return [self._unresolved_target_row_to_dict(row, source_page_id=page.id) for row in rows]
 
     def related(self, title: str, limit: int | None = None) -> list[dict[str, Any]]:
         page = self.resolve_page(title)
@@ -488,7 +488,7 @@ class SQLiteStore:
         line_limit: int | None = None,
         backlink_limit: int = 20,
         related_limit: int = 20,
-        wanted_limit: int = 20,
+        unresolved_limit: int = 20,
     ) -> dict[str, Any]:
         page = self.resolve_page(title)
         backlinks = self.backlinks(title, backlink_limit)
@@ -505,8 +505,7 @@ class SQLiteStore:
                 "backlink_count_returned": len(backlinks),
                 "backlink_count_total": link_stats["link_count"],
                 "related": self.related(title, related_limit),
-                "wanted": [],
-                "red_link": bool(backlinks),
+                "unresolved_targets": [],
             }
 
         lines, lines_truncated = self.page_lines(page, line_limit)
@@ -520,15 +519,14 @@ class SQLiteStore:
             "backlink_count_returned": len(backlinks),
             "backlink_count_total": link_stats["link_count"],
             "related": self.related(page.title, related_limit),
-            "wanted": self.wanted_from_page(page, wanted_limit),
-            "red_link": False,
+            "unresolved_targets": self.unresolved_targets_from_page(page, unresolved_limit),
         }
 
-    def _wanted_stats_sql(self, limit: int | None, source_page_id: str | None = None) -> str:
+    def _unresolved_target_stats_sql(self, limit: int | None, source_page_id: str | None = None) -> str:
         source_filter = "AND e.source_page_id = ?" if source_page_id is not None else ""
         limit_clause = "" if limit is None or limit < 0 else "LIMIT ?"
         return f"""
-            WITH wanted_edges AS (
+            WITH unresolved_edges AS (
               SELECT e.target_norm, e.target_title, e.source_page_id, source.views, source.updated
               FROM edges e
               JOIN pages source ON source.id = e.source_page_id
@@ -539,17 +537,17 @@ class SQLiteStore:
             edge_stats AS (
               SELECT
                 target_norm,
-                COUNT(*) AS count,
+                COUNT(*) AS link_count,
                 COUNT(DISTINCT source_page_id) AS source_page_count,
                 MAX(COALESCE(updated, 0)) AS latest_source_updated
-              FROM wanted_edges
+              FROM unresolved_edges
               GROUP BY target_norm
             ),
             source_stats AS (
               SELECT target_norm, SUM(views) AS total_source_views
               FROM (
                 SELECT DISTINCT target_norm, source_page_id, views
-                FROM wanted_edges
+                FROM unresolved_edges
               )
               GROUP BY target_norm
             ),
@@ -563,7 +561,7 @@ class SQLiteStore:
                     PARTITION BY target_norm
                     ORDER BY COUNT(*) DESC, target_title
                   ) AS rn
-                FROM wanted_edges
+                FROM unresolved_edges
                 GROUP BY target_norm, target_title
               )
               WHERE rn = 1
@@ -571,7 +569,7 @@ class SQLiteStore:
             SELECT
               edge_stats.target_norm,
               title_choice.target_title,
-              edge_stats.count,
+              edge_stats.link_count,
               edge_stats.source_page_count,
               COALESCE(source_stats.total_source_views, 0) AS total_source_views,
               edge_stats.latest_source_updated
@@ -579,7 +577,7 @@ class SQLiteStore:
             JOIN source_stats ON source_stats.target_norm = edge_stats.target_norm
             JOIN title_choice ON title_choice.target_norm = edge_stats.target_norm
             ORDER BY
-              edge_stats.count DESC,
+              edge_stats.link_count DESC,
               edge_stats.source_page_count DESC,
               total_source_views DESC,
               edge_stats.latest_source_updated DESC,
@@ -587,27 +585,27 @@ class SQLiteStore:
             {limit_clause}
         """
 
-    def _wanted_row_to_dict(self, row: sqlite3.Row, source_page_id: str | None = None) -> dict[str, Any]:
+    def _unresolved_target_row_to_dict(self, row: sqlite3.Row, source_page_id: str | None = None) -> dict[str, Any]:
         norm = row["target_norm"]
-        examples = self._wanted_examples(norm, source_page_id=source_page_id)
+        examples = self._unresolved_target_examples(norm, source_page_id=source_page_id)
         return {
             "title": row["target_title"],
             "normalized_title": norm,
-            "count": row["count"],
+            "link_count": row["link_count"],
             "source_page_count": row["source_page_count"],
             "total_source_views": row["total_source_views"],
             "latest_source_updated": row["latest_source_updated"],
             "examples": [edge.to_dict() for edge in examples],
         }
 
-    def _wanted_materialized_rows_to_dicts(self, rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+    def _unresolved_target_materialized_rows_to_dicts(self, rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
         target_norms = [row["target_norm"] for row in rows]
-        examples_by_norm = self._wanted_materialized_examples(target_norms)
+        examples_by_norm = self._unresolved_target_materialized_examples(target_norms)
         return [
             {
                 "title": row["title"],
                 "normalized_title": row["target_norm"],
-                "count": row["count"],
+                "link_count": row["link_count"],
                 "source_page_count": row["source_page_count"],
                 "total_source_views": row["total_source_views"],
                 "latest_source_updated": row["latest_source_updated"],
@@ -616,7 +614,7 @@ class SQLiteStore:
             for row in rows
         ]
 
-    def _wanted_materialized_examples(self, target_norms: list[str]) -> dict[str, list[Edge]]:
+    def _unresolved_target_materialized_examples(self, target_norms: list[str]) -> dict[str, list[Edge]]:
         if not target_norms:
             return {}
         placeholders = ",".join("?" for _ in target_norms)
@@ -624,33 +622,33 @@ class SQLiteStore:
             rows = self.connection.execute(
                 f"""
                 SELECT
-                  we.target_norm,
-                  we.source_page_id,
+                  example.target_norm,
+                  example.source_page_id,
                   source.title AS source_title,
                   source.views AS source_views,
                   source.updated AS source_updated,
-                  we.line_id,
+                  example.line_id,
                   line.line_index,
                   line.text AS line_text,
-                  we.target_title,
-                  we.rank
-                FROM wanted_examples we
-                JOIN pages source ON source.id = we.source_page_id
-                JOIN lines line ON line.line_id = we.line_id
-                WHERE we.target_norm IN ({placeholders})
-                ORDER BY we.target_norm, we.rank
+                  example.target_title,
+                  example.rank
+                FROM unresolved_target_examples example
+                JOIN pages source ON source.id = example.source_page_id
+                JOIN lines line ON line.line_id = example.line_id
+                WHERE example.target_norm IN ({placeholders})
+                ORDER BY example.target_norm, example.rank
                 """,
                 target_norms,
             ).fetchall()
         except sqlite3.OperationalError:
-            return {norm: self._wanted_examples(norm) for norm in target_norms}
+            return {norm: self._unresolved_target_examples(norm) for norm in target_norms}
 
         examples: dict[str, list[Edge]] = {}
         for row in rows:
             examples.setdefault(row["target_norm"], []).append(self._edge_from_row(row))
         return examples
 
-    def _wanted_examples(self, target_norm: str, source_page_id: str | None = None) -> list[Edge]:
+    def _unresolved_target_examples(self, target_norm: str, source_page_id: str | None = None) -> list[Edge]:
         return self.backlinks_by_norm_query(target_norm, limit=5, source_page_id=source_page_id)
 
     def backlinks_by_norm_query(
@@ -812,6 +810,12 @@ class SQLiteStore:
     def _count(self, table: str) -> int:
         return self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
+    def _count_if_exists(self, table: str) -> int | None:
+        try:
+            return self._count(table)
+        except sqlite3.OperationalError:
+            return None
+
 
 def _write_metadata(connection: sqlite3.Connection, values: dict[str, str]) -> None:
     connection.executemany(
@@ -858,23 +862,20 @@ def link_multiplicity(link_count: int) -> str:
     return "multi"
 
 
-def rebuild_wanted(connection: sqlite3.Connection) -> None:
-    connection.execute("DELETE FROM wanted")
-    try:
-        connection.execute("DELETE FROM wanted_examples")
-    except sqlite3.OperationalError:
-        pass
+def rebuild_unresolved_targets(connection: sqlite3.Connection) -> None:
+    connection.execute("DELETE FROM unresolved_targets")
+    connection.execute("DELETE FROM unresolved_target_examples")
     connection.execute(
         """
-        INSERT INTO wanted (
+        INSERT INTO unresolved_targets (
           target_norm,
           title,
-          count,
+          link_count,
           source_page_count,
           total_source_views,
           latest_source_updated
         )
-        WITH wanted_edges AS (
+        WITH unresolved_edges AS (
           SELECT e.target_norm, e.target_title, e.source_page_id, source.views, source.updated
           FROM edges e
           JOIN pages source ON source.id = e.source_page_id
@@ -884,17 +885,17 @@ def rebuild_wanted(connection: sqlite3.Connection) -> None:
         edge_stats AS (
           SELECT
             target_norm,
-            COUNT(*) AS count,
+            COUNT(*) AS link_count,
             COUNT(DISTINCT source_page_id) AS source_page_count,
             MAX(COALESCE(updated, 0)) AS latest_source_updated
-          FROM wanted_edges
+          FROM unresolved_edges
           GROUP BY target_norm
         ),
         source_stats AS (
           SELECT target_norm, SUM(views) AS total_source_views
           FROM (
             SELECT DISTINCT target_norm, source_page_id, views
-            FROM wanted_edges
+            FROM unresolved_edges
           )
           GROUP BY target_norm
         ),
@@ -908,7 +909,7 @@ def rebuild_wanted(connection: sqlite3.Connection) -> None:
                 PARTITION BY target_norm
                 ORDER BY COUNT(*) DESC, target_title
               ) AS rn
-            FROM wanted_edges
+            FROM unresolved_edges
             GROUP BY target_norm, target_title
           )
           WHERE rn = 1
@@ -916,7 +917,7 @@ def rebuild_wanted(connection: sqlite3.Connection) -> None:
         SELECT
           edge_stats.target_norm,
           title_choice.target_title,
-          edge_stats.count,
+          edge_stats.link_count,
           edge_stats.source_page_count,
           COALESCE(source_stats.total_source_views, 0) AS total_source_views,
           edge_stats.latest_source_updated
@@ -925,16 +926,13 @@ def rebuild_wanted(connection: sqlite3.Connection) -> None:
         JOIN title_choice ON title_choice.target_norm = edge_stats.target_norm
         """
     )
-    try:
-        rebuild_wanted_examples(connection)
-    except sqlite3.OperationalError:
-        pass
+    rebuild_unresolved_target_examples(connection)
 
 
-def rebuild_wanted_examples(connection: sqlite3.Connection) -> None:
+def rebuild_unresolved_target_examples(connection: sqlite3.Connection) -> None:
     connection.execute(
         """
-        INSERT INTO wanted_examples (
+        INSERT INTO unresolved_target_examples (
           target_norm,
           rank,
           source_page_id,
