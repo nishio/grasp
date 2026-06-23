@@ -1039,29 +1039,30 @@ class SQLiteStore:
         ).fetchone()
         return self._page_from_row(row) if row is not None else None
 
-    def page_lines(self, page: Page, limit: int | None = None) -> tuple[list[Line], bool]:
+    def page_lines(self, page: Page, limit: int | None = None, offset: int = 0) -> tuple[list[Line], bool]:
         project = self._require_project()
+        offset = max(0, offset)
         if limit is None or limit < 0:
             rows = self.connection.execute(
                 """
                 SELECT * FROM lines
-                WHERE project = ? AND page_id = ?
+                WHERE project = ? AND page_id = ? AND line_index >= ?
                 ORDER BY line_index
                 """,
-                (project, page.id),
+                (project, page.id, offset),
             ).fetchall()
             return [self._line_from_row(row) for row in rows], False
 
         rows = self.connection.execute(
             """
             SELECT * FROM lines
-            WHERE project = ? AND page_id = ?
+            WHERE project = ? AND page_id = ? AND line_index >= ?
             ORDER BY line_index
             LIMIT ?
             """,
-            (project, page.id, limit),
+            (project, page.id, offset, limit),
         ).fetchall()
-        return [self._line_from_row(row) for row in rows], page.line_count > limit
+        return [self._line_from_row(row) for row in rows], offset + len(rows) < page.line_count
 
     def page_lines_around(
         self,

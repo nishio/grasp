@@ -65,6 +65,7 @@ class CliHelpTests(unittest.TestCase):
         self.assertIn("--unresolved-limit", read_help)
         self.assertIn("--around-line", read_help)
         self.assertIn("line_window", read_help)
+        self.assertIn("--line-offset", run_grasp_help("peek"))
         self.assertIn("--context", search_help)
         self.assertIn("context_window", search_help)
         self.assertIn("unresolved_targets", read_help)
@@ -459,6 +460,96 @@ class CliHelpTests(unittest.TestCase):
         self.assertNotIn("aaaaaaaaaaaaaaaaaaaaaaaa:0", compact.stdout)
         self.assertNotIn("line-id aliases:", full.stdout)
         self.assertIn("aaaaaaaaaaaaaaaaaaaaaaaa:0  A", full.stdout)
+
+    def test_peek_supports_line_offset_in_json_and_text_output(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "A",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 1,
+                    "views": 0,
+                    "lines": [
+                        {"text": "A", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "one", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "two", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "three", "created": 1, "updated": 1, "userId": "u"},
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--cosense",
+                    str(export_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            json_output = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "peek",
+                    "A",
+                    "--line-offset",
+                    "1",
+                    "--line-limit",
+                    "2",
+                    "--json",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            text_output = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "peek",
+                    "A",
+                    "--line-offset",
+                    "1",
+                    "--line-limit",
+                    "2",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        result = json.loads(json_output.stdout)
+        self.assertEqual(result["line_offset"], 1)
+        self.assertEqual([line["text"] for line in result["lines"]], ["one", "two"])
+        self.assertTrue(result["lines_truncated"])
+        self.assertTrue(result["lines_truncated_before"])
+        self.assertTrue(result["lines_truncated_after"])
+        self.assertIn("line_offset: 1", text_output.stdout)
+        self.assertIn("...\nP1:1  one\nP1:2  two\n...\n", text_output.stdout)
+        self.assertNotIn("P1:0  A", text_output.stdout)
 
     def test_search_json_includes_normalized_match_mode_for_loose_hits(self):
         fixture = {
