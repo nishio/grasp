@@ -1,5 +1,8 @@
 # Log
 
+## [2026-06-23 21:28] release | MIT ライセンスを明示
+- `LICENSE` に MIT License を追加し、`pyproject.toml` の package metadata と README に MIT 表記を追加。
+
 ## [2026-06-23 21:17] implementation | 複数 project を1 store 内の namespace として保持
 - nishio 指摘: 複数 JSON は同じ graph に merge する必要はないが、store file を分けるのでなく1つの store に project 名ごとに保持すべき。
 - SQLite schema を v4 に更新。`projects` table を追加し、pages / lines / edges / unresolved_targets / unresolved_target_examples を `project` 列で namespace 化。`grasp import --cosense <json>` は export root `name` を project 名にし、同名 project だけを置き換える。他 project は保持する。`grasp import --project <name> --cosense <json>` で override 可能。
