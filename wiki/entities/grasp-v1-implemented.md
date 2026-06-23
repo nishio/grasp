@@ -50,7 +50,7 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.5.7`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.5.8`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -116,6 +116,7 @@ Markdown mirror facts:
 - page id は frontmatter `id` があればそれ、なければ relative path の SHA-1 先頭 24 hex から作る。line id は Cosense import と同じく `<page-id>:<line-index>`。
 - frontmatter `aliases` と file stem は title resolve 候補になる。import 時に `[[alias]]` は canonical page title へ解決して edge 化し、store metadata の alias map により `read <alias>` / `backlinks <alias>` / `link-stats <alias>` も canonical page を読む。
 - frontmatter `tags` は page から tag target への outgoing edge として materialize する。`#tag` 付きの同じ frontmatter line で重複する場合は line 単位で重複 edge を避ける。
+- Markdown mirror の再 import は manifest を metadata に保存して差分判定する。manifest は relative path ごとの content hash / mtime_ns / page id / title / aliases を持つ。content-only 変更では changed file の page / lines / outgoing edges だけを差し替え、unresolved targets と project counts を再計算する。title / id / aliases / file set が変わった時は alias 解決が他 file の edges に影響するため full rebuild に戻す。
 - Markdown line text は原文のまま保存する。frontmatter も本文行として残す。
 - `[[Page]]`, `[[Page|alias]]`, `[[Page#Heading]]`, `[[folder/Page.md]]`, `![[Embed]]`, `#tag` を internal edge として materialize する。heading / alias は target resolution からは落とし、path suffix は file stem に畳む。
 - inline backtick 内と fenced code block 内の `[[...]]` は edge にしない。この repo の `wiki/` ではバックティックのプレーン名を親 llm-wiki 参照として扱い、grasp 内 edge にしない方針と整合する。

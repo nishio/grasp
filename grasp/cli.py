@@ -95,7 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Build or replace one SQLite graph project from a Cosense JSON export or read-only Markdown folder mirror.",
         returns=(
             "store, project, project_count, projects[], schema_version, current_schema_version, schema_ok, "
-            "source_export, imported_at, pages, lines, edges, unresolved_targets"
+            "source_export, imported_at, pages, lines, edges, unresolved_targets, markdown_import|null"
         ),
         examples=[
             "grasp import --cosense raw/nishio.json",
@@ -107,6 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Import replaces only the selected project namespace. Other projects in the same store are preserved.",
             "Project name defaults to the export's name field or folder name. Use --project to override.",
             "Markdown mirror v1 uses frontmatter title/id/aliases/tags when present, falls back to file stems, and parses [[wikilinks]] plus #tags as internal edges.",
+            "Markdown re-import uses a manifest: content-only file changes update incrementally; title/alias/id/file-set changes trigger a safe full rebuild.",
             "A cached copy of each imported Cosense JSON is kept beside the store for automatic schema recovery.",
         ],
     )
@@ -769,6 +770,15 @@ def format_result(command: str, result: Any) -> str:
 
 
 def format_import(result: dict[str, Any]) -> str:
+    markdown_import = result.get("markdown_import")
+    markdown_section = ""
+    if markdown_import:
+        markdown_section = (
+            f"markdown_import: {markdown_import['mode']}\n"
+            f"changed_files: {markdown_import['changed_files']}\n"
+        )
+        if markdown_import.get("full_rebuild_reason"):
+            markdown_section += f"full_rebuild_reason: {markdown_import['full_rebuild_reason']}\n"
     return (
         f"store: {result['store']}\n"
         f"project: {result['project']}\n"
@@ -777,6 +787,7 @@ def format_import(result: dict[str, Any]) -> str:
         f"lines: {result['lines']}\n"
         f"edges: {result['edges']}\n"
         f"unresolved_targets: {result['unresolved_targets']}\n"
+        f"{markdown_section}"
     )
 
 

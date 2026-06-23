@@ -48,6 +48,7 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
+| `1.5.8` | schema `5` | 2026-06-24 | schema `5` compatible | Markdown mirror の再 import に manifest-based incremental path を追加。content-only file 変更は changed page / lines / outgoing edges だけを差し替え、title / id / aliases / file set 変更時は safe full rebuild に戻す |
 | `1.5.7` | schema `5` | 2026-06-24 | schema `5` compatible | Markdown mirror が frontmatter `title` / `id` / `aliases` / `tags` を読むようになった。alias は canonical title へ解決して edge 化し、`read <alias>` / `backlinks <alias>` / `link-stats <alias>` でも canonical page を読める |
 | `1.5.6` | schema `5` | 2026-06-24 | schema `5` compatible | `grasp import --markdown <folder>` を追加。Markdown folder を read-only mirror として既存 SQLite graph store に materialize し、file stem を title、`[[wikilink]]` と `#tag` を edge として既存 `read` / `backlinks` / `related` surface で読めるようにした |
 | `1.5.5` | schema `5` | 2026-06-24 | schema `5` compatible | `related` 空結果に `recovery_hints` を追加。`path <A> <B>` を追加し、pages ∪ unresolved targets を node、materialized internal links を無向 edge として `--max-depth` bounded な shortest path と根拠 line を返す |
@@ -65,6 +66,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.5.7`
+- Current public compatibility version: `1.5.8`
 - Current internal `SCHEMA_VERSION`: `5`
-- Current package metadata should match `1.5.7`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.5.8`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

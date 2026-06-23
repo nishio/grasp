@@ -40,7 +40,7 @@ description: >-
   grasp --store /tmp/grasp-wiki.sqlite --project grasp-wiki read grasp-v1-implemented
   ```
 
-  最小 Markdown mirror は frontmatter `title` / `id` / `aliases` / `tags` を読み、無い場合は file stem を title にする。`[[...]]` と `#tag` を grasp 内 edge にする。バックティックのプレーン名（親 llm-wiki への cross-wiki 参照）は edge にしない。既存 Markdown folder へは書き戻さない。first H1 title resolution / Obsidian block refs / 差分 index はまだ未実装。
+  最小 Markdown mirror は frontmatter `title` / `id` / `aliases` / `tags` を読み、無い場合は file stem を title にする。`[[...]]` と `#tag` を grasp 内 edge にする。バックティックのプレーン名（親 llm-wiki への cross-wiki 参照）は edge にしない。既存 Markdown folder へは書き戻さない。再 import は content-only 変更なら差分更新し、title / id / aliases / file set が変わった時は安全に full rebuild する。first H1 title resolution / Obsidian block refs はまだ未実装。
 
 ## grasp とはどういう物か
 

@@ -110,9 +110,10 @@ grasp related "Some Note"
 - frontmatter `tags` を page から tag target への edge にする。
 - `[[Page]]`, `[[Page|alias]]`, `[[Page#Heading]]`, `[[folder/Page.md]]`, `![[Embed]]`, `#tag` を edge にする。
 - inline backtick / fenced code block 内は edge にしない。
+- manifest を metadata に保存し、content-only 変更なら changed file の page / lines / outgoing edges だけを差し替える。title / id / aliases / file set が変わった時は安全に full rebuild する。
 - 既存 Markdown folder へは書き戻さない。
 
-未実装のまま残すもの: first H1 title resolution、block refs、差分 index、duplicate/alias collision の高度な解決。これらは [[grasp-backlog]] の継続項目。
+未実装のまま残すもの: first H1 title resolution、block refs、alias-aware なより細かい差分 rebuild、duplicate/alias collision の高度な解決。これらは [[grasp-backlog]] の継続項目。
 
 ## Open Questions
 

@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 01:45] implementation | Markdown mirror の manifest-based 差分 index
+- `grasp import --markdown <folder>` が project metadata に Markdown manifest を保存するようにした。manifest は relative path ごとの content hash / mtime_ns / page id / title / aliases を持つ。
+- 再 import 時、title / id / aliases / file set が不変で content hash だけ変わった file は page / lines / outgoing edges を差し替える。unresolved targets と project counts は再計算する。title / id / aliases / file set が変わった時は、他 file の alias 解決済み edges が変わりうるため safe full rebuild に戻す。
+- JSON / text import output に `markdown_import.mode`, `changed_files`, `full_rebuild_reason` を追加。Dogfood: `wiki/` は 21 pages / 2086 lines / 249 edges / unresolved 0。旧 manifest 不在の1回目は `mode=full, reason=manifest_missing`、直後の2回目は `mode=incremental, changed_files=0`。
+- store schema は v5 のまま、public compatibility version は `1.5.8`。alias-aware なより細かい差分 rebuild は [[grasp-backlog]] に残す。
+
 ## [2026-06-24 01:12] implementation | Markdown frontmatter title / aliases / tags 対応
 - Markdown mirror が frontmatter `title` / `id` / `aliases` / `tags` を読むようにした。`title` は canonical title、`id` は page id、`aliases` と file stem は title resolve 候補、`tags` は page から tag target への outgoing edge として扱う。
 - `[[alias]]` は import 時に canonical title へ解決して edge 化し、store metadata の alias map により `read <alias>` / `backlinks <alias>` / `link-stats <alias>` でも canonical page を読める。

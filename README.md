@@ -95,6 +95,7 @@ grasp --project notes read "<ファイル名から .md を除いた title>"
 ```
 
 frontmatter `title` があれば page title に使い、`aliases` と file stem は link 解決候補になります。既存ファイルへは書き戻しません。
+再 import 時は manifest を見て、本文だけ変わったファイルを page 単位で差分更新します。frontmatter `title` / `id` / `aliases` や file set が変わった時は、安全のため project 全体を再構築します。
 
 ### 3. AI に聞く
 
@@ -160,7 +161,7 @@ grasp read "<ページタイトル>"
 
 ## Roadmap
 
-- **Markdown / Obsidian 互換性の拡張** — 最小の read-only mirror は実装済み。first H1 title resolution / Obsidian block refs / 差分 index などは今後の拡張。
+- **Markdown / Obsidian 互換性の拡張** — 最小の read-only mirror と content-only 差分 index は実装済み。first H1 title resolution / Obsidian block refs / より細かい alias-aware incremental rebuild などは今後の拡張。
 - **書き込み層（`write` / `rename`）** — Scrapbox / Cosenseを使っている人がAIから書くときはcosense-cliで書くことを想定しています。これは将来的にCosenseユーザでない人 or オンラインのCosenseに書くのではなくローカルに閉じて欲しいケース をサポートする目的です。
 - **ベクトル検索** — 文字列一致だけでなく、意味の近さで関連を辿る。
 

@@ -4,6 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
+from typing import Any
 
 from .cosense import Edge, Line, Page, normalize_title, parse_cosense_hash_tag
 
@@ -22,6 +23,8 @@ class MarkdownPageRecord:
     page: Page
     aliases: list[str]
     tags: list[tuple[str, int]]
+    source_hash: str
+    mtime_ns: int
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,8 @@ class MarkdownMirror:
     edges: list[Edge]
     title_collisions: dict[str, list[str]]
     title_aliases: dict[str, str]
+    records: tuple[MarkdownPageRecord, ...]
+    file_manifest: dict[str, Any]
     project_name: str
     display_name: str
     source_folder: Path
@@ -51,13 +56,16 @@ class MarkdownMirror:
         id_buckets: dict[str, list[str]] = defaultdict(list)
         for path in markdown_files:
             relative_path = path.relative_to(root)
-            text_lines = path.read_text(encoding="utf-8").splitlines()
+            stat = path.stat()
+            raw_bytes = path.read_bytes()
+            source_hash = hashlib.sha1(raw_bytes).hexdigest()
+            text_lines = raw_bytes.decode("utf-8").splitlines()
             metadata = parse_frontmatter(text_lines)
             file_title = markdown_title(path)
             page_id = metadata.page_id or markdown_page_id(relative_path)
             title = metadata.title or file_title
             norm_title = normalize_title(title)
-            updated = int(path.stat().st_mtime)
+            updated = int(stat.st_mtime)
             lines = tuple(
                 Line(
                     line_id=f"{page_id}:{line_index}",
@@ -83,6 +91,8 @@ class MarkdownMirror:
                     page=page,
                     aliases=[alias for alias in aliases if normalize_title(alias) != norm_title],
                     tags=metadata.tags,
+                    source_hash=source_hash,
+                    mtime_ns=stat.st_mtime_ns,
                 )
             )
             title_buckets[norm_title].append(relative_path.as_posix())
@@ -147,6 +157,8 @@ class MarkdownMirror:
                 for alias_norm, title in title_aliases.items()
                 if normalize_title(title) != alias_norm
             },
+            records=tuple(records),
+            file_manifest=markdown_file_manifest(records),
             project_name=root.name,
             display_name=root.name,
             source_folder=root,
@@ -168,6 +180,23 @@ def markdown_page_id(relative_path: Path) -> str:
 
 def markdown_title(path: Path) -> str:
     return path.stem
+
+
+def markdown_file_manifest(records: list[MarkdownPageRecord]) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "files": {
+            record.relative_path.as_posix(): {
+                "page_id": record.page.id,
+                "title": record.page.title,
+                "norm_title": record.page.norm_title,
+                "aliases": record.aliases,
+                "hash": record.source_hash,
+                "mtime_ns": record.mtime_ns,
+            }
+            for record in records
+        },
+    }
 
 
 def parse_frontmatter(lines: list[str]) -> MarkdownMetadata:
