@@ -180,6 +180,14 @@ line_tombstones(project, id, page_id, deleted_at, last_text?)
 
 出典: [[ai-consumer-feedback-2026-06-23]] Tier 2。`gather "<query>" --budget <tokens>` = 問いから「最小ページ集合＋近傍」を token 予算内で返す retrieval orchestration を 1 verb で。ハブ（KJ法=151 backlinks）を読むと context が溢れるので、ランク上位から予算ぶん詰めて「残り N 件省略」と明示する。**テンション**: 太い verb は orchestration を CLI に寄せ、「薄い CLI / Skill がオーケストレーション」境界（[[delivery-cli-plus-skill]]）と緊張する。薄さを保つなら Skill 側に gather レシピを明文化、太くするなら verb。nishio 判断待ち。
 
+2026-06-24 KJ法 hub audit（[[kj-link-hub-audit-2026-06-24]]）で、巨大 hub は単に backlinks が多いだけでなく、**リンク化を避けた bare mention が graph 外に大量にある**ことが分かった。`KJ法` は exact `[KJ法]` 151 links / 144 pages だが、literal `KJ法` は 681 pages / 2,333 lines / 2,765 occurrences、body bare mention は 490 pages / 1,777 lines / 2,156 occurrences。全部リンク化すると hub を悪化させるため、`gather` は「リンク済み backlinks」だけでなく、bare mention / co-link slice / omitted count を扱う必要がある。
+
+未実装候補:
+
+- `mentions <query>` or `search --mentions --link-gap`: literal mentions outside parsed internal-link spansを、page already has exact link / no exact link / no query-containing link target で分けて返す。目的は bulk link 化ではなく、link gap と意図的 non-link を見分けること。
+- `co-links <query>` or `backlinks --co-links`: query を含む行で同時に出る internal links を rank し、巨大 hub の slice handle を出す。`KJ法` では `考える花火` / `こざね法` / `グループ編成` / `探検ネット` / `付箋` / `川喜田 二郎` / `発想法` / `表札*` が自然な絞り込み軸だった。
+- `gather` は huge hub を token budget 内で扱う時、ranked backlink lines + representative co-link slices + bare mention samples + omitted counts を返す。
+
 ## Graph-native reasoning primitives（AI consumer Tier 3）
 
 出典: [[ai-consumer-feedback-2026-06-23]] Tier 3。embeddings 無しでも純グラフ操作で「Markdown 束には出せない」価値が出る所。
@@ -193,7 +201,8 @@ line_tombstones(project, id, page_id, deleted_at, last_text?)
   - **2026-06-24 00:05 初期実装済み**: `grasp path <A> <B> --max-depth 4 --limit 3` を追加。JSON は source/target node、paths[]、distance、nodes[]、edge example lines、truncated を返す。node は page / unresolved、edge は line-level materialized link を無向に畳む。dogfood: `path KJ法 弱い紐帯 --max-depth 4 --limit 1 --json` が 3-hop（KJ法 → Scrapbox情報整理術 → 情報と秩序 → 弱い紐帯）を返した。**残課題**: dense hub での performance（nishio store で約4-5s）、neighbor ranking、複数 shortest paths の出し方、実用的に意味のある経路かの継続 dogfood。
   - **2026-06-24 01:39 no-path recovery 実装済み**: 端点が resolve できるが bounded search で経路が見つからない時、`recovery_hints.path` に reason / next_max_depth / related / backlinks / link-stats を返す。negative-result contract は path no-path まで揃った。残課題は dense hub performance、neighbor ranking、複数 shortest paths の出し方、実用的に意味のある経路かの継続 dogfood。
 - **backlinks の finer ranking**（nishio agree）: 既に `backlinks` は `source.views DESC, updated DESC, title, line_index` でランク済み（related と同じ primary signal、[[grasp-v1-implemented]]）。未済は **link 密度 / multiplicity / recency の重み付け**で「最も中心的な 20 件」精度を上げること。コア（views ランク）は済んでいる。
-- ~~**近傍クラスタリング `--cluster`**~~ → **却下（nishio 2026-06-23）**。クラスタリングは **AI がやるべき**（AI の方が賢い）＝grasp は raw＋ranking を返し AI が sub-theme に畳む（feedback 著者自身の「default raw、AI にクラスタさせる」選好とも一致、原理 [[ai-consumer-cost-and-trust]] の fidelity 方針）。CLI 側でやるなら **embeddings 導入後に雑な embedding クラスタリング**を optional で足す程度。そもそも **100+ リンクのハブは rare case** なので動機自体が稀。
+- ~~**近傍クラスタリング `--cluster`**~~ → **却下（nishio 2026-06-23）**。クラスタリングは **AI がやるべき**（AI の方が賢い）＝grasp は raw＋ranking を返し AI が sub-theme に畳む（feedback 著者自身の「default raw、AI にクラスタさせる」選好とも一致、原理 [[ai-consumer-cost-and-trust]] の fidelity 方針）。CLI 側でやるなら **embeddings 導入後に雑な embedding クラスタリング**を optional で足す程度。
+  - 2026-06-24 修正: 「100+ リンクのハブは rare case」自体は希少でも、`KJ法` のように実在すると load-bearing。却下するのは CLI が cluster label を作ること。必要なのは AI が clustering できる raw material（counts / ranked rows / co-link slices / bare mention samples）を出す retrieval primitive。
 
 ## Negative-result contract（AI consumer 横断原理）
 

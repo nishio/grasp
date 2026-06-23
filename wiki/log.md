@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 02:22] file back | KJ法 hub audit を記録し、bare mention / co-link slice を backlog 化
+- nishio の相談「KJ法 が 100+ backlink で広すぎ、リンクにしないで KJ法 とだけ書くケースもある」を受け、`~/.grasp/grasp.sqlite` project `nishio` を `sync` 後に実測。
+- 結果: exact `[KJ法]` は 151 links / 144 pages。一方 literal `KJ法` は 681 pages / 2,333 lines / 2,765 occurrences、internal-link span 外の bare `KJ法` は 519 pages / 1,866 lines / 2,246 occurrences、body bare mention は 490 pages / 1,777 lines / 2,156 occurrences。body bare mention があるが exact `[KJ法]` が無い page は 415、`KJ法` 系 link target が一切無い page は 339。
+- 判断: 全部を `[KJ法]` にリンク化すると hub を悪化させる。`[KJ法]` は root / representative link とし、通常言及は `表札づくり` / `グループ編成` / `考える花火` / `Kozaneba` / `探検ネット` / `こざね法` など subtopic link に逃がす方がよい。
+- [[kj-link-hub-audit-2026-06-24]] を追加。[[grasp-backlog]] に `mentions` / `search --mentions --link-gap`、`co-links`、`gather` の huge hub handling を未実装候補として追記。`--cluster` 却下は維持しつつ、`KJ法` が「rare だが load-bearing な hub」実例であると補正。
+
 ## [2026-06-24 02:21] file back | PR #1 Markdown mirror を main に merge
 - GitHub PR #1 `feat/read-only-markdown-mirror`（read-only Markdown mirror import）は draft / conflict 状態だったため、PR worktree で `origin/main` を merge し conflict を解消した。解消 commit は `bf206bf`。
 - conflict は version/current facts/log まわりで、package version と [[history]] の current version は `1.5.10` に統合した。`import --markdown` と `read --around-line` の両 surface を保持。
