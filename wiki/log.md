@@ -1,6 +1,9 @@
 # Log
 
-## [2026-06-24 00:12] tooling | `/ship-next` カスタムコマンドを追加
+## [2026-06-24 00:24] file back | grasp wiki 自身を Markdown mirror 層の最初の dogfood corpus にする動機 ＋ dual-link policy 論点を backlog に追記
+- nishio 「いつかのタイミングでこのプロジェクトの wiki 自体をこのシステムで作りたい」を受け、[[grasp-backlog]] の Markdown / Obsidian indexed mirror 節に小節を追加。
+- 動機: grasp wiki（`wiki/`, Markdown+frontmatter+`[[...]]`）を mirror 層の最初のテスト corpus にすると「設計判断グラフを近傍同梱で辿りながら次を実装する」ループが閉じる。段階は read-only mirror が write 層より先。
+- 設計含意: このwikiは **リンク記法が2系統混在**（`[[...]]`=grasp内→edge、バックティックのプレーン名=親 llm-wiki への cross-wiki link→edge にしない）。∴ Markdown parser TODO に「どの記法を edge とみなすか policy」を明示項目として追加。Cosense JSON だけ見ていると気づけない論点。詳細決定は [[markdown-obsidian-indexed-mirror]]。
 - nishio 提案「file back, commit, push, what's next? までを一つのカスタムコマンドにする？」を受け、`.claude/commands/ship-next.md` を追加。
 - 目的: grasp の作業ループ（差分理解 → wiki file back → `unittest` / wiki lint / diff check → commit → push → 次実装候補提示）を毎回同じ形で閉じる。空差分なら empty commit せず、current backlog から "what's next?" だけ答える。
 
