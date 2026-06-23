@@ -1,18 +1,23 @@
 # Log
 
+## [2026-06-23 20:17] file back | 公式 cosense-cli との速度比較を再計測で更新
+- [[cosense-cli]] の実測比較を、旧 MVP（毎回 123MB JSON full parse で ~3.4s）から現行 SQLite warm store ベースへ更新。median of 5 で `grasp read` 67ms / `peek` 65ms / `related` 72ms / `search 盲点 --limit 100` 185ms、公式 `cosense` v1.4.4 は `browsePage` 578ms / `browseRelatedPages` 1169ms / `searchFullText` 875ms / `searchVector` 792ms。
+- 初回 seed は別枠として temp store import 8.3s。含意: **反復 read/search は grasp、freshness delta は cosense-cli**。`sync --limit 20 --dry-run` 695ms は `listPages --sort updated --limit 20` 636ms と同程度で、sync の律速が hosted network/API であることも明記。
+
 ## [2026-06-23 20:15] implementation | explicit import option を `--cosense` に変更
 - nishio 指摘「`grasp import --export your.json` は将来サポート対象が増えた時に何の export か混乱する。`--cosense` がよい」に合わせ、明示 import surface を `grasp import --cosense <json> --force` に変更。
 - リリース前なので互換性は取らず、global `--export` / `--rebuild-store` / store 不在時の暗黙 seed は削除。store 作成・再構築は `grasp import --cosense <json> --force` に一本化。
 - SPEC / Skill / [[grasp-cli-mvp]] に file back。
 
+## [2026-06-23 20:10] decision | Cosense ヘビーユーザ user test の F1–F5 を v1 TODO に確定
+- 第3の視点（nishio でない Cosense 熟練者が GitHub から自前 project を入れようとする。persona1/persona2 のどちらとも違う）で CLI を user test し、新ページ [[v1-todo]] に nishio 判断を固定。
+- F1 README=★最優先（landing 無し・自前 project の入れ方が無い・default/例が nishio 固有）。F2 `#hashtag` をデフォルトで Scrapbox 同様リンク化（無視オプションは将来）。F3 数字のみ `[1]`/`[2024]` を捨てるのはバグ→拾う（`xs[0]` 等の false positive 除外は維持）。F4+transclude write/transclude/rename は v1 に**載せない**("planned"でもない)＝v1=Export JSON の AI 高速 read-only、SPEC 表から削除。F5 help 例 `.grasp/grasp.sqlite` を実デフォルト `~/.grasp/grasp.sqlite` に一致。
+- 良かった点（中核仮説）: `read`=近傍同梱が「関連ペインのテキスト版」として ~0.1s で成立、search/suggest/peek/unresolved が Scrapbox の手癖に対応、case/space 正規化一致。
+- 未了: persona3（Cosense 熟練者 but not nishio）の user test ページ化は offer のまま未実施。本 TODO は SPEC 反映 action を含むが、SPEC.md は別セッション編集中のため本 session では未編集（commit もしていない）。
+
 ## [2026-06-23 20:09] implementation | `export-ai` default を depth 1・limit なしに変更
 - nishio 指示「デフォルトは `--depth 1` で limit なし」に合わせ、`grasp export-ai` の `--direct-limit` / `--indirect-limit` default を `None`（無制限）に変更。`--depth` は既に 1 が default。
 - SPEC と `skills/grasp/SKILL.md` に default semantics を明記。
-
-## [2026-06-23 20:04] implementation | Cosense Export for AI 風 bundle を CLI に追加
-- raw に置かれた `nishio-*.1hop.txt` / `.2hop.txt` をサンプルとして確認し、`grasp export-ai <title>`（alias `export-for-ai`）を追加。既存 page は main page + 1-hop pages、`--depth 2` で 2-hop pages まで、page が無い target は backlink source pages から始める。stdout が export 本文、`--output <path>` でファイル保存。
-- 1-hop ordering は outgoing existing pages を本文出現順で先に並べ、backlink source pages を補う。2-hop は direct pages と shared link target（unresolved target 含む）経由の pages。これにより raw sample の `巨人の肩に登るコストの減少 --depth 2 --direct-limit 5 --indirect-limit 4` は main + 5 direct + 4 indirect の title 列が一致。
-- SPEC と `skills/grasp/SKILL.md` の verb snapshot を更新。`python3 -m unittest discover -s tests` OK。
 
 ## [2026-06-23 19:56] file back | global store の設計原理を canonical な store decision へ昇格
 - 19:53 の global 化を mechanics として log/delivery decision に書いたが、**「store は global に1個（per-project 複製しない）」という原理**は store の正典 [[persistence-custom-format]] に無かった。そこへ Update を追加: store は単一 AI 所有 knowledge store ＝ どこでも同じ1個（cwd cache でない）、置き場は `$GRASP_STORE → $GRASP_HOME/grasp.sqlite → ~/.grasp/grasp.sqlite`、store path は project state でなく user/agent state、別 knowledge set は `$GRASP_HOME` で home ごと差し替え。delivery の global skill 判断（[[delivery-cli-plus-skill]]）と同根＝「1つの外部脳=1つの store=どこからでも同じ skill」。
@@ -23,6 +28,11 @@
 - 既存 store を `~/.grasp/grasp.sqlite` へ移動、seed を `~/.grasp/nishio.json -> repo raw/nishio.json` の symlink に。**`/tmp` から flag 無しの `grasp read/link-stats` が動作**。`python3 -m unittest discover -s tests` 11 OK（tests は default path 非依存）。
 - skill を **user-level 化**: `~/.claude/skills/grasp -> /Users/nishio/grasp/skills/grasp`（SSoT 1本を symlink、全 project で発火）。SKILL.md「実行方法」を global default 前提に更新（別 cwd でも flag 不要）。`*.egg-info/` を gitignore。
 - file back: [[delivery-cli-plus-skill]] の install Open Q を「user-level skill＋global store 配置済み」に更新。SPEC は別セッションが既に global store 記述に追随済みで一致。
+
+## [2026-06-23 19:52] file back | Markdown / Obsidian folder は indexed mirror として扱う
+- nishio の問い（既存 Markdown 束 or Obsidian folder を point し、grep より高速な検索とリンクたどりを付与する Skill 方向はどうか）を新 decision [[markdown-obsidian-indexed-mirror]] に固定。
+- 核心: **Skill が速くするのではなく、Markdown / Obsidian folder adapter が read-only indexed mirror を作る**。SQLite store に pages / lines / edges / unresolved targets / search index を materialize し、Skill は `grasp` CLI を使わせる薄い層にする。
+- pitch は "faster grep" では弱い。persona2 には **indexed graph reader for Markdown / Obsidian notes, optimized for LLM agents** と言う。価値は `read` が本文 + 逆リンク行 + related + unresolved targets を一体で返すこと。初期は write-back / rename propagation / Obsidian plugin 完全互換を非目標にし、既存 vault を壊さない point-at-folder 体験を優先。
 
 ## [2026-06-23 19:50] file back | persona1 user-test の設計含意を SPEC / entity へ伝播
 - [[persona1-user-test-2026-06-23]] の発見を [[SPEC]] と [[grasp-cli-mvp]] に反映。`~/.grasp/grasp.sqlite` global store default（`$GRASP_HOME` で差し替え）を current mechanics として明記し、repo-local `.grasp/grasp.sqlite` 前提の記述を更新。[[delivery-cli-plus-skill]] も「別 cwd では --store 必須」から「global store なので flag なしで読む」に更新。
