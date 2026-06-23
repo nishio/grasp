@@ -104,17 +104,20 @@ grasp related "Some Note"
 
 実装済み policy:
 
-- file stem を title にする。
+- frontmatter `title` があれば page title にし、無ければ file stem を title にする。
+- frontmatter `id` があれば page id にし、無ければ relative path hash を page id にする。
+- frontmatter `aliases` と file stem を title resolve 候補にし、`[[alias]]` を canonical title へ解決する。
+- frontmatter `tags` を page から tag target への edge にする。
 - `[[Page]]`, `[[Page|alias]]`, `[[Page#Heading]]`, `[[folder/Page.md]]`, `![[Embed]]`, `#tag` を edge にする。
 - inline backtick / fenced code block 内は edge にしない。
 - 既存 Markdown folder へは書き戻さない。
 
-未実装のまま残すもの: frontmatter title / aliases / `id` / tags、block refs、差分 index、duplicate/alias collision の高度な解決。これらは [[grasp-backlog]] の継続項目。
+未実装のまま残すもの: first H1 title resolution、block refs、差分 index、duplicate/alias collision の高度な解決。これらは [[grasp-backlog]] の継続項目。
 
 ## Open Questions
 
 - CLI 名: 初期実装は `import --markdown <folder>`。将来 persona2 向けに `index-md` alias を足すか。
-- title resolution: 初期実装は file stem。first H1, frontmatter title, aliases の優先順位。
+- title resolution: 初期実装は frontmatter title → file stem。first H1 を使うか。
 - duplicate title / alias collision の扱い。
 - heading / block ref を line-id とどう対応させるか。
 - `#tag` と wikilink を同一 edge type にするか。

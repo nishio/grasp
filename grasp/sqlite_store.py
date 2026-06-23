@@ -238,7 +238,10 @@ def import_export_to_sqlite(
                     "schema_version": SCHEMA_VERSION,
                     "last_imported_project": project,
                     "last_source_export": str(export_path),
+                    "last_source_type": "cosense",
                     "last_imported_at": str(int(time.time())),
+                    f"project.{project}.source_type": "cosense",
+                    f"project.{project}.title_aliases": "{}",
                 },
             )
     finally:
@@ -375,6 +378,11 @@ def import_markdown_folder_to_sqlite(
                     "last_source_type": "markdown",
                     "last_imported_at": str(now),
                     f"project.{project}.source_type": "markdown",
+                    f"project.{project}.title_aliases": json.dumps(
+                        source.title_aliases,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
                 },
             )
     finally:
@@ -673,6 +681,30 @@ class SQLiteStore:
             return None
         return data if isinstance(data, dict) else None
 
+    def project_title_aliases(self, project: str | None = None) -> dict[str, str]:
+        project = self._require_project(project)
+        raw = self.metadata().get(f"project.{project}.title_aliases")
+        if raw is None:
+            return {}
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return {
+            str(alias_norm): str(title)
+            for alias_norm, title in data.items()
+            if isinstance(alias_norm, str) and isinstance(title, str)
+        }
+
+    def _resolve_title_norm(self, title: str, *, project: str) -> str:
+        norm_title = normalize_title(title)
+        alias_title = self.project_title_aliases(project).get(norm_title)
+        if alias_title is None:
+            return norm_title
+        return normalize_title(alias_title)
+
     def _selected_project_or_none(self) -> str | None:
         if self.project:
             return self.project
@@ -763,6 +795,8 @@ class SQLiteStore:
                 "last_acquired_project": project,
                 "last_acquired_source": source_export,
                 "last_acquired_at": str(now),
+                f"project.{project}.source_type": "cosense",
+                f"project.{project}.title_aliases": "{}",
             }
             if acquisition_metadata is not None:
                 metadata[f"project.{project}.acquisition"] = json.dumps(
@@ -796,6 +830,7 @@ class SQLiteStore:
 
     def resolve_page(self, title: str) -> Page | None:
         project = self._require_project()
+        norm_title = self._resolve_title_norm(title, project=project)
         row = self.connection.execute(
             """
             SELECT * FROM pages
@@ -803,7 +838,7 @@ class SQLiteStore:
             ORDER BY rowid
             LIMIT 1
             """,
-            (project, normalize_title(title)),
+            (project, norm_title),
         ).fetchone()
         return self._page_from_row(row) if row is not None else None
 
@@ -833,6 +868,7 @@ class SQLiteStore:
 
     def backlinks(self, title: str, limit: int | None = None, offset: int = 0) -> list[Edge]:
         project = self._require_project()
+        norm_title = self._resolve_title_norm(title, project=project)
         query = """
             SELECT
               e.source_page_id,
@@ -850,7 +886,7 @@ class SQLiteStore:
             WHERE e.project = ? AND e.target_norm = ?
             ORDER BY source.views DESC, COALESCE(source.updated, 0) DESC, source.title, line.line_index
         """
-        params: list[Any] = [project, normalize_title(title)]
+        params: list[Any] = [project, norm_title]
         if limit is not None and limit >= 0:
             query += " LIMIT ? OFFSET ?"
             params.extend([limit, offset])
@@ -861,8 +897,8 @@ class SQLiteStore:
 
     def link_stats(self, title: str) -> dict[str, Any]:
         project = self._require_project()
-        norm = normalize_title(title)
         page = self.resolve_page(title)
+        norm = page.norm_title if page is not None else self._resolve_title_norm(title, project=project)
         if page is None:
             unresolved_target = self.connection.execute(
                 "SELECT * FROM unresolved_targets WHERE project = ? AND target_norm = ?",

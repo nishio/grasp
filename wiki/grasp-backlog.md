@@ -45,15 +45,14 @@ sources:
 
 persona2 向け on-ramp。詳細決定は [[markdown-obsidian-indexed-mirror]]。
 
-2026-06-24 00:58: 最小 read-only Markdown mirror は実装済み。`grasp import --markdown <folder>` が `.md` files を既存 SQLite graph store に materialize し、file stem を title、`[[...]]` / `#tag` を edge として既存 `read` / `backlinks` / `related` surface で読める。current facts は [[grasp-v1-implemented]]。
+2026-06-24 00:58: 最小 read-only Markdown mirror は実装済み。`grasp import --markdown <folder>` が `.md` files を既存 SQLite graph store に materialize し、file stem を title、`[[...]]` / `#tag` を edge として既存 `read` / `backlinks` / `related` surface で読める。2026-06-24 01:12 に frontmatter `title` / `id` / `aliases` / `tags` 対応も追加済み。current facts は [[grasp-v1-implemented]]。
 
 未実装:
 
 - `index-md` / `import-md` / `import --format markdown <folder>` を追加するかどうか。現状の実装 surface は `import --markdown <folder>`。
-- first H1 / frontmatter title / aliases の title resolution。
-- frontmatter `id` / `aliases` / `tags` の扱い。
+- first H1 title resolution。
 - Obsidian block refs と heading anchors の line-id 対応。
-- duplicate title / alias collision。
+- duplicate title / alias collision の高度な解決（現状は import error）。
 - source folder を壊さない read-only indexed mirror としての差分 index。
 
 ### grasp 自身の wiki を最初の dogfood corpus にする

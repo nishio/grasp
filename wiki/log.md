@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 01:12] implementation | Markdown frontmatter title / aliases / tags 対応
+- Markdown mirror が frontmatter `title` / `id` / `aliases` / `tags` を読むようにした。`title` は canonical title、`id` は page id、`aliases` と file stem は title resolve 候補、`tags` は page から tag target への outgoing edge として扱う。
+- `[[alias]]` は import 時に canonical title へ解決して edge 化し、store metadata の alias map により `read <alias>` / `backlinks <alias>` / `link-stats <alias>` でも canonical page を読める。
+- Dogfood: `wiki/` は 21 pages / 2077 lines / 248 edges / unresolved 0。frontmatter の `sources: [[...]]` は従来通り本文行 link として edge 化され、バックティック参照は edge にならない。
+- store schema は v5 のまま、public compatibility version は `1.5.7`。first H1 title resolution / Obsidian block refs / 差分 index は [[grasp-backlog]] に残す。
+
 ## [2026-06-24 00:58] implementation | read-only Markdown mirror の最小実装
 - `grasp import --markdown <folder>` を追加。Markdown folder を既存 SQLite graph store に read-only mirror として materialize し、file stem を title、relative path hash を page id、`[[wikilink]]` / `#tag` を edge として扱う。
 - `[[Page|alias]]`, `[[Page#Heading]]`, `[[folder/Page.md]]`, `![[Embed]]` は target title に畳んで edge 化する。inline backtick / fenced code block 内は edge にしないため、grasp wiki のバックティック親 llm-wiki 参照は graph に混ぜない。

@@ -106,7 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Uses --cosense for a Cosense JSON export file, or --markdown for a read-only Markdown folder mirror.",
             "Import replaces only the selected project namespace. Other projects in the same store are preserved.",
             "Project name defaults to the export's name field or folder name. Use --project to override.",
-            "Markdown mirror v1 uses file stems as page titles and parses [[wikilinks]] plus #tags as internal edges.",
+            "Markdown mirror v1 uses frontmatter title/id/aliases/tags when present, falls back to file stems, and parses [[wikilinks]] plus #tags as internal edges.",
             "A cached copy of each imported Cosense JSON is kept beside the store for automatic schema recovery.",
         ],
     )

@@ -9,10 +9,27 @@ from .cosense import Edge, Line, Page, normalize_title, parse_cosense_hash_tag
 
 
 @dataclass(frozen=True)
+class MarkdownMetadata:
+    title: str | None
+    page_id: str | None
+    aliases: list[str]
+    tags: list[tuple[str, int]]
+
+
+@dataclass(frozen=True)
+class MarkdownPageRecord:
+    relative_path: Path
+    page: Page
+    aliases: list[str]
+    tags: list[tuple[str, int]]
+
+
+@dataclass(frozen=True)
 class MarkdownMirror:
     pages: list[Page]
     edges: list[Edge]
     title_collisions: dict[str, list[str]]
+    title_aliases: dict[str, str]
     project_name: str
     display_name: str
     source_folder: Path
@@ -29,15 +46,18 @@ class MarkdownMirror:
         if not markdown_files:
             raise ValueError(f"Markdown folder has no .md files: {root}")
 
-        pages: list[Page] = []
+        records: list[MarkdownPageRecord] = []
         title_buckets: dict[str, list[str]] = defaultdict(list)
+        id_buckets: dict[str, list[str]] = defaultdict(list)
         for path in markdown_files:
             relative_path = path.relative_to(root)
-            page_id = markdown_page_id(relative_path)
-            title = markdown_title(path)
+            text_lines = path.read_text(encoding="utf-8").splitlines()
+            metadata = parse_frontmatter(text_lines)
+            file_title = markdown_title(path)
+            page_id = metadata.page_id or markdown_page_id(relative_path)
+            title = metadata.title or file_title
             norm_title = normalize_title(title)
             updated = int(path.stat().st_mtime)
-            text_lines = path.read_text(encoding="utf-8").splitlines()
             lines = tuple(
                 Line(
                     line_id=f"{page_id}:{line_index}",
@@ -47,18 +67,26 @@ class MarkdownMirror:
                 )
                 for line_index, text in enumerate(text_lines)
             )
-            pages.append(
-                Page(
-                    id=page_id,
-                    title=title,
-                    norm_title=norm_title,
-                    created=None,
-                    updated=updated,
-                    views=0,
-                    lines=lines,
+            page = Page(
+                id=page_id,
+                title=title,
+                norm_title=norm_title,
+                created=None,
+                updated=updated,
+                views=0,
+                lines=lines,
+            )
+            aliases = list(dict.fromkeys([file_title, *metadata.aliases]))
+            records.append(
+                MarkdownPageRecord(
+                    relative_path=relative_path,
+                    page=page,
+                    aliases=[alias for alias in aliases if normalize_title(alias) != norm_title],
+                    tags=metadata.tags,
                 )
             )
             title_buckets[norm_title].append(relative_path.as_posix())
+            id_buckets[page_id].append(relative_path.as_posix())
 
         title_collisions = {
             norm: paths
@@ -72,8 +100,24 @@ class MarkdownMirror:
             )
             raise ValueError(f"duplicate Markdown page titles: {details}")
 
+        id_collisions = {
+            page_id: paths
+            for page_id, paths in id_buckets.items()
+            if len(paths) > 1
+        }
+        if id_collisions:
+            details = "; ".join(
+                f"{page_id}: {', '.join(paths)}"
+                for page_id, paths in sorted(id_collisions.items())
+            )
+            raise ValueError(f"duplicate Markdown page ids: {details}")
+
+        title_aliases = build_title_aliases(records)
+        pages = [record.page for record in records]
         edges: list[Edge] = []
-        for page in pages:
+        line_target_norms: dict[str, set[str]] = defaultdict(set)
+        for record in records:
+            page = record.page
             in_code_fence = False
             for line in page.lines:
                 links, in_code_fence = parse_markdown_line_links(
@@ -81,24 +125,28 @@ class MarkdownMirror:
                     in_code_fence=in_code_fence,
                 )
                 for target_title in links:
-                    edges.append(
-                        Edge(
-                            source_page_id=page.id,
-                            source_title=page.title,
-                            source_views=page.views,
-                            source_updated=page.updated,
-                            line_id=line.line_id,
-                            line_index=line.index,
-                            line_text=line.text,
-                            target_title=target_title,
-                            target_norm=normalize_title(target_title),
-                        )
-                    )
+                    resolved_title = resolve_markdown_target(target_title, title_aliases)
+                    edges.append(markdown_edge(page, line, resolved_title))
+                    line_target_norms.setdefault(line.line_id, set()).add(normalize_title(resolved_title))
+            for tag, line_index in record.tags:
+                if 0 <= line_index < len(page.lines):
+                    line = page.lines[line_index]
+                else:
+                    line = page.lines[0] if page.lines else Line(line_id=f"{page.id}:0", index=0, text="")
+                if normalize_title(tag) in line_target_norms.get(line.line_id, set()):
+                    continue
+                edges.append(markdown_edge(page, line, tag))
+                line_target_norms.setdefault(line.line_id, set()).add(normalize_title(tag))
 
         return cls(
             pages=pages,
             edges=edges,
             title_collisions={},
+            title_aliases={
+                alias_norm: title
+                for alias_norm, title in title_aliases.items()
+                if normalize_title(title) != alias_norm
+            },
             project_name=root.name,
             display_name=root.name,
             source_folder=root,
@@ -120,6 +168,133 @@ def markdown_page_id(relative_path: Path) -> str:
 
 def markdown_title(path: Path) -> str:
     return path.stem
+
+
+def parse_frontmatter(lines: list[str]) -> MarkdownMetadata:
+    if not lines or lines[0].strip() != "---":
+        return MarkdownMetadata(title=None, page_id=None, aliases=[], tags=[])
+
+    end = None
+    for index in range(1, len(lines)):
+        if lines[index].strip() in {"---", "..."}:
+            end = index
+            break
+    if end is None:
+        return MarkdownMetadata(title=None, page_id=None, aliases=[], tags=[])
+
+    values: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    current_key: str | None = None
+    for offset, raw_line in enumerate(lines[1:end], start=1):
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if raw_line[:1].isspace():
+            if current_key and stripped.startswith("- "):
+                value = clean_frontmatter_scalar(stripped[2:].strip())
+                if value:
+                    values[current_key].append((value, offset))
+            continue
+        if ":" not in raw_line:
+            current_key = None
+            continue
+        key, raw_value = raw_line.split(":", 1)
+        current_key = normalize_frontmatter_key(key)
+        raw_value = raw_value.strip()
+        if raw_value:
+            for value in parse_frontmatter_value(raw_value):
+                values[current_key].append((value, offset))
+
+    title = first_frontmatter_value(values, "title")
+    page_id = first_frontmatter_value(values, "id")
+    aliases = [value for value, _ in values.get("aliases", [])]
+    aliases.extend(value for value, _ in values.get("alias", []))
+    tags = [
+        (normalize_frontmatter_tag(value), line_index)
+        for key in ("tags", "tag")
+        for value, line_index in values.get(key, [])
+    ]
+    return MarkdownMetadata(
+        title=title,
+        page_id=page_id,
+        aliases=list(dict.fromkeys(alias for alias in aliases if alias)),
+        tags=list(dict.fromkeys((tag, line_index) for tag, line_index in tags if tag)),
+    )
+
+
+def parse_frontmatter_value(raw_value: str) -> list[str]:
+    value = raw_value.strip()
+    if value.startswith("[") and value.endswith("]"):
+        inner = value[1:-1].strip()
+        if not inner:
+            return []
+        return [
+            parsed
+            for item in inner.split(",")
+            if (parsed := clean_frontmatter_scalar(item.strip()))
+        ]
+    cleaned = clean_frontmatter_scalar(value)
+    return [cleaned] if cleaned else []
+
+
+def clean_frontmatter_scalar(value: str) -> str:
+    value = value.strip()
+    if not value:
+        return ""
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        value = value[1:-1]
+    return value.strip()
+
+
+def normalize_frontmatter_key(key: str) -> str:
+    return key.strip().casefold().replace("-", "_")
+
+
+def first_frontmatter_value(values: dict[str, list[tuple[str, int]]], key: str) -> str | None:
+    key_values = values.get(key) or []
+    return key_values[0][0] if key_values else None
+
+
+def normalize_frontmatter_tag(value: str) -> str:
+    tag = clean_frontmatter_scalar(value).strip()
+    while tag.startswith("#"):
+        tag = tag[1:]
+    return tag.strip()
+
+
+def build_title_aliases(records: list[MarkdownPageRecord]) -> dict[str, str]:
+    owners: dict[str, tuple[str, str]] = {}
+    for record in records:
+        page = record.page
+        for title in [page.title, *record.aliases]:
+            norm = normalize_title(title)
+            if not norm:
+                continue
+            owner = owners.get(norm)
+            if owner is not None and owner[0] != page.title:
+                raise ValueError(
+                    "duplicate Markdown page aliases: "
+                    f"{title!r} is used by {owner[1]} and {record.relative_path.as_posix()}"
+                )
+            owners[norm] = (page.title, record.relative_path.as_posix())
+    return {norm: title for norm, (title, _) in owners.items()}
+
+
+def resolve_markdown_target(target_title: str, title_aliases: dict[str, str]) -> str:
+    return title_aliases.get(normalize_title(target_title), target_title)
+
+
+def markdown_edge(page: Page, line: Line, target_title: str) -> Edge:
+    return Edge(
+        source_page_id=page.id,
+        source_title=page.title,
+        source_views=page.views,
+        source_updated=page.updated,
+        line_id=line.line_id,
+        line_index=line.index,
+        line_text=line.text,
+        target_title=target_title,
+        target_norm=normalize_title(target_title),
+    )
 
 
 def parse_markdown_links(text: str) -> list[str]:

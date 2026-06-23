@@ -48,6 +48,7 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
+| `1.5.7` | schema `5` | 2026-06-24 | schema `5` compatible | Markdown mirror が frontmatter `title` / `id` / `aliases` / `tags` を読むようになった。alias は canonical title へ解決して edge 化し、`read <alias>` / `backlinks <alias>` / `link-stats <alias>` でも canonical page を読める |
 | `1.5.6` | schema `5` | 2026-06-24 | schema `5` compatible | `grasp import --markdown <folder>` を追加。Markdown folder を read-only mirror として既存 SQLite graph store に materialize し、file stem を title、`[[wikilink]]` と `#tag` を edge として既存 `read` / `backlinks` / `related` surface で読めるようにした |
 | `1.5.5` | schema `5` | 2026-06-24 | schema `5` compatible | `related` 空結果に `recovery_hints` を追加。`path <A> <B>` を追加し、pages ∪ unresolved targets を node、materialized internal links を無向 edge として `--max-depth` bounded な shortest path と根拠 line を返す |
 | `1.5.4` | schema `5` | 2026-06-23 | schema `5` compatible | `read --related-snippets` / `--related-snippet-lines N` を追加。related 2-hop / missing target の source pages に先頭 N 行（default 5）を `snippet_lines` として同梱し、Cosense related pane 風の近傍読解を 1 call で行えるようにした |
@@ -64,6 +65,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.5.6`
+- Current public compatibility version: `1.5.7`
 - Current internal `SCHEMA_VERSION`: `5`
-- Current package metadata should match `1.5.6`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.5.7`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
