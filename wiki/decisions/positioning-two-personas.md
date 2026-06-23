@@ -28,6 +28,8 @@ sources:
 
 [[SPEC]] の入力節は「初手＝Cosense JSON export、Markdown adapter は後で足せる」という順序で、これは persona1 の都合。persona2 には Cosense export が存在しないので、**Markdown フォルダ → grasp の取り込みが唯一の入口**。upside-risk を本気で狙うなら、この adapter と「.md フォルダより本当に良い」の**実演可能性**の優先度が上がる（"後で足せる" nice-to-have ではない）。HN/Reddit 読者が最初に殴ってくる問いが文字通り "why not just a folder of markdown / obsidian"。
 
+実証: persona2 視点の fresh onboarding テスト（[[persona2-user-test-2026-06-23]]）で active release は fail。Markdown フォルダの import 経路が無く（directory を渡すと traceback）、英語 README も friendly error も無い。∴ Markdown import adapter は persona2 にとって "re-rank 候補" でなく **release gate**。persona1 dogfooding の MVP としては問題ない。
+
 ## 設計含意2: identity-without-name は両 persona に別の言葉で刺さる
 
 rename の失敗モードは3者で**別物**。identity-without-name（id link、表示名を decouple）は両方を同時に消す。
