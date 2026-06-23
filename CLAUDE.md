@@ -1,66 +1,55 @@
 # grasp
 
 ## テーマ
-単一の AI 自身が所有する local な Scrapbox 型グラフ知識ストアを CLI で扱うツール grasp の開発 wiki。Scrapbox のグラフモデル（自動双方向リンク・2-hop・行リンク・赤リンク）を browser なしに CLI から AI が体験できるようにする。Co-（多人数協調）層を削ぎ name=identity 欠陥を identity-without-name で直す（design B）。実装は Codex、本 wiki は spec/設計判断/gotcha を保持し Codex が context として読む
+単一の **AI 自身が所有する local な Scrapbox 型グラフ知識ストア**を CLI で扱うツール `grasp` の開発 wiki。
+Scrapbox のグラフモデル（自動双方向リンク・2-hop・**行リンク**・**赤リンク**）を、browser / Web UI なしに **CLI から AI が "体験" できる** ようにする。Co-（多人数協調）層は削ぎ、Scrapbox の name=identity 欠陥を **identity-without-name** で直す。
+
+由来: nishio の llm-wiki での設計対話（2026-06-23）。「Cosense は複数人前提の設計だが、一人で使っても Markdown 集合より効く。"Co-" になる前の Scrapbox を CLI で扱える substrate が LLM に良いのでは」。名前 `grasp` = graph × scrap（box）＋「把握する / grasp」。設計の全体は [[why-design-B]] / [[SPEC]]。
+
+## 分業（重要）
+
+- **この wiki（＋ nishio / 設計担当 AI）** = spec・設計判断・原理・open question・gotcha を保持。**Codex が読む context**。
+- **Codex** = 実装。本 wiki を読んでコードを書く。Codex の作業で判明したこと（制約・落とし穴・設計変更）は本 wiki に **file back** する。
+- ∴ ページは **coding agent 向け** に書く（人間向け解説でなく、実装の source of truth）。
+
+## source of truth
+
+- **[[SPEC]]** = grasp が提供する CLI 動詞 ＋ データモデル。Codex はこれに実装を合わせる。design が固まるにつれ **上書き更新**（spec は現状、log は出来事 = 現状 ≠ 記録）。
+- **[[why-design-B]]**（`decisions/`）= なぜこの形か（Scrapbox を Co- / グラフに分解、B を選んだ理由、各 fork）。決定の記録。覆すときは新 decision を追記。
 
 ## ディレクトリ構造
 
 ```
 grasp/
 ├── CLAUDE.md          # このファイル（スキーマ）
-├── raw/               # 生のソース（不変、gitignored）
-├── wiki/              # LLMが生成・維持するwiki
-│   ├── index.md       # 全ページのカタログ
-│   ├── log.md         # 時系列の作業記録
-│   ├── concepts/      # 概念ページ
-│   ├── entities/      # 人物・ツール・プロジェクト
-│   ├── sources/       # ソースの要約
-│   └── analyses/      # 問いから生まれた考察
+├── raw/               # 外部ソース（設計対話ログ・Codex 作業ログ等、不変・gitignored）
+├── wiki/
+│   ├── index.md
+│   ├── log.md         # 出来事の時系列
+│   ├── SPEC.md        # ★ Codex 向け source of truth（CLI surface + data model）
+│   ├── decisions/     # なぜ（design rationale, ADR 風）
+│   ├── concepts/      # 原理・横断概念
+│   └── entities/      # 具体リソース（依存ライブラリ・既存ツール等）
 └── scripts/
-    └── lint_wiki.py   # wikiの健全性チェック
+    └── lint_wiki.py
 ```
 
 ## ページルール
 
-### 全ページ共通
-- 冒頭にYAMLフロントマター：type, summary, sources
-- 主張には出典を明記：`[[source名]]より`
-- 矛盾・未解決の論点は「## Open Questions」セクションで明示
-- 更新は上書きせず「## Updates」で追記
-
-### フロントマター例
-```yaml
----
-type: concept
-summary: 1文で説明
-sources:
-  - source-name.md
----
-```
+- 冒頭に YAML フロントマター: type, summary, sources
+- **SPEC は上書き更新**（現状を表す）。`decisions/` は追記（覆すときも履歴を残す）。`concepts/` は通常 wiki ルール（`## Updates` 追記）。
+- 主張に出典、矛盾・未解決は `## Open Questions`
+- 親 llm-wiki の概念を参照するときは **バックティックのプレーン名**で（例: `名前ではなくIDで識別する設計`）。`[[...]]` は grasp 内リンク専用（cross-wiki link は lint が broken 扱いするため）。
 
 ## 操作
 
-### Ingest（ソース取り込み）
-1. raw/の新ファイルを読む（a.txtのような名前なら適切にリネーム）
-2. 既存wikiページと照合
-3. 関連ページを更新 or 新規作成
-4. index.mdを更新
-5. log.mdに `## [YYYY-MM-DD HH:MM] ingest | <description>` を記録
+### Ingest / File back
+設計対話や Codex の作業ログを raw/ に置いて ingest、または会話の洞察を file back。spec に効くなら SPEC.md を上書き、判断なら `decisions/` に。log に `## [YYYY-MM-DD HH:MM] <op> | <desc>`。
 
-### Query（質問）
-1. wiki/を検索して回答を作成
-2. 有用な回答はanalyses/にfiling back
-3. log.mdに `## [YYYY-MM-DD HH:MM] filing-back | <description>` を記録
-
-### Lint（健全性チェック）
-1. 機械的: `python3 scripts/lint_wiki.py`（孤立・壊れたリンク・未登録など）
-2. 意味的: 矛盾・stale claim・概念ページ不足・新質問の提案
-3. 完了後 `## [YYYY-MM-DD HH:MM] lint | <summary>` を log.md に記録
-
-> 時刻を含めるのは、深夜lint(`02:00`)と同日ingestの順序を区別するため。`[YYYY-MM-DD]`（時刻なし）は当日23:59として扱われる（後方互換）。
+### Lint
+`python3 scripts/lint_wiki.py`（孤立・壊れたリンク・未登録）→ 意味的 lint（矛盾・stale spec・open q）→ log に `## [YYYY-MM-DD HH:MM] lint | <summary>`。
 
 ## 運用方針
 
-- ソースは「参考」であり無批判に採用しない
-- 実験を通じて得た自分自身の気づきを重視
-- スキーマ（このファイル）も実験を通じて改善していく
+- **spec-first だが over-spec しない**。Codex が実装して初めて分かる制約は file back で戻す（親 llm-wiki `書いてから整理する` の実装版）。
+- ソースは参考、無批判採用しない。スキーマも実験で改善する。
