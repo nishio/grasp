@@ -1,5 +1,9 @@
 # Log
 
+## [2026-06-23 20:09] implementation | `export-ai` default を depth 1・limit なしに変更
+- nishio 指示「デフォルトは `--depth 1` で limit なし」に合わせ、`grasp export-ai` の `--direct-limit` / `--indirect-limit` default を `None`（無制限）に変更。`--depth` は既に 1 が default。
+- SPEC と `skills/grasp/SKILL.md` に default semantics を明記。
+
 ## [2026-06-23 20:04] implementation | Cosense Export for AI 風 bundle を CLI に追加
 - raw に置かれた `nishio-*.1hop.txt` / `.2hop.txt` をサンプルとして確認し、`grasp export-ai <title>`（alias `export-for-ai`）を追加。既存 page は main page + 1-hop pages、`--depth 2` で 2-hop pages まで、page が無い target は backlink source pages から始める。stdout が export 本文、`--output <path>` でファイル保存。
 - 1-hop ordering は outgoing existing pages を本文出現順で先に並べ、backlink source pages を補う。2-hop は direct pages と shared link target（unresolved target 含む）経由の pages。これにより raw sample の `巨人の肩に登るコストの減少 --depth 2 --direct-limit 5 --indirect-limit 4` は main + 5 direct + 4 indirect の title 列が一致。

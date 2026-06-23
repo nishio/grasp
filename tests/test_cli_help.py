@@ -13,6 +13,7 @@ COMMANDS = [
     "peek",
     "suggest",
     "search",
+    "export-ai",
     "sync",
     "unresolved",
 ]

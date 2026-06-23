@@ -266,6 +266,53 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--limit", type=int, default=50, help="Maximum line hits to return.")
     search_parser.add_argument("--offset", type=int, default=0, help="Number of ranked line hits to skip.")
 
+    export_ai_parser = add_command_parser(
+        subparsers,
+        "export-ai",
+        aliases=["export-for-ai"],
+        help="Export a page neighborhood as Cosense Export for AI-style text.",
+        description=(
+            "Render a page and its related pages into one AI-readable text file. "
+            "Existing pages include the main page plus 1-hop pages; depth 2 also "
+            "includes pages reachable through those 1-hop pages and shared link targets. "
+            "Missing targets export pages that link to the requested title."
+        ),
+        returns=(
+            "query, depth, page_exists, project_url, page_count, direct_count, "
+            "indirect_count, pages[], text"
+        ),
+        examples=[
+            "grasp export-ai 巨人の肩に登るコストの減少 > out.txt",
+            "grasp export-ai 巨人の肩に登るコストの減少 --depth 2 --output out.txt",
+            "grasp export-for-ai 民主主義 --direct-limit 100",
+            "grasp --json export-ai 民主主義 --depth 1",
+        ],
+        notes=[
+            "Default text output is the export body. With --output, text is written to the file and stdout is a short summary.",
+            "The generated format follows the raw Export for AI samples; ordering is deterministic from the local graph store.",
+        ],
+    )
+    export_ai_parser.add_argument("title", help="Existing page title or missing linked target to export.")
+    export_ai_parser.add_argument("--depth", type=int, choices=[1, 2], default=1, help="Neighborhood depth to include.")
+    export_ai_parser.add_argument(
+        "--direct-limit",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="Maximum 1-hop pages to include; omit for no limit.",
+    )
+    export_ai_parser.add_argument(
+        "--indirect-limit",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="Maximum 2-hop pages to include when --depth 2; omit for no limit.",
+    )
+    export_ai_parser.add_argument(
+        "--project-url",
+        default="https://scrapbox.io/nishio/",
+        help="Project URL used to render page URLs in the export text.",
+    )
+    export_ai_parser.add_argument("--output", type=Path, default=None, help="Write export text to this file instead of stdout.")
+
     sync_parser = add_command_parser(
         subparsers,
         "sync",
@@ -326,6 +373,7 @@ def add_command_parser(
     returns: str,
     examples: list[str],
     notes: list[str] | None = None,
+    aliases: list[str] | None = None,
 ) -> argparse.ArgumentParser:
     epilog_parts = [
         "Returns (--json):",
@@ -338,6 +386,7 @@ def add_command_parser(
         epilog_parts.extend(["", "Notes:", *(f"  {note}" for note in notes)])
     return subparsers.add_parser(
         name,
+        aliases=aliases or [],
         help=help,
         description=description,
         epilog="\n".join(epilog_parts),
@@ -439,6 +488,19 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             "count_returned": len(hits),
             "offset": args.offset,
         }
+    if args.command in {"export-ai", "export-for-ai"}:
+        result = store.export_ai(
+            args.title,
+            depth=args.depth,
+            direct_limit=getattr(args, "direct_limit", None),
+            indirect_limit=getattr(args, "indirect_limit", None),
+            project_url=args.project_url,
+        )
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(result["text"], encoding="utf-8")
+            result["output"] = str(args.output)
+        return result
     if args.command == "unresolved":
         return {
             "unresolved_targets": store.unresolved_targets(limit=args.limit),
@@ -474,6 +536,8 @@ def format_result(command: str, result: Any) -> str:
         return format_suggest(result["query"], result["suggestions"])
     if command == "search":
         return format_search(result["query"], result["hits"], result.get("offset", 0))
+    if command in {"export-ai", "export-for-ai"}:
+        return format_export_ai(result)
     if command == "unresolved":
         return format_unresolved_targets(result["unresolved_targets"])
     if command == "sync":
@@ -674,6 +738,18 @@ def format_sync(result: dict[str, Any]) -> str:
         for page in result["skipped_nonpersistent"]:
             parts.append(f"- {page['title']} {page['url']}\n")
     return "".join(parts)
+
+
+def format_export_ai(result: dict[str, Any]) -> str:
+    output = result.get("output")
+    if output:
+        return (
+            f"wrote: {output}\n"
+            f"pages: {result['page_count']}\n"
+            f"direct: {result['direct_count']}\n"
+            f"indirect: {result['indirect_count']}\n"
+        )
+    return result["text"]
 
 
 def format_unresolved_targets(unresolved_targets: list[dict[str, Any]]) -> str:

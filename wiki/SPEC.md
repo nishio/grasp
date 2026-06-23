@@ -53,11 +53,12 @@ sources:
 **Cosense JSON export 1ファイルを読み取り専用で CLI から扱う**。書き込み・identity 層・Markdown adapter は後。
 - import: Cosense export → 正規化（page/line/edge、line-id 採番）→ in-memory（or 独自 store）
 - 実装: Python package `grasp`。`python3 -m grasp ...`（または console script `grasp`）で起動。`--export` 未指定時は `$GRASP_EXPORT` → `raw/nishio.json` を探す。`--json` で機械可読出力。
-- 動詞: MVP 必須の `read`（近傍同梱）/ `backlinks`（行つき）/ `unresolved`（未解決 target ranking）に加え、read-only helper として `related` / `link-stats` / `peek` / `suggest` も持つ。
+- 動詞: MVP 必須の `read`（近傍同梱）/ `backlinks`（行つき）/ `unresolved`（未解決 target ranking）に加え、read-only helper として `related` / `link-stats` / `peek` / `suggest` / `export-ai` も持つ。
 - read は lines[0]（Cosense title 行）を本文に残す。完全性と line-id 安定性を優先し、重複表示は formatter 側の問題として扱う。
 - `link-stats` は existing page / unresolved target の両方に対して incoming `link_count`, `source_page_count`, `link_multiplicity` (`none` / `single` / `multi`) を返す。
 - `related <existing-page>` は既存 page 間 edge の 2-hop pages を返す。`related <unresolved-target>` は 2-hop ではなく、その target へ link している source pages を返す。
 - `unresolved` ranking: link count → source page count → total source views → latest source updated → title。`read` 内の unresolved targets はその page から出る unresolved link に限定。
+- `export-ai`（alias `export-for-ai`）は Cosense の "Export for AI" 風に、main page + 1-hop/2-hop related pages の本文を 1 テキストへ展開する。default は `--depth 1` かつ limit なし。既存 page の 1-hop は outgoing existing pages を本文順で先に並べ、足りない分を backlink source pages で補う。2-hop は direct pages と shared link target（unresolved target 含む）から到達する pages。page が無い target は mainpage 無しで backlink source pages から始める。標準出力が export 本文、`--output` でファイル保存。
 - これで「AI が CLI だけで Scrapbox グラフを体験する」中核仮説を **実データ（nishio の Cosense project: 25791 pages / 724981 lines / strict parser で edge 120693・unresolved target 41750）** で検証する（[[cosense-json-export]]）。
 
 ## 次のマイルストーン（post-MVP / step 2, なお read-only）
@@ -104,6 +105,7 @@ write / transclude / rename（identity 層）・Markdown import adapter・vector
 | `peek <title>` | 本文だけ（飛ばずプレビュー） | リンク hover |
 | `suggest <partial>` | title 補完候補 | `[[` 補完 |
 | `search <query>` | 本文行検索。`(page, line-id, 行テキスト)` のリスト | 全文検索 |
+| `export-ai <title>` | Cosense Export for AI 風に main/1-hop/2-hop page 本文を単一テキストへ展開（alias `export-for-ai`） | Export for AI |
 | `unresolved` | unresolved link target の ranked view | 赤リンク / unresolved target list |
 | `sync <project-url>` | cosense-cli で最近更新ページを差分 upsert | hosted freshness |
 | `write <title> <body>` | ページ作成 / 更新 ＋ グラフ自動更新 | 編集 |

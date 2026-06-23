@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
+from html import escape as escape_html
 from pathlib import Path
 import os
 import sqlite3
 import time
 from typing import Any
+from urllib.parse import quote
 
 from .cosense import CosenseStore, Edge, Line, Page, normalize_title, parse_cosense_links
 
@@ -522,6 +524,198 @@ class SQLiteStore:
             "unresolved_targets": self.unresolved_targets_from_page(page, unresolved_limit),
         }
 
+    def export_ai(
+        self,
+        title: str,
+        *,
+        depth: int = 1,
+        direct_limit: int | None = None,
+        indirect_limit: int | None = None,
+        project_url: str = "https://scrapbox.io/nishio/",
+    ) -> dict[str, Any]:
+        page = self.resolve_page(title)
+        if page is None:
+            direct_pages = self._pages_from_backlink_sources(title, direct_limit)
+            indirect_pages = (
+                self._indirect_export_ai_pages(None, direct_pages, indirect_limit)
+                if depth >= 2
+                else []
+            )
+        else:
+            direct_pages = self._direct_export_ai_pages(page, direct_limit)
+            indirect_pages = (
+                self._indirect_export_ai_pages(page, direct_pages, indirect_limit)
+                if depth >= 2
+                else []
+            )
+
+        entries: list[dict[str, Any]] = []
+        if page is not None:
+            entries.append(self._export_ai_page_entry(page, "mainpage"))
+        entries.extend(self._export_ai_page_entry(direct_page, "1hopLink") for direct_page in direct_pages)
+        entries.extend(self._export_ai_page_entry(indirect_page, "2hopLink") for indirect_page in indirect_pages)
+
+        text = format_export_ai_text(
+            query=title,
+            page_exists=page is not None,
+            entries=entries,
+            direct_count=len(direct_pages),
+            indirect_count=len(indirect_pages),
+            depth=depth,
+            project_url=project_url,
+        )
+        return {
+            "query": title,
+            "depth": depth,
+            "page_exists": page is not None,
+            "project_url": project_url,
+            "page_count": len(entries),
+            "direct_count": len(direct_pages),
+            "indirect_count": len(indirect_pages),
+            "pages": [
+                {
+                    "title": entry["page"].title,
+                    "type": entry["type"],
+                    "created": entry["page"].created,
+                    "updated": entry["page"].updated,
+                    "line_count": entry["page"].line_count,
+                }
+                for entry in entries
+            ],
+            "text": text,
+        }
+
+    def _direct_export_ai_pages(self, page: Page, limit: int | None) -> list[Page]:
+        if limit == 0:
+            return []
+        pages: list[Page] = []
+        seen = {page.id}
+        for direct_page in self._outgoing_existing_pages(page):
+            if direct_page.id not in seen:
+                pages.append(direct_page)
+                seen.add(direct_page.id)
+                if _limit_reached(pages, limit):
+                    return pages
+
+        for source_page in self._pages_from_backlink_sources(page.title, None):
+            if source_page.id not in seen:
+                pages.append(source_page)
+                seen.add(source_page.id)
+                if _limit_reached(pages, limit):
+                    return pages
+        return pages
+
+    def _indirect_export_ai_pages(
+        self,
+        main_page: Page | None,
+        direct_pages: list[Page],
+        limit: int | None,
+    ) -> list[Page]:
+        if limit == 0:
+            return []
+        pages: list[Page] = []
+        seen = {page.id for page in direct_pages}
+        if main_page is not None:
+            seen.add(main_page.id)
+            for candidate in self._pages_sharing_outgoing_targets(main_page):
+                if candidate.id not in seen:
+                    pages.append(candidate)
+                    seen.add(candidate.id)
+                    if _limit_reached(pages, limit):
+                        return pages
+
+        for direct_page in direct_pages:
+            for candidate in self._direct_export_ai_pages(direct_page, limit=-1):
+                if candidate.id not in seen:
+                    pages.append(candidate)
+                    seen.add(candidate.id)
+                    if _limit_reached(pages, limit):
+                        return pages
+            for candidate in self._pages_sharing_outgoing_targets(direct_page):
+                if candidate.id not in seen:
+                    pages.append(candidate)
+                    seen.add(candidate.id)
+                    if _limit_reached(pages, limit):
+                        return pages
+        return pages
+
+    def _outgoing_existing_pages(self, page: Page) -> list[Page]:
+        rows = self.connection.execute(
+            """
+            SELECT DISTINCT
+              target.*,
+              MIN(line.line_index) AS first_line_index,
+              MIN(e.id) AS first_edge_id
+            FROM edges e
+            JOIN lines line ON line.line_id = e.line_id
+            JOIN pages target ON target.norm_title = e.target_norm
+            WHERE e.source_page_id = ? AND target.id != ?
+            GROUP BY target.id
+            ORDER BY first_line_index, first_edge_id
+            """,
+            (page.id, page.id),
+        ).fetchall()
+        return [self._page_from_row(row) for row in rows]
+
+    def _pages_from_backlink_sources(self, title: str, limit: int | None) -> list[Page]:
+        norm = normalize_title(title)
+        query = """
+            SELECT
+              source.*,
+              COUNT(*) AS link_count,
+              MIN(line.line_index) AS first_line_index
+            FROM edges e
+            JOIN pages source ON source.id = e.source_page_id
+            JOIN lines line ON line.line_id = e.line_id
+            WHERE e.target_norm = ?
+            GROUP BY source.id
+            ORDER BY link_count DESC, source.views DESC, COALESCE(source.updated, 0) DESC, source.title, first_line_index
+        """
+        params: list[Any] = [norm]
+        if limit is not None and limit >= 0:
+            query += " LIMIT ?"
+            params.append(limit)
+        rows = self.connection.execute(query, params).fetchall()
+        return [self._page_from_row(row) for row in rows]
+
+    def _pages_sharing_outgoing_targets(self, page: Page) -> list[Page]:
+        rows = self.connection.execute(
+            """
+            SELECT DISTINCT
+              source.*,
+              e.target_norm,
+              MIN(seed_line.line_index) AS seed_line_index,
+              MIN(seed.id) AS seed_edge_id,
+              MIN(source_line.line_index) AS first_source_line_index,
+              MIN(e.id) AS first_edge_id
+            FROM edges seed
+            JOIN lines seed_line ON seed_line.line_id = seed.line_id
+            JOIN edges e ON e.target_norm = seed.target_norm
+            JOIN pages source ON source.id = e.source_page_id
+            JOIN lines source_line ON source_line.line_id = e.line_id
+            WHERE seed.source_page_id = ? AND source.id != ?
+            GROUP BY source.id, e.target_norm
+            ORDER BY seed_line_index, seed_edge_id, source.views DESC, COALESCE(source.updated, 0) DESC, source.title, first_source_line_index
+            """,
+            (page.id, page.id),
+        ).fetchall()
+        pages: list[Page] = []
+        seen: set[str] = set()
+        for row in rows:
+            source_page = self._page_from_row(row)
+            if source_page.id not in seen:
+                pages.append(source_page)
+                seen.add(source_page.id)
+        return pages
+
+    def _export_ai_page_entry(self, page: Page, page_type: str) -> dict[str, Any]:
+        lines, _ = self.page_lines(page)
+        return {
+            "page": page,
+            "type": page_type,
+            "lines": lines,
+        }
+
     def _unresolved_target_stats_sql(self, limit: int | None, source_page_id: str | None = None) -> str:
         source_filter = "AND e.source_page_id = ?" if source_page_id is not None else ""
         limit_clause = "" if limit is None or limit < 0 else "LIMIT ?"
@@ -835,6 +1029,113 @@ def _int_or_none(value: str | None) -> int | None:
         return int(value)
     except ValueError:
         return None
+
+
+def format_export_ai_text(
+    *,
+    query: str,
+    page_exists: bool,
+    entries: list[dict[str, Any]],
+    direct_count: int,
+    indirect_count: int,
+    depth: int,
+    project_url: str,
+) -> str:
+    url = cosense_page_url(project_url, query)
+    total_line = export_ai_total_line(
+        page_count=len(entries),
+        page_exists=page_exists,
+        direct_count=direct_count,
+        indirect_count=indirect_count,
+        depth=depth,
+    )
+    parts = [
+        f"This text contains the content of {url} (a page on Cosense, formerly known as Scrapbox) and its related pages in one file.\n",
+        f"{total_line}\n",
+        "\n",
+        "IMPORTANT: Bracketed [page title] are internal links. Most linked pages exist within this document - use them to navigate between related concepts.\n",
+        "\n",
+        "== GUIDE FOR AI AGENTS ==\n",
+    ]
+    if page_exists:
+        parts.append(f"1. START with the first page (main topic: \"{query}\") - marked as type=\"mainpage\"\n")
+    else:
+        parts.append(
+            f"1. START with the first listed page - it links to the requested topic \"{query}\", whose page is not present in the local store\n"
+        )
+    parts.extend(
+        [
+            "2. READ the <PageList> in order - pages are sorted by relevance and importance\n",
+            "3. USE internal links [page title] to understand connections between concepts\n",
+            "4. NAVIGATE by searching for \"<Page title=\" to jump to specific pages\n",
+            "5. REFERENCE created/updated timestamps when handling conflicting information\n",
+            "6. UNDERSTAND page relationships using type attribute:\n",
+            "   - type=\"mainpage\": The primary page you requested\n",
+            "   - type=\"1hopLink\": Pages directly linked from the main page (most relevant)\n",
+            "   - type=\"2hopLink\": Pages linked from 1-hop pages (contextually relevant)\n",
+        ]
+    )
+    if not page_exists:
+        parts.append("\nNOTE: The requested page is not present in the local store; this export starts with pages that link to the requested title.\n")
+
+    parts.append("\n<PageList>\n")
+    for entry in entries:
+        page: Page = entry["page"]
+        page_type = entry["type"]
+        parts.append(
+            f'<Page title="{escape_html(page.title, quote=True)}" '
+            f'url="{escape_html(cosense_page_url(project_url, page.title), quote=True)}" '
+            f'updated="{escape_html(format_export_ai_time(page.updated), quote=True)}" '
+            f'created="{escape_html(format_export_ai_time(page.created), quote=True)}" '
+            f'type="{escape_html(page_type, quote=True)}">\n'
+        )
+        lines: list[Line] = entry["lines"]
+        for line in lines:
+            parts.append(f"{line.text}\n")
+        parts.append("</Page>\n\n\n\n")
+    parts.append("</PageList>\n")
+    return "".join(parts)
+
+
+def export_ai_total_line(
+    *,
+    page_count: int,
+    page_exists: bool,
+    direct_count: int,
+    indirect_count: int,
+    depth: int,
+) -> str:
+    if not page_exists:
+        if depth >= 2 and indirect_count:
+            return (
+                f"Total pages included: {page_count} "
+                f"({direct_count} directly linked + {indirect_count} indirectly linked pages; main page not present in local store)."
+            )
+        return (
+            f"Total pages included: {page_count} "
+            f"({direct_count} directly linked pages; main page not present in local store)."
+        )
+    if depth >= 2 and indirect_count:
+        return (
+            f"Total pages included: {page_count} "
+            f"(main page + {direct_count} directly linked + {indirect_count} indirectly linked pages)."
+        )
+    return f"Total pages included: {page_count} (main page + {direct_count} directly linked pages)."
+
+
+def cosense_page_url(project_url: str, title: str) -> str:
+    base_url = project_url.rstrip("/") + "/"
+    return base_url + quote(title, safe="")
+
+
+def format_export_ai_time(value: int | None) -> str:
+    if value is None:
+        return ""
+    return datetime.fromtimestamp(value, tz=timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _limit_reached(items: list[Any], limit: int | None) -> bool:
+    return limit is not None and limit >= 0 and len(items) >= limit
 
 
 def parse_cosense_time(value: Any) -> int | None:

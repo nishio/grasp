@@ -53,6 +53,9 @@ hosted Cosense を生で操作したい時は `cosense` skill を使う（使い
 ### 本文だけ見たい（近傍は不要）
 → `grasp peek <title>`。
 
+### AI に渡す 1 ファイルの近傍 bundle が欲しい
+→ `grasp export-ai <title>`。Cosense の "Export for AI" 風に main page + 1-hop pages を 1 テキストへ展開する。default は `--depth 1` かつ limit なし。2-hop まで欲しい時は `--depth 2`、ファイルへ保存する時は `--output <path>`。
+
 ### hosted の最新を取り込みたい（保守作業）
 → `grasp sync <project-url>`（`cosense` CLI 経由で最近更新ページのみ差分 upsert。`--dry-run` あり）。認証が要る。通常の調査では不要。
 
@@ -69,6 +72,7 @@ hosted Cosense を生で操作したい時は `cosense` skill を使う（使い
 | `unresolved` | 未解決 target の rank view（TODO ではない） |
 | `peek <title>` | 本文行のみ |
 | `stats` | store の状態・件数 |
+| `export-ai <title>` | Export for AI 風の単一テキスト bundle（alias `export-for-ai`） |
 | `sync <url>` | hosted 差分取り込み（保守） |
 
 ## 実行方法
