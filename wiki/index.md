@@ -7,6 +7,7 @@ Codex が実装し、本 wiki が実装済み事実・backlog・設計判断・g
 
 | ページ | 役割 |
 |---|---|
+| [history](history.md) | release / store compatibility history。v1 系は `1.x.y` とし、store format / materialized index semantics が変わる時は `x`、それ以外は `y` を進める |
 | [grasp-v1-implemented](entities/grasp-v1-implemented.md) | ★ v1 リリース時点で実装済みの CLI surface / data model / parser / delivery。旧 SPEC / v1-todo の完了済み側を分離した current facts |
 | [grasp-backlog](grasp-backlog.md) | ★ 旧 SPEC / v1-todo にあったが v1 時点で未実装の項目。parser fidelity・UX・Markdown adapter・write/identity・search・sync・distribution |
 | [why-not-scrapbox-clone](decisions/why-not-scrapbox-clone.md) | なぜこの形か。Scrapbox 忠実 clone でなく identity-without-name を足したあるべき姿を作る（内部呼称 design B） |
@@ -20,7 +21,11 @@ Codex が実装し、本 wiki が実装済み事実・backlog・設計判断・g
 
 ## concepts/
 
-_まだ無し。read＝近傍同梱 / 行リンク / 未解決 link target / identity-without-name が実装・設計をまたいで育ったら切り出す。_
+| ページ | 役割 |
+|---|---|
+| [ai-consumer-cost-and-trust](concepts/ai-consumer-cost-and-trust.md) | grasp の設計上の主たるユーザ＝CLI 越しにグラフを読む AI の cost-and-trust model。軸1 round-trip/token の経済（read=近傍同梱の why、gather/snippets/token economy backlog の ranking 原理）、軸2 negative-result contract（沈黙の偽陰性 = absence の hallucination、recall を vector より先に直す理由） |
+
+_他に: read＝近傍同梱 / 行リンク / 未解決 link target / identity-without-name が実装・設計をまたいで育ったら切り出す。_
 
 ## entities/
 
@@ -33,6 +38,7 @@ _まだ無し。read＝近傍同梱 / 行リンク / 未解決 link target / ide
 | [cosense-cli](entities/cosense-cli.md) | `@helpfeel/cosense-cli` / `cosense` binary の local availability・grasp との使い分け・**実測比較（速度/機能差）**・post-MVP の freshness 経路 |
 | [persona1-user-test-2026-06-23](entities/persona1-user-test-2026-06-23.md) | persona1（JP Cosense ヘビーユーザ=nishio dogfooding）視点の CLI ユーザテスト。read=近傍同梱の価値確認と、表記ゆれ空振り・global option 位置・長大ページ出力・store default docs drift の発見 |
 | [persona2-user-test-2026-06-23](entities/persona2-user-test-2026-06-23.md) | persona2（世界の LLM Wiki / Markdown 束ユーザ）視点の fresh onboarding テスト。現状は Markdown folder import が無く、英語 README / friendly error も無いため active acquisition はまだ早い |
+| [ai-consumer-feedback-2026-06-23](entities/ai-consumer-feedback-2026-06-23.md) | 設計上の主たるユーザ＝CLI 越しに読む AI（Claude Opus 4.8）が v1 を実走したレビュー。validated（read=近傍同梱・related rank・miss recovery）＋ Tier 1-4 findings（recall が最優先）と routing。ingest 時に backlinks ランク済み / read --json の page-id 既済を確認 |
 
 ## メタ
 

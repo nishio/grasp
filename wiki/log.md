@@ -1,5 +1,34 @@
 # Log
 
+## [2026-06-23 22:19] lint | AI consumer feedback ingest 後の検証
+
+- `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。新設 [[ai-consumer-cost-and-trust]]（concept, sources あり）と [[ai-consumer-feedback-2026-06-23]]（entity）は孤立せず（concept は 4 incoming）。既存の孤立 `multi-project-store` 警告は継続（index 登録済み）。
+- `python3 -m unittest discover -s tests` OK（22 tests）。`git diff --check` OK。
+
+## [2026-06-23 22:18] ingest | AI consumer（主たるユーザ視点）の v1 フィードバックを取り込み
+
+- `raw/claude-feedback-2026-06-23.md`（Claude Opus 4.8 が grasp の設計上の主たるユーザ＝CLI 越しにグラフを読む AI として v1 を実走したレビュー、25792 pages の実 store で `stats`/`read`/`related`/`search`/miss を実行）を ingest。仮説（採否 nishio 判断）として routing した。
+- **concept 新設** [[ai-consumer-cost-and-trust]]: AI consumer の cost-and-trust model を最初の concept page として切り出し。軸1 round-trip/token の経済（read=近傍同梱の why、gather/snippets/token economy backlog の ranking 原理）、軸2 negative-result contract（沈黙の偽陰性 = absence の hallucination、recall を vector より先に直す理由）。read=近傍同梱（実装済）＋ delivery の Skill orchestration ＋ Tier 1-2 backlog をまたいで育っていたため「育ったら切り出す」trigger 成立と判断。
+- **entity 新設** [[ai-consumer-feedback-2026-06-23]]: persona1/persona2 user test と同型の review event 記録。validated（read=近傍同梱・related co-citation rank・miss recovery・scale-first）＋ Tier 1-4 findings ＋ 各 finding の routing 先。
+- **backlog 追加** [[grasp-backlog]]: Tier 1 search recall（page 単位 AND / OR / 正規化、vector の前＝最優先）、Tier 2 read --related-snippets / `gather --budget` verb（薄CLI テンション付き）/ output token economy（line-id ローカル別名・--strip-decoration）、Tier 3 Graph-native primitives（path / backlinks finer ranking / --cluster）、横断 Negative-result contract（search/related へ拡張＋実データ hint）、Tier 4 を write/identity の consumer 要件に。
+- **decision Update** [[why-not-scrapbox-clone]]: identity-without-name の consumer 側価値（AI 引用が write/rename を跨いで腐らない時間安定性）を著者側 rationale に追記。[[delivery-cli-plus-skill]]: `gather` verb vs 薄CLI の orchestration 置き場を Open Question 化。
+- **ingest 時の code 確認で既済2点を訂正記録**（既done な ask を積まないため）: ① backlinks は既に `source.views DESC...` でランク済み（grasp/sqlite_store.py）→ Tier 3 の「挿入順かも」懸念は不成立、未済は finer weighting のみ。② `read --json` は既に安定 page-id を含む（`Page.to_summary()` の `id`、grasp/cosense.py）→ Tier 4 の未済は read field でなく rename を跨ぐ identity 層。
+
+## [2026-06-23 22:07] lint | history / versioning policy 追加後の検証
+- `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。
+- `python3 -m unittest discover -s tests` OK（22 tests）。`git diff --check` OK。
+- `grasp.__version__` は `1.5.1`。
+
+## [2026-06-23 22:04] implementation | admin export なしの hosted acquisition を実装
+- `grasp acquire <project-url>` を追加。`cosense searchFullText` による `--search` seed、`listPages --filter` による `--filter` seed、bounded `--full-list` seed、`readPage` + parsed links による `--from-page --depth` crawl、`--seed-file` に対応。
+- `acquire` は対象 project namespace を append せず置き換える。`--project` 省略時は `<remote-project>:acquire` を使い、既存 full export project を誤って partial slice で置き換えない。partial corpus の coverage は store metadata に保存し、`grasp stats` の Acquisition 節で mode / coverage / project_url / fetched を表示する。Skill / README でも backlinks / related / unresolved は取得済み subset 内の結果だと明記。
+- 検証: `python3 scripts/lint_wiki.py` OK（真の壊れた wikilink 0、index 未登録 0、frontmatter 不備 0）。`python3 -m unittest discover -s tests` OK（22 tests）。public `https://scrapbox.io/shokai/` に対して `acquire --search codex --limit 2` が `shokai:acquire` に 2 pages / 55 lines / 16 edges / 15 unresolved_targets を作り、`read Codex` が本文 + unresolved targets を返した。`git diff --check` OK。
+
+## [2026-06-23 22:03] file back | history と store 互換 versioning policy を追加
+- [[history]] を追加。v1 系の public version は `1.x.y` とし、`x` は SQLite table shape だけでなく parser / materialized index semantics が変わり既存 store を current truth としてそのまま読めない時、`y` は store compatible な CLI / docs / recovery / performance 変更時に進める。
+- 2026-06-23 の同日 MVP churn を store compatibility ledger として後付け整理: internal `SCHEMA_VERSION=5` の base は public compatibility version `1.5.0`、current working tree は store-compatible `acquire` 追加を含むため `1.5.1`。`1.4.1` は import cache / auto rebuild の y bump、`1.5.0` は `#tag` / 数字 link の parser/index semantics 変更による x bump。
+- `[[grasp-v1-implemented]]` から [[history]] へ current version と source page link を追加。package metadata も `1.5.1` に合わせた。
+
 ## [2026-06-23 22:00] file back | install path 検証中に schema auto-rebuild の live 観測
 - README/SKILL の install 3 ステップ（`pip install -e`→skill を `~/.claude/skills/grasp` に symlink→`import --cosense`）が nishio primary machine で end-to-end 成立済みと確認（CLI は pyenv 3.10.11 の `grasp`、skill symlink live、store 25791 pages）。install path 自体の dogfooding は persona1/2 test がカバーしていなかった面。
 - 検証中に偶発観測: `~/.grasp/grasp.sqlite` が code の `SCHEMA_VERSION` 3→5 に追従して最初の通常 command でサイレント再構築。可視副作用（edges 120693→125409 / unresolved 41750→42770 の drift、`imported_at` 更新、その 1 command だけ import latency）を「期待挙動・corruption でない」gotcha として [[grasp-v1-implemented]] の store 節に追記。rebuild の機構自体は既載なので side-effect の誤読防止だけ足した。

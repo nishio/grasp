@@ -19,6 +19,7 @@ COMMANDS = [
     "search",
     "export-ai",
     "sync",
+    "acquire",
     "unresolved",
 ]
 

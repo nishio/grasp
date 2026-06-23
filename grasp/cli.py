@@ -9,8 +9,8 @@ import sys
 from textwrap import dedent
 from typing import Any
 
-from .cosense_cli import CosenseCliClient, sync_from_cosense
-from .sqlite_store import SCHEMA_VERSION, SQLiteStore, import_export_to_sqlite, recover_store_from_import_cache
+from .cosense_cli import CosenseCliClient, acquire_from_cosense, sync_from_cosense
+from .sqlite_store import SCHEMA_VERSION, SQLiteStore, ensure_store_schema, import_export_to_sqlite, recover_store_from_import_cache
 
 
 class GraspHelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
@@ -56,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
               grasp stats
               grasp read 盲点カード --json --backlinks-limit 5 --related-limit 5
               grasp import --cosense raw/nishio.json
+              grasp --project nishio:search acquire https://scrapbox.io/nishio/ --search "[nishio.icon]" --limit 20
 
             Output:
               Default output is compact text for agent reading.
@@ -349,6 +350,44 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser.add_argument("--cosense-command", default="cosense", help="cosense CLI binary.")
     sync_parser.add_argument("--dry-run", action="store_true", help="List changed pages without fetching/upserting them.")
 
+    acquire_parser = add_command_parser(
+        subparsers,
+        "acquire",
+        help="Acquire hosted Cosense pages without an admin JSON export.",
+        description=(
+            "Seed or replace a local project namespace by reading hosted Cosense pages "
+            "through @helpfeel/cosense-cli. This is for non-admin or partial-corpus "
+            "acquisition, distinct from sync of an already seeded full export."
+        ),
+        returns=(
+            "project_url, project, modes[], coverage, limit, depth, search_results[], "
+            "list_results[], fetched, updated, skipped_nonpersistent[], failed_pages[], pages[], stats"
+        ),
+        examples=[
+            "grasp --project nishio:search acquire https://scrapbox.io/nishio/ --search '[nishio.icon]' --limit 50",
+            "grasp --project nishio:crawl acquire https://scrapbox.io/nishio/ --from-page 盲点カード --depth 1 --limit 100",
+            "grasp --project nishio:mine acquire https://scrapbox.io/nishio/ --filter nishio --limit 200",
+            "grasp acquire https://scrapbox.io/nishio/ --seed-file pages.txt",
+        ],
+        notes=[
+            "Requires @helpfeel/cosense-cli's `cosense` binary in PATH and a working login.",
+            "The acquired project namespace is replaced, not appended, so slice coverage stays explicit.",
+            "If --project is omitted, the local namespace defaults to <remote-project>:acquire to avoid overwriting a full export.",
+            "For partial corpora, backlinks/related/unresolved describe only acquired pages.",
+        ],
+    )
+    acquire_parser.add_argument("project_url", help="Hosted Cosense/Scrapbox project URL, e.g. https://scrapbox.io/nishio/.")
+    acquire_parser.add_argument("--search", action="append", default=[], help="searchFullText query to seed pages. May be repeated.")
+    acquire_parser.add_argument("--from-page", action="append", default=[], help="Start page title or URL for link crawl. May be repeated.")
+    acquire_parser.add_argument("--seed-file", type=Path, default=None, help="Text file of page titles or URLs, one per line.")
+    acquire_parser.add_argument("--filter", dest="filter_name", default=None, help="listPages --filter name for author/icon related pages.")
+    acquire_parser.add_argument("--full-list", action="store_true", help="Use listPages pagination as a full-list seed, bounded by --limit.")
+    acquire_parser.add_argument("--depth", type=int, default=1, help="Link crawl depth for --from-page. 0 fetches only seed pages.")
+    acquire_parser.add_argument("--limit", type=int, default=100, help="Maximum persistent pages to fetch and store.")
+    acquire_parser.add_argument("--batch-size", type=int, default=100, help="listPages page size for --filter/--full-list.")
+    acquire_parser.add_argument("--sort", default="updated", choices=["updated", "created", "accessed", "linked", "views", "title"], help="listPages sort for --filter/--full-list.")
+    acquire_parser.add_argument("--cosense-command", default="cosense", help="cosense CLI binary.")
+
     unresolved_parser = add_command_parser(
         subparsers,
         "unresolved",
@@ -425,6 +464,9 @@ def main(argv: list[str] | None = None) -> int:
         emit_result(args, result)
         return 0
 
+    if args.command == "acquire" and not args.store.exists():
+        ensure_store_schema(args.store)
+
     if not args.store.exists():
         if args.command == "stats":
             emit_result(args, store_missing_stats(args.store))
@@ -469,11 +511,13 @@ def store_missing_stats(store_path: Path) -> dict[str, Any]:
         "lines": 0,
         "edges": 0,
         "unresolved_targets": 0,
+        "acquisition": None,
         "diagnostic": {
             "type": "store_missing",
             "message": f"store does not exist: {store_path}",
             "next_actions": [
                 "Create the store from a Cosense JSON export: grasp import --cosense <json>",
+                "Acquire hosted pages without admin export: grasp acquire <project-url> --search <query>",
                 "Use another store path: grasp --store <path> stats",
             ],
             "markdown_folder_import": "Markdown/Obsidian folder import is not implemented yet.",
@@ -485,6 +529,7 @@ def store_missing_error(store_path: Path) -> str:
     return (
         f"store does not exist: {store_path}\n"
         "Create it from a Cosense JSON export: grasp import --cosense <json>\n"
+        "Or acquire hosted pages without admin export: grasp acquire <project-url> --search <query>\n"
         "Or choose another store: grasp --store <path> <command>\n"
         "Markdown/Obsidian folder import is not implemented yet."
     )
@@ -574,7 +619,38 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             batch_size=args.batch_size,
             dry_run=args.dry_run,
         )
+    if args.command == "acquire":
+        seed_titles = read_seed_file(args.seed_file) if args.seed_file is not None else []
+        return acquire_from_cosense(
+            store,
+            args.project_url,
+            client=CosenseCliClient(args.cosense_command),
+            project=args.project,
+            searches=args.search,
+            from_pages=args.from_page,
+            seed_titles=seed_titles,
+            filter_name=args.filter_name,
+            full_list=args.full_list,
+            depth=args.depth,
+            limit=args.limit,
+            batch_size=args.batch_size,
+            sort=args.sort,
+        )
     raise ValueError(f"unknown command: {args.command}")
+
+
+def read_seed_file(path: Path) -> list[str]:
+    if not path.exists():
+        raise ValueError(f"seed file does not exist: {path}")
+    if path.is_dir():
+        raise ValueError(f"seed file must be a text file, not a folder: {path}")
+    titles: list[str] = []
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        titles.append(line)
+    return titles
 
 
 def format_result(command: str, result: Any) -> str:
@@ -602,6 +678,8 @@ def format_result(command: str, result: Any) -> str:
         return format_unresolved_targets(result["unresolved_targets"])
     if command == "sync":
         return format_sync(result)
+    if command == "acquire":
+        return format_acquire(result)
     return json.dumps(result, ensure_ascii=False, indent=2) + "\n"
 
 
@@ -624,6 +702,17 @@ def format_stats(result: dict[str, Any]) -> str:
     )
     project_section = project_lines if project_lines else "(none)\n"
     diagnostic = format_diagnostic(result.get("diagnostic"))
+    acquisition = result.get("acquisition")
+    acquisition_section = ""
+    if acquisition:
+        acquisition_section = (
+            "\n## Acquisition\n"
+            f"mode: {acquisition.get('mode')}\n"
+            f"coverage: {acquisition.get('coverage')}\n"
+            f"project_url: {acquisition.get('project_url')}\n"
+            f"fetched: {acquisition.get('fetched')}\n"
+            "note: backlinks/related/unresolved are within the acquired corpus.\n"
+        )
     return (
         f"store: {result['store']}\n"
         f"project: {result['project']}\n"
@@ -638,6 +727,7 @@ def format_stats(result: dict[str, Any]) -> str:
         f"edges: {result['edges']}\n"
         f"unresolved_targets: {result['unresolved_targets']}\n"
         f"\n## Projects\n{project_section}"
+        f"{acquisition_section}"
         f"{diagnostic}"
     )
 
@@ -871,6 +961,33 @@ def format_sync(result: dict[str, Any]) -> str:
         parts.append("\n## Skipped Nonpersistent\n")
         for page in result["skipped_nonpersistent"]:
             parts.append(f"- {page['title']} {page['url']}\n")
+    return "".join(parts)
+
+
+def format_acquire(result: dict[str, Any]) -> str:
+    parts = [
+        f"project: {result['project']}\n",
+        f"project_url: {result['project_url']}\n",
+        f"modes: {', '.join(result['modes'])}\n",
+        f"coverage: {result['coverage']}\n",
+        f"fetched: {result['fetched']}\n",
+        f"updated: {result['updated']}\n",
+        "note: backlinks/related/unresolved now describe only the acquired corpus for this project namespace.\n",
+    ]
+    if result["pages"]:
+        parts.append("\n## Acquired Pages\n")
+        for page in result["pages"][:20]:
+            parts.append(f"- {page['title']} ({page['updated']})\n")
+        if len(result["pages"]) > 20:
+            parts.append(f"... {len(result['pages']) - 20} more\n")
+    if result["skipped_nonpersistent"]:
+        parts.append("\n## Skipped Nonpersistent\n")
+        for page in result["skipped_nonpersistent"]:
+            parts.append(f"- {page['title']} {page['url']}\n")
+    if result["failed_pages"]:
+        parts.append("\n## Failed Pages\n")
+        for page in result["failed_pages"]:
+            parts.append(f"- {page['title_or_url']}: {page['error']}\n")
     return "".join(parts)
 
 

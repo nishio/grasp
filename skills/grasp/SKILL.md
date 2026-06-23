@@ -85,6 +85,16 @@ description: >-
 ### hosted の最新を取り込みたい（保守作業）
 → ユーザが指定した project URL で `grasp sync <project-url>`（`cosense` CLI 経由で最近更新ページのみ差分 upsert。`--dry-run` あり）。`@helpfeel/cosense-cli` の `cosense` binary が PATH にあり、対象 project に認証済みであることが必要。通常の JSON 調査では不要。
 
+### 管理者 export が無い hosted project を部分取得したい
+→ `grasp acquire <project-url>`。これは full seed 済み project の freshness path である `sync` とは別で、読めるページだけを local store の project namespace に取り込む初回 seed。
+
+- 特定文字列を含む slice: `grasp --project <project:slice> acquire <url> --search <query> --limit N`
+- 自分の icon / 編集 page slice: `grasp --project <project:mine> acquire <url> --filter <name> --limit N`
+- 起点 page から link crawl: `grasp --project <project:crawl> acquire <url> --from-page <title-or-url> --depth N --limit N`
+- URL/title リスト: `grasp --project <project:seed> acquire <url> --seed-file pages.txt`
+
+`acquire` は対象 project namespace を置き換える（append しない）。既存 full export を誤って潰さないよう、`--project` 省略時の local namespace は `<remote-project>:acquire` になる。partial corpus の `backlinks` / `related` / `unresolved` は「取得済み subset 内」の結果であり、hosted project 全体の事実として答えない。`grasp stats` の Acquisition 節で coverage を確認する。
+
 ## verb 一覧（snapshot — 詳細は各 `grasp <cmd> --help`）
 
 | verb | 用途 |
@@ -100,6 +110,7 @@ description: >-
 | `stats` | store の状態・件数 |
 | `export-ai <title>` | Export for AI 風の単一テキスト bundle（alias `export-for-ai`） |
 | `sync <url>` | hosted 差分取り込み（保守） |
+| `acquire <url>` | admin export なしの hosted 部分取得 seed |
 
 ## 実行方法
 

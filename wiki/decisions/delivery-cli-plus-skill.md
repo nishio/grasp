@@ -54,6 +54,7 @@ cosense の `read-page.md` が長いのは、hosted/多人数ゆえ **traversal 
 - trigger 語の具体（「思い出して」「関連は」「何が未解決か」「この概念どこで言及した」等）。over-trigger と under-trigger の調整。
 - MCP を将来併設するか（cosense は CLI+Skill と MCP server の両方を持つ）。当面は不要。
 - write/identity 層が入った時の Skill 拡張（cosense の edit-page.md 相当。`[[...]]` write 記法の説明はここで初めて要る）。
+- **orchestration をどこに置くか（thin CLI vs `gather` verb）**。出典 [[ai-consumer-feedback-2026-06-23]] Tier 2。AI consumer は round-trip が実費なので、問い単位の retrieval orchestration（search→read→backlinks→related を token 予算内で 1 往復に畳む）を欲する。これは本 decision の「薄い CLI / Skill がオーケストレーション」境界と緊張する。選択肢: ①薄さを保ち Skill 側に gather レシピを明文化（手順.md 層）、②`gather "<query>" --budget` verb を CLI に足す。round-trip コストが AI には実費という前提は [[ai-consumer-cost-and-trust]] 軸1。候補は [[grasp-backlog]]。nishio 判断待ち。
 
 ## Updates
 

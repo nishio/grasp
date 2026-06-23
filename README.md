@@ -78,6 +78,15 @@ grasp import --cosense your-project.json
 grasp --project your-project read "<ページタイトル>"
 ```
 
+管理者 export を取れない hosted project では、`cosense` CLI 経由で読める範囲だけを partial corpus として seed できます。これは full export の代替入口で、結果の逆リンク・related・未解決ターゲットは**取得済み subset 内**の事実です。
+
+```bash
+grasp --project project:slice acquire https://scrapbox.io/project/ --search "[your.icon]" --limit 100
+grasp --project project:crawl acquire https://scrapbox.io/project/ --from-page "<起点ページ>" --depth 1 --limit 100
+```
+
+`--project` を省略した場合、既存の full export project を誤って潰さないよう local namespace は `<remote-project>:acquire` になります。
+
 ### 3. AI に聞く
 
 Skill を登録してあれば、あとは AI エージェントに自然言語で話しかけるだけです。
@@ -113,6 +122,7 @@ grasp read "<ページタイトル>"
 | `export-ai <title>` | main + 1-hop / 2-hop ページ本文を 1 テキストへ展開（alias `export-for-ai`） |
 | `stats` | ストアの件数・更新日時などを確認 |
 | `import --cosense <json>` | Cosense JSON エクスポートを project namespace に取り込み・再構築 |
+| `acquire <project-url>` | 管理者 export なしで hosted Cosense から読めるページを partial corpus として取得（要 `cosense` CLI） |
 | `sync <project-url>` | hosted Cosense の最近更新ページを差分取り込み（保守用・要 `cosense` CLI install + 認証） |
 
 > `unresolved` は「埋めるべき TODO リスト」ではありません。多くのページから参照される未解決ターゲットは、本文が無くても**他ページの文脈で既に意味を持つ概念ノード**です。次に書く候補や調査の起点として眺めるのはよいですが、全部を埋めるべき穴とは解釈しないでください。

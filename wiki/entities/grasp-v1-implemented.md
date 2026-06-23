@@ -7,6 +7,7 @@ sources:
   - grasp/cli.py
   - grasp/cosense.py
   - grasp/sqlite_store.py
+  - pyproject.toml
   - README.md
   - skills/grasp/SKILL.md
 ---
@@ -46,6 +47,7 @@ v1 scope 外:
 
 ## store
 
+- current public compatibility version は `1.5.1`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -53,7 +55,7 @@ v1 scope 外:
 - current schema store への import は他 project を保持する。古い schema の store に import する時は current schema として作り直す。
 - legacy `--export` / `--rebuild-store` / `--force` / 暗黙 seed は v1 surface には無い。
 - SQLite schema は projects / pages / lines / edges / unresolved_targets / unresolved_target_examples を持つ。pages/lines/edges/unresolved は project 列で namespace 化し、page id / line id は project と組にした複合 key で扱う。
-- `stats` は store path, selected project, project list, schema version, source export, imported_at, counts などを返す。project 未指定かつ複数 project がある時は aggregate counts と `projects[]` を返す。store が存在しない場合も traceback/error ではなく `diagnostic.type=store_missing` と次アクションを返す。
+- `stats` は store path, selected project, project list, schema version, source export, imported_at, counts, acquisition metadata などを返す。project 未指定かつ複数 project がある時は aggregate counts と `projects[]` を返す。store が存在しない場合も traceback/error ではなく `diagnostic.type=store_missing` と次アクションを返す。
 - import 済み JSON は store 横の `<store>.imports/` に project ごとの復旧用コピーとして保持する。manifest は project override と cached path を持つ。
 - 古い schema の store でも `stats` は診断用に読める。`read` / `peek` など通常 command は schema mismatch を検出すると、復旧用コピーからサイレントに current schema へ再構築してから続行する。復旧用コピーが無い古い store では、metadata の `last_source_export` / `source_export` が存在すればそれを fallback に使う。どちらも無ければ従来通り手動 `grasp import --cosense <json>` を促す。import cache は seed snapshot なので、hosted の最新差分は復旧後も `sync` の責務。
 - **2026-06-23 観測（nishio primary machine, install path 検証中に偶発）**: code の `SCHEMA_VERSION` が 3→5 に上がった後、`~/.grasp/grasp.sqlite`（schema 3 のまま）に対する最初の通常 command で import cache からサイレント再構築が実際に発火した。**可視な副作用**として stats の count が変わり（parser semantics 変更で edges 120693→125409, unresolved_targets 41750→42770）、`imported_at` も更新され、その **1 command だけは sub-second でなく import 相当の latency** を払う（[[grasp-cli-mvp]] の "初回 import は数秒〜十数秒" がここでも当てはまる）。これは corruption でも `sync` でもなく期待挙動。upgrade（`git pull` で schema bump）前後で `stats` を比べた AI / 人間が count drift や `imported_at` 更新を「壊れた / 同期された」と誤読しないこと。drift は parser が `#tag` / 数字 link を edge 化した結果で、本文・page 数（25791）は不変。
@@ -73,6 +75,7 @@ v1 scope 外:
 | `search <query>` | `lines.text LIKE` の literal substring search。行レベル hits を返す |
 | `export-ai <title>` / `export-for-ai` | main + 1-hop/2-hop page 本文を Cosense Export for AI 風に単一テキスト化 |
 | `sync <project-url>` | optional freshness path。`cosense` CLI で最近更新ページを取得し、SQLite store に upsert |
+| `acquire <project-url>` | admin export なしの hosted Cosense 初回 seed / partial corpus acquisition。`--search` / `--filter` / `--full-list` / `--from-page` / `--seed-file` |
 | `unresolved` | page 実体のない linked target を ranking して返す。TODO list ではない |
 
 ## sync facts
@@ -81,6 +84,14 @@ v1 scope 外:
 - `--dry-run` は changed page の検出だけを行い、`readPage` / upsert はしない。
 - 2026-06-23 実測: export seed 由来の local `nishio` store は 25791 pages、hosted count は 25792 pages。`sync --limit 20` が新規ページ `タブUI` を upsert し、local stats は 25792 pages / 724986 lines になった。再 dry-run は changed 0。
 - この検証は「最近更新された missing/new page」の解消を確認したもの。削除・rename・古い更新日時のまま local に無いページの検出は [[incremental-sync]] の Open Questions のまま。
+
+## acquire facts
+
+- `grasp acquire <project-url>` は `@helpfeel/cosense-cli` の `cosense` binary を使い、管理者 JSON export なしに hosted project の読めるページを local project namespace に seed する。
+- acquisition modes: `--search <query>` は `cosense searchFullText` の page results、`--filter <name>` / `--full-list` は `cosense listPages` pagination、`--from-page <title-or-url> --depth N` は `cosense readPage` と本文 links の bounded crawl、`--seed-file` は title/URL list を読む。
+- `acquire` は対象 project namespace を append せず置き換える。`--project` 省略時は既存 full export project を誤って潰さないよう `<remote-project>:acquire` を default local namespace にする。同じ hosted project の複数 slice は `--project project:slice` のように別 namespace へ分ける。
+- `stats.acquisition` と text `## Acquisition` は mode / coverage / project_url / seed / depth / limit / fetched / failed を返す。partial corpus の `backlinks` / `related` / `unresolved` は取得済み subset 内の結果であり、hosted project 全体の事実ではない。
+- 2026-06-23 smoke: public `https://scrapbox.io/shokai/` に対して `acquire --search codex --limit 2` が 2 pages / 55 lines / 16 edges / 15 unresolved_targets を作成し、`read Codex` が本文 + unresolved targets を返した。
 
 ## import and parser facts
 
@@ -112,6 +123,7 @@ parser が link から除外するもの:
 
 - Cosense JSON export の実スキーマ: [[cosense-json-export]]
 - v1 実装の詳細履歴: [[grasp-cli-mvp]]
+- release / store compatibility history: [[history]]
 - CLI + Skill delivery: [[delivery-cli-plus-skill]]
 - store 決定: [[persistence-custom-format]]
 - freshness path: [[incremental-sync]]

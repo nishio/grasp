@@ -454,6 +454,7 @@ class SQLiteStore:
         project_row = self.project_metadata(project) if project is not None else None
         source_export = metadata.get("last_source_export") or metadata.get("source_export")
         imported_at = _int_or_none(metadata.get("last_imported_at") or metadata.get("imported_at"))
+        acquisition = self.project_acquisition_metadata(project) if project is not None else None
         return {
             "store": str(self.path),
             "project": project,
@@ -468,6 +469,7 @@ class SQLiteStore:
             "lines": self._count_if_exists("lines", project=project),
             "edges": self._count_if_exists("edges", project=project),
             "unresolved_targets": self._count_if_exists("unresolved_targets", project=project),
+            "acquisition": acquisition,
         }
 
     def metadata(self) -> dict[str, str]:
@@ -522,6 +524,17 @@ class SQLiteStore:
         ).fetchone()
         return None if row is None else dict(row)
 
+    def project_acquisition_metadata(self, project: str | None = None) -> dict[str, Any] | None:
+        project = self._require_project(project)
+        raw = self.metadata().get(f"project.{project}.acquisition")
+        if raw is None:
+            return None
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        return data if isinstance(data, dict) else None
+
     def _selected_project_or_none(self) -> str | None:
         if self.project:
             return self.project
@@ -563,6 +576,65 @@ class SQLiteStore:
                 """,
                 values.items(),
             )
+
+    def replace_project_with_cosense_pages(
+        self,
+        project: str,
+        pages: list[dict[str, Any]],
+        *,
+        display_name: str | None = None,
+        source_export: str = "",
+        acquisition_metadata: dict[str, Any] | None = None,
+    ) -> None:
+        project = normalize_project_name(project)
+        if not project:
+            raise ValueError("project name is required")
+
+        now = int(time.time())
+        with self.connection:
+            _delete_project(self.connection, project)
+            self.connection.execute(
+                """
+                INSERT INTO projects (
+                  name,
+                  display_name,
+                  source_export,
+                  exported,
+                  imported_at,
+                  pages,
+                  lines,
+                  edges,
+                  unresolved_targets
+                )
+                VALUES (?, ?, ?, NULL, ?, 0, 0, 0, 0)
+                """,
+                (
+                    project,
+                    display_name or project,
+                    source_export,
+                    now,
+                ),
+            )
+            for page in pages:
+                self._upsert_cosense_page(page, project)
+            rebuild_unresolved_targets(self.connection, project)
+            self._refresh_project_counts(project)
+
+            metadata: dict[str, str] = {
+                "schema_version": SCHEMA_VERSION,
+                "last_acquired_project": project,
+                "last_acquired_source": source_export,
+                "last_acquired_at": str(now),
+            }
+            if acquisition_metadata is not None:
+                metadata[f"project.{project}.acquisition"] = json.dumps(
+                    acquisition_metadata,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            _write_metadata(self.connection, metadata)
+
+        self.project = project
 
     def page_updated(self, page_id: str) -> int | None:
         project = self._require_project()

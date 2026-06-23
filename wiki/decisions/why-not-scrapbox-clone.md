@@ -49,3 +49,13 @@ shokai 製 `@helpfeel/cosense-cli` は *hosted な多人数 Cosense* への CLI 
 
 - B の identity 層をどこまで最初から入れるか（MVP は line-id 自動のみ、page id は後、でもよい）。
 - フラット vs 既存 llm-wiki の concepts/analyses/ 階層との互換（互換を取るとフラット原則と緊張）。
+
+## Updates
+
+### 2026-06-23: identity-without-name の consumer 側価値（AI 引用の時間安定性）
+
+出典: [[ai-consumer-feedback-2026-06-23]] Tier 4。これまで identity-without-name の rationale は**著者側**（rename で参照ページの文意が壊れない・redirect stub が累積しない、上記 fork A の議論）に置いていた。主たるユーザ＝AI consumer 観点で**消費者側の価値**を一つ足す:
+
+AI はユーザに答える時、根拠をページ単位で引用する（「`KJ法` ページより」）。将来 write/rename が入って title が動くと、**過去セッションで AI が出した引用が腐る**（指すページが別物 or 消失）。安定 id で cite できれば、AI の回答は edit を跨いでも検証可能なまま残る。
+
+∴ identity-without-name は「rename で参照ページの文意が壊れない」（著者側）に加えて「**AI の引用が時間を跨いで安定する**」（消費者側）の価値を持つ。write 層設計時の要件: `read --json` が title と別に **安定 page-id を必ず含む**こと。これは read 出力 field としては既済（`Page.to_summary()` が `id` を含む、[[grasp-v1-implemented]]）。未済は id を rename を跨ぐ stable identity にする page-id policy（[[grasp-backlog]] write/identity）。横断原理は [[ai-consumer-cost-and-trust]]。
