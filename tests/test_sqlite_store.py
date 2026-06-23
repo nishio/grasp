@@ -172,8 +172,26 @@ class SQLiteStoreTests(unittest.TestCase):
                 read = store.read("A", backlink_limit=10, related_limit=10, unresolved_limit=10)
                 self.assertEqual(read["page"]["title"], "A")
                 self.assertEqual(read["backlink_count_total"], 1)
+                self.assertIsNone(read["line_window"])
                 self.assertEqual(read["unresolved_targets"][0]["examples"][0]["source_title"], "A")
                 self.assertNotIn("snippet_lines", read["related"][0])
+
+                read_around_line = store.read_around_line(
+                    "aaaaaaaaaaaaaaaaaaaaaaaa:1",
+                    line_context=0,
+                    backlink_limit=0,
+                    related_limit=0,
+                    unresolved_limit=0,
+                )
+                self.assertEqual(read_around_line["page"]["title"], "A")
+                self.assertEqual([line["text"] for line in read_around_line["lines"]], ["links to [B] and [Missing]"])
+                self.assertEqual(read_around_line["line_window"]["around_line_id"], "aaaaaaaaaaaaaaaaaaaaaaaa:1")
+                self.assertEqual(read_around_line["line_window"]["start_index"], 1)
+                self.assertEqual(read_around_line["line_window"]["end_index"], 1)
+                self.assertTrue(read_around_line["lines_truncated"])
+
+                with self.assertRaisesRegex(ValueError, "belongs to page A, not B"):
+                    store.read_around_line("aaaaaaaaaaaaaaaaaaaaaaaa:1", title="B")
 
                 read_with_snippets = store.read(
                     "A",

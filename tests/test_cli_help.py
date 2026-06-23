@@ -61,6 +61,8 @@ class CliHelpTests(unittest.TestCase):
         self.assertIn("--cosense", import_help)
         self.assertNotIn("--force", import_help)
         self.assertIn("--unresolved-limit", read_help)
+        self.assertIn("--around-line", read_help)
+        self.assertIn("line_window", read_help)
         self.assertIn("unresolved_targets", read_help)
         self.assertIn("link_count", unresolved_help)
         self.assertNotIn("--wanted-limit", read_help)
@@ -291,9 +293,87 @@ class CliHelpTests(unittest.TestCase):
         result = json.loads(completed.stdout)
         self.assertEqual(result["page"]["title"], "A")
         self.assertEqual(result["lines"][0]["text"], "A")
+        self.assertIsNone(result["line_window"])
         self.assertEqual(result["related"][0]["title"], "C")
         self.assertEqual(result["related"][0]["snippet_lines"][0]["text"], "C")
         self.assertTrue(result["related"][0]["snippet_truncated"])
+
+    def test_read_around_line_json_returns_bounded_window(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "A",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 1,
+                    "views": 0,
+                    "lines": [
+                        {"text": "A", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "before", "created": 1, "updated": 2, "userId": "u"},
+                        {"text": "center", "created": 1, "updated": 3, "userId": "u"},
+                        {"text": "after", "created": 1, "updated": 4, "userId": "u"},
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--cosense",
+                    str(export_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "read",
+                    "--around-line",
+                    "aaaaaaaaaaaaaaaaaaaaaaaa:2",
+                    "--line-context",
+                    "1",
+                    "--backlinks-limit",
+                    "0",
+                    "--related-limit",
+                    "0",
+                    "--unresolved-limit",
+                    "0",
+                    "--json",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["page"]["title"], "A")
+        self.assertEqual([line["text"] for line in result["lines"]], ["before", "center", "after"])
+        self.assertEqual(result["line_window"]["around_line_id"], "aaaaaaaaaaaaaaaaaaaaaaaa:2")
+        self.assertEqual(result["line_window"]["start_index"], 1)
+        self.assertEqual(result["line_window"]["end_index"], 3)
+        self.assertTrue(result["line_window"]["truncated_before"])
+        self.assertFalse(result["line_window"]["truncated_after"])
+        self.assertTrue(result["lines_truncated"])
 
     def test_text_output_uses_local_line_id_aliases_by_default(self):
         fixture = {

@@ -65,7 +65,7 @@ description: >-
 → 親 conversation に長い `read` 出力を直接持ち込まない。まず探索用 subagent / Explore agent に任せ、subagent 側で `search` / `peek` / limit 付き `read` を使って読む。
 - 親に返すのは、結論・根拠ページ・該当 `line_id`・必要な短い引用/要約だけにする。中間の大量 stdout、長大本文、網羅的検索結果は subagent context に閉じ込める。
 - CLI 側は要約しない。grasp は LLM 依存の summarizer ではなく、行 ID 付きの deterministic graph reader。要約と取捨選択は Skill / subagent の責務。
-- 長大ページを直接開く必要がある時も、先に `grasp search <query>` で hit line を見つけ、`grasp read <title> --line-limit <N>` などで範囲を絞る。親へ戻す時は再アクセスできる `source_title` と `line_id` を残す。
+- 長大ページを直接開く必要がある時も、先に `grasp search <query> --json` で hit line を見つけ、完全 `line_id` を使って `grasp read --around-line <line-id> --line-context 5` で周辺行を読む。ページ先頭だけで足りる時は `grasp read <title> --line-limit <N>` で範囲を絞る。親へ戻す時は再アクセスできる `source_title` と完全 `line_id` を残す。
 
 ### 「この概念にどこで言及したか」
 → `grasp backlinks <title>`（`(source_title, line-id, 行テキスト)`）。`read` の Backlinks 節と同じものを単体で。page が無い概念にも効く。

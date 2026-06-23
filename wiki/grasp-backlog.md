@@ -33,10 +33,11 @@ sources:
 
 2026-06-23 21:52 判断: P0 としては CLI に summarizer を持たせない。Claude Code / OpenCode のような harness は大きい shell output を truncate / 保存し、subagent は中間 tool output を親 conversation へ返さない。したがって長大ページの読解はまず Skill 側で subagent / Explore agent に委譲し、親には要約・根拠 page・line-id だけを返す。詳細は [[delivery-cli-plus-skill]]。
 
+2026-06-24 01:58: `read --around-line <line-id> --line-context N` は実装済み。完全 `line_id` から所属ページを解決し、中心行の前後 N 行だけを返す。JSON は `line_window`、text は `line_window: P1:12 (lines A-B, context N)` を出す。local alias（`P1:12`）は実行内表示用なので入力には使わず、`--json` / `--full-ids` の完全 ID を使う。
+
 候補:
 
 - `search --context N`
-- `read --around-line <line-id>`
 - `peek --line-offset`
 
 これらは Skill/subagent 運用で不足が見えた時に足す bounded primitive。LLM 要約は CLI ではなく agent 層の責務。

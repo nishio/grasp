@@ -151,22 +151,28 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "query, page|null, link_stats, lines, lines_truncated, backlinks, "
-            "backlink_count_returned, backlink_count_total, related, unresolved_targets, recovery_hints|null; "
-            "with --related-snippets, related[] items also include snippet_lines[] and snippet_truncated"
+            "line_window|null, backlink_count_returned, backlink_count_total, related, "
+            "unresolved_targets, recovery_hints|null; with --around-line, lines[] is the bounded "
+            "window around that line; with --related-snippets, related[] items also include "
+            "snippet_lines[] and snippet_truncated"
         ),
         examples=[
             "grasp read 盲点カード",
             "grasp read 盲点カード --line-limit 20 --backlinks-limit 5 --related-limit 5 --unresolved-limit 5",
+            "grasp read --around-line 5928725cba093700118fa5b2:12 --line-context 4",
             "grasp read 盲点カード --related-snippets --related-snippet-lines 5",
             "grasp --json read 民主主義 --backlinks-limit 3 --related-limit 5",
         ],
         notes=[
             "For missing targets, related[] contains source pages with relation=backlink-source.",
             "unresolved_targets[] is populated only for existing pages.",
+            "--around-line accepts a full line_id from JSON or --full-ids text output. Local aliases like P1:12 are per-output only.",
             "--related-snippets includes the first N lines of each related/source page, matching the Cosense related-pane reading pattern.",
         ],
     )
-    read_parser.add_argument("title", help="Page title or missing linked target to open.")
+    read_parser.add_argument("title", nargs="?", help="Page title or missing linked target to open. Optional when --around-line is set.")
+    read_parser.add_argument("--around-line", default=None, help="Open the page containing this full line_id and return a bounded line window around it.")
+    read_parser.add_argument("--line-context", type=int, default=5, help="Number of lines before and after --around-line to return.")
     read_parser.add_argument("--line-limit", type=int, default=None, help="Maximum page lines to return; omit for all lines.")
     read_parser.add_argument("--backlinks-limit", type=int, default=20, help="Maximum backlink lines to return.")
     read_parser.add_argument("--related-limit", type=int, default=20, help="Maximum related pages/source pages to return.")
@@ -603,6 +609,21 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
     if args.command == "stats":
         return store.stats()
     if args.command == "read":
+        if args.around_line:
+            if args.line_limit is not None:
+                raise ValueError("--line-limit cannot be combined with --around-line; use --line-context")
+            return store.read_around_line(
+                args.around_line,
+                title=args.title,
+                line_context=args.line_context,
+                backlink_limit=args.backlinks_limit,
+                related_limit=args.related_limit,
+                unresolved_limit=args.unresolved_limit,
+                related_snippets=args.related_snippets,
+                related_snippet_lines=args.related_snippet_lines,
+            )
+        if args.title is None:
+            raise ValueError("read requires a title or --around-line <line-id>")
         return store.read(
             args.title,
             line_limit=args.line_limit,
@@ -898,6 +919,13 @@ def format_read(result: dict[str, Any], aliases: LineIdAliases | None = None) ->
             f"id: {page['id']}\nviews: {page['views']}\nlines: {page['line_count']}\n"
         )
         parts.append(format_link_stats_summary(result.get("link_stats", {})))
+        line_window = result.get("line_window")
+        if line_window:
+            parts.append(
+                f"line_window: {aliases.format_line_id(line_window['around_line_id'])} "
+                f"(lines {line_window['start_index']}-{line_window['end_index']}, "
+                f"context {line_window['context']})\n"
+            )
         parts.append("\n## Lines\n")
         for line in result["lines"]:
             parts.append(f"{aliases.format_line_id(line['line_id'])}  {line['text']}\n")

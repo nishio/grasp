@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 01:58] implementation | read --around-line を追加
+- `grasp read --around-line <line-id> --line-context N` を追加。完全 `line_id` から所属ページを解決し、中心行の前後 N 行だけを `lines[]` として返す。
+- JSON は `line_window`（around_line_id / center_index / start_index / end_index / context / truncated_before / truncated_after）を返す。通常 read / missing target read では `line_window: null`。
+- text 出力は line-id alias と連動し、`line_window: P1:12 (lines A-B, context N)` を表示する。local alias は入力には使えず、存在しない line-id の場合は `--json` / `--full-ids` の完全 ID を使うよう error で案内する。
+- Skill の長大ページ手順を、`search --json` → 完全 `line_id` → `read --around-line` の流れに更新。store schema は v5 のまま、public compatibility version は `1.5.9`。検証: `python3 -m unittest discover -s tests` OK（29 tests）、`python3 scripts/lint_wiki.py` OK、`git diff --check` OK。
+
 ## [2026-06-24 01:49] implementation | text 出力の line-id をローカル別名化
 - text 出力で `page-id:line-index` を既定で `P1:0` のような実行内ローカル別名に畳み、先頭付近に `line-id aliases: P1=<page-id>` legend を出すようにした。
 - JSON は従来通り完全 `line_id` を返す。text で完全 ID が必要な場合は `--full-ids` を使う。`--full-ids` は root option だが、`--json` と同じく verb 後にも置ける hidden alias として受ける。

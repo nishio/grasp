@@ -696,6 +696,35 @@ class SQLiteStore:
         ).fetchall()
         return [self._line_from_row(row) for row in rows], page.line_count > limit
 
+    def page_lines_around(
+        self,
+        page: Page,
+        *,
+        center_index: int,
+        context: int,
+    ) -> tuple[list[Line], dict[str, Any]]:
+        project = self._require_project()
+        context = max(0, context)
+        start_index = max(0, center_index - context)
+        end_index = min(page.line_count - 1, center_index + context)
+        rows = self.connection.execute(
+            """
+            SELECT * FROM lines
+            WHERE project = ? AND page_id = ? AND line_index BETWEEN ? AND ?
+            ORDER BY line_index
+            """,
+            (project, page.id, start_index, end_index),
+        ).fetchall()
+        return [self._line_from_row(row) for row in rows], {
+            "around_line_id": f"{page.id}:{center_index}",
+            "center_index": center_index,
+            "start_index": start_index,
+            "end_index": end_index,
+            "context": context,
+            "truncated_before": start_index > 0,
+            "truncated_after": end_index < page.line_count - 1,
+        }
+
     def backlinks(self, title: str, limit: int | None = None, offset: int = 0) -> list[Edge]:
         project = self._require_project()
         query = """
@@ -1572,6 +1601,7 @@ class SQLiteStore:
                 "link_stats": link_stats,
                 "lines": [],
                 "lines_truncated": False,
+                "line_window": None,
                 "backlinks": [edge.to_dict() for edge in backlinks],
                 "backlink_count_returned": len(backlinks),
                 "backlink_count_total": link_stats["link_count"],
@@ -1587,6 +1617,63 @@ class SQLiteStore:
             "link_stats": link_stats,
             "lines": [line.to_dict() for line in lines],
             "lines_truncated": lines_truncated,
+            "line_window": None,
+            "backlinks": [edge.to_dict() for edge in backlinks],
+            "backlink_count_returned": len(backlinks),
+            "backlink_count_total": link_stats["link_count"],
+            "related": related,
+            "unresolved_targets": self.unresolved_targets_from_page(page, unresolved_limit),
+            "recovery_hints": None,
+        }
+
+    def read_around_line(
+        self,
+        line_id: str,
+        *,
+        title: str | None = None,
+        line_context: int = 5,
+        backlink_limit: int = 20,
+        related_limit: int = 20,
+        unresolved_limit: int = 20,
+        related_snippets: bool = False,
+        related_snippet_lines: int = 5,
+    ) -> dict[str, Any]:
+        if line_context < 0:
+            raise ValueError("--line-context must be >= 0")
+
+        line_page = self._line_and_page_by_id(line_id)
+        if line_page is None:
+            raise ValueError(
+                f"line-id not found in selected project: {line_id}; "
+                "use a full line_id from --json or --full-ids output"
+            )
+        page, center_line = line_page
+
+        if title is not None:
+            requested_page = self.resolve_page(title)
+            if requested_page is None or requested_page.id != page.id:
+                raise ValueError(
+                    f"--around-line {line_id} belongs to page {page.title}, not {title}"
+                )
+
+        lines, line_window = self.page_lines_around(
+            page,
+            center_index=center_line.index,
+            context=line_context,
+        )
+        backlinks = self.backlinks(page.title, backlink_limit)
+        link_stats = self.link_stats(page.title)
+        related = self.related(page.title, related_limit)
+        if related_snippets:
+            related = self._with_page_snippets(related, related_snippet_lines)
+
+        return {
+            "query": title or page.title,
+            "page": page.to_summary(),
+            "link_stats": link_stats,
+            "lines": [line.to_dict() for line in lines],
+            "lines_truncated": line_window["truncated_before"] or line_window["truncated_after"],
+            "line_window": line_window,
             "backlinks": [edge.to_dict() for edge in backlinks],
             "backlink_count_returned": len(backlinks),
             "backlink_count_total": link_stats["link_count"],
@@ -2011,6 +2098,19 @@ class SQLiteStore:
             (project, page_id),
         ).fetchone()
         return self._page_from_row(row) if row is not None else None
+
+    def _line_and_page_by_id(self, line_id: str) -> tuple[Page, Line] | None:
+        project = self._require_project()
+        line_row = self.connection.execute(
+            "SELECT * FROM lines WHERE project = ? AND line_id = ?",
+            (project, line_id),
+        ).fetchone()
+        if line_row is None:
+            return None
+        page = self._page_by_id(line_row["page_id"])
+        if page is None:
+            return None
+        return page, self._line_from_row(line_row)
 
     def _upsert_cosense_page(self, page: dict[str, Any], project: str) -> None:
         page_id = str(page["id"])
