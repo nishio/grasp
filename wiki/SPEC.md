@@ -82,6 +82,7 @@ MVP（step 1）は実装・smoke 済み。`cosense` との実測比較（[[cosen
 - 修正: decoration 判定を「先頭の連続する `*` `-` `_` 群 ＋ 空白」に拡張（現状は先頭 1 文字のみ判定）。あわせて false-negative（短い英数字 title）の監査。
 
 ### M2-4. cosense-cli 差分更新（freshness）
+- Status 2026-06-23: **実装済み**。`grasp sync <project-url>` が `cosense listPages` → changed page `readPage` → SQLite upsert を行う。`--dry-run` 対応。
 - 問題: export は重く（手動生成・123MB）頻繁な再取得に向かない。最新化を export 反復でやらない。
 - やること: 初回 export を seed にし、以降は `cosense listPages <project> --sort updated` で最近更新ページのみ取得 → `readPage` で本文 → store に upsert ＋ edge 再 materialize。決定と grounded メカニズム（last-sync カーソル / humanize 済み updated の扱い）は [[incremental-sync]]。
 - 位置づけ: "Co-" でなく単一所有 mirror の最新化（[[why-not-scrapbox-clone]] スコープ内）。import adapter が bulk seed と incremental delta の2モードになる。
@@ -101,6 +102,7 @@ write / transclude / rename（identity 層）・Markdown import adapter・vector
 | `suggest <partial>` | title 補完候補 | `[[` 補完 |
 | `search <query>` | 本文行検索。`(page, line-id, 行テキスト)` のリスト | 全文検索 |
 | `wanted` | 未作成 link target 一覧（自己宛キュー） | 赤リンク |
+| `sync <project-url>` | cosense-cli で最近更新ページを差分 upsert | hosted freshness |
 | `write <title> <body>` | ページ作成 / 更新 ＋ グラフ自動更新 | 編集 |
 | `transclude <line-id>` | 行の埋め込み / 参照 | 行参照 |
 | `rename <id> <new-title>` | identity 保持で改名（リンク追従・文意保存） | name=identity 修正 |

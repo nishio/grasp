@@ -38,7 +38,7 @@ node: /Users/nishio/.nvm/versions/node/v24.16.0
 - `cosense`: hosted Cosense project を読む・検索する・編集する。認証やネットワーク、共同編集された現在状態が関係する。
 - `grasp`: local export/native store を読む。AI 所有の graph memory substrate。逆リンク・2-hop・red link を local graph として materialize する。
 
-grasp の **MVP** では `cosense` を runtime dependency にしない（export が import 入力、hosted API は別系統）。**ただし post-MVP では cosense-cli が grasp の freshness 経路に昇格する**: 初回 export を seed にし、以降は cosense-cli で最近更新ページのみ差分取得して local store を最新化する（決定とメカニズムは [[incremental-sync]]）。比較対象から grasp の構成要素へ。
+grasp の **MVP** では `cosense` を runtime dependency にしない（export が import 入力、hosted API は別系統）。**ただし post-MVP では cosense-cli が grasp の freshness 経路に昇格する**: 初回 export を seed にし、以降は `grasp sync <project-url>` が `cosense listPages` / `cosense readPage` を呼び、最近更新ページのみ差分取得して local store を最新化する（決定とメカニズムは [[incremental-sync]]）。比較対象から grasp の構成要素へ。
 
 ## 実測比較（2026-06-23, 同一ページ `君主道徳と奴隷道徳` 38 lines / 2113 views）
 

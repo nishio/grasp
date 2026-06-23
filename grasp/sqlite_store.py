@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 import os
 import sqlite3
 import time
 from typing import Any
 
-from .cosense import CosenseStore, Edge, Line, Page, normalize_title
+from .cosense import CosenseStore, Edge, Line, Page, normalize_title, parse_cosense_links
 
 
 SCHEMA_VERSION = "1"
@@ -191,6 +192,30 @@ class SQLiteStore:
             "edges": self._count("edges"),
             "wanted": self._count("wanted"),
         }
+
+    def set_metadata(self, values: dict[str, str]) -> None:
+        with self.connection:
+            self.connection.executemany(
+                """
+                INSERT INTO metadata (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                values.items(),
+            )
+
+    def page_updated(self, page_id: str) -> int | None:
+        row = self.connection.execute("SELECT updated FROM pages WHERE id = ?", (page_id,)).fetchone()
+        if row is None:
+            return None
+        return row["updated"]
+
+    def upsert_cosense_pages(self, pages: list[dict[str, Any]]) -> None:
+        if not pages:
+            return
+        with self.connection:
+            for page in pages:
+                self._upsert_cosense_page(page)
+            rebuild_wanted(self.connection)
 
     def resolve_page(self, title: str) -> Page | None:
         row = self.connection.execute(
@@ -565,6 +590,62 @@ class SQLiteStore:
         row = self.connection.execute("SELECT * FROM pages WHERE id = ?", (page_id,)).fetchone()
         return self._page_from_row(row) if row is not None else None
 
+    def _upsert_cosense_page(self, page: dict[str, Any]) -> None:
+        page_id = str(page["id"])
+        title = str(page["title"])
+        lines = page.get("lines") or []
+        self.connection.execute("DELETE FROM pages WHERE id = ?", (page_id,))
+        self.connection.execute(
+            """
+            INSERT INTO pages (id, title, norm_title, created, updated, views, line_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                page_id,
+                title,
+                normalize_title(title),
+                parse_cosense_time(page.get("created")),
+                parse_cosense_time(page.get("updated")),
+                int(page.get("views") or 0),
+                len(lines),
+            ),
+        )
+
+        line_rows = []
+        edge_rows = []
+        for line_index, line in enumerate(lines):
+            line_id = f"{page_id}:{line_index}"
+            text = str(line.get("text", ""))
+            user = line.get("user") or {}
+            line_rows.append(
+                (
+                    line_id,
+                    page_id,
+                    line_index,
+                    text,
+                    parse_cosense_time(line.get("created")),
+                    parse_cosense_time(line.get("updated")),
+                    user.get("id"),
+                )
+            )
+            for target_title in parse_cosense_links(text):
+                edge_rows.append((page_id, line_id, target_title, normalize_title(target_title)))
+
+        self.connection.executemany(
+            """
+            INSERT INTO lines (line_id, page_id, line_index, text, created, updated, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            line_rows,
+        )
+        self.connection.executemany(
+            """
+            INSERT INTO edges (source_page_id, line_id, target_title, target_norm)
+            VALUES (?, ?, ?, ?)
+            """,
+            edge_rows,
+        )
+
     def _page_from_row(self, row: sqlite3.Row) -> Page:
         return Page(
             id=row["id"],
@@ -620,6 +701,23 @@ def _int_or_none(value: str | None) -> int | None:
         return None
     try:
         return int(value)
+    except ValueError:
+        return None
+
+
+def parse_cosense_time(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if not isinstance(value, str):
+        return None
+
+    iso_part = value.split(" ", 1)[0]
+    try:
+        return int(datetime.fromisoformat(iso_part).timestamp())
     except ValueError:
         return None
 

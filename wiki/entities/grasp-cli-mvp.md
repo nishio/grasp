@@ -20,6 +20,7 @@ python3 -m grasp wanted --limit 10
 python3 -m grasp backlinks 盲点 --limit 5
 python3 -m grasp read 盲点カード --line-limit 8 --backlinks-limit 3 --related-limit 3 --wanted-limit 3
 python3 -m grasp search 盲点 --limit 5
+python3 -m grasp sync https://scrapbox.io/nishio/ --limit 20 --dry-run
 python3 -m grasp --json backlinks 盲点 --limit 2
 ```
 
@@ -36,6 +37,7 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 - `backlinks <title>`: `(source_page, line-id, line_text)`。red link target にも効く。
 - `wanted`: 未作成 target を ranking して返す。
 - `search <query>`: 本文行を substring 検索し、`(page, line-id, line_text)` を page.views 優先で返す。
+- `sync <project-url>`: `cosense` CLI で最近更新ページだけ取得し、SQLite store に upsert する。`--dry-run` あり。
 - helper: `related`, `peek`, `suggest`。MVP 必須ではないが read-only なので追加。
 
 ## data model 実装
@@ -84,6 +86,7 @@ MVP parser は以下を link としない:
 - ~~on-disk store/cache ★最優先~~ → SQLite store 実装済み。edge/materialized wanted を on-disk 永続し、通常 read は JSON parse しない。
 - ~~本文検索 `search`~~ → 実装済み。SQLite `lines.text LIKE` で行本文を検索し、行レベル hits を返す。
 - ~~parser false-positive 修正~~ → `[** x]` 系装飾は除外済み。false-negative（短い英数字 title）監査は残る。
+- **cosense-cli 差分更新**: `grasp sync` 実装済み。削除/rename tombstone は未対応。
 - `#tag` を page link と同等に扱うか。
 - line context window: backlink は現状 hit line のみ。前後行を付けるか。
 - `wanted` ranking の重み調整: count/views/recency の順で十分かは利用で検証。

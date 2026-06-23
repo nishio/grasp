@@ -20,6 +20,15 @@ sources:
 - grasp は last-sync カーソル（前回同期時点の最大 updated）を保持。listPages を新しい順に walk し、stored と updated が一致する run に達したら停止 ＝ **変更ページ集合**を得る。
 - 各変更ページは `cosense readPage <pageUrl>`（`lines` を含む）で本文取得 → store に upsert ＋ そのページの edge を再 materialize（[[persistence-custom-format]] のエッジ層）。
 
+## Update (2026-06-23): 実装
+
+`grasp sync <project-url>` を追加。`--limit` 件まで `cosense listPages --sort updated` を inspect し、store の `pages.updated` と remote `updated` を比較する。変更ページだけ `cosense readPage` で取得して SQLite store に upsert、最後に `wanted` を再 materialize する。
+
+- `updated` は humanized suffix の前の ISO8601 部分を `datetime.fromisoformat` で epoch seconds に変換して比較する。
+- pinned page は updated が古くても停止条件にしない（`pin > 0` なら skip して次を見る）。
+- hosted line id は採用せず、grasp の既存方針 `page.id:line-index` を維持する。
+- `--dry-run` は changed page の列挙のみで `readPage` / upsert しない。
+
 ## 帰結
 
 - import adapter は **2モード**: bulk seed（export）と incremental delta（cosense-cli）。native store（[[persistence-custom-format]]）はどちらの入力も同じ正規化先。
@@ -28,7 +37,7 @@ sources:
 
 ## Open Questions
 
-- cosense-cli は `updated` を humanize した文字列（例 `2022-03-01T23:20+09:00 (4 年前)`）で返す → 数値秒での厳密比較がしづらい。page id 単位で updated 文字列の異同を見るか、raw timestamp 取得手段を要確認。
+- ~~cosense-cli は `updated` を humanize した文字列で返す~~ → suffix 前の ISO8601 を epoch seconds に parse して比較。
 - 削除・rename されたページの検出（listPages は存在ページのみ返す）。tombstone をどう同期するか。
-- `pinned page は常に先頭に来る`（sort=updated でも）→ カーソル walk の停止判定で pinned を除外する必要。
-- hosted lines は Cosense 由来の安定 line-id を持つ（export には無い）。grasp は自前 line-id（`page.id:line-index`）を維持するか、hosted line-id を採用するか（[[grasp-cli-mvp]] の line-id 方針と整合をとる）。
+- ~~`pinned page は常に先頭に来る`~~ → sync の停止判定から pinned を除外。
+- ~~hosted lines は Cosense 由来の安定 line-id を持つ~~ → grasp は自前 line-id（`page.id:line-index`）を維持。

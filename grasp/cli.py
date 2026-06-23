@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
+from .cosense_cli import CosenseCliClient, sync_from_cosense
 from .sqlite_store import SQLiteStore, import_export_to_sqlite
 
 
@@ -78,6 +79,13 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("query")
     search_parser.add_argument("--limit", type=int, default=50)
     search_parser.add_argument("--offset", type=int, default=0)
+
+    sync_parser = subparsers.add_parser("sync", help="Incrementally sync recently updated hosted Cosense pages into the store.")
+    sync_parser.add_argument("project_url")
+    sync_parser.add_argument("--limit", type=int, default=100, help="Maximum listPages entries to inspect.")
+    sync_parser.add_argument("--batch-size", type=int, default=100, help="listPages page size.")
+    sync_parser.add_argument("--cosense-command", default="cosense", help="cosense CLI binary.")
+    sync_parser.add_argument("--dry-run", action="store_true", help="List changed pages without fetching/upserting them.")
 
     wanted_parser = subparsers.add_parser("wanted", help="List ranked red links.")
     wanted_parser.add_argument("--limit", type=int, default=50)
@@ -174,6 +182,15 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return {
             "wanted": store.wanted(limit=args.limit),
         }
+    if args.command == "sync":
+        return sync_from_cosense(
+            store,
+            args.project_url,
+            client=CosenseCliClient(args.cosense_command),
+            limit=args.limit,
+            batch_size=args.batch_size,
+            dry_run=args.dry_run,
+        )
     raise ValueError(f"unknown command: {args.command}")
 
 
@@ -194,6 +211,8 @@ def format_result(command: str, result: Any) -> str:
         return format_search(result["query"], result["hits"], result.get("offset", 0))
     if command == "wanted":
         return format_wanted(result["wanted"])
+    if command == "sync":
+        return format_sync(result)
     return json.dumps(result, ensure_ascii=False, indent=2) + "\n"
 
 
@@ -310,6 +329,28 @@ def format_search(query: str, hits: list[dict[str, Any]], offset: int = 0) -> st
     else:
         for hit in hits:
             parts.append(f"- {hit['source_title']} {hit['line_id']}: {hit['line_text']}\n")
+    return "".join(parts)
+
+
+def format_sync(result: dict[str, Any]) -> str:
+    parts = [
+        f"project: {result['project_url']}\n",
+        f"dry_run: {result['dry_run']}\n",
+        f"inspected: {result['inspected']}\n",
+        f"changed: {result['changed']}\n",
+        f"updated: {result['updated']}\n",
+    ]
+    if result["stopped_at"]:
+        stopped = result["stopped_at"]
+        parts.append(f"stopped_at: {stopped['title']} ({stopped['updated']})\n")
+    if result["changed_pages"]:
+        parts.append("\n## Changed Pages\n")
+        for page in result["changed_pages"]:
+            parts.append(f"- {page['title']} ({page['updated']})\n")
+    if result["skipped_nonpersistent"]:
+        parts.append("\n## Skipped Nonpersistent\n")
+        for page in result["skipped_nonpersistent"]:
+            parts.append(f"- {page['title']} {page['url']}\n")
     return "".join(parts)
 
 
