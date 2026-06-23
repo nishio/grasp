@@ -11,7 +11,7 @@ from typing import Any
 from .cosense import CosenseStore, Edge, Line, Page, normalize_title, parse_cosense_links
 
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 
 SCHEMA = """
@@ -62,6 +62,15 @@ CREATE TABLE wanted (
   latest_source_updated INTEGER NOT NULL
 );
 
+CREATE TABLE wanted_examples (
+  target_norm TEXT NOT NULL,
+  rank INTEGER NOT NULL,
+  source_page_id TEXT NOT NULL,
+  line_id TEXT NOT NULL,
+  target_title TEXT NOT NULL,
+  PRIMARY KEY(target_norm, rank)
+);
+
 CREATE INDEX idx_pages_norm_title ON pages(norm_title);
 CREATE INDEX idx_pages_title ON pages(title);
 CREATE INDEX idx_lines_page_index ON lines(page_id, line_index);
@@ -69,6 +78,7 @@ CREATE INDEX idx_edges_target_norm ON edges(target_norm);
 CREATE INDEX idx_edges_source_page ON edges(source_page_id);
 CREATE INDEX idx_edges_line ON edges(line_id);
 CREATE INDEX idx_wanted_rank ON wanted(count DESC, source_page_count DESC, total_source_views DESC, latest_source_updated DESC, title);
+CREATE INDEX idx_wanted_examples_norm_rank ON wanted_examples(target_norm, rank);
 """
 
 
@@ -296,7 +306,7 @@ class SQLiteStore:
                 """,
                 (limit,),
             ).fetchall()
-        return [self._wanted_materialized_row_to_dict(row) for row in rows]
+        return self._wanted_materialized_rows_to_dicts(rows)
 
     def _wanted_dynamic(self, limit: int | None = None) -> list[dict[str, Any]]:
         rows = self.connection.execute(
@@ -509,18 +519,55 @@ class SQLiteStore:
             "examples": [edge.to_dict() for edge in examples],
         }
 
-    def _wanted_materialized_row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
-        norm = row["target_norm"]
-        examples = self._wanted_examples(norm)
-        return {
-            "title": row["title"],
-            "normalized_title": norm,
-            "count": row["count"],
-            "source_page_count": row["source_page_count"],
-            "total_source_views": row["total_source_views"],
-            "latest_source_updated": row["latest_source_updated"],
-            "examples": [edge.to_dict() for edge in examples],
-        }
+    def _wanted_materialized_rows_to_dicts(self, rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+        target_norms = [row["target_norm"] for row in rows]
+        examples_by_norm = self._wanted_materialized_examples(target_norms)
+        return [
+            {
+                "title": row["title"],
+                "normalized_title": row["target_norm"],
+                "count": row["count"],
+                "source_page_count": row["source_page_count"],
+                "total_source_views": row["total_source_views"],
+                "latest_source_updated": row["latest_source_updated"],
+                "examples": [edge.to_dict() for edge in examples_by_norm.get(row["target_norm"], [])],
+            }
+            for row in rows
+        ]
+
+    def _wanted_materialized_examples(self, target_norms: list[str]) -> dict[str, list[Edge]]:
+        if not target_norms:
+            return {}
+        placeholders = ",".join("?" for _ in target_norms)
+        try:
+            rows = self.connection.execute(
+                f"""
+                SELECT
+                  we.target_norm,
+                  we.source_page_id,
+                  source.title AS source_title,
+                  source.views AS source_views,
+                  source.updated AS source_updated,
+                  we.line_id,
+                  line.line_index,
+                  line.text AS line_text,
+                  we.target_title,
+                  we.rank
+                FROM wanted_examples we
+                JOIN pages source ON source.id = we.source_page_id
+                JOIN lines line ON line.line_id = we.line_id
+                WHERE we.target_norm IN ({placeholders})
+                ORDER BY we.target_norm, we.rank
+                """,
+                target_norms,
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {norm: self._wanted_examples(norm) for norm in target_norms}
+
+        examples: dict[str, list[Edge]] = {}
+        for row in rows:
+            examples.setdefault(row["target_norm"], []).append(self._edge_from_row(row))
+        return examples
 
     def _wanted_examples(self, target_norm: str, source_page_id: str | None = None) -> list[Edge]:
         return self.backlinks_by_norm_query(target_norm, limit=5, source_page_id=source_page_id)
@@ -724,6 +771,10 @@ def parse_cosense_time(value: Any) -> int | None:
 
 def rebuild_wanted(connection: sqlite3.Connection) -> None:
     connection.execute("DELETE FROM wanted")
+    try:
+        connection.execute("DELETE FROM wanted_examples")
+    except sqlite3.OperationalError:
+        pass
     connection.execute(
         """
         INSERT INTO wanted (
@@ -783,5 +834,42 @@ def rebuild_wanted(connection: sqlite3.Connection) -> None:
         FROM edge_stats
         JOIN source_stats ON source_stats.target_norm = edge_stats.target_norm
         JOIN title_choice ON title_choice.target_norm = edge_stats.target_norm
+        """
+    )
+    try:
+        rebuild_wanted_examples(connection)
+    except sqlite3.OperationalError:
+        pass
+
+
+def rebuild_wanted_examples(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        INSERT INTO wanted_examples (
+          target_norm,
+          rank,
+          source_page_id,
+          line_id,
+          target_title
+        )
+        WITH ranked AS (
+          SELECT
+            e.target_norm,
+            ROW_NUMBER() OVER (
+              PARTITION BY e.target_norm
+              ORDER BY source.views DESC, COALESCE(source.updated, 0) DESC, source.title, line.line_index
+            ) AS rank,
+            e.source_page_id,
+            e.line_id,
+            e.target_title
+          FROM edges e
+          JOIN pages source ON source.id = e.source_page_id
+          JOIN lines line ON line.line_id = e.line_id
+          LEFT JOIN pages target ON target.norm_title = e.target_norm
+          WHERE target.id IS NULL
+        )
+        SELECT target_norm, rank, source_page_id, line_id, target_title
+        FROM ranked
+        WHERE rank <= 5
         """
     )

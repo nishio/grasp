@@ -47,6 +47,8 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 - `Edge`: source page + source line + target title/normalized title。forward/backward は同一 edge の両読み。
 - store は SQLite on-disk。`pages` / `lines` / `edges` / materialized `wanted` を保存する。起動ごとに 118MB JSON を parse しない。
 - 実測（2026-06-23）: import 約 8 秒。store 利用時 `read 盲点カード` 約 0.7 秒、`wanted --limit 3` 約 0.7 秒、`backlinks 盲点` 約 0.4 秒。
+- Update 2026-06-23: `wanted_examples` を materialize して `wanted --limit N` の example 取得を N 回 query しないようにした。Python 内部計測では `wanted(limit=100)` が約 6ms。CLI wall time は Python 起動 + output 書き出し込みで約 1.0 秒。
+- `search` は SQLite FTS5 trigram を試したが、2文字日本語 query（例: `盲点`）は `MATCH` に乗らず、FTS table `LIKE` は一部日本語 substring（例: `盲点カード`）の recall を落とした。現状は correctness 優先で `lines.text LIKE` を維持。
 
 ## 実装判断
 
