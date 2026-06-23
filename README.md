@@ -122,7 +122,7 @@ grasp read "<ページタイトル>"
 | verb | 用途 |
 | --- | --- |
 | `read <title>` | 本文＋逆リンク＋related＋未解決を**近傍同梱**で返す（`--related-snippets` で related/source ページ冒頭も同梱、`--around-line <line-id>` で行周辺だけ読む） |
-| `search <query>` | 本文行を検索。既定は空白も含めて入力文字列そのものの line substring。`--mode boolean` で AND/OR/NOT、`--scope line|page` で行単位/ページ単位を切替。0件時は NFKC/長音ゆれの normalized fallback を試す |
+| `search <query>` | 本文行を検索。既定は空白も含めて入力文字列そのものの line substring。`--mode boolean` で AND/OR/NOT、`--scope line|page` で行単位/ページ単位を切替。`--context N` で各 hit の前後 N 行を同梱。0件時は NFKC/長音ゆれの normalized fallback を試す |
 | `suggest <partial>` | タイトルの部分一致補完 |
 | `backlinks <title>` | 行レベルの逆リンク（本文の無いターゲットにも効く） |
 | `related <title>` | 既存ページなら 2-hop ページ、本文の無いターゲットならそれを参照する source ページ |

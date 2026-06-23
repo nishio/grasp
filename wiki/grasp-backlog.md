@@ -35,9 +35,10 @@ sources:
 
 2026-06-24 01:58: `read --around-line <line-id> --line-context N` は実装済み。完全 `line_id` から所属ページを解決し、中心行の前後 N 行だけを返す。JSON は `line_window`、text は `line_window: P1:12 (lines A-B, context N)` を出す。local alias（`P1:12`）は実行内表示用なので入力には使わず、`--json` / `--full-ids` の完全 ID を使う。
 
+2026-06-24 02:30: `search --context N` は実装済み。検索 semantics は変えず、各 hit に前後 N 行の `context_lines[]` と `context_window` を同梱する。text 出力でも hit 直下に bounded context を表示する。
+
 候補:
 
-- `search --context N`
 - `peek --line-offset`
 
 これらは Skill/subagent 運用で不足が見えた時に足す bounded primitive。LLM 要約は CLI ではなく agent 層の責務。

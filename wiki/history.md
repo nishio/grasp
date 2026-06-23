@@ -48,6 +48,7 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
+| `1.5.11` | schema `5` | 2026-06-24 | schema `5` compatible | `search --context N` を追加。各 hit に前後 N 行の `context_lines[]` と `context_window` を同梱し、text 出力でも hit 直下に bounded context を表示する。検索 semantics / store schema は不変 |
 | `1.5.10` | schema `5` | 2026-06-24 | schema `5` compatible | `grasp import --markdown <folder>` を追加。Markdown folder を read-only mirror として既存 SQLite graph store に materialize する。frontmatter `title` / `id` / `aliases` / `tags`、wikilinks / hashtags、alias canonicalization、manifest-based incremental re-import に対応 |
 | `1.5.9` | schema `5` | 2026-06-24 | schema `5` compatible | `read --around-line <line-id> --line-context N` を追加。完全 `line_id` から同一ページを解決し、中心行の前後 N 行だけを返す。JSON は `line_window` を返し、通常 read では `line_window: null` |
 | `1.5.8` | schema `5` | 2026-06-24 | schema `5` compatible | text 出力の line-id を既定で実行内ローカル別名（`P1:0` など）に短縮し、先頭付近に `P1=<page-id>` legend を出す。`--json` は従来通り完全 ID、text で完全 ID が必要な時は `--full-ids` |
@@ -68,6 +69,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.5.10`
+- Current public compatibility version: `1.5.11`
 - Current internal `SCHEMA_VERSION`: `5`
-- Current package metadata should match `1.5.10`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.5.11`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

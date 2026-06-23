@@ -57,6 +57,7 @@ class CliHelpTests(unittest.TestCase):
     def test_help_uses_current_unresolved_mechanics(self):
         import_help = run_grasp_help("import")
         read_help = run_grasp_help("read")
+        search_help = run_grasp_help("search")
         unresolved_help = run_grasp_help("unresolved")
         self.assertIn("--cosense", import_help)
         self.assertIn("--markdown", import_help)
@@ -64,6 +65,8 @@ class CliHelpTests(unittest.TestCase):
         self.assertIn("--unresolved-limit", read_help)
         self.assertIn("--around-line", read_help)
         self.assertIn("line_window", read_help)
+        self.assertIn("--context", search_help)
+        self.assertIn("context_window", search_help)
         self.assertIn("unresolved_targets", read_help)
         self.assertIn("link_count", unresolved_help)
         self.assertNotIn("--wanted-limit", read_help)
@@ -599,6 +602,75 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual([hit["source_title"] for hit in result["hits"]], ["Both", "Both"])
         self.assertEqual([hit["match_terms"] for hit in result["hits"]], [["alpha"], ["beta"]])
         self.assertIsNone(result["recovery_hints"])
+
+    def test_search_json_includes_context_lines_when_requested(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "A",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 1,
+                    "views": 0,
+                    "lines": [
+                        {"text": "A", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "before", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "needle appears", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "after", "created": 1, "updated": 1, "userId": "u"},
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--cosense",
+                    str(export_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "search",
+                    "needle",
+                    "--context",
+                    "1",
+                    "--json",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["context"], 1)
+        self.assertEqual(
+            [line["text"] for line in result["hits"][0]["context_lines"]],
+            ["before", "needle appears", "after"],
+        )
+        self.assertEqual(result["hits"][0]["context_window"]["start_index"], 1)
+        self.assertEqual(result["hits"][0]["context_window"]["end_index"], 3)
 
     def test_related_empty_json_includes_recovery_hints(self):
         fixture = {
