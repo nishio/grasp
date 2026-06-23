@@ -37,7 +37,7 @@ sources:
 「既存資産を読める」は native format でなく **import の責務**。native は独自のまま、複数の adapter で取り込む:
 - **初手（MVP の入力）= Cosense JSON export**。pages → lines ＋ リンク構造を既に持つ ＝ native モデルの自然な seed。
 - 後で Markdown adapter も足せる（既存 llm-wiki 森 40+ を読める）。← native を Markdown にしなくても達成。
-- 注意（Codex が実物で確認）: Cosense の link 構文は `[title]`（単角括弧。`[[...]]` は bold）。export の `lines` は安定 line-id を持たない可能性 → **import 時に grasp が line-id を採番**（原理4「line-id は機械自動採番」と整合）。
+- 実物の export で確定（スキーマ詳細は [[cosense-json-export]]）: ① **lines に安定 id は無い** → import 時に grasp が line-id を採番（原理4 と整合）。② **link graph は export に保存されない** → line.text を parse してエッジを materialize。③ link 構文 `[...]` は overloaded（内部リンクは 62.7%、残りは外部 URL / icon / 装飾 `[* ]` / cross-project `[/p/x]`）。`[[...]]` は **bold でリンクでない**（grasp の `[[wikilink]]` と逆）。④ リンク解決は normalize（case-insensitive ＋ 空白畳み込み）。
 
 ## データモデル（暫定）
 
@@ -51,7 +51,7 @@ sources:
 **Cosense JSON export 1ファイルを読み取り専用で CLI から扱う**。書き込み・identity 層・Markdown adapter は後。
 - import: Cosense export → 正規化（page/line/edge、line-id 採番）→ in-memory（or 独自 store）
 - 動詞: `read`（近傍同梱）/ `backlinks`（行つき）/ `wanted`（赤リンク）の3つ
-- これで「AI が CLI だけで Scrapbox グラフを体験する」中核仮説を **実データ（nishio の Cosense project）** で検証できる。
+- これで「AI が CLI だけで Scrapbox グラフを体験する」中核仮説を **実データ（nishio の Cosense project: 25791 pages / 724981 lines / 内部リンク 133022・distinct target 61613・うち red link 45703）** で検証できる（[[cosense-json-export]]）。
 
 ## CLI 動詞（surface）
 
@@ -75,7 +75,7 @@ sources:
 
 - ~~永続化形式~~ → **解決: 独自フォーマット**（[[persistence-custom-format]]）。読込は import adapter の責務に分離。
 - **独自 store の具体**: in-memory のみ（export を毎回読む）か、独自の on-disk 表現を持つか。MVP は前者で可。
-- **read の近傍境界**: 2-hop までか、逆リンクは全件か上位 N か、赤リンクの優先順位づけ。
+- **read の近傍境界**: 2-hop までか、逆リンクは全件か上位 N か、赤リンクの優先順位づけ。← 実データで `wanted` ~45700 件 → **ranking 必須**が確定（[[cosense-json-export]]）。signal 候補: 出現回数 / page.views / recency。
 - **page id をいつ振るか**: 「必要時のみ ＝ 意味判断」の運用ルールを誰がどう発火するか。
 - **行リンクの文脈窓**: 該当行だけか、前後数行か。
 - **Codex からの呼び方**: 純 CLI か MCP server 化か。
