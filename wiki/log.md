@@ -1,5 +1,14 @@
 # Log
 
+## [2026-06-23 22:31] file back | AI consumer feedback への nishio 採否を反映
+
+- 22:18 ingest した [[ai-consumer-feedback-2026-06-23]] の候補に nishio が adjudication。live status を [[grasp-backlog]] に、原理の訂正を [[ai-consumer-cost-and-trust]] に、event の採否要約を entity に反映。
+- **採用**: `read --related-snippets`（**実 Cosense UI も related 先頭 5 行を表示**するので default snippet=先頭 ~5 行 = Cosense parity）。line-id ローカル別名（agree）。backlinks finer ranking（agree、既に views ランク済み）。
+- **却下** `--strip-decoration`: decoration は noise でない。`[nishio.icon]`=block の著者、bare image URL=今の AI に読めずとも人間に画像提示・将来 AI も読む。畳んではいけない。token 削減は line-id 別名側でやる。concept page の cost 軸の例示からも除去し「fidelity を捨てない」を明記。
+- **却下** 近傍クラスタリング `--cluster`: クラスタリングは AI がやるべき（AI の方が賢い）。CLI は embeddings 後の雑な embedding クラスタリング程度。そもそも 100+ リンクの hub は rare case。raw＋ranking→AI が畳む方針を確定。
+- **experimental** `path <A> <B>`: 研究的には筋が良いが実用性は未知、試作可。要確定 Open Q＝グラフモデル（ノード=page か、エッジ=materialize 済み internal-link edges か）を backlog に記録。
+- 検証: `python3 scripts/lint_wiki.py` OK（壊れた wikilink 0 / index 未登録 0 / frontmatter 不備 0）。`python3 -m unittest discover -s tests` OK（22 tests）。`git diff --check` OK。
+
 ## [2026-06-23 22:19] lint | AI consumer feedback ingest 後の検証
 
 - `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。新設 [[ai-consumer-cost-and-trust]]（concept, sources あり）と [[ai-consumer-feedback-2026-06-23]]（entity）は孤立せず（concept は 4 incoming）。既存の孤立 `multi-project-store` 警告は継続（index 登録済み）。
