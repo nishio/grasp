@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p ~/.grasp)",
+      "Bash(mv .grasp/grasp.sqlite ~/.grasp/grasp.sqlite)",
+      "Bash(ln -sfn /Users/nishio/grasp/raw/nishio.json ~/.grasp/nishio.json)",
+      "Bash(python3 -m unittest discover -s tests)",
+      "Bash(grasp link-stats *)",
+      "Bash(grasp read *)"
+    ]
+  }
+}
