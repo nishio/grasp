@@ -85,9 +85,40 @@ class SQLiteStoreTests(unittest.TestCase):
                 self.assertEqual(wanted[0]["title"], "Missing")
                 self.assertEqual(wanted[0]["count"], 2)
 
+                existing_stats = store.link_stats("B")
+                self.assertTrue(existing_stats["page_exists"])
+                self.assertEqual(existing_stats["title"], "B")
+                self.assertEqual(existing_stats["link_count"], 2)
+                self.assertEqual(existing_stats["source_page_count"], 2)
+                self.assertEqual(existing_stats["link_multiplicity"], "multi")
+
+                missing_stats = store.link_stats("Missing")
+                self.assertFalse(missing_stats["page_exists"])
+                self.assertEqual(missing_stats["title"], "Missing")
+                self.assertEqual(missing_stats["link_count"], 2)
+                self.assertEqual(missing_stats["source_page_count"], 2)
+                self.assertEqual(missing_stats["link_multiplicity"], "multi")
+
+                absent_stats = store.link_stats("Nope")
+                self.assertFalse(absent_stats["page_exists"])
+                self.assertEqual(absent_stats["link_count"], 0)
+                self.assertEqual(absent_stats["source_page_count"], 0)
+                self.assertEqual(absent_stats["link_multiplicity"], "none")
+
+                missing_related = store.related("Missing")
+                self.assertEqual([item["title"] for item in missing_related], ["A", "C"])
+                self.assertEqual(missing_related[0]["relation"], "backlink-source")
+                self.assertEqual(missing_related[0]["score"], 1)
+
                 read = store.read("A", backlink_limit=10, related_limit=10, wanted_limit=10)
                 self.assertEqual(read["page"]["title"], "A")
+                self.assertEqual(read["backlink_count_total"], 1)
                 self.assertEqual(read["wanted"][0]["examples"][0]["source_title"], "A")
+
+                missing_read = store.read("Missing", backlink_limit=10, related_limit=10, wanted_limit=10)
+                self.assertIsNone(missing_read["page"])
+                self.assertEqual(missing_read["backlink_count_total"], 2)
+                self.assertEqual([item["title"] for item in missing_read["related"]], ["A", "C"])
             finally:
                 store.close()
 

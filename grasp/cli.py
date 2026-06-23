@@ -53,21 +53,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("stats", help="Show SQLite store stats and schema status.")
 
-    read_parser = subparsers.add_parser("read", help="Read a page with backlinks, 2-hop related pages, and red links.")
+    read_parser = subparsers.add_parser(
+        "read",
+        help="Read a page with backlinks, related pages, and unresolved outgoing targets.",
+    )
     read_parser.add_argument("title")
     read_parser.add_argument("--line-limit", type=int, default=None)
     read_parser.add_argument("--backlinks-limit", type=int, default=20)
     read_parser.add_argument("--related-limit", type=int, default=20)
     read_parser.add_argument("--wanted-limit", type=int, default=20)
 
-    backlinks_parser = subparsers.add_parser("backlinks", help="List line-level backlinks to a page or red link.")
+    backlinks_parser = subparsers.add_parser("backlinks", help="List line-level backlinks to a page or missing target.")
     backlinks_parser.add_argument("title")
     backlinks_parser.add_argument("--limit", type=int, default=50)
     backlinks_parser.add_argument("--offset", type=int, default=0)
 
-    related_parser = subparsers.add_parser("related", help="List 2-hop pages through existing graph links.")
+    related_parser = subparsers.add_parser("related", help="List 2-hop pages, or source pages for a missing linked target.")
     related_parser.add_argument("title")
     related_parser.add_argument("--limit", type=int, default=50)
+
+    link_stats_parser = subparsers.add_parser("link-stats", help="Show incoming link count for an existing or missing target.")
+    link_stats_parser.add_argument("title")
 
     peek_parser = subparsers.add_parser("peek", help="Show page lines only.")
     peek_parser.add_argument("title")
@@ -89,7 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser.add_argument("--cosense-command", default="cosense", help="cosense CLI binary.")
     sync_parser.add_argument("--dry-run", action="store_true", help="List changed pages without fetching/upserting them.")
 
-    wanted_parser = subparsers.add_parser("wanted", help="List ranked red links.")
+    wanted_parser = subparsers.add_parser("wanted", help="List ranked unresolved link targets.")
     wanted_parser.add_argument("--limit", type=int, default=50)
 
     return parser
@@ -164,6 +170,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             "query": args.title,
             "related": store.related(args.title, limit=args.limit),
         }
+    if args.command == "link-stats":
+        return store.link_stats(args.title)
     if args.command == "peek":
         page = store.resolve_page(args.title)
         if page is None:
@@ -215,6 +223,8 @@ def format_result(command: str, result: Any) -> str:
         return format_backlinks(result["query"], result["backlinks"], result.get("offset", 0))
     if command == "related":
         return format_related(result["query"], result["related"])
+    if command == "link-stats":
+        return format_link_stats(result)
     if command == "peek":
         return format_peek(result)
     if command == "suggest":
@@ -261,12 +271,16 @@ def format_read(result: dict[str, Any]) -> str:
     parts.append(f"# {title}\n")
 
     if page is None:
-        red_status = "red link" if result["red_link"] else "missing page"
-        parts.append(f"page: {red_status}\n")
+        link_stats = result.get("link_stats", {})
+        linked = link_stats.get("link_count", 0) > 0
+        page_status = "linked target without page" if linked else "missing page"
+        parts.append(f"page: {page_status}\n")
+        parts.append(format_link_stats_summary(link_stats))
     else:
         parts.append(
             f"id: {page['id']}\nviews: {page['views']}\nlines: {page['line_count']}\n"
         )
+        parts.append(format_link_stats_summary(result.get("link_stats", {})))
         parts.append("\n## Lines\n")
         for line in result["lines"]:
             parts.append(f"{line['line_id']}  {line['text']}\n")
@@ -280,21 +294,21 @@ def format_read(result: dict[str, Any]) -> str:
     else:
         parts.append("(none)\n")
 
-    parts.append("\n## Related 2-hop\n")
+    related_heading = "Related Source Pages" if page is None else "Related 2-hop"
+    parts.append(f"\n## {related_heading}\n")
     related = result["related"]
     if related:
-        for item in related:
-            via = ", ".join(item["via"])
-            parts.append(f"- {item['title']} (score {item['score']}, views {item['views']}; via {via})\n")
+        parts.append(format_related_items(related))
     else:
         parts.append("(none)\n")
 
-    parts.append("\n## Wanted From This Page\n")
-    wanted = result["wanted"]
-    if wanted:
-        parts.append(format_wanted(wanted))
-    else:
-        parts.append("(none)\n")
+    if page is not None:
+        parts.append("\n## Wanted From This Page\n")
+        wanted = result["wanted"]
+        if wanted:
+            parts.append(format_wanted(wanted))
+        else:
+            parts.append("(none)\n")
 
     return "".join(parts)
 
@@ -316,14 +330,52 @@ def format_edge_list(edges: list[dict[str, Any]]) -> str:
 
 
 def format_related(query: str, related: list[dict[str, Any]]) -> str:
-    parts = [f"# Related 2-hop: {query}\n"]
+    heading = "Related source pages" if is_source_page_related(related) else "Related 2-hop"
+    parts = [f"# {heading}: {query}\n"]
     if not related:
         parts.append("(none)\n")
     else:
-        for item in related:
-            via = ", ".join(item["via"])
+        parts.append(format_related_items(related))
+    return "".join(parts)
+
+
+def format_related_items(related: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for item in related:
+        via = ", ".join(item["via"])
+        if item.get("relation") == "backlink-source":
+            parts.append(f"- {item['title']} (links {item['score']}, views {item['views']}; target {via})\n")
+        else:
             parts.append(f"- {item['title']} (score {item['score']}, views {item['views']}; via {via})\n")
     return "".join(parts)
+
+
+def is_source_page_related(related: list[dict[str, Any]]) -> bool:
+    return bool(related) and all(item.get("relation") == "backlink-source" for item in related)
+
+
+def format_link_stats(result: dict[str, Any]) -> str:
+    page_status = "exists" if result["page_exists"] else "missing"
+    parts = [
+        f"# Link stats: {result['title']}\n",
+        f"query: {result['query']}\n",
+        f"normalized: {result['normalized_title']}\n",
+        f"page: {page_status}\n",
+        format_link_stats_summary(result),
+    ]
+    page = result.get("page")
+    if page is not None:
+        parts.append(f"id: {page['id']}\nviews: {page['views']}\nlines: {page['line_count']}\n")
+    return "".join(parts)
+
+
+def format_link_stats_summary(result: dict[str, Any]) -> str:
+    if not result:
+        return ""
+    return (
+        f"links_to_this: {result['link_count']} from {result['source_page_count']} pages "
+        f"({result['link_multiplicity']})\n"
+    )
 
 
 def format_peek(result: dict[str, Any]) -> str:

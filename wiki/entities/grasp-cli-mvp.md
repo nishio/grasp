@@ -19,6 +19,8 @@ sources:
 python3 -m grasp wanted --limit 10
 python3 -m grasp backlinks 盲点 --limit 5
 python3 -m grasp read 盲点カード --line-limit 8 --backlinks-limit 3 --related-limit 3 --wanted-limit 3
+python3 -m grasp link-stats 民主主義
+python3 -m grasp related 民主主義 --limit 5
 python3 -m grasp search 盲点 --limit 5
 python3 -m grasp sync https://scrapbox.io/nishio/ --limit 20 --dry-run
 python3 -m grasp stats
@@ -34,9 +36,10 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 
 ## 実装済み verbs
 
-- `read <title>`: 本文 lines + line-level backlinks + deterministic 2-hop related + page-local wanted。
-- `backlinks <title>`: `(source_page, line-id, line_text)`。red link target にも効く。
-- `wanted`: 未作成 target を ranking して返す。
+- `read <title>`: 本文 lines + line-level backlinks + deterministic related + page-local unresolved targets。page がない target でも link stats と related source pages を返す。
+- `backlinks <title>`: `(source_page, line-id, line_text)`。page がない target にも効く。
+- `link-stats <title>`: existing page / unresolved target の incoming `link_count`, `source_page_count`, `link_multiplicity` (`none` / `single` / `multi`) を返す。
+- `wanted`: unresolved target を ranking して返す。構造名ではなく「次に書く候補」view。
 - `search <query>`: 本文行を substring 検索し、`(page, line-id, line_text)` を page.views 優先で返す。
 - `sync <project-url>`: `cosense` CLI で最近更新ページだけ取得し、SQLite store に upsert する。`--dry-run` あり。
 - `stats`: store path / schema version / current schema / counts を返す。古い schema の store を通常 command で開いた時は stderr に rebuild 警告を出す。
@@ -51,6 +54,7 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 - 実測（2026-06-23）: import 約 8 秒。store 利用時 `read 盲点カード` 約 0.7 秒、`wanted --limit 3` 約 0.7 秒、`backlinks 盲点` 約 0.4 秒。
 - Update 2026-06-23: `wanted_examples` を materialize して `wanted --limit N` の example 取得を N 回 query しないようにした。Python 内部計測では `wanted(limit=100)` が約 6ms。CLI wall time は Python 起動 + output 書き出し込みで約 1.0 秒。
 - `search` は SQLite FTS5 trigram を試したが、2文字日本語 query（例: `盲点`）は `MATCH` に乗らず、FTS table `LIKE` は一部日本語 substring（例: `盲点カード`）の recall を落とした。現状は correctness 優先で `lines.text LIKE` を維持。
+- Update 2026-06-23: 「link があるが page がない」こと自体は `wanted` ではなく unresolved graph node と整理。`link-stats` は missing target の 0/1/N を materialized `wanted` row から高速に返し、existing page は `edges.target_norm` index で count する。`related <missing-target>` は source pages を `relation=backlink-source` として返す。
 
 ### FTS5 trigram 検証メモ（2026-06-23）
 
@@ -84,7 +88,7 @@ FTS5 trigram は **候補 prefilter としては有効**だが、`grasp search` 
 - lines[0]（Cosense title 行）は本文に残す。理由: 完全性と `page.id:line-index` の安定性を優先。重複表示は formatter の問題。
 - title resolve は Cosense に合わせて normalize（casefold + whitespace folding）。
 - `wanted` ranking は `count → source_page_count → total_source_views → latest_source_updated → title`。
-- `related` は既存 page 間 edge の undirected adjacency から 2-hop score を出す。`via` は deterministic order にした。
+- `related` は existing page なら page 間 edge の undirected adjacency から 2-hop score を出す。page がない target なら、その target に link している source pages を返す。`via` は deterministic order にした。
 
 ## parser 補正
 
@@ -98,7 +102,7 @@ MVP parser は以下を link としない:
 - 数字のみ `[1]`
 - 連続 `*`/`-`/`_` 装飾 `[** x]`, `[*** x]`
 
-この strict parser で `raw/nishio.json`: 25791 pages / 724981 lines / 120693 edges / 41750 wanted / normalized title collision 1。
+この strict parser で `raw/nishio.json`: 25791 pages / 724981 lines / 120693 edges / 41750 unresolved targets / normalized title collision 1。
 
 ### 残る false-positive（2026-06-23 実測）
 
@@ -108,7 +112,7 @@ MVP parser は以下を link としない:
 
 - `python3 -m unittest discover -s tests` OK。
 - `python3 scripts/lint_wiki.py` OK。
-- 実データ smoke: `wanted`, `backlinks 盲点`, `read 盲点カード`, `related 盲点カード`, JSON output を確認。
+- 実データ smoke: `wanted`, `backlinks 盲点`, `read 盲点カード`, `related 盲点カード`, `link-stats 民主主義`, `related 民主主義`, JSON output を確認。
 
 ## 次の実装課題
 

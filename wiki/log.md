@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-23 18:53] implementation | missing link target の link stats と related source pages を追加
+- 「link があるが page がない」こと自体は `wanted` ではなく unresolved graph node と整理。[[SPEC]] の中核原理・データモデル・CLI surface を更新し、`wanted` は unresolved targets の ranked view と明記。
+- `grasp link-stats <title>` を追加。existing page / unresolved target の incoming `link_count`, `source_page_count`, `link_multiplicity` (`none` / `single` / `multi`) を返す。unresolved target は materialized `wanted` row、existing page は `edges.target_norm` index で数える。
+- `related <unresolved-target>` は空でなく、その target に link している source pages を `relation=backlink-source` として返す。実データ smoke: `民主主義` は page なしだが 82 links / 78 source pages、`related 民主主義 --limit 5` が source pages を返した。
+
 ## [2026-06-23 18:45] file-back | FTS5 trigram 検証メモを記録
 - [[grasp-cli-mvp]] に FTS5 trigram の実測と判断を追記。3文字以上の safe query では hybrid（`MATCH` → `LIKE`）が高速だが、2文字日本語 query は trigram に乗らず、記号入り query は FTS query syntax と衝突する。
 - `MATCH` は literal substring search ではない（例 `MATCH 'abc bcd'` が `abcd` / `abcde` / `abcXbcd` も返す）ため、grasp の `search` semantics を保つには hybrid でも最後に `line.text LIKE '%query%'` が必要。現段階では特殊化として見送り、correctness 優先で `lines.text LIKE` を維持。

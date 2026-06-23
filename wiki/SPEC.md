@@ -11,15 +11,15 @@ sources:
 
 ## 一行
 
-単一 AI 所有の local グラフ知識ストア。`[[wikilink]]` で結ばれた **行ベースのページ群**を、自動双方向リンク・2-hop・行リンク・赤リンクつきで CLI から読み書きする。**読む単位は「ファイル」でなく「近傍込みのページ」**。
+単一 AI 所有の local グラフ知識ストア。`[[wikilink]]` で結ばれた **行ベースのページ群**を、自動双方向リンク・2-hop・行リンク・未解決 link target（赤リンク）つきで CLI から読み書きする。**読む単位は「ファイル」でなく「近傍込みのページ」**。
 
 ## 中核原理
 
-1. **read ＝ 近傍同梱** — `read <title>` は本文だけでなく **逆リンク（行文脈つき）・2-hop・赤リンク** を一体で返す。人間がブラウザでページを開くと関連が一望に入るのを、AI が一発で得る。*query はオプトイン、体験はデフォルトで近傍が同梱*。これが「グラフ DB を CLI で叩く」と「Scrapbox の体験を CLI で」の差。
+1. **read ＝ 近傍同梱** — `read <title>` は本文だけでなく **逆リンク（行文脈つき）・related pages・未解決 link target** を一体で返す。人間がブラウザでページを開くと関連が一望に入るのを、AI が一発で得る。*query はオプトイン、体験はデフォルトで近傍が同梱*。これが「グラフ DB を CLI で叩く」と「Scrapbox の体験を CLI で」の差。
 
 2. **行リンク（line links）** — 逆リンクは「ページ単位」でなく `(page, line-id, 行テキスト)` で返す。"X に言及" でなく "この行で言及"。AI は逆リンクを全文 grep せず **文脈行だけ**受け取る ＝ retrieval が安い。Scrapbox 関連 pane の richness の正体。
 
-3. **赤リンク ＝ 自己宛キュー** — 書かれたが本文のない link target（red link）を `wanted` が一覧。単一所有なので「誰かが書く穴」でなく **「自分が次に書く TODO」**。書く側 ＝ 読む側が同一だから穴が自己宛タスクになる（人間コミュニティの赤リンクとの非対称）。
+3. **未解決 link target は構造事実、wanted は解釈** — 書かれたが本文のない link target はまず **page 実体のない graph node** として扱う。`link-stats <title>` で incoming link が 0 / 1 / N のどれかを高速に識別し、N 件あるなら page 実体がなくても `related <title>` は source pages を返せる。`wanted` はその unresolved targets を「自分が次に書く候補」として rank する view であり、missing target すべてが TODO とは限らない。
 
 4. **identity ≠ name** — Scrapbox の name=identity 欠陥（rename で文意が変わる）を直す。ページは安定 `id`、行は `line-id`。**粒度分離: line-id は機械が自動採番（意味判断なし）／ page id は意味判断で必要な時だけ振る**（すべてに振る ＝ 早すぎる物化を避ける）。
 
@@ -39,24 +39,26 @@ sources:
 - **最新化は export 反復でなく cosense-cli 差分更新**: 初回 export を seed、以降は cosense-cli で最近更新ページだけ取得して upsert（[[incremental-sync]]）。∴ import adapter は bulk seed と incremental delta の2モード（M2-4）。
 - 後で Markdown adapter も足せる（既存 llm-wiki 森 40+ を読める）。← native を Markdown にしなくても達成。
 - 実物の export で確定（スキーマ詳細は [[cosense-json-export]]）: ① **lines に安定 id は無い** → import 時に grasp が line-id を採番（原理4 と整合）。② **link graph は export に保存されない** → line.text を parse してエッジを materialize。③ link 構文 `[...]` は overloaded（内部リンクは 62.7%、残りは外部 URL / icon / 装飾 `[* ]` / cross-project `[/p/x]`）。`[[...]]` は **bold でリンクでない**（grasp の `[[wikilink]]` と逆）。④ リンク解決は normalize（case-insensitive ＋ 空白畳み込み）。
-- MVP parser は上記に加え、実データで code/list/decoration 記法が `wanted` 上位を汚すため **inline backtick 内・ASCII index 風 `xs[i]` / `func()[0]`・数字のみ `[1]`・連続 `*`/`-`/`_` 装飾 `[** x]` を link としない**。この strict parser で `raw/nishio.json` は 120693 edge / wanted 41750（先の 133022 / 61613 / 45703 は broad bracket 分類）。
+- MVP parser は上記に加え、実データで code/list/decoration 記法が `wanted` 上位を汚すため **inline backtick 内・ASCII index 風 `xs[i]` / `func()[0]`・数字のみ `[1]`・連続 `*`/`-`/`_` 装飾 `[** x]` を link としない**。この strict parser で `raw/nishio.json` は 120693 edge / unresolved target 41750（先の 133022 / 61613 / 45703 は broad bracket 分類）。
 
 ## データモデル（暫定）
 
 - **page**: `id`（安定・不変, 必要時のみ採番）, `title`（表示・変更可, `aliases[]` 可）, `lines[]`
 - **line**: `line-id`（機械が自動採番・安定。MVP は `page.id:line-index`）, `text`（forward links は text から parse）
 - **link graph**: **エッジを native に保持**。forward / backward は同一エッジの両読み（backlinks の「維持」は不要、O(1)）。2-hop はグラフ隣接。
-- **wanted（red link）**: link target で page が存在しないエッジ。
+- **unresolved link target**: link target だが page が存在しない node。`link_count` と `source_page_count` を持つ。`wanted` は unresolved target の ranking view であって、構造名ではない。
 
 ## MVP（Codex 最初の一歩）
 
 **Cosense JSON export 1ファイルを読み取り専用で CLI から扱う**。書き込み・identity 層・Markdown adapter は後。
 - import: Cosense export → 正規化（page/line/edge、line-id 採番）→ in-memory（or 独自 store）
 - 実装: Python package `grasp`。`python3 -m grasp ...`（または console script `grasp`）で起動。`--export` 未指定時は `$GRASP_EXPORT` → `raw/nishio.json` を探す。`--json` で機械可読出力。
-- 動詞: MVP 必須の `read`（近傍同梱）/ `backlinks`（行つき）/ `wanted`（赤リンク）に加え、read-only helper として `related` / `peek` / `suggest` も持つ。
+- 動詞: MVP 必須の `read`（近傍同梱）/ `backlinks`（行つき）/ `wanted`（unresolved target ranking）に加え、read-only helper として `related` / `link-stats` / `peek` / `suggest` も持つ。
 - read は lines[0]（Cosense title 行）を本文に残す。完全性と line-id 安定性を優先し、重複表示は formatter 側の問題として扱う。
+- `link-stats` は existing page / unresolved target の両方に対して incoming `link_count`, `source_page_count`, `link_multiplicity` (`none` / `single` / `multi`) を返す。
+- `related <existing-page>` は既存 page 間 edge の 2-hop pages を返す。`related <unresolved-target>` は 2-hop ではなく、その target へ link している source pages を返す。
 - `wanted` ranking: count → source page count → total source views → latest source updated → title。`read` 内の wanted はその page から出る unresolved link に限定。
-- これで「AI が CLI だけで Scrapbox グラフを体験する」中核仮説を **実データ（nishio の Cosense project: 25791 pages / 724981 lines / strict parser で edge 120693・red link 41750）** で検証する（[[cosense-json-export]]）。
+- これで「AI が CLI だけで Scrapbox グラフを体験する」中核仮説を **実データ（nishio の Cosense project: 25791 pages / 724981 lines / strict parser で edge 120693・unresolved target 41750）** で検証する（[[cosense-json-export]]）。
 
 ## 次のマイルストーン（post-MVP / step 2, なお read-only）
 
@@ -95,13 +97,14 @@ write / transclude / rename（identity 層）・Markdown import adapter・vector
 
 | 動詞 | 返す / する | ブラウザ対応 |
 |---|---|---|
-| `read <title>` | 本文 ＋ backlinks(行つき) ＋ 2-hop ＋ wanted を一体で | ページを開く |
-| `backlinks <title>` | `(page, line-id, 行テキスト)` のリスト | 関連 pane のカード |
-| `related <title>` | 2-hop ページ（リンクを共有するページ） | 2-hop 表示 |
+| `read <title>` | 本文 ＋ backlinks(行つき) ＋ related ＋ page-local unresolved targets を一体で。page がなくても incoming link count と related source pages を返す | ページを開く |
+| `backlinks <title>` | `(page, line-id, 行テキスト)` のリスト。page がない target にも効く | 関連 pane のカード |
+| `related <title>` | existing page は 2-hop pages、unresolved target は source pages | 2-hop / related 表示 |
+| `link-stats <title>` | existing page / unresolved target の incoming link count と 0/1/N 区別 | 赤リンク濃度 / link badge |
 | `peek <title>` | 本文だけ（飛ばずプレビュー） | リンク hover |
 | `suggest <partial>` | title 補完候補 | `[[` 補完 |
 | `search <query>` | 本文行検索。`(page, line-id, 行テキスト)` のリスト | 全文検索 |
-| `wanted` | 未作成 link target 一覧（自己宛キュー） | 赤リンク |
+| `wanted` | unresolved link target の ranked view（自己宛キュー候補） | 赤リンク |
 | `sync <project-url>` | cosense-cli で最近更新ページを差分 upsert | hosted freshness |
 | `write <title> <body>` | ページ作成 / 更新 ＋ グラフ自動更新 | 編集 |
 | `transclude <line-id>` | 行の埋め込み / 参照 | 行参照 |

@@ -301,6 +301,41 @@ class SQLiteStore:
             params.append(offset)
         return [self._edge_from_row(row) for row in self.connection.execute(query, params)]
 
+    def link_stats(self, title: str) -> dict[str, Any]:
+        norm = normalize_title(title)
+        page = self.resolve_page(title)
+        if page is None:
+            wanted = self.connection.execute(
+                "SELECT * FROM wanted WHERE target_norm = ?",
+                (norm,),
+            ).fetchone()
+            link_count = int(wanted["count"]) if wanted is not None else 0
+            source_page_count = int(wanted["source_page_count"]) if wanted is not None else 0
+            canonical_title = wanted["title"] if wanted is not None else title
+        else:
+            row = self.connection.execute(
+                """
+                SELECT COUNT(*) AS link_count, COUNT(DISTINCT source_page_id) AS source_page_count
+                FROM edges
+                WHERE target_norm = ?
+                """,
+                (norm,),
+            ).fetchone()
+            link_count = int(row["link_count"])
+            source_page_count = int(row["source_page_count"])
+            canonical_title = page.title
+
+        return {
+            "query": title,
+            "title": canonical_title,
+            "normalized_title": norm,
+            "page_exists": page is not None,
+            "page": page.to_summary() if page is not None else None,
+            "link_count": link_count,
+            "source_page_count": source_page_count,
+            "link_multiplicity": link_multiplicity(link_count),
+        }
+
     def wanted(self, limit: int | None = None) -> list[dict[str, Any]]:
         if limit is None or limit < 0:
             rows = self.connection.execute(
@@ -337,7 +372,7 @@ class SQLiteStore:
     def related(self, title: str, limit: int | None = None) -> list[dict[str, Any]]:
         page = self.resolve_page(title)
         if page is None:
-            return []
+            return self._related_missing_target(title, limit)
 
         direct = self._neighbor_ids(page.id, page.norm_title)
         scores: Counter[str] = Counter()
@@ -365,6 +400,35 @@ class SQLiteStore:
         if limit is not None and limit >= 0:
             return related_pages[:limit]
         return related_pages
+
+    def _related_missing_target(self, title: str, limit: int | None = None) -> list[dict[str, Any]]:
+        norm = normalize_title(title)
+        query = """
+            SELECT
+              source.*,
+              COUNT(*) AS score,
+              MIN(e.target_title) AS target_title
+            FROM edges e
+            JOIN pages source ON source.id = e.source_page_id
+            WHERE e.target_norm = ?
+            GROUP BY source.id
+            ORDER BY score DESC, source.views DESC, COALESCE(source.updated, 0) DESC, source.title
+        """
+        params: list[Any] = [norm]
+        if limit is not None and limit >= 0:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        rows = self.connection.execute(query, params).fetchall()
+        return [
+            {
+                **self._page_from_row(row).to_summary(),
+                "score": int(row["score"]),
+                "relation": "backlink-source",
+                "via": [row["target_title"]],
+            }
+            for row in rows
+        ]
 
     def suggest(self, partial: str, limit: int = 20) -> list[dict[str, Any]]:
         norm_partial = normalize_title(partial)
@@ -428,16 +492,19 @@ class SQLiteStore:
     ) -> dict[str, Any]:
         page = self.resolve_page(title)
         backlinks = self.backlinks(title, backlink_limit)
+        link_stats = self.link_stats(title)
 
         if page is None:
             return {
                 "query": title,
                 "page": None,
+                "link_stats": link_stats,
                 "lines": [],
                 "lines_truncated": False,
                 "backlinks": [edge.to_dict() for edge in backlinks],
                 "backlink_count_returned": len(backlinks),
-                "related": [],
+                "backlink_count_total": link_stats["link_count"],
+                "related": self.related(title, related_limit),
                 "wanted": [],
                 "red_link": bool(backlinks),
             }
@@ -446,10 +513,12 @@ class SQLiteStore:
         return {
             "query": title,
             "page": page.to_summary(),
+            "link_stats": link_stats,
             "lines": [line.to_dict() for line in lines],
             "lines_truncated": lines_truncated,
             "backlinks": [edge.to_dict() for edge in backlinks],
             "backlink_count_returned": len(backlinks),
+            "backlink_count_total": link_stats["link_count"],
             "related": self.related(page.title, related_limit),
             "wanted": self.wanted_from_page(page, wanted_limit),
             "red_link": False,
@@ -779,6 +848,14 @@ def parse_cosense_time(value: Any) -> int | None:
         return int(datetime.fromisoformat(iso_part).timestamp())
     except ValueError:
         return None
+
+
+def link_multiplicity(link_count: int) -> str:
+    if link_count <= 0:
+        return "none"
+    if link_count == 1:
+        return "single"
+    return "multi"
 
 
 def rebuild_wanted(connection: sqlite3.Connection) -> None:
