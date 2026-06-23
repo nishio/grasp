@@ -40,6 +40,7 @@ class CliHelpTests(unittest.TestCase):
         help_text = run_grasp_help()
         self.assertIn("Mechanics SSoT", help_text)
         self.assertIn("--json is also", help_text)
+        self.assertIn("--full-ids", help_text)
         self.assertNotIn("--store .grasp/grasp.sqlite", help_text)
         self.assertNotIn("--export", help_text)
         self.assertNotIn("--rebuild-store", help_text)
@@ -61,6 +62,8 @@ class CliHelpTests(unittest.TestCase):
         self.assertIn("--markdown", import_help)
         self.assertNotIn("--force", import_help)
         self.assertIn("--unresolved-limit", read_help)
+        self.assertIn("--around-line", read_help)
+        self.assertIn("line_window", read_help)
         self.assertIn("unresolved_targets", read_help)
         self.assertIn("link_count", unresolved_help)
         self.assertNotIn("--wanted-limit", read_help)
@@ -291,9 +294,168 @@ class CliHelpTests(unittest.TestCase):
         result = json.loads(completed.stdout)
         self.assertEqual(result["page"]["title"], "A")
         self.assertEqual(result["lines"][0]["text"], "A")
+        self.assertIsNone(result["line_window"])
         self.assertEqual(result["related"][0]["title"], "C")
         self.assertEqual(result["related"][0]["snippet_lines"][0]["text"], "C")
         self.assertTrue(result["related"][0]["snippet_truncated"])
+
+    def test_read_around_line_json_returns_bounded_window(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "A",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 1,
+                    "views": 0,
+                    "lines": [
+                        {"text": "A", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "before", "created": 1, "updated": 2, "userId": "u"},
+                        {"text": "center", "created": 1, "updated": 3, "userId": "u"},
+                        {"text": "after", "created": 1, "updated": 4, "userId": "u"},
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--cosense",
+                    str(export_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "read",
+                    "--around-line",
+                    "aaaaaaaaaaaaaaaaaaaaaaaa:2",
+                    "--line-context",
+                    "1",
+                    "--backlinks-limit",
+                    "0",
+                    "--related-limit",
+                    "0",
+                    "--unresolved-limit",
+                    "0",
+                    "--json",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["page"]["title"], "A")
+        self.assertEqual([line["text"] for line in result["lines"]], ["before", "center", "after"])
+        self.assertEqual(result["line_window"]["around_line_id"], "aaaaaaaaaaaaaaaaaaaaaaaa:2")
+        self.assertEqual(result["line_window"]["start_index"], 1)
+        self.assertEqual(result["line_window"]["end_index"], 3)
+        self.assertTrue(result["line_window"]["truncated_before"])
+        self.assertFalse(result["line_window"]["truncated_after"])
+        self.assertTrue(result["lines_truncated"])
+
+    def test_text_output_uses_local_line_id_aliases_by_default(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "A",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 1,
+                    "views": 0,
+                    "lines": [
+                        {"text": "A", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "body", "created": 1, "updated": 2, "userId": "u"},
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--cosense",
+                    str(export_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            compact = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "peek",
+                    "A",
+                    "--line-limit",
+                    "2",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            full = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "peek",
+                    "A",
+                    "--line-limit",
+                    "1",
+                    "--full-ids",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        self.assertIn("line-id aliases: P1=aaaaaaaaaaaaaaaaaaaaaaaa", compact.stdout)
+        self.assertIn("P1:0  A", compact.stdout)
+        self.assertIn("P1:1  body", compact.stdout)
+        self.assertNotIn("aaaaaaaaaaaaaaaaaaaaaaaa:0", compact.stdout)
+        self.assertNotIn("line-id aliases:", full.stdout)
+        self.assertIn("aaaaaaaaaaaaaaaaaaaaaaaa:0  A", full.stdout)
 
     def test_search_json_includes_normalized_match_mode_for_loose_hits(self):
         fixture = {
@@ -355,6 +517,87 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(len(result["hits"]), 1)
         self.assertEqual(result["hits"][0]["source_title"], "A")
         self.assertEqual(result["hits"][0]["match_mode"], "normalized")
+        self.assertEqual(result["mode"], "literal")
+        self.assertEqual(result["scope"], "line")
+        self.assertIsNone(result["recovery_hints"])
+
+    def test_search_boolean_json_supports_page_scope(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "Both",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 2,
+                    "views": 10,
+                    "lines": [
+                        {"text": "Both", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "alpha appears here", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "beta appears there", "created": 1, "updated": 1, "userId": "u"},
+                    ],
+                },
+                {
+                    "title": "AlphaOnly",
+                    "id": "bbbbbbbbbbbbbbbbbbbbbbbb",
+                    "created": 1,
+                    "updated": 1,
+                    "views": 9,
+                    "lines": [
+                        {"text": "AlphaOnly", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "alpha appears here", "created": 1, "updated": 1, "userId": "u"},
+                    ],
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--cosense",
+                    str(export_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "search",
+                    "alpha AND beta",
+                    "--mode",
+                    "boolean",
+                    "--scope",
+                    "page",
+                    "--json",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["mode"], "boolean")
+        self.assertEqual(result["scope"], "page")
+        self.assertEqual([hit["source_title"] for hit in result["hits"]], ["Both", "Both"])
+        self.assertEqual([hit["match_terms"] for hit in result["hits"]], [["alpha"], ["beta"]])
         self.assertIsNone(result["recovery_hints"])
 
     def test_related_empty_json_includes_recovery_hints(self):
@@ -485,6 +728,26 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
+            no_path_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "path",
+                    "A",
+                    "B",
+                    "--max-depth",
+                    "1",
+                    "--limit",
+                    "1",
+                    "--json",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
 
         result = json.loads(completed.stdout)
         self.assertEqual(result["path_count"], 1)
@@ -492,6 +755,13 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual([node["title"] for node in result["paths"][0]["nodes"]], ["A", "Shared", "B"])
         self.assertEqual(result["paths"][0]["nodes"][1]["kind"], "unresolved")
         self.assertEqual(result["paths"][0]["edges"][0]["line_text"], "links to [Shared]")
+
+        no_path_result = json.loads(no_path_completed.stdout)
+        self.assertEqual(no_path_result["path_count"], 0)
+        self.assertEqual(no_path_result["recovery_hints"]["path"]["reason"], "no_path_within_max_depth")
+        self.assertEqual(no_path_result["recovery_hints"]["path"]["next_max_depth"], 2)
+        self.assertEqual(no_path_result["recovery_hints"]["path"]["source_link_stats"]["title"], "A")
+        self.assertEqual(no_path_result["recovery_hints"]["path"]["target_link_stats"]["title"], "B")
 
     def test_missing_store_stats_returns_friendly_diagnostic(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -1,22 +1,52 @@
 # Log
 
+## [2026-06-24 02:05] integration | Markdown mirror PR を main へ追従
+- PR #1 `feat/read-only-markdown-mirror` が main の `1.5.8` / `1.5.9` 変更（line-id alias / `read --around-line`）と version 履歴で conflict したため、Markdown mirror series を final `1.5.10` として統合した。
+- conflict は package version、[[history]]、[[grasp-v1-implemented]]、log の時系列だけ。実装 surface は `import --markdown` と `read --around-line` の両方を保持。
+- 検証: `python3 -m unittest discover -s tests` OK（39 tests; ResourceWarning 1件は既存の unclosed sqlite warning）、`python3 scripts/lint_wiki.py` OK、`python3 -m py_compile grasp/cli.py grasp/sqlite_store.py` OK。
+
+## [2026-06-24 01:58] implementation | read --around-line を追加
+- `grasp read --around-line <line-id> --line-context N` を追加。完全 `line_id` から所属ページを解決し、中心行の前後 N 行だけを `lines[]` として返す。
+- JSON は `line_window`（around_line_id / center_index / start_index / end_index / context / truncated_before / truncated_after）を返す。通常 read / missing target read では `line_window: null`。
+- text 出力は line-id alias と連動し、`line_window: P1:12 (lines A-B, context N)` を表示する。local alias は入力には使えず、存在しない line-id の場合は `--json` / `--full-ids` の完全 ID を使うよう error で案内する。
+- Skill の長大ページ手順を、`search --json` → 完全 `line_id` → `read --around-line` の流れに更新。store schema は v5 のまま、public compatibility version は `1.5.9`。検証: `python3 -m unittest discover -s tests` OK（29 tests）、`python3 scripts/lint_wiki.py` OK、`git diff --check` OK。
+
+## [2026-06-24 01:49] implementation | text 出力の line-id をローカル別名化
+- text 出力で `page-id:line-index` を既定で `P1:0` のような実行内ローカル別名に畳み、先頭付近に `line-id aliases: P1=<page-id>` legend を出すようにした。
+- JSON は従来通り完全 `line_id` を返す。text で完全 ID が必要な場合は `--full-ids` を使う。`--full-ids` は root option だが、`--json` と同じく verb 後にも置ける hidden alias として受ける。
+- 対象は `read` / `backlinks` / `related` / `path` / `link-stats` の recovery hints / `peek` / `search` / `unresolved` の text formatter。`export-ai` は本文 bundle なので対象外。
+- store schema は v5 のまま、public compatibility version は `1.5.8`。検証: `python3 -m unittest discover -s tests` OK（28 tests）、`python3 scripts/lint_wiki.py` OK、`git diff --check` OK。
+
 ## [2026-06-24 01:45] implementation | Markdown mirror の manifest-based 差分 index
 - `grasp import --markdown <folder>` が project metadata に Markdown manifest を保存するようにした。manifest は relative path ごとの content hash / mtime_ns / page id / title / aliases を持つ。
 - 再 import 時、title / id / aliases / file set が不変で content hash だけ変わった file は page / lines / outgoing edges を差し替える。unresolved targets と project counts は再計算する。title / id / aliases / file set が変わった時は、他 file の alias 解決済み edges が変わりうるため safe full rebuild に戻す。
 - JSON / text import output に `markdown_import.mode`, `changed_files`, `full_rebuild_reason` を追加。Dogfood: `wiki/` は 21 pages / 2086 lines / 249 edges / unresolved 0。旧 manifest 不在の1回目は `mode=full, reason=manifest_missing`、直後の2回目は `mode=incremental, changed_files=0`。
-- store schema は v5 のまま、public compatibility version は `1.5.8`。alias-aware なより細かい差分 rebuild は [[grasp-backlog]] に残す。
+- store schema は v5 のまま。Markdown mirror series は main 追従後に public compatibility version `1.5.10` として release。alias-aware なより細かい差分 rebuild は [[grasp-backlog]] に残す。
+
+## [2026-06-24 01:39] implementation | path no-path recovery hints を追加
+- `grasp path <A> <B>` で端点は resolve できるが bounded search 内に経路が無い時、`recovery_hints.path` を返すようにした。
+- JSON は `reason`（`no_path_within_max_depth` / `search_truncated`）、`next_max_depth`、両端の `link_stats`、`related`、`backlinks` を小さく同梱。text 出力は次に試す `path --max-depth N` / `related` / `backlinks` と候補データを表示する。
+- これで negative-result contract は `read` / `link-stats` / `search` / `related` / `path no-path` まで揃った。`gather` など将来 verb は継続監査。
+- store schema は v5 のまま、public compatibility version は `1.5.7`。検証: `python3 -m unittest discover -s tests` OK（27 tests）。
 
 ## [2026-06-24 01:12] implementation | Markdown frontmatter title / aliases / tags 対応
 - Markdown mirror が frontmatter `title` / `id` / `aliases` / `tags` を読むようにした。`title` は canonical title、`id` は page id、`aliases` と file stem は title resolve 候補、`tags` は page から tag target への outgoing edge として扱う。
 - `[[alias]]` は import 時に canonical title へ解決して edge 化し、store metadata の alias map により `read <alias>` / `backlinks <alias>` / `link-stats <alias>` でも canonical page を読める。
 - Dogfood: `wiki/` は 21 pages / 2077 lines / 248 edges / unresolved 0。frontmatter の `sources: [[...]]` は従来通り本文行 link として edge 化され、バックティック参照は edge にならない。
-- store schema は v5 のまま、public compatibility version は `1.5.7`。first H1 title resolution / Obsidian block refs / 差分 index は [[grasp-backlog]] に残す。
+- store schema は v5 のまま。Markdown mirror series は main 追従後に public compatibility version `1.5.10` として release。first H1 title resolution / Obsidian block refs は [[grasp-backlog]] に残す。
 
 ## [2026-06-24 00:58] implementation | read-only Markdown mirror の最小実装
 - `grasp import --markdown <folder>` を追加。Markdown folder を既存 SQLite graph store に read-only mirror として materialize し、file stem を title、relative path hash を page id、`[[wikilink]]` / `#tag` を edge として扱う。
 - `[[Page|alias]]`, `[[Page#Heading]]`, `[[folder/Page.md]]`, `![[Embed]]` は target title に畳んで edge 化する。inline backtick / fenced code block 内は edge にしないため、grasp wiki のバックティック親 llm-wiki 参照は graph に混ぜない。
 - Dogfood: `python3 -m grasp --store /tmp/grasp-wiki.sqlite import --markdown wiki --project grasp-wiki` で `wiki/` を 21 pages / 2072 lines / 248 edges / unresolved 0 として index。`read markdown-obsidian-indexed-mirror` が backlinks 7 / related を返した。
-- store schema は v5 のまま、public compatibility version は `1.5.6`。frontmatter title / aliases / Obsidian block refs / 差分 index は [[grasp-backlog]] に残す。
+- store schema は v5 のまま。Markdown mirror series は main 追従後に public compatibility version `1.5.10` として release。frontmatter title / aliases / Obsidian block refs / 差分 index は [[grasp-backlog]] に残す。
+
+## [2026-06-24 00:56] implementation | search を default literal + explicit boolean/scope に変更
+- nishio 指摘: 空白で query を刻んで AND 検索する既定は「クエリーを書けない人間向け」の interface で、英文 phrase を検索するなら既定は入力文字列通りの literal search が自然。AND / OR / NOT と行単位 / ページ単位を明示的に組み合わせられる方が良い。
+- `grasp search <query>` の既定を、空白も含む literal line substring に戻した。literal 0件時の normalized fallback は維持。
+- `--mode boolean` を追加。AND / OR / NOT、括弧、quoted phrase、隣接 term の implicit AND に対応。`--scope line|page` を追加し、式を同一行で評価するか同一ページ全体で評価するかを切り替える。旧「空白区切り page AND」は `--mode boolean --scope page "alpha beta"` で明示的に再現。
+- dogfood: `search "KJ法 表札"` は既定 literal なので `(none)`、`search "KJ法 AND 表札" --mode boolean --scope page --limit 3` は `Scrapboxベストプラクティス` / `KJ法` の該当行を返した。
+- store schema は v5 のまま、public compatibility version は `1.5.6`。検証: `python3 -m unittest discover -s tests` OK（27 tests）。
 
 ## [2026-06-24 00:33] implementation | `/ship-next` と Skill の日本語応答方針を反映
 - nishio 指摘「日本語で(skillも更新しといて)」を受け、`.claude/commands/ship-next.md` の最終 summary / "what's next?" を日本語で返す運用に更新。

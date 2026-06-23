@@ -55,6 +55,8 @@ def build_parser() -> argparse.ArgumentParser:
             for command arguments, JSON return keys, text output shape, and examples.
             Global options normally appear before the command; --json is also
             accepted after a command for recovery from common agent mistakes.
+            Text output uses compact local line-id aliases by default; use
+            --full-ids for stable full line ids.
             """
         ).strip(),
         epilog=dedent(
@@ -68,6 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
 
             Output:
               Default output is compact text for agent reading.
+              Text line ids are shortened to local aliases such as P1:12.
               With --json, commands emit the return keys documented in each
               `grasp <cmd> --help`.
             """
@@ -85,6 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Project namespace to read/update. Defaults to $GRASP_PROJECT, or the only project in the store.",
     )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    parser.add_argument("--full-ids", action="store_true", help="In text output, show full stable line ids instead of local aliases.")
 
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="command")
 
@@ -164,22 +168,28 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "query, page|null, link_stats, lines, lines_truncated, backlinks, "
-            "backlink_count_returned, backlink_count_total, related, unresolved_targets, recovery_hints|null; "
-            "with --related-snippets, related[] items also include snippet_lines[] and snippet_truncated"
+            "line_window|null, backlink_count_returned, backlink_count_total, related, "
+            "unresolved_targets, recovery_hints|null; with --around-line, lines[] is the bounded "
+            "window around that line; with --related-snippets, related[] items also include "
+            "snippet_lines[] and snippet_truncated"
         ),
         examples=[
             "grasp read 盲点カード",
             "grasp read 盲点カード --line-limit 20 --backlinks-limit 5 --related-limit 5 --unresolved-limit 5",
+            "grasp read --around-line 5928725cba093700118fa5b2:12 --line-context 4",
             "grasp read 盲点カード --related-snippets --related-snippet-lines 5",
             "grasp --json read 民主主義 --backlinks-limit 3 --related-limit 5",
         ],
         notes=[
             "For missing targets, related[] contains source pages with relation=backlink-source.",
             "unresolved_targets[] is populated only for existing pages.",
+            "--around-line accepts a full line_id from JSON or --full-ids text output. Local aliases like P1:12 are per-output only.",
             "--related-snippets includes the first N lines of each related/source page, matching the Cosense related-pane reading pattern.",
         ],
     )
-    read_parser.add_argument("title", help="Page title or missing linked target to open.")
+    read_parser.add_argument("title", nargs="?", help="Page title or missing linked target to open. Optional when --around-line is set.")
+    read_parser.add_argument("--around-line", default=None, help="Open the page containing this full line_id and return a bounded line window around it.")
+    read_parser.add_argument("--line-context", type=int, default=5, help="Number of lines before and after --around-line to return.")
     read_parser.add_argument("--line-limit", type=int, default=None, help="Maximum page lines to return; omit for all lines.")
     read_parser.add_argument("--backlinks-limit", type=int, default=20, help="Maximum backlink lines to return.")
     read_parser.add_argument("--related-limit", type=int, default=20, help="Maximum related pages/source pages to return.")
@@ -252,6 +262,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Nodes are pages plus unresolved targets. This is intentionally broader than page-only traversal.",
             "The search is bounded by --max-depth; use small depths first because dense hubs can expand quickly.",
             "Edges include example source lines so the bridge can be checked against source context.",
+            "If both endpoints resolve but no path is found, recovery_hints.path includes next-depth, related, backlinks, and link stats cues.",
         ],
     )
     path_parser.add_argument("source", help="Start page title or unresolved target.")
@@ -312,24 +323,32 @@ def build_parser() -> argparse.ArgumentParser:
         "search",
         help="Search page body lines and return line-level hits.",
         description=(
-            "Search stored line text. Single-term queries use literal line substring search; "
-            "whitespace-separated multi-term queries return lines from pages containing every term. "
-            "If literal search returns no hits, search retries with normalized fallback matching."
+            "Search stored line text. By default, the query is a literal line substring, "
+            "including spaces. Use --mode boolean for AND/OR/NOT expressions, and --scope "
+            "line or page to choose where the expression must hold. If literal search "
+            "returns no hits, search retries with normalized fallback matching."
         ),
-        returns="query, hits[], count_returned, offset, recovery_hints|null",
+        returns="query, mode, scope, hits[], count_returned, offset, recovery_hints|null",
         examples=[
             "grasp search 盲点 --limit 20",
-            "grasp search \"KJ法 表札\" --limit 20",
+            "grasp search \"weak ties\" --limit 20",
+            "grasp search \"KJ法 AND 表札\" --mode boolean --scope page --limit 20",
+            "grasp search \"(KJ法 OR 発想法) AND NOT 古い\" --mode boolean --scope line",
             "grasp search \"民主主義\" --limit 10 --offset 10",
             "grasp --json search Scrapbox --limit 5",
         ],
         notes=[
             "hits[] items: source_page_id, source_title, source_views, "
             "source_updated, line_id, line_index, line_text, match_mode, match_terms.",
-            "match_mode is literal for direct substring hits and normalized for loose fallback matches.",
+            "Default mode is literal: spaces are part of the searched string.",
+            "Boolean mode supports AND, OR, NOT, parentheses, quoted phrases, and implicit AND between adjacent terms.",
+            "--scope line evaluates the expression per line. --scope page evaluates it across all lines in a page, then returns matching lines from those pages.",
+            "match_mode is literal for direct substring hits and normalized for loose fallback matches. Normalized fallback applies to literal mode.",
         ],
     )
-    search_parser.add_argument("query", help="Substring or whitespace-separated terms to find in page text.")
+    search_parser.add_argument("query", help="Literal substring, or a boolean expression when --mode boolean is set.")
+    search_parser.add_argument("--mode", choices=["literal", "boolean"], default="literal", help="Query interpretation mode.")
+    search_parser.add_argument("--scope", choices=["line", "page"], default="line", help="Where the query must match.")
     search_parser.add_argument("--limit", type=int, default=50, help="Maximum line hits to return.")
     search_parser.add_argument("--offset", type=int, default=0, help="Number of ranked line hits to skip.")
 
@@ -498,6 +517,7 @@ def add_command_parser(
         formatter_class=GraspHelpFormatter,
     )
     command_parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    command_parser.add_argument("--full-ids", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     return command_parser
 
 
@@ -607,13 +627,29 @@ def emit_result(args: argparse.Namespace, result: Any) -> None:
         json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
         sys.stdout.write("\n")
     else:
-        sys.stdout.write(format_result(args.command, result))
+        aliases = LineIdAliases(enabled=not args.full_ids)
+        sys.stdout.write(format_result(args.command, result, aliases=aliases))
 
 
 def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
     if args.command == "stats":
         return store.stats()
     if args.command == "read":
+        if args.around_line:
+            if args.line_limit is not None:
+                raise ValueError("--line-limit cannot be combined with --around-line; use --line-context")
+            return store.read_around_line(
+                args.around_line,
+                title=args.title,
+                line_context=args.line_context,
+                backlink_limit=args.backlinks_limit,
+                related_limit=args.related_limit,
+                unresolved_limit=args.unresolved_limit,
+                related_snippets=args.related_snippets,
+                related_snippet_lines=args.related_snippet_lines,
+            )
+        if args.title is None:
+            raise ValueError("read requires a title or --around-line <line-id>")
         return store.read(
             args.title,
             line_limit=args.line_limit,
@@ -664,9 +700,17 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             "suggestions": store.suggest(args.partial, limit=args.limit),
         }
     if args.command == "search":
-        hits = store.search(args.query, limit=args.limit, offset=args.offset)
+        hits = store.search(
+            args.query,
+            limit=args.limit,
+            offset=args.offset,
+            mode=args.mode,
+            scope=args.scope,
+        )
         return {
             "query": args.query,
+            "mode": args.mode,
+            "scope": args.scope,
             "hits": hits,
             "count_returned": len(hits),
             "offset": args.offset,
@@ -732,23 +776,63 @@ def read_seed_file(path: Path) -> list[str]:
     return titles
 
 
-def format_result(command: str, result: Any) -> str:
+class LineIdAliases:
+    def __init__(self, *, enabled: bool):
+        self.enabled = enabled
+        self._page_to_alias: dict[str, str] = {}
+
+    def format_line_id(self, line_id: str) -> str:
+        if not self.enabled:
+            return line_id
+        page_id, separator, line_index = line_id.rpartition(":")
+        if not separator or not page_id or not line_index:
+            return line_id
+        alias = self._page_to_alias.get(page_id)
+        if alias is None:
+            alias = f"P{len(self._page_to_alias) + 1}"
+            self._page_to_alias[page_id] = alias
+        return f"{alias}:{line_index}"
+
+    def legend(self) -> str:
+        if not self.enabled or not self._page_to_alias:
+            return ""
+        items = ", ".join(
+            f"{alias}={page_id}"
+            for page_id, alias in self._page_to_alias.items()
+        )
+        return f"line-id aliases: {items}\n"
+
+
+def with_alias_legend(text: str, aliases: LineIdAliases) -> str:
+    legend = aliases.legend()
+    if not legend:
+        return text
+    if not text.startswith("#"):
+        return f"{legend}{text}"
+    newline_index = text.find("\n")
+    if newline_index < 0:
+        return f"{text}\n{legend}"
+    return f"{text[:newline_index + 1]}{legend}{text[newline_index + 1:]}"
+
+
+def format_result(command: str, result: Any, aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
     if command == "import":
         return format_import(result)
     if command == "stats":
         return format_stats(result)
     if command == "read":
-        return format_read(result)
+        return format_read(result, aliases=aliases)
     if command == "backlinks":
-        return format_backlinks(result["query"], result["backlinks"], result.get("offset", 0))
+        return format_backlinks(result["query"], result["backlinks"], result.get("offset", 0), aliases=aliases)
     if command == "related":
-        return format_related(result["query"], result["related"], result.get("recovery_hints"))
+        return format_related(result["query"], result["related"], result.get("recovery_hints"), aliases=aliases)
     if command == "path":
-        return format_path(result)
+        return format_path(result, aliases=aliases)
     if command == "link-stats":
-        return format_link_stats(result)
+        return format_link_stats(result, aliases=aliases)
     if command == "peek":
-        return format_peek(result)
+        return format_peek(result, aliases=aliases)
     if command == "suggest":
         return format_suggest(result["query"], result["suggestions"])
     if command == "search":
@@ -757,11 +841,14 @@ def format_result(command: str, result: Any) -> str:
             result["hits"],
             result.get("offset", 0),
             result.get("recovery_hints"),
+            mode=result.get("mode", "literal"),
+            scope=result.get("scope", "line"),
+            aliases=aliases,
         )
     if command in {"export-ai", "export-for-ai"}:
         return format_export_ai(result)
     if command == "unresolved":
-        return format_unresolved_targets(result["unresolved_targets"])
+        return with_alias_legend(format_unresolved_targets(result["unresolved_targets"], aliases=aliases), aliases)
     if command == "sync":
         return format_sync(result)
     if command == "acquire":
@@ -849,7 +936,8 @@ def format_diagnostic(diagnostic: dict[str, Any] | None) -> str:
     return "".join(parts)
 
 
-def format_read(result: dict[str, Any]) -> str:
+def format_read(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
     parts: list[str] = []
     page = result["page"]
     title = page["title"] if page else result["query"]
@@ -861,22 +949,29 @@ def format_read(result: dict[str, Any]) -> str:
         page_status = "linked target without page" if linked else "missing page"
         parts.append(f"page: {page_status}\n")
         parts.append(format_link_stats_summary(link_stats))
-        parts.append(format_recovery_hints(result["query"], result.get("recovery_hints")))
+        parts.append(format_recovery_hints(result["query"], result.get("recovery_hints"), aliases=aliases))
     else:
         parts.append(
             f"id: {page['id']}\nviews: {page['views']}\nlines: {page['line_count']}\n"
         )
         parts.append(format_link_stats_summary(result.get("link_stats", {})))
+        line_window = result.get("line_window")
+        if line_window:
+            parts.append(
+                f"line_window: {aliases.format_line_id(line_window['around_line_id'])} "
+                f"(lines {line_window['start_index']}-{line_window['end_index']}, "
+                f"context {line_window['context']})\n"
+            )
         parts.append("\n## Lines\n")
         for line in result["lines"]:
-            parts.append(f"{line['line_id']}  {line['text']}\n")
+            parts.append(f"{aliases.format_line_id(line['line_id'])}  {line['text']}\n")
         if result["lines_truncated"]:
             parts.append("...\n")
 
     parts.append("\n## Backlinks\n")
     backlinks = result["backlinks"]
     if backlinks:
-        parts.append(format_edge_list(backlinks))
+        parts.append(format_edge_list(backlinks, aliases=aliases))
     else:
         parts.append("(none)\n")
 
@@ -884,7 +979,7 @@ def format_read(result: dict[str, Any]) -> str:
     parts.append(f"\n## {related_heading}\n")
     related = result["related"]
     if related:
-        parts.append(format_related_items(related))
+        parts.append(format_related_items(related, aliases=aliases))
     else:
         parts.append("(none)\n")
 
@@ -892,26 +987,33 @@ def format_read(result: dict[str, Any]) -> str:
         parts.append("\n## Unresolved Targets From This Page\n")
         unresolved_targets = result["unresolved_targets"]
         if unresolved_targets:
-            parts.append(format_unresolved_targets(unresolved_targets))
+            parts.append(format_unresolved_targets(unresolved_targets, aliases=aliases))
         else:
             parts.append("(none)\n")
 
-    return "".join(parts)
+    return with_alias_legend("".join(parts), aliases)
 
 
-def format_backlinks(query: str, backlinks: list[dict[str, Any]], offset: int = 0) -> str:
+def format_backlinks(
+    query: str,
+    backlinks: list[dict[str, Any]],
+    offset: int = 0,
+    aliases: LineIdAliases | None = None,
+) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
     parts = [f"# Backlinks: {query}\n", f"offset: {offset}\n"]
     if not backlinks:
         parts.append("(none)\n")
     else:
-        parts.append(format_edge_list(backlinks))
-    return "".join(parts)
+        parts.append(format_edge_list(backlinks, aliases=aliases))
+    return with_alias_legend("".join(parts), aliases)
 
 
-def format_edge_list(edges: list[dict[str, Any]]) -> str:
+def format_edge_list(edges: list[dict[str, Any]], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
     parts = []
     for edge in edges:
-        parts.append(f"- {edge['source_title']} {edge['line_id']}: {edge['line_text']}\n")
+        parts.append(f"- {edge['source_title']} {aliases.format_line_id(edge['line_id'])}: {edge['line_text']}\n")
     return "".join(parts)
 
 
@@ -919,18 +1021,21 @@ def format_related(
     query: str,
     related: list[dict[str, Any]],
     recovery_hints: dict[str, Any] | None = None,
+    aliases: LineIdAliases | None = None,
 ) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
     heading = "Related source pages" if is_source_page_related(related) else "Related 2-hop"
     parts = [f"# {heading}: {query}\n"]
     if not related:
         parts.append("(none)\n")
     else:
-        parts.append(format_related_items(related))
-    parts.append(format_recovery_hints(query, recovery_hints))
-    return "".join(parts)
+        parts.append(format_related_items(related, aliases=aliases))
+    parts.append(format_recovery_hints(query, recovery_hints, aliases=aliases))
+    return with_alias_legend("".join(parts), aliases)
 
 
-def format_related_items(related: list[dict[str, Any]]) -> str:
+def format_related_items(related: list[dict[str, Any]], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
     parts: list[str] = []
     for item in related:
         via = ", ".join(item["via"])
@@ -940,7 +1045,7 @@ def format_related_items(related: list[dict[str, Any]]) -> str:
             parts.append(f"- {item['title']} (score {item['score']}, views {item['views']}; via {via})\n")
         if "snippet_lines" in item:
             for line in item["snippet_lines"]:
-                parts.append(f"  {line['line_id']}  {line['text']}\n")
+                parts.append(f"  {aliases.format_line_id(line['line_id'])}  {line['text']}\n")
             if item.get("snippet_truncated"):
                 parts.append("  ...\n")
     return "".join(parts)
@@ -950,7 +1055,8 @@ def is_source_page_related(related: list[dict[str, Any]]) -> bool:
     return bool(related) and all(item.get("relation") == "backlink-source" for item in related)
 
 
-def format_path(result: dict[str, Any]) -> str:
+def format_path(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
     source_title = result["query"]["source"]
     target_title = result["query"]["target"]
     parts = [
@@ -966,9 +1072,10 @@ def format_path(result: dict[str, Any]) -> str:
     if not paths:
         parts.append("(none)\n")
         recovery = result.get("recovery_hints") or {}
-        parts.append(format_recovery_hints(source_title, recovery.get("source")))
-        parts.append(format_recovery_hints(target_title, recovery.get("target")))
-        return "".join(parts)
+        parts.append(format_recovery_hints(source_title, recovery.get("source"), aliases=aliases))
+        parts.append(format_recovery_hints(target_title, recovery.get("target"), aliases=aliases))
+        parts.append(format_path_recovery_hints(source_title, target_title, recovery.get("path"), aliases=aliases))
+        return with_alias_legend("".join(parts), aliases)
 
     for index, path in enumerate(paths, start=1):
         titles = " -> ".join(node["title"] for node in path["nodes"])
@@ -977,15 +1084,79 @@ def format_path(result: dict[str, Any]) -> str:
         for edge in path["edges"]:
             direction = "<-" if edge["direction"] == "reverse" else "->"
             parts.append(
-                f"- {edge['source_title']} {edge['line_id']} {direction} "
+                f"- {edge['source_title']} {aliases.format_line_id(edge['line_id'])} {direction} "
                 f"[{edge['target_title']}]: {edge['line_text']}\n"
             )
     if result.get("truncated"):
         parts.append("\ntruncated: true\n")
+    return with_alias_legend("".join(parts), aliases)
+
+
+def format_path_recovery_hints(
+    source_title: str,
+    target_title: str,
+    recovery_hints: dict[str, Any] | None,
+    aliases: LineIdAliases | None = None,
+) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
+    if not recovery_hints:
+        return ""
+
+    related_limit = recovery_hints.get("related_limit", 3)
+    backlinks_limit = recovery_hints.get("backlinks_limit", 3)
+    next_max_depth = recovery_hints.get("next_max_depth")
+    parts = [
+        "\n## Path Recovery Hints\n",
+        f"reason: {recovery_hints.get('reason', 'no_path')}\n",
+    ]
+    if next_max_depth is not None:
+        parts.append(
+            f"try: grasp path {shlex.quote(source_title)} {shlex.quote(target_title)} "
+            f"--max-depth {next_max_depth}\n"
+        )
+    parts.extend(
+        [
+            f"try: grasp related {shlex.quote(source_title)} --limit {related_limit}\n",
+            f"try: grasp related {shlex.quote(target_title)} --limit {related_limit}\n",
+            f"try: grasp backlinks {shlex.quote(source_title)} --limit {backlinks_limit}\n",
+            f"try: grasp backlinks {shlex.quote(target_title)} --limit {backlinks_limit}\n",
+        ]
+    )
+
+    source_stats = recovery_hints.get("source_link_stats")
+    target_stats = recovery_hints.get("target_link_stats")
+    if source_stats or target_stats:
+        parts.append("\nLink stats:\n")
+        if source_stats:
+            parts.append(f"- source {source_stats['title']}: {format_link_stats_summary(source_stats)}")
+        if target_stats:
+            parts.append(f"- target {target_stats['title']}: {format_link_stats_summary(target_stats)}")
+
+    source_related = recovery_hints.get("source_related") or []
+    if source_related:
+        parts.append("\nSource related:\n")
+        parts.append(format_related_items(source_related, aliases=aliases))
+
+    target_related = recovery_hints.get("target_related") or []
+    if target_related:
+        parts.append("\nTarget related:\n")
+        parts.append(format_related_items(target_related, aliases=aliases))
+
+    source_backlinks = recovery_hints.get("source_backlinks") or []
+    if source_backlinks:
+        parts.append("\nBacklinks to source:\n")
+        parts.append(format_edge_list(source_backlinks, aliases=aliases))
+
+    target_backlinks = recovery_hints.get("target_backlinks") or []
+    if target_backlinks:
+        parts.append("\nBacklinks to target:\n")
+        parts.append(format_edge_list(target_backlinks, aliases=aliases))
+
     return "".join(parts)
 
 
-def format_link_stats(result: dict[str, Any]) -> str:
+def format_link_stats(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
     page_status = "exists" if result["page_exists"] else "missing"
     parts = [
         f"# Link stats: {result['title']}\n",
@@ -997,8 +1168,8 @@ def format_link_stats(result: dict[str, Any]) -> str:
     page = result.get("page")
     if page is not None:
         parts.append(f"id: {page['id']}\nviews: {page['views']}\nlines: {page['line_count']}\n")
-    parts.append(format_recovery_hints(result["query"], result.get("recovery_hints")))
-    return "".join(parts)
+    parts.append(format_recovery_hints(result["query"], result.get("recovery_hints"), aliases=aliases))
+    return with_alias_legend("".join(parts), aliases)
 
 
 def format_link_stats_summary(result: dict[str, Any]) -> str:
@@ -1010,7 +1181,12 @@ def format_link_stats_summary(result: dict[str, Any]) -> str:
     )
 
 
-def format_recovery_hints(query: str, recovery_hints: dict[str, Any] | None) -> str:
+def format_recovery_hints(
+    query: str,
+    recovery_hints: dict[str, Any] | None,
+    aliases: LineIdAliases | None = None,
+) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
     if not recovery_hints:
         return ""
 
@@ -1043,24 +1219,25 @@ def format_recovery_hints(query: str, recovery_hints: dict[str, Any] | None) -> 
     if hits:
         parts.append("\nSearch hits:\n")
         for hit in hits:
-            parts.append(f"- {hit['source_title']} {hit['line_id']}: {hit['line_text']}\n")
+            parts.append(f"- {hit['source_title']} {aliases.format_line_id(hit['line_id'])}: {hit['line_text']}\n")
 
     if not suggestions and not targets and not hits:
         parts.append("\n(no nearby title suggestions or line hits)\n")
     return "".join(parts)
 
 
-def format_peek(result: dict[str, Any]) -> str:
+def format_peek(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
     page = result["page"]
     if page is None:
         return f"# {result['query']}\npage: missing\n"
 
     parts = [f"# {page['title']}\n", f"id: {page['id']}\nviews: {page['views']}\nlines: {page['line_count']}\n\n"]
     for line in result["lines"]:
-        parts.append(f"{line['line_id']}  {line['text']}\n")
+        parts.append(f"{aliases.format_line_id(line['line_id'])}  {line['text']}\n")
     if result["lines_truncated"]:
         parts.append("...\n")
-    return "".join(parts)
+    return with_alias_legend("".join(parts), aliases)
 
 
 def format_suggest(query: str, suggestions: list[dict[str, Any]]) -> str:
@@ -1078,16 +1255,21 @@ def format_search(
     hits: list[dict[str, Any]],
     offset: int = 0,
     recovery_hints: dict[str, Any] | None = None,
+    *,
+    mode: str = "literal",
+    scope: str = "line",
+    aliases: LineIdAliases | None = None,
 ) -> str:
-    parts = [f"# Search: {query}\n", f"offset: {offset}\n"]
+    aliases = aliases or LineIdAliases(enabled=False)
+    parts = [f"# Search: {query}\n", f"mode: {mode}\n", f"scope: {scope}\n", f"offset: {offset}\n"]
     if not hits:
         parts.append("(none)\n")
     else:
         for hit in hits:
             match_note = " [normalized]" if hit.get("match_mode") == "normalized" else ""
-            parts.append(f"- {hit['source_title']} {hit['line_id']}{match_note}: {hit['line_text']}\n")
-    parts.append(format_recovery_hints(query, recovery_hints))
-    return "".join(parts)
+            parts.append(f"- {hit['source_title']} {aliases.format_line_id(hit['line_id'])}{match_note}: {hit['line_text']}\n")
+    parts.append(format_recovery_hints(query, recovery_hints, aliases=aliases))
+    return with_alias_legend("".join(parts), aliases)
 
 
 def format_sync(result: dict[str, Any]) -> str:
@@ -1151,7 +1333,11 @@ def format_export_ai(result: dict[str, Any]) -> str:
     return result["text"]
 
 
-def format_unresolved_targets(unresolved_targets: list[dict[str, Any]]) -> str:
+def format_unresolved_targets(
+    unresolved_targets: list[dict[str, Any]],
+    aliases: LineIdAliases | None = None,
+) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
     parts: list[str] = []
     if not unresolved_targets:
         return "(none)\n"
@@ -1161,5 +1347,5 @@ def format_unresolved_targets(unresolved_targets: list[dict[str, Any]]) -> str:
             f"- {item['title']} (links {item['link_count']}, pages {item['source_page_count']}, views {item['total_source_views']})\n"
         )
         for example in item["examples"][:2]:
-            parts.append(f"  - {example['source_title']} {example['line_id']}: {example['line_text']}\n")
+            parts.append(f"  - {example['source_title']} {aliases.format_line_id(example['line_id'])}: {example['line_text']}\n")
     return "".join(parts)

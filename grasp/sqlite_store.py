@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape as escape_html
 import json
@@ -1062,6 +1063,35 @@ class SQLiteStore:
         ).fetchall()
         return [self._line_from_row(row) for row in rows], page.line_count > limit
 
+    def page_lines_around(
+        self,
+        page: Page,
+        *,
+        center_index: int,
+        context: int,
+    ) -> tuple[list[Line], dict[str, Any]]:
+        project = self._require_project()
+        context = max(0, context)
+        start_index = max(0, center_index - context)
+        end_index = min(page.line_count - 1, center_index + context)
+        rows = self.connection.execute(
+            """
+            SELECT * FROM lines
+            WHERE project = ? AND page_id = ? AND line_index BETWEEN ? AND ?
+            ORDER BY line_index
+            """,
+            (project, page.id, start_index, end_index),
+        ).fetchall()
+        return [self._line_from_row(row) for row in rows], {
+            "around_line_id": f"{page.id}:{center_index}",
+            "center_index": center_index,
+            "start_index": start_index,
+            "end_index": end_index,
+            "context": context,
+            "truncated_before": start_index > 0,
+            "truncated_after": end_index < page.line_count - 1,
+        }
+
     def backlinks(self, title: str, limit: int | None = None, offset: int = 0) -> list[Edge]:
         project = self._require_project()
         norm_title = self._resolve_title_norm(title, project=project)
@@ -1253,6 +1283,7 @@ class SQLiteStore:
         recovery_hints = {
             "source": None if source_node is not None else self.recovery_hints(source_title, limit=3),
             "target": None if target_node is not None else self.recovery_hints(target_title, limit=3),
+            "path": None,
         }
         result = {
             "query": {"source": source_title, "target": target_title},
@@ -1262,7 +1293,7 @@ class SQLiteStore:
             "paths": [],
             "path_count": 0,
             "truncated": False,
-            "recovery_hints": recovery_hints if recovery_hints["source"] or recovery_hints["target"] else None,
+            "recovery_hints": _nonempty_recovery_hints(recovery_hints),
         }
         if source_node is None or target_node is None or limit == 0:
             return result
@@ -1330,7 +1361,45 @@ class SQLiteStore:
         result["path_count"] = len(result["paths"])
         if queue and len(paths) >= limit:
             result["truncated"] = True
+        if not result["paths"]:
+            recovery_hints["path"] = self._path_no_path_recovery_hints(
+                source_title,
+                target_title,
+                max_depth=max_depth,
+                truncated=bool(result["truncated"]),
+            )
+            result["recovery_hints"] = _nonempty_recovery_hints(recovery_hints)
         return result
+
+    def _path_no_path_recovery_hints(
+        self,
+        source_title: str,
+        target_title: str,
+        *,
+        max_depth: int,
+        truncated: bool,
+        related_limit: int = 3,
+        backlinks_limit: int = 3,
+    ) -> dict[str, Any]:
+        return {
+            "reason": "search_truncated" if truncated else "no_path_within_max_depth",
+            "max_depth": max_depth,
+            "next_max_depth": max_depth + 1,
+            "related_limit": related_limit,
+            "backlinks_limit": backlinks_limit,
+            "source_link_stats": self.link_stats(source_title),
+            "target_link_stats": self.link_stats(target_title),
+            "source_related": self.related(source_title, limit=related_limit),
+            "target_related": self.related(target_title, limit=related_limit),
+            "source_backlinks": [
+                edge.to_dict()
+                for edge in self.backlinks(source_title, limit=backlinks_limit)
+            ],
+            "target_backlinks": [
+                edge.to_dict()
+                for edge in self.backlinks(target_title, limit=backlinks_limit)
+            ],
+        }
 
     def _resolve_graph_node(self, title: str) -> dict[str, Any] | None:
         page = self.resolve_page(title)
@@ -1528,23 +1597,54 @@ class SQLiteStore:
         ).fetchall()
         return [self._page_from_row(row).to_summary() for row in rows]
 
-    def search(self, query: str, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        mode: str = "literal",
+        scope: str = "line",
+    ) -> list[dict[str, Any]]:
         project = self._require_project()
-        terms = _search_terms(query)
-        if len(terms) > 1:
-            hits = self._search_page_and(terms, limit=limit, offset=offset)
-            if hits:
-                return hits
-            sql_loose_terms = _sql_loose_search_terms(query)
-            hits = self._search_sql_loose_page_and(sql_loose_terms, limit=limit, offset=offset)
-            if hits:
-                return hits
-            loose_terms = _loose_search_terms(query)
-            if self._can_use_python_loose_search(project) and _needs_python_loose_fallback(query, terms, loose_terms):
-                return self._search_loose_page_and(loose_terms, limit=limit, offset=offset)
+        if mode not in {"literal", "boolean"}:
+            raise ValueError(f"unsupported search mode: {mode}")
+        if scope not in {"line", "page"}:
+            raise ValueError(f"unsupported search scope: {scope}")
+
+        if mode == "boolean":
+            expression = parse_search_boolean_query(query)
+            return self._search_boolean(expression, limit=limit, offset=offset, scope=scope)
+
+        hits = self._search_literal(query, limit=limit, offset=offset, scope=scope)
+        if hits:
             return hits
 
+        sql_loose_query = sql_loose_search_key(query)
+        hits = self._search_sql_loose_literal(sql_loose_query, limit=limit, offset=offset, scope=scope)
+        if hits:
+            return hits
+
+        loose_query = loose_search_key(query)
+        terms = _search_terms(query)
+        loose_terms = _loose_search_terms(query)
+        if self._can_use_python_loose_search(project) and _needs_python_loose_fallback(query, terms, loose_terms):
+            return self._search_loose_literal(loose_query, limit=limit, offset=offset, scope=scope)
+        return hits
+
+    def _search_literal(self, query: str, limit: int = 50, offset: int = 0, scope: str = "line") -> list[dict[str, Any]]:
+        project = self._require_project()
         like = f"%{_escape_like(query)}%"
+        if scope == "page":
+            return self._search_page_expression(
+                "EXISTS (SELECT 1 FROM lines term_line WHERE term_line.project = page.project AND term_line.page_id = page.id AND term_line.text LIKE ? ESCAPE '\\')",
+                [like],
+                positive_terms=[query],
+                limit=limit,
+                offset=offset,
+                match_mode="literal",
+            )
+
         rows = self.connection.execute(
             """
             SELECT
@@ -1563,143 +1663,34 @@ class SQLiteStore:
             """,
             (project, like, limit, offset),
         ).fetchall()
-        hits = [
-            {
-                "source_page_id": row["source_page_id"],
-                "source_title": row["source_title"],
-                "source_views": row["source_views"],
-                "source_updated": row["source_updated"],
-                "line_id": row["line_id"],
-                "line_index": row["line_index"],
-                "line_text": row["line_text"],
-                "match_mode": "literal",
-                "match_terms": terms,
-            }
-            for row in rows
-        ]
-        if hits:
-            return hits
-
-        sql_loose_terms = _sql_loose_search_terms(query)
-        hits = self._search_sql_loose_page_and(sql_loose_terms, limit=limit, offset=offset)
-        if hits:
-            return hits
-
-        loose_terms = _loose_search_terms(query)
-        if self._can_use_python_loose_search(project) and _needs_python_loose_fallback(query, terms, loose_terms):
-            return self._search_loose_page_and(loose_terms, limit=limit, offset=offset)
-        return hits
-
-    def _search_page_and(self, terms: list[str], limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
-        project = self._require_project()
-        likes = [f"%{_escape_like(term)}%" for term in terms]
-        anchor_index = max(range(len(terms)), key=lambda index: len(terms[index]))
-        anchor_like = likes[anchor_index]
-        remaining_likes = [like for index, like in enumerate(likes) if index != anchor_index]
-        remaining_filters = "\n".join(
-            """
-              AND EXISTS (
-                SELECT 1
-                FROM lines other
-                WHERE other.project = ?
-                  AND other.page_id = anchor_pages.page_id
-                  AND other.text LIKE ? ESCAPE '\\'
-              )
-            """
-            for _ in remaining_likes
-        )
-        line_filters = " OR ".join("line.text LIKE ? ESCAPE '\\'" for _ in likes)
-        params: list[Any] = [project, anchor_like]
-        for like in remaining_likes:
-            params.extend([project, like])
-        params.extend([project, *likes, limit, offset])
-        rows = self.connection.execute(
-            f"""
-            WITH anchor_pages AS (
-              SELECT DISTINCT page_id
-              FROM lines
-              WHERE project = ? AND text LIKE ? ESCAPE '\\'
-            ),
-            matching_pages AS (
-              SELECT page_id
-              FROM anchor_pages
-              WHERE 1 = 1
-              {remaining_filters}
-            )
-            SELECT
-              page.id AS source_page_id,
-              page.title AS source_title,
-              page.views AS source_views,
-              page.updated AS source_updated,
-              line.line_id,
-              line.line_index,
-              line.text AS line_text
-            FROM lines line
-            JOIN pages page ON page.project = line.project AND page.id = line.page_id
-            JOIN matching_pages matched ON matched.page_id = line.page_id
-            WHERE line.project = ? AND ({line_filters})
-            ORDER BY page.views DESC, COALESCE(page.updated, 0) DESC, page.title, line.line_index
-            LIMIT ? OFFSET ?
-            """,
-            params,
-        ).fetchall()
+        normalized_terms = _normalized_unique_terms([query])
         return [
-            {
-                "source_page_id": row["source_page_id"],
-                "source_title": row["source_title"],
-                "source_views": row["source_views"],
-                "source_updated": row["source_updated"],
-                "line_id": row["line_id"],
-                "line_index": row["line_index"],
-                "line_text": row["line_text"],
-                "match_terms": _matched_search_terms(row["line_text"], terms),
-                "match_mode": "literal",
-            }
+            self._search_hit_from_row(
+                row,
+                match_terms=_matched_search_terms(row["line_text"], normalized_terms),
+                match_mode="literal",
+            )
             for row in rows
         ]
 
-    def _search_sql_loose_page_and(self, terms: list[str], limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    def _search_sql_loose_literal(self, query: str, limit: int = 50, offset: int = 0, scope: str = "line") -> list[dict[str, Any]]:
         project = self._require_project()
-        if not terms:
+        if not query:
             return []
-
-        likes = [f"%{_escape_like(term)}%" for term in terms]
-        anchor_index = max(range(len(terms)), key=lambda index: len(terms[index]))
-        anchor_like = likes[anchor_index]
-        remaining_likes = [like for index, like in enumerate(likes) if index != anchor_index]
-        remaining_filters = "\n".join(
-            """
-              AND EXISTS (
-                SELECT 1
-                FROM lines other
-                WHERE other.project = ?
-                  AND other.page_id = anchor_pages.page_id
-                  AND REPLACE(other.text, ?, '') LIKE ? ESCAPE '\\'
-              )
-            """
-            for _ in remaining_likes
-        )
-        line_filters = " OR ".join("REPLACE(line.text, ?, '') LIKE ? ESCAPE '\\'" for _ in likes)
-        params: list[Any] = [project, "\u30fc", anchor_like]
-        for like in remaining_likes:
-            params.extend([project, "\u30fc", like])
-        params.append(project)
-        for like in likes:
-            params.extend(["\u30fc", like])
-        params.extend([limit, offset])
-        rows = self.connection.execute(
-            f"""
-            WITH anchor_pages AS (
-              SELECT DISTINCT page_id
-              FROM lines
-              WHERE project = ? AND REPLACE(text, ?, '') LIKE ? ESCAPE '\\'
-            ),
-            matching_pages AS (
-              SELECT page_id
-              FROM anchor_pages
-              WHERE 1 = 1
-              {remaining_filters}
+        like = f"%{_escape_like(query)}%"
+        if scope == "page":
+            return self._search_page_expression(
+                "EXISTS (SELECT 1 FROM lines term_line WHERE term_line.project = page.project AND term_line.page_id = page.id AND REPLACE(term_line.text, ?, '') LIKE ? ESCAPE '\\')",
+                ["\u30fc", like],
+                positive_terms=[query],
+                limit=limit,
+                offset=offset,
+                match_mode="normalized",
+                line_transform="sql_loose",
             )
+
+        rows = self.connection.execute(
+            """
             SELECT
               page.id AS source_page_id,
               page.title AS source_title,
@@ -1710,31 +1701,24 @@ class SQLiteStore:
               line.text AS line_text
             FROM lines line
             JOIN pages page ON page.project = line.project AND page.id = line.page_id
-            JOIN matching_pages matched ON matched.page_id = line.page_id
-            WHERE line.project = ? AND ({line_filters})
+            WHERE line.project = ? AND REPLACE(line.text, ?, '') LIKE ? ESCAPE '\\'
             ORDER BY page.views DESC, COALESCE(page.updated, 0) DESC, page.title, line.line_index
             LIMIT ? OFFSET ?
             """,
-            params,
+            (project, "\u30fc", like, limit, offset),
         ).fetchall()
         return [
-            {
-                "source_page_id": row["source_page_id"],
-                "source_title": row["source_title"],
-                "source_views": row["source_views"],
-                "source_updated": row["source_updated"],
-                "line_id": row["line_id"],
-                "line_index": row["line_index"],
-                "line_text": row["line_text"],
-                "match_terms": _matched_sql_loose_search_terms(row["line_text"], terms),
-                "match_mode": "normalized",
-            }
+            self._search_hit_from_row(
+                row,
+                match_terms=_matched_sql_loose_search_terms(row["line_text"], [query]),
+                match_mode="normalized",
+            )
             for row in rows
         ]
 
-    def _search_loose_page_and(self, terms: list[str], limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    def _search_loose_literal(self, query: str, limit: int = 50, offset: int = 0, scope: str = "line") -> list[dict[str, Any]]:
         project = self._require_project()
-        if not terms:
+        if not query:
             return []
 
         rows = self.connection.execute(
@@ -1755,41 +1739,159 @@ class SQLiteStore:
             (project,),
         ).fetchall()
 
-        page_terms: dict[str, set[str]] = {}
-        candidate_rows: list[tuple[sqlite3.Row, list[str]]] = []
-        for row in rows:
-            matched_terms = _matched_loose_search_terms(row["line_text"], terms)
-            if not matched_terms:
-                continue
-            page_id = row["source_page_id"]
-            page_terms.setdefault(page_id, set()).update(matched_terms)
-            candidate_rows.append((row, matched_terms))
+        if scope == "page":
+            matching_page_ids = {
+                row["source_page_id"]
+                for row in rows
+                if query in loose_search_key(row["line_text"])
+            }
+            candidate_rows = [
+                row
+                for row in rows
+                if row["source_page_id"] in matching_page_ids and query in loose_search_key(row["line_text"])
+            ]
+        else:
+            candidate_rows = [row for row in rows if query in loose_search_key(row["line_text"])]
 
-        required_terms = set(terms)
         hits: list[dict[str, Any]] = []
-        skipped = 0
-        for row, matched_terms in candidate_rows:
-            if not required_terms.issubset(page_terms[row["source_page_id"]]):
-                continue
-            if skipped < offset:
-                skipped += 1
-                continue
+        for row in candidate_rows[offset:]:
             hits.append(
-                {
-                    "source_page_id": row["source_page_id"],
-                    "source_title": row["source_title"],
-                    "source_views": row["source_views"],
-                    "source_updated": row["source_updated"],
-                    "line_id": row["line_id"],
-                    "line_index": row["line_index"],
-                    "line_text": row["line_text"],
-                    "match_terms": matched_terms,
-                    "match_mode": "normalized",
-                }
+                self._search_hit_from_row(
+                    row,
+                    match_terms=_matched_loose_search_terms(row["line_text"], [query]),
+                    match_mode="normalized",
+                )
             )
             if limit >= 0 and len(hits) >= limit:
                 break
         return hits
+
+    def _search_boolean(
+        self,
+        expression: SearchExpression,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        scope: str = "line",
+    ) -> list[dict[str, Any]]:
+        if scope == "page":
+            sql, params = _search_expression_page_sql(expression)
+            return self._search_page_expression(
+                sql,
+                params,
+                positive_terms=_search_positive_terms(expression),
+                limit=limit,
+                offset=offset,
+                match_mode="literal",
+            )
+
+        project = self._require_project()
+        sql, params = _search_expression_line_sql(expression)
+        rows = self.connection.execute(
+            f"""
+            SELECT
+              page.id AS source_page_id,
+              page.title AS source_title,
+              page.views AS source_views,
+              page.updated AS source_updated,
+              line.line_id,
+              line.line_index,
+              line.text AS line_text
+            FROM lines line
+            JOIN pages page ON page.project = line.project AND page.id = line.page_id
+            WHERE line.project = ? AND ({sql})
+            ORDER BY page.views DESC, COALESCE(page.updated, 0) DESC, page.title, line.line_index
+            LIMIT ? OFFSET ?
+            """,
+            [project, *params, limit, offset],
+        ).fetchall()
+        positive_terms = _normalized_unique_terms(_search_positive_terms(expression))
+        return [
+            self._search_hit_from_row(
+                row,
+                match_terms=_matched_search_terms(row["line_text"], positive_terms),
+                match_mode="literal",
+            )
+            for row in rows
+        ]
+
+    def _search_page_expression(
+        self,
+        page_sql: str,
+        page_params: list[Any],
+        *,
+        positive_terms: list[str],
+        limit: int = 50,
+        offset: int = 0,
+        match_mode: str,
+        line_transform: str = "literal",
+    ) -> list[dict[str, Any]]:
+        project = self._require_project()
+        if positive_terms:
+            if line_transform == "sql_loose":
+                line_filter = " OR ".join("REPLACE(line.text, ?, '') LIKE ? ESCAPE '\\'" for _ in positive_terms)
+                line_params: list[Any] = []
+                for term in positive_terms:
+                    line_params.extend(["\u30fc", f"%{_escape_like(term)}%"])
+                normalized_terms = positive_terms
+                match_fn = _matched_sql_loose_search_terms
+            else:
+                line_filter = " OR ".join("line.text LIKE ? ESCAPE '\\'" for _ in positive_terms)
+                line_params = [f"%{_escape_like(term)}%" for term in positive_terms]
+                normalized_terms = _normalized_unique_terms(positive_terms)
+                match_fn = _matched_search_terms
+        else:
+            line_filter = "line.line_index = 0"
+            line_params = []
+            normalized_terms = []
+            match_fn = _matched_search_terms
+
+        rows = self.connection.execute(
+            f"""
+            WITH matching_pages AS (
+              SELECT page.id AS page_id
+              FROM pages page
+              WHERE page.project = ? AND ({page_sql})
+            )
+            SELECT
+              page.id AS source_page_id,
+              page.title AS source_title,
+              page.views AS source_views,
+              page.updated AS source_updated,
+              line.line_id,
+              line.line_index,
+              line.text AS line_text
+            FROM lines line
+            JOIN pages page ON page.project = line.project AND page.id = line.page_id
+            JOIN matching_pages matched ON matched.page_id = line.page_id
+            WHERE line.project = ? AND ({line_filter})
+            ORDER BY page.views DESC, COALESCE(page.updated, 0) DESC, page.title, line.line_index
+            LIMIT ? OFFSET ?
+            """,
+            [project, *page_params, project, *line_params, limit, offset],
+        ).fetchall()
+        return [
+            self._search_hit_from_row(
+                row,
+                match_terms=match_fn(row["line_text"], normalized_terms),
+                match_mode=match_mode,
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    def _search_hit_from_row(row: sqlite3.Row, *, match_terms: list[str], match_mode: str) -> dict[str, Any]:
+        return {
+            "source_page_id": row["source_page_id"],
+            "source_title": row["source_title"],
+            "source_views": row["source_views"],
+            "source_updated": row["source_updated"],
+            "line_id": row["line_id"],
+            "line_index": row["line_index"],
+            "line_text": row["line_text"],
+            "match_mode": match_mode,
+            "match_terms": match_terms,
+        }
 
     def _can_use_python_loose_search(self, project: str) -> bool:
         row = self.connection.execute(
@@ -1867,6 +1969,7 @@ class SQLiteStore:
                 "link_stats": link_stats,
                 "lines": [],
                 "lines_truncated": False,
+                "line_window": None,
                 "backlinks": [edge.to_dict() for edge in backlinks],
                 "backlink_count_returned": len(backlinks),
                 "backlink_count_total": link_stats["link_count"],
@@ -1882,6 +1985,63 @@ class SQLiteStore:
             "link_stats": link_stats,
             "lines": [line.to_dict() for line in lines],
             "lines_truncated": lines_truncated,
+            "line_window": None,
+            "backlinks": [edge.to_dict() for edge in backlinks],
+            "backlink_count_returned": len(backlinks),
+            "backlink_count_total": link_stats["link_count"],
+            "related": related,
+            "unresolved_targets": self.unresolved_targets_from_page(page, unresolved_limit),
+            "recovery_hints": None,
+        }
+
+    def read_around_line(
+        self,
+        line_id: str,
+        *,
+        title: str | None = None,
+        line_context: int = 5,
+        backlink_limit: int = 20,
+        related_limit: int = 20,
+        unresolved_limit: int = 20,
+        related_snippets: bool = False,
+        related_snippet_lines: int = 5,
+    ) -> dict[str, Any]:
+        if line_context < 0:
+            raise ValueError("--line-context must be >= 0")
+
+        line_page = self._line_and_page_by_id(line_id)
+        if line_page is None:
+            raise ValueError(
+                f"line-id not found in selected project: {line_id}; "
+                "use a full line_id from --json or --full-ids output"
+            )
+        page, center_line = line_page
+
+        if title is not None:
+            requested_page = self.resolve_page(title)
+            if requested_page is None or requested_page.id != page.id:
+                raise ValueError(
+                    f"--around-line {line_id} belongs to page {page.title}, not {title}"
+                )
+
+        lines, line_window = self.page_lines_around(
+            page,
+            center_index=center_line.index,
+            context=line_context,
+        )
+        backlinks = self.backlinks(page.title, backlink_limit)
+        link_stats = self.link_stats(page.title)
+        related = self.related(page.title, related_limit)
+        if related_snippets:
+            related = self._with_page_snippets(related, related_snippet_lines)
+
+        return {
+            "query": title or page.title,
+            "page": page.to_summary(),
+            "link_stats": link_stats,
+            "lines": [line.to_dict() for line in lines],
+            "lines_truncated": line_window["truncated_before"] or line_window["truncated_after"],
+            "line_window": line_window,
             "backlinks": [edge.to_dict() for edge in backlinks],
             "backlink_count_returned": len(backlinks),
             "backlink_count_total": link_stats["link_count"],
@@ -2307,6 +2467,19 @@ class SQLiteStore:
         ).fetchone()
         return self._page_from_row(row) if row is not None else None
 
+    def _line_and_page_by_id(self, line_id: str) -> tuple[Page, Line] | None:
+        project = self._require_project()
+        line_row = self.connection.execute(
+            "SELECT * FROM lines WHERE project = ? AND line_id = ?",
+            (project, line_id),
+        ).fetchone()
+        if line_row is None:
+            return None
+        page = self._page_by_id(line_row["page_id"])
+        if page is None:
+            return None
+        return page, self._line_from_row(line_row)
+
     def _upsert_cosense_page(self, page: dict[str, Any], project: str) -> None:
         page_id = str(page["id"])
         title = str(page["title"])
@@ -2424,6 +2597,198 @@ class SQLiteStore:
             return self._count(table, project=project)
         except sqlite3.OperationalError:
             return None
+
+
+@dataclass(frozen=True)
+class SearchTerm:
+    value: str
+
+
+@dataclass(frozen=True)
+class SearchNot:
+    expression: "SearchExpression"
+
+
+@dataclass(frozen=True)
+class SearchBinary:
+    operator: str
+    left: "SearchExpression"
+    right: "SearchExpression"
+
+
+SearchExpression = SearchTerm | SearchNot | SearchBinary
+
+
+@dataclass(frozen=True)
+class _SearchToken:
+    kind: str
+    value: str
+
+
+def parse_search_boolean_query(query: str) -> SearchExpression:
+    tokens = _tokenize_search_boolean_query(query)
+    if not tokens:
+        raise ValueError("boolean search query is empty")
+    parser = _SearchBooleanParser(tokens)
+    return parser.parse()
+
+
+def _tokenize_search_boolean_query(query: str) -> list[_SearchToken]:
+    tokens: list[_SearchToken] = []
+    index = 0
+    while index < len(query):
+        char = query[index]
+        if char.isspace():
+            index += 1
+            continue
+        if char in "()":
+            tokens.append(_SearchToken(char, char))
+            index += 1
+            continue
+        if char in {"'", '"'}:
+            quote_char = char
+            index += 1
+            value_chars: list[str] = []
+            while index < len(query):
+                char = query[index]
+                if char == "\\" and index + 1 < len(query):
+                    value_chars.append(query[index + 1])
+                    index += 2
+                    continue
+                if char == quote_char:
+                    break
+                value_chars.append(char)
+                index += 1
+            if index >= len(query) or query[index] != quote_char:
+                raise ValueError("unterminated quoted phrase in boolean search query")
+            value = "".join(value_chars)
+            if not value:
+                raise ValueError("empty quoted phrase in boolean search query")
+            tokens.append(_SearchToken("TERM", value))
+            index += 1
+            continue
+
+        start = index
+        while index < len(query) and not query[index].isspace() and query[index] not in "()":
+            index += 1
+        value = query[start:index]
+        upper = value.upper()
+        if upper in {"AND", "OR", "NOT"}:
+            tokens.append(_SearchToken(upper, upper))
+        else:
+            tokens.append(_SearchToken("TERM", value))
+    return tokens
+
+
+class _SearchBooleanParser:
+    def __init__(self, tokens: list[_SearchToken]):
+        self.tokens = tokens
+        self.index = 0
+
+    def parse(self) -> SearchExpression:
+        expression = self._parse_or()
+        if self._peek() is not None:
+            raise ValueError(f"unexpected token in boolean search query: {self._peek().value}")
+        return expression
+
+    def _parse_or(self) -> SearchExpression:
+        left = self._parse_and()
+        while self._match("OR"):
+            right = self._parse_and()
+            left = SearchBinary("OR", left, right)
+        return left
+
+    def _parse_and(self) -> SearchExpression:
+        left = self._parse_not()
+        while True:
+            if self._match("AND"):
+                right = self._parse_not()
+                left = SearchBinary("AND", left, right)
+                continue
+            token = self._peek()
+            if token is not None and token.kind in {"TERM", "NOT", "("}:
+                right = self._parse_not()
+                left = SearchBinary("AND", left, right)
+                continue
+            return left
+
+    def _parse_not(self) -> SearchExpression:
+        if self._match("NOT"):
+            return SearchNot(self._parse_not())
+        return self._parse_primary()
+
+    def _parse_primary(self) -> SearchExpression:
+        token = self._peek()
+        if token is None:
+            raise ValueError("unexpected end of boolean search query")
+        if token.kind == "TERM":
+            self.index += 1
+            return SearchTerm(token.value)
+        if self._match("("):
+            expression = self._parse_or()
+            if not self._match(")"):
+                raise ValueError("missing closing parenthesis in boolean search query")
+            return expression
+        raise ValueError(f"unexpected token in boolean search query: {token.value}")
+
+    def _peek(self) -> _SearchToken | None:
+        if self.index >= len(self.tokens):
+            return None
+        return self.tokens[self.index]
+
+    def _match(self, kind: str) -> bool:
+        token = self._peek()
+        if token is None or token.kind != kind:
+            return False
+        self.index += 1
+        return True
+
+
+def _search_expression_line_sql(expression: SearchExpression) -> tuple[str, list[Any]]:
+    if isinstance(expression, SearchTerm):
+        return "line.text LIKE ? ESCAPE '\\'", [f"%{_escape_like(expression.value)}%"]
+    if isinstance(expression, SearchNot):
+        sql, params = _search_expression_line_sql(expression.expression)
+        return f"NOT ({sql})", params
+    left_sql, left_params = _search_expression_line_sql(expression.left)
+    right_sql, right_params = _search_expression_line_sql(expression.right)
+    return f"({left_sql}) {expression.operator} ({right_sql})", [*left_params, *right_params]
+
+
+def _search_expression_page_sql(expression: SearchExpression) -> tuple[str, list[Any]]:
+    if isinstance(expression, SearchTerm):
+        return (
+            "EXISTS (SELECT 1 FROM lines term_line WHERE term_line.project = page.project "
+            "AND term_line.page_id = page.id AND term_line.text LIKE ? ESCAPE '\\')",
+            [f"%{_escape_like(expression.value)}%"],
+        )
+    if isinstance(expression, SearchNot):
+        sql, params = _search_expression_page_sql(expression.expression)
+        return f"NOT ({sql})", params
+    left_sql, left_params = _search_expression_page_sql(expression.left)
+    right_sql, right_params = _search_expression_page_sql(expression.right)
+    return f"({left_sql}) {expression.operator} ({right_sql})", [*left_params, *right_params]
+
+
+def _search_positive_terms(expression: SearchExpression, *, positive: bool = True) -> list[str]:
+    if isinstance(expression, SearchTerm):
+        return [expression.value] if positive else []
+    if isinstance(expression, SearchNot):
+        return _search_positive_terms(expression.expression, positive=not positive)
+    return [
+        *_search_positive_terms(expression.left, positive=positive),
+        *_search_positive_terms(expression.right, positive=positive),
+    ]
+
+
+def _normalized_unique_terms(terms: list[str]) -> list[str]:
+    normalized_terms = [normalize_title(term) for term in terms if normalize_title(term)]
+    return list(dict.fromkeys(normalized_terms))
+
+
+def _nonempty_recovery_hints(recovery_hints: dict[str, Any]) -> dict[str, Any] | None:
+    compact = {key: value for key, value in recovery_hints.items() if value}
+    return compact or None
 
 
 def _write_metadata(connection: sqlite3.Connection, values: dict[str, str]) -> None:

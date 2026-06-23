@@ -24,7 +24,7 @@ AI にとって 1 回の `grasp` 呼び出しは:
 
 - `read --related-snippets`: hub 探索を 1 往復で（各 related の中身を追加 read せずに見る。default は Cosense UI 同様 先頭 ~5 行）。
 - `gather "<query>" --budget`: 問いから「最小ページ集合＋近傍」を token 予算内で返す retrieval orchestration。
-- read 単位の **line-id 別名**: 24 桁 page-id＋index を全行に付けるのは冗長なので `P1:0` 等に畳み context を空ける。
+- text 出力の **line-id 別名**（2026-06-24 実装済み）: 24 桁 page-id＋index を全行に付けるのは冗長なので `P1:0` 等に畳み context を空ける。完全 ID は `--json` / `--full-ids`。
 
 ただし token 削減は**意味のある token を捨てない範囲**で。`[nishio.icon]`（block の著者）や bare image URL（人間に画像提示・将来 AI も読む）のような decoration を畳む `--strip-decoration` は **却下**（[[grasp-backlog]]）— decoration は noise でなく情報。cost 軸は「畳めるところを畳む」のであって「fidelity を捨てる」ことではない。
 
@@ -39,9 +39,9 @@ AI にとって 1 回の `grasp` 呼び出しは:
 - **絶対的不在**: ストアにその概念が無い（→ ユーザに「書かれていない」と言える）
 - **マッチ失敗**: 有るが surface form / 検索意味論で取れなかった（→ 別の引き方を試すべき・断定してはいけない）
 
-grasp の `read` / `link-stats` の zero-hit、`search` の空結果、`related` の空結果は `recovery_hints` を返す（実装済み）。ヒントは command 文字列だけでなく **実データ**（近い title 候補・正規化で寄せた候補・部分一致 line）を載せると、1 往復節約＋判断材料になる。この contract は今後追加する retrieval verb（例: `path` / `gather`）にも揃える。
+grasp の `read` / `link-stats` の zero-hit、`search` の空結果、`related` の空結果、`path` の no-path は `recovery_hints` を返す（実装済み）。ヒントは command 文字列だけでなく **実データ**（近い title 候補・正規化で寄せた候補・部分一致 line、related/backlinks/link-stats）を載せると、1 往復節約＋判断材料になる。この contract は今後追加する retrieval verb（例: `gather`）にも揃える。
 
-これが **recall（page 単位 AND / OR / 正規化マッチ）を vector search より先に直す**理由でもある: 沈黙の偽陰性は AI には人間より危険なので、embeddings の前に AND/正規化/negative-contract で底上げするのが AI 価値の順序。page 単位 AND と `search` 空結果の recovery hints は 2026-06-23 に実装済み。
+これが **recall（明示 boolean / page scope / 正規化マッチ）を vector search より先に直す**理由でもある: 沈黙の偽陰性は AI には人間より危険なので、embeddings の前に boolean/正規化/negative-contract で底上げするのが AI 価値の順序。page 単位 AND は 2026-06-23 に一度 implicit に実装したが、2026-06-24 に default literal + 明示 `--mode boolean --scope page` へ変更した。`search` 空結果の recovery hints は 2026-06-23 に実装済み。
 
 ## 根
 

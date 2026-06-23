@@ -74,7 +74,7 @@ P0-2「long page navigation」は、CLI に WebFetch 風 summarizer を入れる
 - Skill: 長大 `read` を親 context に直接持ち込まない手順を持つ。まず `search` で hit line を見つけ、必要なら subagent 側で limit 付き `read` / `peek` を使う。
 - subagent: 大量 stdout、長大本文、網羅的検索結果を自分の context に閉じ込め、親には結論・短い根拠・再アクセス用 line-id を返す。
 
-帰結: `search --context N` / `read --around-line <line-id>` は将来の bounded primitive としては有用だが、P0 の本筋ではない。まず Skill 運用を更新し、CLI surface は実運用で不足が見えた時に足す。
+帰結: `search --context N` / `read --around-line <line-id>` は bounded primitive としては有用だが、P0 の本筋ではない。まず Skill 運用を更新し、CLI surface は実運用で不足が見えた時に足す。2026-06-24: `read --around-line <line-id> --line-context N` は、search hit から周辺本文へ移動する小さい deterministic primitive として実装済み。`search --context N` は未実装。
 
 ### 2026-06-23: README/onboarding は「人間＝CLI operator」前提を外す
 

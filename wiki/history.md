@@ -48,9 +48,11 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
-| `1.5.8` | schema `5` | 2026-06-24 | schema `5` compatible | Markdown mirror の再 import に manifest-based incremental path を追加。content-only file 変更は changed page / lines / outgoing edges だけを差し替え、title / id / aliases / file set 変更時は safe full rebuild に戻す |
-| `1.5.7` | schema `5` | 2026-06-24 | schema `5` compatible | Markdown mirror が frontmatter `title` / `id` / `aliases` / `tags` を読むようになった。alias は canonical title へ解決して edge 化し、`read <alias>` / `backlinks <alias>` / `link-stats <alias>` でも canonical page を読める |
-| `1.5.6` | schema `5` | 2026-06-24 | schema `5` compatible | `grasp import --markdown <folder>` を追加。Markdown folder を read-only mirror として既存 SQLite graph store に materialize し、file stem を title、`[[wikilink]]` と `#tag` を edge として既存 `read` / `backlinks` / `related` surface で読めるようにした |
+| `1.5.10` | schema `5` | 2026-06-24 | schema `5` compatible | `grasp import --markdown <folder>` を追加。Markdown folder を read-only mirror として既存 SQLite graph store に materialize する。frontmatter `title` / `id` / `aliases` / `tags`、wikilinks / hashtags、alias canonicalization、manifest-based incremental re-import に対応 |
+| `1.5.9` | schema `5` | 2026-06-24 | schema `5` compatible | `read --around-line <line-id> --line-context N` を追加。完全 `line_id` から同一ページを解決し、中心行の前後 N 行だけを返す。JSON は `line_window` を返し、通常 read では `line_window: null` |
+| `1.5.8` | schema `5` | 2026-06-24 | schema `5` compatible | text 出力の line-id を既定で実行内ローカル別名（`P1:0` など）に短縮し、先頭付近に `P1=<page-id>` legend を出す。`--json` は従来通り完全 ID、text で完全 ID が必要な時は `--full-ids` |
+| `1.5.7` | schema `5` | 2026-06-24 | schema `5` compatible | `path` の no-path negative-result contract を追加。端点が resolve できるが bounded search で経路が見つからない時、`recovery_hints.path` に reason / next_max_depth / related / backlinks / link-stats を返す |
+| `1.5.6` | schema `5` | 2026-06-24 | schema `5` compatible | `search` の既定を空白も含む literal line substring に戻し、`--mode boolean` と `--scope line|page` を追加。boolean は AND/OR/NOT、括弧、quoted phrase、隣接 term の implicit AND を扱う。旧 page 単位 AND は `--mode boolean --scope page` で明示 |
 | `1.5.5` | schema `5` | 2026-06-24 | schema `5` compatible | `related` 空結果に `recovery_hints` を追加。`path <A> <B>` を追加し、pages ∪ unresolved targets を node、materialized internal links を無向 edge として `--max-depth` bounded な shortest path と根拠 line を返す |
 | `1.5.4` | schema `5` | 2026-06-23 | schema `5` compatible | `read --related-snippets` / `--related-snippet-lines N` を追加。related 2-hop / missing target の source pages に先頭 N 行（default 5）を `snippet_lines` として同梱し、Cosense related pane 風の近傍読解を 1 call で行えるようにした |
 | `1.5.3` | schema `5` | 2026-06-23 | schema `5` compatible | `search` の zero-hit 時に normalized fallback を追加。NFKC query 正規化＋長音除去は SQLite `REPLACE` で大規模 store でも使い、text 出力は `[normalized]`、JSON は `match_mode: "normalized"` を返す。完全な kana 変換の Python scan は 50k lines 以下の小規模 store のみに制限 |
@@ -66,6 +68,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.5.8`
+- Current public compatibility version: `1.5.10`
 - Current internal `SCHEMA_VERSION`: `5`
-- Current package metadata should match `1.5.8`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.5.10`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

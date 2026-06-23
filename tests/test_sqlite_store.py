@@ -146,6 +146,18 @@ class SQLiteStoreTests(unittest.TestCase):
                     [[node["kind"] for node in path_item["nodes"]] for path_item in path["paths"]],
                 )
 
+                too_shallow_path = store.paths_between("A", "C", max_depth=1, limit=1)
+                self.assertEqual(too_shallow_path["path_count"], 0)
+                self.assertEqual(too_shallow_path["source"]["title"], "A")
+                self.assertEqual(too_shallow_path["target"]["title"], "C")
+                path_hints = too_shallow_path["recovery_hints"]["path"]
+                self.assertEqual(path_hints["reason"], "no_path_within_max_depth")
+                self.assertEqual(path_hints["next_max_depth"], 2)
+                self.assertEqual(path_hints["source_link_stats"]["title"], "A")
+                self.assertEqual(path_hints["target_link_stats"]["title"], "C")
+                self.assertEqual(path_hints["source_related"][0]["title"], "C")
+                self.assertTrue(path_hints["source_backlinks"])
+
                 missing_hinge_path = store.paths_between("A", "Missing", max_depth=1, limit=1)
                 self.assertEqual(missing_hinge_path["path_count"], 1)
                 self.assertEqual(missing_hinge_path["paths"][0]["distance"], 1)
@@ -160,8 +172,26 @@ class SQLiteStoreTests(unittest.TestCase):
                 read = store.read("A", backlink_limit=10, related_limit=10, unresolved_limit=10)
                 self.assertEqual(read["page"]["title"], "A")
                 self.assertEqual(read["backlink_count_total"], 1)
+                self.assertIsNone(read["line_window"])
                 self.assertEqual(read["unresolved_targets"][0]["examples"][0]["source_title"], "A")
                 self.assertNotIn("snippet_lines", read["related"][0])
+
+                read_around_line = store.read_around_line(
+                    "aaaaaaaaaaaaaaaaaaaaaaaa:1",
+                    line_context=0,
+                    backlink_limit=0,
+                    related_limit=0,
+                    unresolved_limit=0,
+                )
+                self.assertEqual(read_around_line["page"]["title"], "A")
+                self.assertEqual([line["text"] for line in read_around_line["lines"]], ["links to [B] and [Missing]"])
+                self.assertEqual(read_around_line["line_window"]["around_line_id"], "aaaaaaaaaaaaaaaaaaaaaaaa:1")
+                self.assertEqual(read_around_line["line_window"]["start_index"], 1)
+                self.assertEqual(read_around_line["line_window"]["end_index"], 1)
+                self.assertTrue(read_around_line["lines_truncated"])
+
+                with self.assertRaisesRegex(ValueError, "belongs to page A, not B"):
+                    store.read_around_line("aaaaaaaaaaaaaaaaaaaaaaaa:1", title="B")
 
                 read_with_snippets = store.read(
                     "A",
@@ -300,7 +330,7 @@ class SQLiteStoreTests(unittest.TestCase):
             finally:
                 store.close()
 
-    def test_search_multi_term_matches_terms_across_page_lines(self):
+    def test_search_boolean_mode_supports_line_and_page_scope(self):
         fixture = {
             "name": "fixture",
             "displayName": "fixture",
@@ -320,24 +350,24 @@ class SQLiteStoreTests(unittest.TestCase):
                     ],
                 },
                 {
-                    "title": "AlphaOnly",
+                    "title": "AOnly",
                     "id": "bbbbbbbbbbbbbbbbbbbbbbbb",
                     "created": 1,
                     "updated": 20,
                     "views": 90,
                     "lines": [
-                        {"text": "AlphaOnly", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "AOnly", "created": 1, "updated": 1, "userId": "u"},
                         {"text": "alpha appears here too", "created": 1, "updated": 2, "userId": "u"},
                     ],
                 },
                 {
-                    "title": "BetaOnly",
+                    "title": "BOnly",
                     "id": "cccccccccccccccccccccccc",
                     "created": 1,
                     "updated": 10,
                     "views": 80,
                     "lines": [
-                        {"text": "BetaOnly", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "BOnly", "created": 1, "updated": 1, "userId": "u"},
                         {"text": "beta appears here too", "created": 1, "updated": 2, "userId": "u"},
                     ],
                 },
@@ -352,12 +382,30 @@ class SQLiteStoreTests(unittest.TestCase):
 
             store = SQLiteStore(store_path)
             try:
-                hits = store.search("alpha beta", limit=10)
-                self.assertEqual([hit["source_title"] for hit in hits], ["Both", "Both"])
-                self.assertEqual([hit["line_index"] for hit in hits], [1, 2])
-                self.assertEqual(hits[0]["match_terms"], ["alpha"])
-                self.assertEqual(hits[1]["match_terms"], ["beta"])
-                self.assertEqual(hits[0]["match_mode"], "literal")
+                literal_hits = store.search("alpha beta", limit=10)
+                self.assertEqual(literal_hits, [])
+
+                page_and_hits = store.search("alpha AND beta", mode="boolean", scope="page", limit=10)
+                self.assertEqual([hit["source_title"] for hit in page_and_hits], ["Both", "Both"])
+                self.assertEqual([hit["line_index"] for hit in page_and_hits], [1, 2])
+                self.assertEqual(page_and_hits[0]["match_terms"], ["alpha"])
+                self.assertEqual(page_and_hits[1]["match_terms"], ["beta"])
+                self.assertEqual(page_and_hits[0]["match_mode"], "literal")
+
+                implicit_page_and_hits = store.search("alpha beta", mode="boolean", scope="page", limit=10)
+                self.assertEqual([hit["source_title"] for hit in implicit_page_and_hits], ["Both", "Both"])
+
+                line_hits = store.search("alpha AND appears", mode="boolean", scope="line", limit=10)
+                self.assertEqual([hit["source_title"] for hit in line_hits], ["Both", "AOnly"])
+
+                page_not_hits = store.search("alpha AND NOT beta", mode="boolean", scope="page", limit=10)
+                self.assertEqual([hit["source_title"] for hit in page_not_hits], ["AOnly"])
+
+                line_or_hits = store.search("alpha OR beta", mode="boolean", scope="line", limit=10)
+                self.assertEqual(
+                    [hit["source_title"] for hit in line_or_hits],
+                    ["Both", "Both", "AOnly", "BOnly"],
+                )
             finally:
                 store.close()
 

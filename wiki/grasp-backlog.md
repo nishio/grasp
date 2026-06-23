@@ -33,10 +33,11 @@ sources:
 
 2026-06-23 21:52 判断: P0 としては CLI に summarizer を持たせない。Claude Code / OpenCode のような harness は大きい shell output を truncate / 保存し、subagent は中間 tool output を親 conversation へ返さない。したがって長大ページの読解はまず Skill 側で subagent / Explore agent に委譲し、親には要約・根拠 page・line-id だけを返す。詳細は [[delivery-cli-plus-skill]]。
 
+2026-06-24 01:58: `read --around-line <line-id> --line-context N` は実装済み。完全 `line_id` から所属ページを解決し、中心行の前後 N 行だけを返す。JSON は `line_window`、text は `line_window: P1:12 (lines A-B, context N)` を出す。local alias（`P1:12`）は実行内表示用なので入力には使わず、`--json` / `--full-ids` の完全 ID を使う。
+
 候補:
 
 - `search --context N`
-- `read --around-line <line-id>`
 - `peek --line-offset`
 
 これらは Skill/subagent 運用で不足が見えた時に足す bounded primitive。LLM 要約は CLI ではなく agent 層の責務。
@@ -94,13 +95,13 @@ AI consumer 観点の要件（出典 [[ai-consumer-feedback-2026-06-23]] Tier 4 
 
 ### search recall（AI consumer Tier 1 = 最優先, vector の前）
 
-出典: [[ai-consumer-feedback-2026-06-23]] Tier 1。現状 `search` は literal substring・単一行マッチで、`search "KJ法 表札"` が両語同一ページでも `(none)` を返す（silent false-negative）。AI は recall に依存し `(none)` の不在/不一致を区別できないため、これは retrieval を AI に食わせる最も危険な失敗モード（原理は [[ai-consumer-cost-and-trust]] 軸2）。embeddings 不要で今日から効く順:
+出典: [[ai-consumer-feedback-2026-06-23]] Tier 1。旧状では `search` は literal substring・単一行マッチで、`search "KJ法 表札"` が両語同一ページでも `(none)` を返す（silent false-negative）。AI は recall に依存し `(none)` の不在/不一致を区別できないため、これは retrieval を AI に食わせる最も危険な失敗モード（原理は [[ai-consumer-cost-and-trust]] 軸2）。
 
-- **2026-06-23 22:36 実装済み: page 単位の多語 AND**。空白区切り複数語は、同一行でなく同一ページに全語があれば返す。line 検索を page で集約し AND を取る。current facts は [[grasp-v1-implemented]]。
-- **未実装: OR**。スペース区切り AND は済み。明示 OR は別記法で要設計。
+- **2026-06-23 22:36 実装済み（後に surface 変更）: page 単位の多語 AND**。空白区切り複数語を、同一行でなく同一ページに全語があれば返すようにした。2026-06-24 に暗黙挙動ではなく `--mode boolean --scope page` で明示する surface へ変更。
+- **2026-06-24 00:56 実装済み: default literal + 明示 boolean**。空白区切りを暗黙 page AND にするのは「query を書けない人間向け」の interface で、英文 phrase を検索するには既定が入力文字列そのものの literal search である方が自然、という nishio 指摘を反映。`search` 既定は literal line substring に戻し、`--mode boolean` で AND/OR/NOT・括弧・quoted phrase・隣接 term の implicit AND、`--scope line|page` で評価単位を切り替える。旧 page AND は `--mode boolean --scope page "alpha beta"` で明示的に再現する。current facts は [[grasp-v1-implemented]]。
 - **2026-06-23 23:10 一部実装済み: normalized fallback**。literal 0件時に NFKC query 正規化＋長音除去を SQLite `REPLACE` で試す。例: `ﾕｰｻﾞﾃｽﾄ` が `ユーザテスト` / `ユーザーテスト` 行に hit し、text では `[normalized]`、JSON では `match_mode: "normalized"` を返す。store schema は変えない。完全なかな/カナ変換の Python scan は 50k lines 以下の小規模 store のみに制限（nishio 規模では 20s 級になるため）。
 - **未実装: 大規模 store での完全なかな/カナ・全半角本文正規化 index**。本文側を materialize した normalized column / FTS hybrid / trigram 等で持たない限り、完全な正規化 search は大規模 store で高コスト。
-- 順序: **recall（AND/正規化）を直してから** FTS5 速度最適化（recall と速度は別軸）。
+- 順序: **recall（boolean/page scope/正規化）を直してから** FTS5 速度最適化（recall と速度は別軸）。
 
 ### read の近傍 snippet 同梱（AI consumer Tier 2）
 
@@ -127,6 +128,7 @@ AI consumer 観点の要件（出典 [[ai-consumer-feedback-2026-06-23]] Tier 4 
   - **go/no-go の実測基準（実用性懐疑への決着法）**: nishio のような密グラフでは大半の概念対が既に ≤2-hop（related が繋ぐ）。path の純増価値は「>2-hop 離れ かつ 共有近傍なし」の対だけ＝おそらく稀。**試作前にランダム概念対の hop 距離分布を測り**、大半が ≤2 なら marginal value は小さい → 工数は Tier-1 recall に回す。これで「作るか否か」を falsifiable に判定できる。
   - **2026-06-23 23:58 簡易実測（`~/.grasp/grasp.sqlite`, project `nishio`, schema v5）**: nodes = pages with edges 23322 + unresolved targets 42770 = 66092、undirected edges = 115075、最大連結成分 = 63490 nodes（96.06%）。ページ間距離の標本では「大半が ≤2-hop」は成立しなかった。uniform pages 300 pairs は ≤2 が 0.3%、≤4 が 9.0%、≤6 が 63.3%。top-degree pages 300 pairs でも ≤2 が 4.3%、≤3 が 30.0%、≤4 が 76.7%、≤6 が 99.3%。**含意: `related`（2-hop）外に意味のある接続は多く、`path --max-depth 4` の試作価値はある**。ただし uniform pages には日記・低次数 leaf が混ざるので、実用評価は user が問う概念ペア（高次数/タイトル明示）でさらに dogfood する。
   - **2026-06-24 00:05 初期実装済み**: `grasp path <A> <B> --max-depth 4 --limit 3` を追加。JSON は source/target node、paths[]、distance、nodes[]、edge example lines、truncated を返す。node は page / unresolved、edge は line-level materialized link を無向に畳む。dogfood: `path KJ法 弱い紐帯 --max-depth 4 --limit 1 --json` が 3-hop（KJ法 → Scrapbox情報整理術 → 情報と秩序 → 弱い紐帯）を返した。**残課題**: dense hub での performance（nishio store で約4-5s）、neighbor ranking、複数 shortest paths の出し方、実用的に意味のある経路かの継続 dogfood。
+  - **2026-06-24 01:39 no-path recovery 実装済み**: 端点が resolve できるが bounded search で経路が見つからない時、`recovery_hints.path` に reason / next_max_depth / related / backlinks / link-stats を返す。negative-result contract は path no-path まで揃った。残課題は dense hub performance、neighbor ranking、複数 shortest paths の出し方、実用的に意味のある経路かの継続 dogfood。
 - **backlinks の finer ranking**（nishio agree）: 既に `backlinks` は `source.views DESC, updated DESC, title, line_index` でランク済み（related と同じ primary signal、[[grasp-v1-implemented]]）。未済は **link 密度 / multiplicity / recency の重み付け**で「最も中心的な 20 件」精度を上げること。コア（views ランク）は済んでいる。
 - ~~**近傍クラスタリング `--cluster`**~~ → **却下（nishio 2026-06-23）**。クラスタリングは **AI がやるべき**（AI の方が賢い）＝grasp は raw＋ranking を返し AI が sub-theme に畳む（feedback 著者自身の「default raw、AI にクラスタさせる」選好とも一致、原理 [[ai-consumer-cost-and-trust]] の fidelity 方針）。CLI 側でやるなら **embeddings 導入後に雑な embedding クラスタリング**を optional で足す程度。そもそも **100+ リンクのハブは rare case** なので動機自体が稀。
 
@@ -138,13 +140,15 @@ AI consumer 観点の要件（出典 [[ai-consumer-feedback-2026-06-23]] Tier 4 
 
 未実装:
 
-- empty result contract が今後追加する retrieval verb（例: `path` no path / `gather`）でも揃っているかの継続監査。
+- empty result contract が今後追加する retrieval verb（例: `gather`）でも揃っているかの継続監査。
 
 ## Output token economy（AI consumer Tier 2）
 
-出典: [[ai-consumer-feedback-2026-06-23]] Tier 2。default 出力は AI が読む前提なので token を削るほど AI の context が空き、多くを読める（原理 [[ai-consumer-cost-and-trust]] 軸1）。未実装:
+出典: [[ai-consumer-feedback-2026-06-23]] Tier 2。default 出力は AI が読む前提なので token を削るほど AI の context が空き、多くを読める（原理 [[ai-consumer-cost-and-trust]] 軸1）。
 
-- **line-id のローカル別名**（nishio agree）。`5928725cba093700118fa5b2:0` のような 24 桁 page-id＋index が全行に付くのは冗長。read 単位で `P1` / `P1:0` の別名＋先頭 legend 1 行にし、安定 id が要る時は `--json` / `--full-ids`。
+実装済み:
+
+- **2026-06-24 実装済み**: line-id のローカル別名。text 出力では `5928725cba093700118fa5b2:0` のような完全 ID を `P1:0` に畳み、先頭付近に `line-id aliases: P1=<page-id>` legend を出す。安定 ID が要る時は `--json`、text で完全 ID が必要な時は `--full-ids`。
 
 却下（nishio 2026-06-23）:
 

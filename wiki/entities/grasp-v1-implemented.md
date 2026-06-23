@@ -46,11 +46,12 @@ v1 scope 外:
 - Python 3.10+、runtime dependencies は無し（stdlib `sqlite3`）。
 - `README.md` は「主たるユーザは人間 CLI operator ではなく AI agent」という前提に更新済み。
 - `skills/grasp/SKILL.md` が「いつ使うか」を持ち、CLI mechanics は `grasp <cmd> --help` に寄せる。
-- `--store` / `--project` は root option として command 前に置く。`--json` は agent が末尾へ置くミスを回復するため、command 後にも hidden alias として受ける。
+- `--store` / `--project` は root option として command 前に置く。`--json` / `--full-ids` は agent が末尾へ置くミスを回復するため、command 後にも hidden alias として受ける。
+- text 出力の line-id は既定で実行内ローカル別名（`P1:0` など）に短縮し、先頭付近に `line-id aliases: P1=<page-id>` legend を出す。JSON は従来通り完全 `page.id:line-index` を返す。text で完全 ID が必要な時は `--full-ids`。
 
 ## store
 
-- current public compatibility version は `1.5.8`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.5.10`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -71,14 +72,14 @@ v1 scope 外:
 | `import --cosense <json>` | Cosense JSON export を project namespace に構築・置換。他 project は保持 |
 | `import --markdown <folder>` | Markdown folder を read-only mirror として project namespace に構築・置換。他 project は保持。frontmatter `title` / `id` / `aliases` / `tags` を読み、`[[wikilink]]` / `#tag` を edge にする |
 | `stats` | store の schema / project list / metadata / count を表示。store missing 時は diagnostic と next actions を返す |
-| `read <title>` | existing page は本文 + backlinks + related + unresolved。missing linked target は link stats + backlinks + source pages。zero-hit 時は `recovery_hints` も返す。`--related-snippets` で related/source pages の先頭 N 行（default 5）を `snippet_lines` として同梱する |
+| `read <title>` | existing page は本文 + backlinks + related + unresolved。missing linked target は link stats + backlinks + source pages。zero-hit 時は `recovery_hints` も返す。`--related-snippets` で related/source pages の先頭 N 行（default 5）を `snippet_lines` として同梱する。`--around-line <line-id> --line-context N` で完全 line_id からページを解決し、中心行の前後 N 行だけを `lines[]` と `line_window` で返す |
 | `backlinks <title>` | `(source page, line-id, line text)` の行レベル backlinks。missing target にも効く |
 | `related <title>` | existing page は page 間 edge の 2-hop pages。missing target は source pages。空結果時は `recovery_hints` を返す |
-| `path <A> <B>` | pages ∪ unresolved targets を node、materialized internal links を無向 edge として shortest path を返す。`--max-depth` default 4、`--limit` default 3。edge には根拠 line を同梱する |
+| `path <A> <B>` | pages ∪ unresolved targets を node、materialized internal links を無向 edge として shortest path を返す。`--max-depth` default 4、`--limit` default 3。edge には根拠 line を同梱する。端点が resolve できるが経路が無い時は `recovery_hints.path` に reason / next_max_depth / related / backlinks / link-stats を返す |
 | `link-stats <title>` | incoming link count / source page count / none-single-multi を返す。zero-hit 時は `recovery_hints` も返す |
 | `peek <title>` | page lines のみ |
 | `suggest <partial>` | title 部分一致候補 |
-| `search <query>` | 単一語は `lines.text LIKE` の literal substring search。空白区切り複数語は page 単位 AND で、全語を含む page から該当行 hits を返す。literal 0件時は NFKC query 正規化＋長音除去の normalized fallback を試し、text は `[normalized]`、JSON は `match_mode: "normalized"` を返す。空結果時は `recovery_hints` も返す |
+| `search <query>` | 既定は空白も含む literal line substring search。`--mode boolean` で AND/OR/NOT、括弧、quoted phrase、隣接 term の implicit AND を扱う。`--scope line` は行単位、`--scope page` はページ単位で式を評価する。literal 0件時は NFKC query 正規化＋長音除去の normalized fallback を試し、text は `[normalized]`、JSON は `match_mode: "normalized"` を返す。空結果時は `recovery_hints` も返す |
 | `export-ai <title>` / `export-for-ai` | main + 1-hop/2-hop page 本文を Cosense Export for AI 風に単一テキスト化 |
 | `sync <project-url>` | optional freshness path。`cosense` CLI で最近更新ページを取得し、SQLite store に upsert |
 | `acquire <project-url>` | admin export なしの hosted Cosense 初回 seed / partial corpus acquisition。`--search` / `--filter` / `--full-list` / `--from-page` / `--seed-file` |
@@ -101,7 +102,7 @@ v1 scope 外:
 
 ## import and parser facts
 
-- Cosense export の line には安定 id が無いので、v1 は `page.id:line-index` を `line-id` として採番する。
+- Cosense export の line には安定 id が無いので、v1 は `page.id:line-index` を `line-id` として採番する。text 出力では token 節約のため local alias に畳むが、JSON と `--full-ids` は完全 ID を出す。
 - link graph は export に保存されないため、line text から edge を materialize する。
 - title / link resolve は case-insensitive + whitespace folding。
 - Cosense title 行 `lines[0]` は本文に残す。完全性と line-id 安定性を優先する。
@@ -134,7 +135,7 @@ parser が link から除外するもの:
 
 - `read` は sub-100ms。
 - `backlinks` / `unresolved` は約 50-80ms。
-- 単一語 `search` は `LIKE` 全行 scan 律速で約 180ms。空白区切り複数語は page 単位 AND の SQL query で、全語を含む page に絞って該当行を返す。literal 0件時の normalized fallback は NFKC query 正規化＋長音除去を SQLite `REPLACE` で行う。完全なかな/カナ変換 Python scan は 50k lines 以下の小規模 store に限る。FTS5 trigram hybrid は [[fts5-trigram-search]] の通り未実装候補。
+- 既定 `search` は `LIKE` 全行 scan 律速で約 180ms。boolean page scope は SQL の `EXISTS` でページ単位に条件判定し、該当 positive term を含む行を返す。literal 0件時の normalized fallback は NFKC query 正規化＋長音除去を SQLite `REPLACE` で行う。完全なかな/カナ変換 Python scan は 50k lines 以下の小規模 store に限る。FTS5 trigram hybrid は [[fts5-trigram-search]] の通り未実装候補。
 - `path` は実験的 command で、現状は command ごとに pages ∪ unresolved targets の一時 adjacency を構築する。nishio store の dogfood（66092 nodes / 115075 undirected edges）では `path KJ法 弱い紐帯 --max-depth 4 --limit 1` が約2-5s。hot read path ではなく graph reasoning primitive として扱う。
 - 初回 import は 1 回だけ数秒から十数秒程度。
 

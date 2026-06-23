@@ -63,14 +63,16 @@ description: >-
 
 ### テーマ・問いから探す（タイトル未確定）
 → `grasp search <query>` で**本文行**を検索（行レベル hit）し、良さそうな `source_title` を `grasp read` で開く。タイトルの当たりが付くなら `grasp suggest <partial>`（タイトル補完）。
-- `search` は単一語ならリテラル substring 検索。空白区切りの複数語は page 単位 AND になり、同じ行でなく同じページに全語があれば該当行を返す。OR 検索はまだ無い。
-- literal で0件の時は、NFKC と長音ゆれ（例: `ﾕｰｻﾞﾃｽﾄ` / `ユーザーテスト` / `ユーザテスト`）を緩く合わせる normalized fallback が走る。text 出力では該当行に `[normalized]` が付き、JSON では `match_mode: "normalized"` になる。大規模 store では完全なかな/カナ変換 scan は行わない。
+- `search` の既定は、空白も含めて入力文字列そのものを探す literal line substring 検索。英文 phrase や空白入り query はまずこの既定でよい。
+- 複数語を論理条件として探したい時は `--mode boolean` を付ける。AND / OR / NOT、括弧、quoted phrase、隣接 term の implicit AND が使える。例: `grasp search "KJ法 AND 表札" --mode boolean --scope page`。
+- `--scope line` は1行内で式を評価し、`--scope page` は同一ページ内の全行で式を評価してから該当行を返す。旧「空白区切り page AND」は `--mode boolean --scope page "alpha beta"` で明示的に再現する。
+- literal で0件の時は、NFKC と長音ゆれ（例: `ﾕｰｻﾞﾃｽﾄ` / `ユーザーテスト` / `ユーザテスト`）を緩く合わせる normalized fallback が走る。text 出力では該当行に `[normalized]` が付き、JSON では `match_mode: "normalized"` になる。大規模 store では完全なかな/カナ変換 scan は行わない。normalized fallback は literal mode 用。
 
 ### 長大ページ・ログページを読む
 → 親 conversation に長い `read` 出力を直接持ち込まない。まず探索用 subagent / Explore agent に任せ、subagent 側で `search` / `peek` / limit 付き `read` を使って読む。
 - 親に返すのは、結論・根拠ページ・該当 `line_id`・必要な短い引用/要約だけにする。中間の大量 stdout、長大本文、網羅的検索結果は subagent context に閉じ込める。
 - CLI 側は要約しない。grasp は LLM 依存の summarizer ではなく、行 ID 付きの deterministic graph reader。要約と取捨選択は Skill / subagent の責務。
-- 長大ページを直接開く必要がある時も、先に `grasp search <query>` で hit line を見つけ、`grasp read <title> --line-limit <N>` などで範囲を絞る。親へ戻す時は再アクセスできる `source_title` と `line_id` を残す。
+- 長大ページを直接開く必要がある時も、先に `grasp search <query> --json` で hit line を見つけ、完全 `line_id` を使って `grasp read --around-line <line-id> --line-context 5` で周辺行を読む。ページ先頭だけで足りる時は `grasp read <title> --line-limit <N>` で範囲を絞る。親へ戻す時は再アクセスできる `source_title` と完全 `line_id` を残す。
 
 ### 「この概念にどこで言及したか」
 → `grasp backlinks <title>`（`(source_title, line-id, 行テキスト)`）。`read` の Backlinks 節と同じものを単体で。page が無い概念にも効く。
@@ -79,7 +81,7 @@ description: >-
 → `grasp related <title>`。existing page なら 2-hop ページ、page なし target ならそれを参照する source pages。
 
 ### 「この概念とこの概念はどう繋がるか」
-→ `grasp path <A> <B> --max-depth 4`。pages と page なし target をどちらも node として扱い、materialized internal links を無向 edge として短い経路を返す。経路の edge には根拠 line が付くので、bridge が意味的に妥当かを確認する。密な hub では展開が大きくなるため、まず `--max-depth 4 --limit 1` で見る。
+→ `grasp path <A> <B> --max-depth 4`。pages と page なし target をどちらも node として扱い、materialized internal links を無向 edge として短い経路を返す。経路の edge には根拠 line が付くので、bridge が意味的に妥当かを確認する。密な hub では展開が大きくなるため、まず `--max-depth 4 --limit 1` で見る。端点は見つかったが経路が無い時も `recovery_hints.path` に次に試す depth、related、backlinks、link-stats が入るので、単なる不在として扱わない。
 
 ### 被リンクの濃さだけ知りたい / その概念が既出か
 → `grasp link-stats <title>`。incoming `link_count` と 0/1/N（none/single/multi）。
@@ -112,11 +114,11 @@ description: >-
 | verb | 用途 |
 | --- | --- |
 | `read <title>` | 本文＋逆リンク＋related＋未解決を近傍同梱で（`--related-snippets` で related/source ページ冒頭も同梱） |
-| `search <query>` | 本文行を検索、単一語は line substring、複数語は page AND、0件時は NFKC/長音ゆれ fallback |
+| `search <query>` | 本文行を検索。既定は literal line substring、`--mode boolean` で AND/OR/NOT、`--scope line|page` で評価単位を切替 |
 | `suggest <partial>` | タイトル補完 |
 | `backlinks <title>` | 行レベル逆リンク（page なし target も） |
 | `related <title>` | 2-hop ページ / page なし target の source pages |
-| `path <A> <B>` | pages / page なし target 間の短いリンク経路 |
+| `path <A> <B>` | pages / page なし target 間の短いリンク経路（no-path 時も recovery hints） |
 | `link-stats <title>` | incoming link count と 0/1/N |
 | `unresolved` | 未解決 target の rank view（TODO ではない） |
 | `peek <title>` | 本文行のみ |
@@ -135,7 +137,8 @@ description: >-
 - `grasp import --cosense <json>` で Cosense JSON export、`grasp import --markdown <folder>` で read-only Markdown mirror を import する。以降は sub-second。別パスは `--store` / `$GRASP_STORE`、別 home は `$GRASP_HOME`。
 - import 済み JSON は store 横の `<store>.imports/` に復旧用コピーとして保持される。通常 command が古い schema の store を見つけた時は、復旧用コピーからサイレントに current schema へ再構築して続行する。`stats` は診断用なので自動再構築しない。hosted の最新差分は復旧後も `sync` の責務。
 - 複数 project がある store で読む時は `grasp --project <name> read "ページタイトル"` のように project を指定する。project が1つだけなら省略可。
-- 機械可読が要る時は `--json`。root option だが verb 後にも置ける: `grasp --project <name> read "ページタイトル" --backlinks-limit 3 --json`。`--store` / `--project` は verb の前。
+- text 出力の `line_id` は既定で `P1:0` のような実行内ローカル別名に短縮され、先頭付近に `P1=<page-id>` の legend が出る。親へ根拠として返す時は、必要なら `source_title` とこの alias ではなく `--json` の完全 `line_id` を使う。
+- 機械可読が要る時は `--json`。root option だが verb 後にも置ける: `grasp --project <name> read "ページタイトル" --backlinks-limit 3 --json`。text のまま完全 line id を見たい時は `--full-ids`（これも verb 後可）。`--store` / `--project` は verb の前。
 - 空白・記号を含む title / query は shell でクォートする（`'...'`）。
 
 ## 回答の形式
