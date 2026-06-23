@@ -1,5 +1,14 @@
 # Log
 
+## [2026-06-23 21:41] file back | 非 admin project の取得候補を backlog 化
+- nishio 提案: 自分が管理者でない project の取得方法として、特定文字列を含む page（キーワード、`[nishio.icon]`、`[/nishio/` など）を検索 seed にする、指定 page から link を辿る、など。
+- [[grasp-backlog]] に "Hosted Cosense acquisition without admin export" を追加。既存の `import --cosense` は admin export、`sync` は full seed 済み project の freshness path なので、非 admin 取得は別の `acquire` / `crawl` 系 surface として扱う。
+- 候補: `listPages` pagination + `readPage` の full list seed、`searchFullText` の search seed、`listPages --filter <name>` の author/icon filter seed、link crawl seed、manual seed list。partial corpus では backlinks / related / unresolved が subset 内の結果であることを metadata / 表示で明示する必要がある。
+
+## [2026-06-23 21:42] lint | 非 admin acquisition file back 後の wiki lint
+- `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。
+- 既存の孤立ページ警告 `multi-project-store` は継続（index 登録済み）。
+
 ## [2026-06-23 21:38] lint | sync file back 後の wiki lint
 - `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。
 - 既存の孤立ページ警告 `multi-project-store` は継続（index 登録済み）。
