@@ -66,3 +66,9 @@ persona2 向けに振りすぎると「Obsidian-but-for-LLMs / CLI 付き graph 
 - persona2 を「今 actively 狙う」か「設計を曲げない範囲で受け皿だけ用意」か。後者がデフォルト（dilution 回避）だが、Markdown adapter をどの milestone で出すかは未定。
 - Markdown フォルダの import で何を seed にするか（wikilink 記法・frontmatter id/aliases・既存 llm-wiki 森 40+ の concepts/analyses 階層）。フラット原則との緊張は [[why-not-scrapbox-clone]] Open Q と重なる。
 - 「.md 束より良い」を**実演**する最小デモの形（同一ノートを Markdown フォルダと grasp で読ませて retrieval 差を見せる等）。
+
+## Updates
+
+### 2026-06-23: Markdown / Obsidian folder 対応は indexed mirror として切る
+
+[[markdown-obsidian-indexed-mirror]] を追加。persona2 の on-ramp は「Skill が grep を速くする」ではなく、既存 Markdown / Obsidian folder を `grasp` の read-only indexed mirror にし、Skill はそれを使わせる薄い層にする。pitch は "faster grep" ではなく **indexed graph reader for Markdown / Obsidian notes, optimized for LLM agents**。価値は速度より、`read` が本文 + 逆リンク行 + related + unresolved targets を一体で返すこと。
