@@ -409,6 +409,57 @@ class SQLiteStoreTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_search_context_includes_bounded_line_window(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "A",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 10,
+                    "views": 100,
+                    "lines": [
+                        {"text": "title", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "before", "created": 1, "updated": 2, "userId": "u"},
+                        {"text": "needle appears here", "created": 1, "updated": 3, "userId": "u"},
+                        {"text": "after", "created": 1, "updated": 4, "userId": "u"},
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+
+            store = SQLiteStore(store_path)
+            try:
+                hits = store.search("needle", limit=10, context=1)
+                self.assertEqual(len(hits), 1)
+                self.assertEqual(
+                    [line["text"] for line in hits[0]["context_lines"]],
+                    ["before", "needle appears here", "after"],
+                )
+                self.assertEqual(
+                    hits[0]["context_window"]["around_line_id"],
+                    "aaaaaaaaaaaaaaaaaaaaaaaa:2",
+                )
+                self.assertEqual(hits[0]["context_window"]["start_index"], 1)
+                self.assertEqual(hits[0]["context_window"]["end_index"], 3)
+                self.assertTrue(hits[0]["context_window"]["truncated_before"])
+                self.assertFalse(hits[0]["context_window"]["truncated_after"])
+
+                compact_hits = store.search("needle", limit=10)
+                self.assertNotIn("context_lines", compact_hits[0])
+            finally:
+                store.close()
+
     def test_search_loose_normalization_matches_long_vowel_and_kana_width(self):
         fixture = {
             "name": "fixture",

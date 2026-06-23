@@ -51,7 +51,7 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.5.10`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.5.11`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -79,7 +79,7 @@ v1 scope 外:
 | `link-stats <title>` | incoming link count / source page count / none-single-multi を返す。zero-hit 時は `recovery_hints` も返す |
 | `peek <title>` | page lines のみ |
 | `suggest <partial>` | title 部分一致候補 |
-| `search <query>` | 既定は空白も含む literal line substring search。`--mode boolean` で AND/OR/NOT、括弧、quoted phrase、隣接 term の implicit AND を扱う。`--scope line` は行単位、`--scope page` はページ単位で式を評価する。literal 0件時は NFKC query 正規化＋長音除去の normalized fallback を試し、text は `[normalized]`、JSON は `match_mode: "normalized"` を返す。空結果時は `recovery_hints` も返す |
+| `search <query>` | 既定は空白も含む literal line substring search。`--mode boolean` で AND/OR/NOT、括弧、quoted phrase、隣接 term の implicit AND を扱う。`--scope line` は行単位、`--scope page` はページ単位で式を評価する。`--context N` で各 hit に前後 N 行の `context_lines[]` と `context_window` を同梱し、text 出力でも hit 直下に bounded context を表示する。literal 0件時は NFKC query 正規化＋長音除去の normalized fallback を試し、text は `[normalized]`、JSON は `match_mode: "normalized"` を返す。空結果時は `recovery_hints` も返す |
 | `export-ai <title>` / `export-for-ai` | main + 1-hop/2-hop page 本文を Cosense Export for AI 風に単一テキスト化 |
 | `sync <project-url>` | optional freshness path。`cosense` CLI で最近更新ページを取得し、SQLite store に upsert |
 | `acquire <project-url>` | admin export なしの hosted Cosense 初回 seed / partial corpus acquisition。`--search` / `--filter` / `--full-list` / `--from-page` / `--seed-file` |

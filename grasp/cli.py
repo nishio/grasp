@@ -328,10 +328,11 @@ def build_parser() -> argparse.ArgumentParser:
             "line or page to choose where the expression must hold. If literal search "
             "returns no hits, search retries with normalized fallback matching."
         ),
-        returns="query, mode, scope, hits[], count_returned, offset, recovery_hints|null",
+        returns="query, mode, scope, context, hits[], count_returned, offset, recovery_hints|null",
         examples=[
             "grasp search 盲点 --limit 20",
             "grasp search \"weak ties\" --limit 20",
+            "grasp search KJ法 --context 2 --limit 10",
             "grasp search \"KJ法 AND 表札\" --mode boolean --scope page --limit 20",
             "grasp search \"(KJ法 OR 発想法) AND NOT 古い\" --mode boolean --scope line",
             "grasp search \"民主主義\" --limit 10 --offset 10",
@@ -340,6 +341,7 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "hits[] items: source_page_id, source_title, source_views, "
             "source_updated, line_id, line_index, line_text, match_mode, match_terms.",
+            "With --context N, each hit also includes context_lines[] and context_window.",
             "Default mode is literal: spaces are part of the searched string.",
             "Boolean mode supports AND, OR, NOT, parentheses, quoted phrases, and implicit AND between adjacent terms.",
             "--scope line evaluates the expression per line. --scope page evaluates it across all lines in a page, then returns matching lines from those pages.",
@@ -351,6 +353,7 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--scope", choices=["line", "page"], default="line", help="Where the query must match.")
     search_parser.add_argument("--limit", type=int, default=50, help="Maximum line hits to return.")
     search_parser.add_argument("--offset", type=int, default=0, help="Number of ranked line hits to skip.")
+    search_parser.add_argument("--context", type=int, default=0, help="Number of lines before and after each hit to include.")
 
     export_ai_parser = add_command_parser(
         subparsers,
@@ -706,11 +709,13 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             offset=args.offset,
             mode=args.mode,
             scope=args.scope,
+            context=args.context,
         )
         return {
             "query": args.query,
             "mode": args.mode,
             "scope": args.scope,
+            "context": max(0, args.context),
             "hits": hits,
             "count_returned": len(hits),
             "offset": args.offset,
@@ -843,6 +848,7 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
             result.get("recovery_hints"),
             mode=result.get("mode", "literal"),
             scope=result.get("scope", "line"),
+            context=result.get("context", 0),
             aliases=aliases,
         )
     if command in {"export-ai", "export-for-ai"}:
@@ -1258,16 +1264,28 @@ def format_search(
     *,
     mode: str = "literal",
     scope: str = "line",
+    context: int = 0,
     aliases: LineIdAliases | None = None,
 ) -> str:
     aliases = aliases or LineIdAliases(enabled=False)
-    parts = [f"# Search: {query}\n", f"mode: {mode}\n", f"scope: {scope}\n", f"offset: {offset}\n"]
+    parts = [f"# Search: {query}\n", f"mode: {mode}\n", f"scope: {scope}\n"]
+    if context:
+        parts.append(f"context: {context}\n")
+    parts.append(f"offset: {offset}\n")
     if not hits:
         parts.append("(none)\n")
     else:
         for hit in hits:
             match_note = " [normalized]" if hit.get("match_mode") == "normalized" else ""
             parts.append(f"- {hit['source_title']} {aliases.format_line_id(hit['line_id'])}{match_note}: {hit['line_text']}\n")
+            window = hit.get("context_window")
+            if window:
+                parts.append(
+                    f"  context: lines {window['start_index']}-{window['end_index']} "
+                    f"(around {aliases.format_line_id(window['around_line_id'])})\n"
+                )
+                for line in hit.get("context_lines", []):
+                    parts.append(f"  {aliases.format_line_id(line['line_id'])}  {line['text']}\n")
     parts.append(format_recovery_hints(query, recovery_hints, aliases=aliases))
     return with_alias_legend("".join(parts), aliases)
 

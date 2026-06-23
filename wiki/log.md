@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 02:30] file back | search hit に bounded context を同梱
+- `search --context N` を追加し、検索 semantics は literal / boolean / scope とも既存のまま、返却 hit に前後 N 行の `context_lines[]` と `context_window` を同梱する形にした。
+- text 出力では hit 直下に `context: lines A-B` と周辺行を表示する。JSON では `context` top-level と per-hit context fields を返す。既定 `context=0` では既存 hit に context fields を付けない。
+- [[grasp-v1-implemented]] / [[history]] / [[grasp-backlog]] / README / skill を更新し、version は schema `5` compatible の `1.5.11` に上げた。
+- 検証: `python3 -m unittest discover -s tests` OK（41 tests）、`python3 scripts/lint_wiki.py` OK、skill validator OK。
+
 ## [2026-06-24 02:22] file back | KJ法 hub audit を記録し、bare mention / co-link slice を backlog 化
 - nishio の相談「KJ法 が 100+ backlink で広すぎ、リンクにしないで KJ法 とだけ書くケースもある」を受け、`~/.grasp/grasp.sqlite` project `nishio` を `sync` 後に実測。
 - 結果: exact `[KJ法]` は 151 links / 144 pages。一方 literal `KJ法` は 681 pages / 2,333 lines / 2,765 occurrences、internal-link span 外の bare `KJ法` は 519 pages / 1,866 lines / 2,246 occurrences、body bare mention は 490 pages / 1,777 lines / 2,156 occurrences。body bare mention があるが exact `[KJ法]` が無い page は 415、`KJ法` 系 link target が一切無い page は 339。

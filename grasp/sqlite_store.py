@@ -1605,6 +1605,7 @@ class SQLiteStore:
         *,
         mode: str = "literal",
         scope: str = "line",
+        context: int = 0,
     ) -> list[dict[str, Any]]:
         project = self._require_project()
         if mode not in {"literal", "boolean"}:
@@ -1614,23 +1615,24 @@ class SQLiteStore:
 
         if mode == "boolean":
             expression = parse_search_boolean_query(query)
-            return self._search_boolean(expression, limit=limit, offset=offset, scope=scope)
+            hits = self._search_boolean(expression, limit=limit, offset=offset, scope=scope)
+            return self._search_hits_with_context(hits, context=context)
 
         hits = self._search_literal(query, limit=limit, offset=offset, scope=scope)
         if hits:
-            return hits
+            return self._search_hits_with_context(hits, context=context)
 
         sql_loose_query = sql_loose_search_key(query)
         hits = self._search_sql_loose_literal(sql_loose_query, limit=limit, offset=offset, scope=scope)
         if hits:
-            return hits
+            return self._search_hits_with_context(hits, context=context)
 
         loose_query = loose_search_key(query)
         terms = _search_terms(query)
         loose_terms = _loose_search_terms(query)
         if self._can_use_python_loose_search(project) and _needs_python_loose_fallback(query, terms, loose_terms):
-            return self._search_loose_literal(loose_query, limit=limit, offset=offset, scope=scope)
-        return hits
+            hits = self._search_loose_literal(loose_query, limit=limit, offset=offset, scope=scope)
+        return self._search_hits_with_context(hits, context=context)
 
     def _search_literal(self, query: str, limit: int = 50, offset: int = 0, scope: str = "line") -> list[dict[str, Any]]:
         project = self._require_project()
@@ -1892,6 +1894,25 @@ class SQLiteStore:
             "match_mode": match_mode,
             "match_terms": match_terms,
         }
+
+    def _search_hits_with_context(self, hits: list[dict[str, Any]], *, context: int) -> list[dict[str, Any]]:
+        context = max(0, context)
+        if context == 0:
+            return hits
+
+        enriched: list[dict[str, Any]] = []
+        for hit in hits:
+            hit_with_context = dict(hit)
+            page = self._page_by_id(hit["source_page_id"])
+            if page is None:
+                hit_with_context["context_lines"] = []
+                hit_with_context["context_window"] = None
+            else:
+                lines, window = self.page_lines_around(page, center_index=hit["line_index"], context=context)
+                hit_with_context["context_lines"] = [line.to_dict() for line in lines]
+                hit_with_context["context_window"] = window
+            enriched.append(hit_with_context)
+        return enriched
 
     def _can_use_python_loose_search(self, project: str) -> bool:
         row = self.connection.execute(
