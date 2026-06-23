@@ -15,13 +15,17 @@ class CosenseParsingTests(unittest.TestCase):
             "[Page] [[bold only]] [https://example.com label] [label https://example.com] "
             "[person.icon] [photo.img] [* bold] [/ italic] [- strike] [_ underline] "
             "[** heading] [*** deeper] [-- strike] [__ underline] "
-            "[$ x+y] [/other/project] [Other Page] xs[i] paper.projects[1] func()[0] [2] `[Code]`"
+            "[$ x+y] [/other/project] [Other Page] xs[i] paper.projects[1] func()[0] [2] `[Code]` "
+            "#tag #2024 # https://example.com/#fragment"
         )
 
-        self.assertEqual(parse_cosense_links(text), ["Page", "Other Page"])
+        self.assertEqual(parse_cosense_links(text), ["Page", "Other Page", "2", "tag", "2024"])
 
     def test_parse_cosense_links_allows_links_embedded_in_japanese_text(self):
         self.assertEqual(parse_cosense_links("人間が[盲点]に気づく"), ["盲点"])
+
+    def test_parse_cosense_links_allows_hash_tags_embedded_in_japanese_text(self):
+        self.assertEqual(parse_cosense_links("人間が#盲点 に気づく"), ["盲点"])
 
 
 class CosenseStoreTests(unittest.TestCase):

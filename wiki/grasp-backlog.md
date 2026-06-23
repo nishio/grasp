@@ -17,26 +17,7 @@ sources:
 
 ## Parser fidelity
 
-### `#tag` を page link と同等に扱う
-
-現状: Cosense parser は `[link]` を対象にし、`#tag` を edge にしない。
-
-やること:
-
-- Scrapbox / Cosense と同じく `#foo` を `[foo]` と同等の internal link として materialize する。
-- `# ` decoration や URL fragment など、誤検出しやすいケースの規則を確認する。
-- edge / unresolved_targets / backlinks / related に反映する。
-
-### 数字のみ `[1]` / `[2024]` を link として拾う
-
-現状: v1 parser は `token.isdigit()` を除外している。
-
-判断: Scrapbox では `[2024]` は正当な page link なので、これは parser fidelity bug。
-
-やること:
-
-- 数字のみ token の除外を外す。
-- `xs[0]` / `func()[1]` のような ASCII index false positive は従来どおり除外する。
+2026-06-23 21:49: `#tag` link 化と数字のみ `[1]` / `[2024]` link 化は実装済み。current facts は [[grasp-v1-implemented]]。
 
 ### parser false-negative 監査
 
@@ -44,31 +25,7 @@ sources:
 
 ## CLI and agent UX
 
-### zero-hit recovery
-
-現状: `read` / `link-stats` が missing + 0 incoming になると、表記ゆれや記憶違いから回復しにくい。
-
-やること:
-
-- zero-hit 時に `suggest <query>` と `search <query> --limit 3` 相当の hints を返す。
-- 近い unresolved target も候補に含めるか検討する。
-
-### root option recovery
-
-現状: `grasp --json read ...` が正だが、`grasp read ... --json` は argparse error になる。
-
-やること:
-
-- subcommand 後の `--json` を受ける、または error に `grasp --json read ...` の具体例を出す。
-
-### help examples の global store 化
-
-現状: root help / subcommand help の一部 example が `--store .grasp/grasp.sqlite` をまだ出す。実 default は `~/.grasp/grasp.sqlite`。
-
-やること:
-
-- help の example を global store 前提に合わせる。
-- README / Skill / help の path 表現を揃える。
+2026-06-23 21:49: zero-hit recovery hints、`grasp read ... --json` 後置許容、help example drift、store missing diagnostics は実装済み。current facts は [[grasp-v1-implemented]]。
 
 ### long page navigation
 
@@ -79,15 +36,6 @@ sources:
 - `search --context N`
 - `read --around-line <line-id>`
 - `peek --line-offset`
-
-### store missing diagnostics
-
-現状: store が無い状態で `stats` も error になる。
-
-やること:
-
-- `stats` は store missing を診断として返すか、次アクションを friendly に提示する。
-- Markdown folder を import しようとした persona2 に対し、未対応であることを traceback ではなく product language で返す。
 
 ## Markdown / Obsidian indexed mirror
 

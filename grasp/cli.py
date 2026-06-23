@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shlex
 import sys
 from textwrap import dedent
 from typing import Any
@@ -45,15 +46,16 @@ def build_parser() -> argparse.ArgumentParser:
 
             Mechanics SSoT: `grasp <cmd> --help` is the authoritative reference
             for command arguments, JSON return keys, text output shape, and examples.
-            Global options must appear before the command.
+            Global options normally appear before the command; --json is also
+            accepted after a command for recovery from common agent mistakes.
             """
         ).strip(),
         epilog=dedent(
             """
             Global examples:
-              grasp --store .grasp/grasp.sqlite stats
-              grasp --json read 盲点カード --backlinks-limit 5 --related-limit 5
-              grasp --store .grasp/grasp.sqlite import --cosense raw/nishio.json
+              grasp stats
+              grasp read 盲点カード --json --backlinks-limit 5 --related-limit 5
+              grasp import --cosense raw/nishio.json
 
             Output:
               Default output is compact text for agent reading.
@@ -88,7 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         examples=[
             "grasp import --cosense raw/nishio.json",
-            "grasp --store .grasp/grasp.sqlite import --cosense raw/nishio.json",
+            "grasp --store /tmp/grasp-task.sqlite import --cosense raw/nishio.json",
         ],
         notes=[
             "Uses --cosense for the Cosense JSON export path and global --store for the destination store.",
@@ -144,7 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "query, page|null, link_stats, lines, lines_truncated, backlinks, "
-            "backlink_count_returned, backlink_count_total, related, unresolved_targets"
+            "backlink_count_returned, backlink_count_total, related, unresolved_targets, recovery_hints|null"
         ),
         examples=[
             "grasp read 盲点カード",
@@ -211,7 +213,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Classify a title as existing/missing and report incoming link multiplicity.",
         returns=(
             "query, title, normalized_title, page_exists, page|null, "
-            "link_count, source_page_count, link_multiplicity"
+            "link_count, source_page_count, link_multiplicity, recovery_hints|null"
         ),
         examples=[
             "grasp link-stats 盲点カード",
@@ -334,7 +336,7 @@ def build_parser() -> argparse.ArgumentParser:
         examples=[
             "grasp sync https://scrapbox.io/nishio/ --limit 20 --dry-run",
             "grasp sync https://scrapbox.io/nishio/ --limit 100 --batch-size 100",
-            "grasp --store .grasp/grasp.sqlite sync https://scrapbox.io/nishio/ --cosense-command cosense",
+            "grasp sync https://scrapbox.io/nishio/ --cosense-command cosense",
         ],
         notes=[
             "Requires @helpfeel/cosense-cli's `cosense` binary in PATH and a working login.",
@@ -390,7 +392,7 @@ def add_command_parser(
     ]
     if notes:
         epilog_parts.extend(["", "Notes:", *(f"  {note}" for note in notes)])
-    return subparsers.add_parser(
+    command_parser = subparsers.add_parser(
         name,
         aliases=aliases or [],
         help=help,
@@ -398,6 +400,8 @@ def add_command_parser(
         epilog="\n".join(epilog_parts),
         formatter_class=GraspHelpFormatter,
     )
+    command_parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    return command_parser
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -408,6 +412,11 @@ def main(argv: list[str] | None = None) -> int:
         export_path = args.cosense_export
         if not export_path.exists():
             parser.error(f"export path does not exist: {export_path}")
+        if export_path.is_dir():
+            parser.error(
+                "import expects a Cosense JSON export file, not a folder. "
+                "Markdown/Obsidian folder import is not implemented yet; use a Cosense JSON export for now."
+            )
         project = args.import_project or args.project
         try:
             result = import_export_to_sqlite(export_path, args.store, project_name=project)
@@ -417,7 +426,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if not args.store.exists():
-        parser.error(f"store does not exist: {args.store} (run `grasp import --cosense <json>` first)")
+        if args.command == "stats":
+            emit_result(args, store_missing_stats(args.store))
+            return 0
+        parser.error(store_missing_error(args.store))
 
     store: SQLiteStore | None = SQLiteStore(args.store, project=args.project)
     try:
@@ -440,6 +452,42 @@ def main(argv: list[str] | None = None) -> int:
             store.close()
     emit_result(args, result)
     return 0
+
+
+def store_missing_stats(store_path: Path) -> dict[str, Any]:
+    return {
+        "store": str(store_path),
+        "project": None,
+        "project_count": 0,
+        "projects": [],
+        "schema_version": None,
+        "current_schema_version": SCHEMA_VERSION,
+        "schema_ok": False,
+        "source_export": None,
+        "imported_at": None,
+        "pages": 0,
+        "lines": 0,
+        "edges": 0,
+        "unresolved_targets": 0,
+        "diagnostic": {
+            "type": "store_missing",
+            "message": f"store does not exist: {store_path}",
+            "next_actions": [
+                "Create the store from a Cosense JSON export: grasp import --cosense <json>",
+                "Use another store path: grasp --store <path> stats",
+            ],
+            "markdown_folder_import": "Markdown/Obsidian folder import is not implemented yet.",
+        },
+    }
+
+
+def store_missing_error(store_path: Path) -> str:
+    return (
+        f"store does not exist: {store_path}\n"
+        "Create it from a Cosense JSON export: grasp import --cosense <json>\n"
+        "Or choose another store: grasp --store <path> <command>\n"
+        "Markdown/Obsidian folder import is not implemented yet."
+    )
 
 
 def emit_result(args: argparse.Namespace, result: Any) -> None:
@@ -575,6 +623,7 @@ def format_stats(result: dict[str, Any]) -> str:
         for project in result.get("projects", [])
     )
     project_section = project_lines if project_lines else "(none)\n"
+    diagnostic = format_diagnostic(result.get("diagnostic"))
     return (
         f"store: {result['store']}\n"
         f"project: {result['project']}\n"
@@ -589,7 +638,29 @@ def format_stats(result: dict[str, Any]) -> str:
         f"edges: {result['edges']}\n"
         f"unresolved_targets: {result['unresolved_targets']}\n"
         f"\n## Projects\n{project_section}"
+        f"{diagnostic}"
     )
+
+
+def format_diagnostic(diagnostic: dict[str, Any] | None) -> str:
+    if not diagnostic:
+        return ""
+
+    parts = ["\n## Diagnostic\n"]
+    message = diagnostic.get("message")
+    if message:
+        parts.append(f"{message}\n")
+
+    next_actions = diagnostic.get("next_actions") or []
+    if next_actions:
+        parts.append("\nNext actions:\n")
+        for action in next_actions:
+            parts.append(f"- {action}\n")
+
+    markdown_note = diagnostic.get("markdown_folder_import")
+    if markdown_note:
+        parts.append(f"\n{markdown_note}\n")
+    return "".join(parts)
 
 
 def format_read(result: dict[str, Any]) -> str:
@@ -604,6 +675,7 @@ def format_read(result: dict[str, Any]) -> str:
         page_status = "linked target without page" if linked else "missing page"
         parts.append(f"page: {page_status}\n")
         parts.append(format_link_stats_summary(link_stats))
+        parts.append(format_recovery_hints(result["query"], result.get("recovery_hints")))
     else:
         parts.append(
             f"id: {page['id']}\nviews: {page['views']}\nlines: {page['line_count']}\n"
@@ -694,6 +766,7 @@ def format_link_stats(result: dict[str, Any]) -> str:
     page = result.get("page")
     if page is not None:
         parts.append(f"id: {page['id']}\nviews: {page['views']}\nlines: {page['line_count']}\n")
+    parts.append(format_recovery_hints(result["query"], result.get("recovery_hints")))
     return "".join(parts)
 
 
@@ -704,6 +777,46 @@ def format_link_stats_summary(result: dict[str, Any]) -> str:
         f"links_to_this: {result['link_count']} from {result['source_page_count']} pages "
         f"({result['link_multiplicity']})\n"
     )
+
+
+def format_recovery_hints(query: str, recovery_hints: dict[str, Any] | None) -> str:
+    if not recovery_hints:
+        return ""
+
+    quoted_query = shlex.quote(query)
+    suggest = recovery_hints.get("suggest", {})
+    search = recovery_hints.get("search", {})
+    unresolved = recovery_hints.get("unresolved_targets", {})
+    suggest_limit = suggest.get("limit", 3)
+    search_limit = search.get("limit", 3)
+
+    parts = [
+        "\n## Recovery Hints\n",
+        f"try: grasp suggest {quoted_query} --limit {suggest_limit}\n",
+        f"try: grasp search {quoted_query} --limit {search_limit}\n",
+    ]
+
+    suggestions = suggest.get("suggestions") or []
+    if suggestions:
+        parts.append("\nTitle suggestions:\n")
+        for page in suggestions:
+            parts.append(f"- {page['title']} (views {page['views']}, lines {page['line_count']})\n")
+
+    targets = unresolved.get("targets") or []
+    if targets:
+        parts.append("\nUnresolved target suggestions:\n")
+        for target in targets:
+            parts.append(f"- {target['title']} (links {target['link_count']}, pages {target['source_page_count']})\n")
+
+    hits = search.get("hits") or []
+    if hits:
+        parts.append("\nSearch hits:\n")
+        for hit in hits:
+            parts.append(f"- {hit['source_title']} {hit['line_id']}: {hit['line_text']}\n")
+
+    if not suggestions and not targets and not hits:
+        parts.append("\n(no nearby title suggestions or line hits)\n")
+    return "".join(parts)
 
 
 def format_peek(result: dict[str, Any]) -> str:

@@ -9,6 +9,9 @@ from typing import Any
 
 
 WHITESPACE_RE = re.compile(r"\s+")
+HASH_TAG_STOP_CHARS = set(" \t\r\n[]{}()<>'\"`#")
+HASH_TAG_TRAILING_CHARS = ".,;:!?)]}>" "\u3001\u3002\uff1f\uff01\uff09\u300d\u300f\u3011"
+HASH_TAG_PREFIX_BOUNDARY_CHARS = set(" \t\r\n([{<>'\"`")
 
 
 def normalize_title(title: str) -> str:
@@ -23,8 +26,6 @@ def is_internal_cosense_link(content: str) -> bool:
         return False
 
     lower = token.casefold()
-    if token.isdigit():
-        return False
     if "http://" in lower or "https://" in lower:
         return False
     if token.startswith("/"):
@@ -53,10 +54,21 @@ def parse_cosense_links(text: str) -> list[str]:
     links: list[str] = []
     index = 0
     while index < len(text):
-        start = text.find("[", index)
-        if start == -1:
-            break
+        char = text[index]
+        if char == "#":
+            tag = parse_cosense_hash_tag(text, index)
+            if tag is not None:
+                links.append(tag[0])
+                index = tag[1]
+                continue
+            index += 1
+            continue
 
+        if char != "[":
+            index += 1
+            continue
+
+        start = index
         if start + 1 < len(text) and text[start + 1] == "[":
             close = text.find("]]", start + 2)
             index = len(text) if close == -1 else close + 2
@@ -76,6 +88,42 @@ def parse_cosense_links(text: str) -> list[str]:
         index = close + 1
 
     return links
+
+
+def parse_cosense_hash_tag(text: str, start: int) -> tuple[str, int] | None:
+    if is_inside_inline_code(text, start):
+        return None
+    if not is_hash_tag_start_boundary(text, start):
+        return None
+    if start + 1 >= len(text) or text[start + 1].isspace():
+        return None
+
+    end = start + 1
+    while end < len(text):
+        char = text[end]
+        if char in HASH_TAG_STOP_CHARS or char.isspace():
+            break
+        end += 1
+
+    raw_tag = text[start + 1 : end]
+    tag = raw_tag.rstrip(HASH_TAG_TRAILING_CHARS)
+    if not tag:
+        return None
+    if "http://" in tag.casefold() or "https://" in tag.casefold():
+        return None
+    return tag, end
+
+
+def is_hash_tag_start_boundary(text: str, start: int) -> bool:
+    if start == 0:
+        return True
+
+    previous = text[start - 1]
+    if not previous.isascii():
+        return True
+    if previous in HASH_TAG_PREFIX_BOUNDARY_CHARS:
+        return True
+    return False
 
 
 def is_inside_inline_code(text: str, position: int) -> bool:

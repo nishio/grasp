@@ -15,7 +15,7 @@ from urllib.parse import quote
 from .cosense import CosenseStore, Edge, Line, Page, normalize_title, parse_cosense_links
 
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 IMPORT_CACHE_MANIFEST_VERSION = 1
 
 
@@ -674,7 +674,7 @@ class SQLiteStore:
             source_page_count = int(row["source_page_count"])
             canonical_title = page.title
 
-        return {
+        result = {
             "query": title,
             "title": canonical_title,
             "normalized_title": norm,
@@ -683,7 +683,11 @@ class SQLiteStore:
             "link_count": link_count,
             "source_page_count": source_page_count,
             "link_multiplicity": link_multiplicity(link_count),
+            "recovery_hints": None,
         }
+        if page is None and link_count == 0:
+            result["recovery_hints"] = self.recovery_hints(title, limit=3)
+        return result
 
     def unresolved_targets(self, limit: int | None = None) -> list[dict[str, Any]]:
         project = self._require_project()
@@ -845,6 +849,49 @@ class SQLiteStore:
             for row in rows
         ]
 
+    def recovery_hints(self, query: str, limit: int = 3) -> dict[str, Any]:
+        return {
+            "suggest": {
+                "query": query,
+                "limit": limit,
+                "suggestions": self.suggest(query, limit=limit),
+            },
+            "search": {
+                "query": query,
+                "limit": limit,
+                "hits": self.search(query, limit=limit, offset=0),
+            },
+            "unresolved_targets": {
+                "query": query,
+                "limit": limit,
+                "targets": self.suggest_unresolved_targets(query, limit=limit),
+            },
+        }
+
+    def suggest_unresolved_targets(self, query: str, limit: int = 3) -> list[dict[str, Any]]:
+        project = self._require_project()
+        norm_query = normalize_title(query)
+        like = f"%{_escape_like(norm_query)}%"
+        loose_query = loose_recovery_key(norm_query)
+
+        clauses = ["target_norm LIKE ? ESCAPE '\\'"]
+        params: list[Any] = [project, like]
+        if loose_query and loose_query != norm_query:
+            clauses.append("REPLACE(target_norm, ?, '') LIKE ? ESCAPE '\\'")
+            params.extend(["\u30fc", f"%{_escape_like(loose_query)}%"])
+
+        params.append(limit)
+        rows = self.connection.execute(
+            f"""
+            SELECT * FROM unresolved_targets
+            WHERE project = ? AND ({" OR ".join(clauses)})
+            ORDER BY link_count DESC, source_page_count DESC, total_source_views DESC, latest_source_updated DESC, title
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return self._unresolved_target_materialized_rows_to_dicts(rows)
+
     def read(
         self,
         title: str,
@@ -859,6 +906,7 @@ class SQLiteStore:
         link_stats = self.link_stats(title)
 
         if page is None:
+            recovery_hints = link_stats.get("recovery_hints")
             return {
                 "query": title,
                 "page": None,
@@ -870,6 +918,7 @@ class SQLiteStore:
                 "backlink_count_total": link_stats["link_count"],
                 "related": self.related(title, related_limit),
                 "unresolved_targets": [],
+                "recovery_hints": recovery_hints,
             }
 
         lines, lines_truncated = self.page_lines(page, line_limit)
@@ -884,6 +933,7 @@ class SQLiteStore:
             "backlink_count_total": link_stats["link_count"],
             "related": self.related(page.title, related_limit),
             "unresolved_targets": self.unresolved_targets_from_page(page, unresolved_limit),
+            "recovery_hints": None,
         }
 
     def export_ai(
@@ -1414,6 +1464,10 @@ def _write_metadata(connection: sqlite3.Connection, values: dict[str, str]) -> N
 
 def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def loose_recovery_key(value: str) -> str:
+    return value.replace("\u30fc", "")
 
 
 def _int_or_none(value: str | None) -> int | None:

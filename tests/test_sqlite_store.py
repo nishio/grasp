@@ -204,6 +204,88 @@ class SQLiteStoreTests(unittest.TestCase):
                 fixture_store.close()
                 other_store.close()
 
+    def test_import_materializes_hash_tags_and_numeric_links(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "A",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 10,
+                    "views": 100,
+                    "lines": [
+                        {"text": "A", "created": 1, "updated": 1, "userId": "u"},
+                        {
+                            "text": "links to [2024] and #topic but not xs[0] or https://example.com/#fragment",
+                            "created": 1,
+                            "updated": 2,
+                            "userId": "u",
+                        },
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+            stats = import_export_to_sqlite(export_path, store_path)
+
+            store = SQLiteStore(store_path)
+            try:
+                self.assertEqual(stats["edges"], 2)
+                self.assertEqual(stats["unresolved_targets"], 2)
+                self.assertEqual(store.link_stats("2024")["link_count"], 1)
+                self.assertEqual(store.link_stats("topic")["link_count"], 1)
+                self.assertEqual(store.link_stats("0")["link_count"], 0)
+                self.assertEqual(store.link_stats("fragment")["link_count"], 0)
+            finally:
+                store.close()
+
+    def test_zero_hit_recovery_hints_include_search_and_unresolved_candidates(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "A",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 10,
+                    "views": 100,
+                    "lines": [
+                        {"text": "A", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "links to [ユーザーテスト]", "created": 1, "updated": 2, "userId": "u"},
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture, ensure_ascii=False), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+
+            store = SQLiteStore(store_path)
+            try:
+                result = store.read("ユーザテスト", backlink_limit=3, related_limit=3, unresolved_limit=3)
+                self.assertIsNone(result["page"])
+                self.assertEqual(result["backlink_count_total"], 0)
+                hints = result["recovery_hints"]
+                self.assertIsNotNone(hints)
+                self.assertEqual(hints["unresolved_targets"]["targets"][0]["title"], "ユーザーテスト")
+                self.assertEqual(hints["search"]["hits"], [])
+            finally:
+                store.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -25,6 +25,7 @@ v1 = **エクスポート済み Scrapbox / Cosense JSON を、AI が CLI + Agent
 - 1つの SQLite store に複数 Cosense project を `project` namespace で保持する。project 内の graph は混ぜない。
 - `read` が本文だけでなく、行レベル backlinks・related・page-local unresolved targets を一体で返す。
 - page が存在しない linked target も graph node として扱い、`backlinks` / `related` / `link-stats` で source context を読める。
+- `read` / `link-stats` は missing + 0 incoming の zero-hit 時に recovery hints（`suggest`, `search --limit 3`, 近い unresolved target）を返す。
 - home 配下の global store 1 個を default にする。
 - AI 向け delivery は CLI + Agent Skill。詳細引数と JSON key は `grasp <cmd> --help` が mechanics SSoT。
 
@@ -41,16 +42,18 @@ v1 scope 外:
 - Python 3.10+、runtime dependencies は無し（stdlib `sqlite3`）。
 - `README.md` は「主たるユーザは人間 CLI operator ではなく AI agent」という前提に更新済み。
 - `skills/grasp/SKILL.md` が「いつ使うか」を持ち、CLI mechanics は `grasp <cmd> --help` に寄せる。
+- `--store` / `--project` は root option として command 前に置く。`--json` は agent が末尾へ置くミスを回復するため、command 後にも hidden alias として受ける。
 
 ## store
 
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
-- 既存 v4 store への import は他 project を保持する。古い schema の store に import する時は v4 schema として作り直す。
+- current schema は v5。schema version は table shape だけでなく parser/index semantics の変更にも使う。v5 は `#tag` と数字 link を edge 化するため、v4 store は import cache から再構築される。
+- current schema store への import は他 project を保持する。古い schema の store に import する時は current schema として作り直す。
 - legacy `--export` / `--rebuild-store` / `--force` / 暗黙 seed は v1 surface には無い。
 - SQLite schema は projects / pages / lines / edges / unresolved_targets / unresolved_target_examples を持つ。pages/lines/edges/unresolved は project 列で namespace 化し、page id / line id は project と組にした複合 key で扱う。
-- `stats` は store path, selected project, project list, schema version, source export, imported_at, counts などを返す。project 未指定かつ複数 project がある時は aggregate counts と `projects[]` を返す。
+- `stats` は store path, selected project, project list, schema version, source export, imported_at, counts などを返す。project 未指定かつ複数 project がある時は aggregate counts と `projects[]` を返す。store が存在しない場合も traceback/error ではなく `diagnostic.type=store_missing` と次アクションを返す。
 - import 済み JSON は store 横の `<store>.imports/` に project ごとの復旧用コピーとして保持する。manifest は project override と cached path を持つ。
 - 古い schema の store でも `stats` は診断用に読める。`read` / `peek` など通常 command は schema mismatch を検出すると、復旧用コピーからサイレントに current schema へ再構築してから続行する。復旧用コピーが無い古い store では、metadata の `last_source_export` / `source_export` が存在すればそれを fallback に使う。どちらも無ければ従来通り手動 `grasp import --cosense <json>` を促す。import cache は seed snapshot なので、hosted の最新差分は復旧後も `sync` の責務。
 
@@ -58,12 +61,12 @@ v1 scope 外:
 
 | command | v1 implemented behavior |
 |---|---|
-| `import --cosense <json>` | Cosense JSON export を project namespace に構築・置換。他 project は保持 |
-| `stats` | store の schema / project list / metadata / count を表示 |
-| `read <title>` | existing page は本文 + backlinks + related + unresolved。missing linked target は link stats + backlinks + source pages |
+| `import --cosense <json>` | Cosense JSON export を project namespace に構築・置換。他 project は保持。folder を渡した時は Markdown import 未実装を friendly に返す |
+| `stats` | store の schema / project list / metadata / count を表示。store missing 時は diagnostic と next actions を返す |
+| `read <title>` | existing page は本文 + backlinks + related + unresolved。missing linked target は link stats + backlinks + source pages。zero-hit 時は `recovery_hints` も返す |
 | `backlinks <title>` | `(source page, line-id, line text)` の行レベル backlinks。missing target にも効く |
 | `related <title>` | existing page は page 間 edge の 2-hop pages。missing target は source pages |
-| `link-stats <title>` | incoming link count / source page count / none-single-multi を返す |
+| `link-stats <title>` | incoming link count / source page count / none-single-multi を返す。zero-hit 時は `recovery_hints` も返す |
 | `peek <title>` | page lines のみ |
 | `suggest <partial>` | title 部分一致候補 |
 | `search <query>` | `lines.text LIKE` の literal substring search。行レベル hits を返す |
@@ -85,16 +88,15 @@ v1 scope 外:
 - title / link resolve は case-insensitive + whitespace folding。
 - Cosense title 行 `lines[0]` は本文に残す。完全性と line-id 安定性を優先する。
 - Cosense `[[...]]` は bold markup であり link ではない。v1 importer は link として扱わない。
+- `[2024]` のような数字のみ bracket token は valid internal link として扱う。`xs[0]` / `func()[1]` のように `[` の直前が ASCII 非空白の index 風 syntax は false positive として除外する。
+- `#tag` は `[tag]` と同等の internal link として edge 化する。`# ` は空 token なので除外し、`https://example.com/#fragment` のような URL fragment は hashtag boundary で除外する。
 
-v1 parser が link から除外するもの:
+parser が link から除外するもの:
 
 - external URL / icon or image / decoration / math / cross-project link。
 - inline backtick 内。
 - ASCII index 風 `xs[i]` / `func()[0]`。
-- 数字のみ `[1]` / `[2024]`。
 - 連続 `*` / `-` / `_` decoration の `[** x]` など。
-
-数字のみ link と `#tag` は Scrapbox fidelity 上の未実装項目として [[grasp-backlog]] に分離した。
 
 ## performance
 

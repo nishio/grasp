@@ -1,5 +1,17 @@
 # Log
 
+## [2026-06-23 21:52] lint | persona1 P0 friction file back 後の wiki lint
+- `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。
+- 既存の孤立ページ警告 `multi-project-store` は継続（index 登録済み）。
+
+## [2026-06-23 21:49] implementation | persona1 dogfooding P0 friction を解消
+- [[persona1-user-test-2026-06-23]] / [[grasp-backlog]] の P0 に対応。parser は `#tag` を `[tag]` と同等の internal link として edge 化し、数字のみ `[1]` / `[2024]` も link として拾う。`xs[0]` / `func()[1]` など ASCII index 風 syntax、inline code、URL fragment は false positive として除外する。
+- parser/index semantics 変更のため SQLite schema を v5 に更新。v4 store は通常 command 時に import cache から自動再構築され、新しい edge / unresolved / backlinks / related に反映される。
+- `read` / `link-stats` が missing + 0 incoming の時、`recovery_hints` として `suggest`, `search --limit 3`, 近い unresolved target を返す。日本語の `ユーザテスト` / `ユーザーテスト` 型に効くよう、unresolved target 候補では長音記号を落とした loose match も使う。
+- `grasp read ... --json` のような command 後 `--json` を hidden alias として受ける。help example の repo-local `.grasp/grasp.sqlite` drift を消し、README / Skill は `--store` / `--project` は root option、`--json` は後置も可に更新。
+- store missing 時の `stats` は `diagnostic.type=store_missing` と next actions を返す。通常 command の store missing と folder を `import --cosense` に渡した時は traceback ではなく product language で復旧案 / Markdown import 未実装を返す。
+- 検証: `python3 -m unittest discover -s tests` OK（20 tests）。`grasp --store /tmp/grasp-missing-demo.sqlite stats --json` は store missing diagnostic を返し、`grasp --store /tmp/grasp-missing-demo.sqlite read Missing --json` と `grasp import --cosense .` は friendly error を返した。
+
 ## [2026-06-23 21:41] file back | 非 admin project の取得候補を backlog 化
 - nishio 提案: 自分が管理者でない project の取得方法として、特定文字列を含む page（キーワード、`[nishio.icon]`、`[/nishio/` など）を検索 seed にする、指定 page から link を辿る、など。
 - [[grasp-backlog]] に "Hosted Cosense acquisition without admin export" を追加。既存の `import --cosense` は admin export、`sync` は full seed 済み project の freshness path なので、非 admin 取得は別の `acquire` / `crawl` 系 surface として扱う。
