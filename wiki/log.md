@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-23 19:42] file back | warm-store 再計測を実装現状ページへ伝播
+- [[language-and-distribution]] の一次データ（warm page cache・median of 5 の各 verb wall time）を、性能事実の source of truth である [[grasp-cli-mvp]] にも反映。`stats` 70ms / `backlinks` 54ms / `read`（近傍同梱）83ms / `unresolved` 52ms / `search` 178ms、固定オーバーヘッドは bare `python3` 33ms・`import grasp` ~free（依存ゼロ）。
+- entity ページに残っていた **stale な「read 約 0.7 秒 / wall 1.0 秒」を訂正**: あれは早い時点の cold/単発計測で、warm steady-state は 50–180ms。中核 read は既に sub-100ms、`search` 178ms だけ SQLite `LIKE` 全行スキャン律速（index が lever、host 言語ではない）。
+- 上書きせず `## Updates` 流の inline note 追記（entity の既存 update 慣習に合わせた）。decision の主張に entity 側の一次データが整合した。
+
 ## [2026-06-23 19:39] file back | 実装言語 × 配布チャネルの長期比較を decision 化
 - nishio の問い（Python/Node/Rust で native build／Claude Code は npm 更新／PyPI は pip）を新 decision [[language-and-distribution]] に distill。核心は**実装言語と配布チャネルは独立な2軸**で、混同（"Node でネイティブビルド"）を解いた。
 - **言語論点は session 内実測で溶けた**: warm store（238MB）で bare `python3` 起動 33ms / `import grasp` ~27ms（依存ゼロ）/ `read` 83ms / `backlinks` 52ms / `search` 178ms。重い仕事は全部 SQLite=言語非依存、固定 Python オーバーヘッドは ~30ms のみ。[[SPEC]] 原理1「graph を流れる体験」は既に sub-100ms で達成済み → native 化の latency 便益はほぼ無い。[[grasp-cli-mvp]] の旧「read 0.7s」は cold/最適化前と判明。
