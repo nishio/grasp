@@ -136,6 +136,27 @@ class SQLiteStoreTests(unittest.TestCase):
                 self.assertEqual(missing_related[0]["relation"], "backlink-source")
                 self.assertEqual(missing_related[0]["score"], 1)
 
+                path = store.paths_between("A", "C", max_depth=2, limit=3)
+                self.assertEqual(path["path_count"], 2)
+                self.assertEqual(path["paths"][0]["distance"], 2)
+                self.assertEqual(path["paths"][0]["nodes"][0]["title"], "A")
+                self.assertEqual(path["paths"][0]["nodes"][-1]["title"], "C")
+                self.assertIn(
+                    ["page", "unresolved", "page"],
+                    [[node["kind"] for node in path_item["nodes"]] for path_item in path["paths"]],
+                )
+
+                missing_hinge_path = store.paths_between("A", "Missing", max_depth=1, limit=1)
+                self.assertEqual(missing_hinge_path["path_count"], 1)
+                self.assertEqual(missing_hinge_path["paths"][0]["distance"], 1)
+                self.assertEqual(missing_hinge_path["paths"][0]["nodes"][-1]["kind"], "unresolved")
+                self.assertEqual(missing_hinge_path["paths"][0]["nodes"][-1]["title"], "Missing")
+
+                no_path = store.paths_between("A", "Nope", max_depth=2, limit=1)
+                self.assertEqual(no_path["path_count"], 0)
+                self.assertIsNone(no_path["target"])
+                self.assertIsNotNone(no_path["recovery_hints"]["target"])
+
                 read = store.read("A", backlink_limit=10, related_limit=10, unresolved_limit=10)
                 self.assertEqual(read["page"]["title"], "A")
                 self.assertEqual(read["backlink_count_total"], 1)

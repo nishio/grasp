@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, deque
 from datetime import datetime, timezone
 from html import escape as escape_html
 import json
@@ -869,6 +869,277 @@ class SQLiteStore:
             }
             for row in rows
         ]
+
+    def paths_between(
+        self,
+        source_title: str,
+        target_title: str,
+        *,
+        max_depth: int = 4,
+        limit: int = 3,
+    ) -> dict[str, Any]:
+        max_depth = max(0, max_depth)
+        limit = max(0, limit)
+        source_node = self._resolve_graph_node(source_title)
+        target_node = self._resolve_graph_node(target_title)
+        recovery_hints = {
+            "source": None if source_node is not None else self.recovery_hints(source_title, limit=3),
+            "target": None if target_node is not None else self.recovery_hints(target_title, limit=3),
+        }
+        result = {
+            "query": {"source": source_title, "target": target_title},
+            "source": source_node,
+            "target": target_node,
+            "max_depth": max_depth,
+            "paths": [],
+            "path_count": 0,
+            "truncated": False,
+            "recovery_hints": recovery_hints if recovery_hints["source"] or recovery_hints["target"] else None,
+        }
+        if source_node is None or target_node is None or limit == 0:
+            return result
+
+        source_key = source_node["node_key"]
+        target_key = target_node["node_key"]
+        graph = self._path_graph()
+        nodes = graph["nodes"]
+        adjacency = graph["adjacency"]
+        edge_examples = graph["edge_examples"]
+
+        if source_key == target_key:
+            result["paths"] = [
+                {
+                    "distance": 0,
+                    "nodes": [nodes[source_key]],
+                    "edges": [],
+                }
+            ]
+            result["path_count"] = 1
+            return result
+
+        paths: list[list[str]] = []
+        queue: deque[list[str]] = deque([[source_key]])
+        best_depth_by_node: dict[str, int] = {source_key: 0}
+        shortest_depth: int | None = None
+        expansions = 0
+        expansion_limit = 50_000
+
+        while queue and len(paths) < limit:
+            path = queue.popleft()
+            depth = len(path) - 1
+            if shortest_depth is not None and depth >= shortest_depth:
+                continue
+            if depth >= max_depth:
+                continue
+
+            current = path[-1]
+            expansions += 1
+            if expansions > expansion_limit:
+                result["truncated"] = True
+                break
+
+            for neighbor in self._sorted_path_neighbors(current, adjacency, nodes):
+                if neighbor in path:
+                    continue
+                next_depth = depth + 1
+                known_depth = best_depth_by_node.get(neighbor)
+                if known_depth is not None and known_depth < next_depth:
+                    continue
+                best_depth_by_node[neighbor] = next_depth
+                next_path = [*path, neighbor]
+                if neighbor == target_key:
+                    shortest_depth = next_depth if shortest_depth is None else shortest_depth
+                    paths.append(next_path)
+                    if len(paths) >= limit:
+                        break
+                elif shortest_depth is None:
+                    queue.append(next_path)
+
+        result["paths"] = [
+            self._format_path(node_path, nodes=nodes, edge_examples=edge_examples)
+            for node_path in paths
+        ]
+        result["path_count"] = len(result["paths"])
+        if queue and len(paths) >= limit:
+            result["truncated"] = True
+        return result
+
+    def _resolve_graph_node(self, title: str) -> dict[str, Any] | None:
+        page = self.resolve_page(title)
+        if page is not None:
+            return self._page_graph_node(page)
+
+        project = self._require_project()
+        row = self.connection.execute(
+            "SELECT * FROM unresolved_targets WHERE project = ? AND target_norm = ?",
+            (project, normalize_title(title)),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._unresolved_graph_node_from_row(row)
+
+    def _path_graph(self) -> dict[str, Any]:
+        project = self._require_project()
+        page_rows = self.connection.execute(
+            """
+            SELECT id, title, norm_title, created, updated, views, line_count
+            FROM pages
+            WHERE project = ?
+            """,
+            (project,),
+        ).fetchall()
+        nodes: dict[str, dict[str, Any]] = {}
+        page_id_by_norm: dict[str, str] = {}
+        for row in page_rows:
+            node_key = self._page_node_key(row["id"])
+            page_id_by_norm[row["norm_title"]] = row["id"]
+            nodes[node_key] = {
+                "node_key": node_key,
+                "kind": "page",
+                "id": row["id"],
+                "title": row["title"],
+                "normalized_title": row["norm_title"],
+                "created": row["created"],
+                "updated": row["updated"],
+                "views": row["views"],
+                "line_count": row["line_count"],
+            }
+
+        unresolved_rows = self.connection.execute(
+            "SELECT * FROM unresolved_targets WHERE project = ?",
+            (project,),
+        ).fetchall()
+        for row in unresolved_rows:
+            node_key = self._unresolved_node_key(row["target_norm"])
+            nodes[node_key] = self._unresolved_graph_node_from_row(row)
+
+        adjacency: dict[str, set[str]] = {}
+        edge_examples: dict[tuple[str, str], dict[str, Any]] = {}
+        edge_rows = self.connection.execute(
+            """
+            SELECT
+              e.source_page_id,
+              source.title AS source_title,
+              source.views AS source_views,
+              source.updated AS source_updated,
+              e.line_id,
+              line.line_index,
+              line.text AS line_text,
+              e.target_title,
+              e.target_norm
+            FROM edges e
+            JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
+            JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
+            WHERE e.project = ?
+            ORDER BY source.views DESC, COALESCE(source.updated, 0) DESC, source.title, line.line_index
+            """,
+            (project,),
+        ).fetchall()
+        for row in edge_rows:
+            source_key = self._page_node_key(row["source_page_id"])
+            target_page_id = page_id_by_norm.get(row["target_norm"])
+            target_key = (
+                self._page_node_key(target_page_id)
+                if target_page_id is not None
+                else self._unresolved_node_key(row["target_norm"])
+            )
+            if source_key == target_key:
+                continue
+            if source_key not in nodes or target_key not in nodes:
+                continue
+
+            adjacency.setdefault(source_key, set()).add(target_key)
+            adjacency.setdefault(target_key, set()).add(source_key)
+            example_key = self._undirected_edge_key(source_key, target_key)
+            edge_examples.setdefault(
+                example_key,
+                {
+                    "stored_source_node": source_key,
+                    "stored_target_node": target_key,
+                    "source_page_id": row["source_page_id"],
+                    "source_title": row["source_title"],
+                    "source_views": row["source_views"],
+                    "source_updated": row["source_updated"],
+                    "line_id": row["line_id"],
+                    "line_index": row["line_index"],
+                    "line_text": row["line_text"],
+                    "target_title": row["target_title"],
+                    "target_norm": row["target_norm"],
+                },
+            )
+        return {"nodes": nodes, "adjacency": adjacency, "edge_examples": edge_examples}
+
+    def _format_path(
+        self,
+        node_path: list[str],
+        *,
+        nodes: dict[str, dict[str, Any]],
+        edge_examples: dict[tuple[str, str], dict[str, Any]],
+    ) -> dict[str, Any]:
+        edges = []
+        for source_key, target_key in zip(node_path, node_path[1:]):
+            example = dict(edge_examples[self._undirected_edge_key(source_key, target_key)])
+            example["from_node"] = source_key
+            example["to_node"] = target_key
+            example["direction"] = (
+                "forward"
+                if example["stored_source_node"] == source_key and example["stored_target_node"] == target_key
+                else "reverse"
+            )
+            edges.append(example)
+        return {
+            "distance": len(node_path) - 1,
+            "nodes": [nodes[node_key] for node_key in node_path],
+            "edges": edges,
+        }
+
+    def _sorted_path_neighbors(
+        self,
+        node_key: str,
+        adjacency: dict[str, set[str]],
+        nodes: dict[str, dict[str, Any]],
+    ) -> list[str]:
+        return sorted(
+            adjacency.get(node_key, set()),
+            key=lambda key: (
+                -int(nodes[key].get("views") or 0),
+                nodes[key].get("title", "").casefold(),
+                nodes[key].get("kind", ""),
+                key,
+            ),
+        )
+
+    def _page_graph_node(self, page: Page) -> dict[str, Any]:
+        node = page.to_summary()
+        node["node_key"] = self._page_node_key(page.id)
+        node["kind"] = "page"
+        node["normalized_title"] = page.norm_title
+        return node
+
+    def _unresolved_graph_node_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "node_key": self._unresolved_node_key(row["target_norm"]),
+            "kind": "unresolved",
+            "title": row["title"],
+            "normalized_title": row["target_norm"],
+            "link_count": row["link_count"],
+            "source_page_count": row["source_page_count"],
+            "total_source_views": row["total_source_views"],
+            "latest_source_updated": row["latest_source_updated"],
+        }
+
+    @staticmethod
+    def _page_node_key(page_id: str) -> str:
+        return f"page:{page_id}"
+
+    @staticmethod
+    def _unresolved_node_key(target_norm: str) -> str:
+        return f"unresolved:{target_norm}"
+
+    @staticmethod
+    def _undirected_edge_key(source_key: str, target_key: str) -> tuple[str, str]:
+        first, second = sorted((source_key, target_key))
+        return first, second
 
     def suggest(self, partial: str, limit: int = 20) -> list[dict[str, Any]]:
         project = self._require_project()

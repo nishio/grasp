@@ -26,7 +26,8 @@ v1 = **エクスポート済み Scrapbox / Cosense JSON を、AI が CLI + Agent
 - 1つの SQLite store に複数 Cosense project を `project` namespace で保持する。project 内の graph は混ぜない。
 - `read` が本文だけでなく、行レベル backlinks・related・page-local unresolved targets を一体で返す。
 - page が存在しない linked target も graph node として扱い、`backlinks` / `related` / `link-stats` で source context を読める。
-- `read` / `link-stats` は missing + 0 incoming の zero-hit 時に recovery hints（`suggest`, `search --limit 3`, 近い unresolved target）を返す。`search` も空結果時に recovery hints を返す。
+- `read` / `link-stats` は missing + 0 incoming の zero-hit 時に recovery hints（`suggest`, `search --limit 3`, 近い unresolved target）を返す。`search` と `related` も空結果時に recovery hints を返す。
+- `path <A> <B>` が pages ∪ unresolved targets を node、materialized internal links を無向 edge として bounded shortest path を返す。
 - home 配下の global store 1 個を default にする。
 - AI 向け delivery は CLI + Agent Skill。詳細引数と JSON key は `grasp <cmd> --help` が mechanics SSoT。
 
@@ -47,7 +48,7 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.5.4`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.5.5`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -68,7 +69,8 @@ v1 scope 外:
 | `stats` | store の schema / project list / metadata / count を表示。store missing 時は diagnostic と next actions を返す |
 | `read <title>` | existing page は本文 + backlinks + related + unresolved。missing linked target は link stats + backlinks + source pages。zero-hit 時は `recovery_hints` も返す。`--related-snippets` で related/source pages の先頭 N 行（default 5）を `snippet_lines` として同梱する |
 | `backlinks <title>` | `(source page, line-id, line text)` の行レベル backlinks。missing target にも効く |
-| `related <title>` | existing page は page 間 edge の 2-hop pages。missing target は source pages |
+| `related <title>` | existing page は page 間 edge の 2-hop pages。missing target は source pages。空結果時は `recovery_hints` を返す |
+| `path <A> <B>` | pages ∪ unresolved targets を node、materialized internal links を無向 edge として shortest path を返す。`--max-depth` default 4、`--limit` default 3。edge には根拠 line を同梱する |
 | `link-stats <title>` | incoming link count / source page count / none-single-multi を返す。zero-hit 時は `recovery_hints` も返す |
 | `peek <title>` | page lines のみ |
 | `suggest <partial>` | title 部分一致候補 |
@@ -117,6 +119,7 @@ parser が link から除外するもの:
 - `read` は sub-100ms。
 - `backlinks` / `unresolved` は約 50-80ms。
 - 単一語 `search` は `LIKE` 全行 scan 律速で約 180ms。空白区切り複数語は page 単位 AND の SQL query で、全語を含む page に絞って該当行を返す。literal 0件時の normalized fallback は NFKC query 正規化＋長音除去を SQLite `REPLACE` で行う。完全なかな/カナ変換 Python scan は 50k lines 以下の小規模 store に限る。FTS5 trigram hybrid は [[fts5-trigram-search]] の通り未実装候補。
+- `path` は実験的 command で、現状は command ごとに pages ∪ unresolved targets の一時 adjacency を構築する。nishio store の dogfood（66092 nodes / 115075 undirected edges）では `path KJ法 弱い紐帯 --max-depth 4 --limit 1` が約2-5s。hot read path ではなく graph reasoning primitive として扱う。
 - 初回 import は 1 回だけ数秒から十数秒程度。
 
 ## source pages

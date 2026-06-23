@@ -1,5 +1,15 @@
 # Log
 
+## [2026-06-24 00:05] implementation | related recovery hints と path 初期実装
+- `related <title>` の空結果に `recovery_hints` を追加し、`read` / `link-stats` / `search` と同じ negative-result contract に揃えた。JSON は `query, related[], recovery_hints|null`、text は空結果時に Recovery Hints を表示する。
+- `path <A> <B> --max-depth 4 --limit 3` を追加。pages ∪ unresolved targets を node、materialized internal links を無向 edge として bounded shortest path を返す。edge には source page / line-id / line text を同梱し、bridge の根拠を確認できる。
+- Dogfood: `grasp path KJ法 弱い紐帯 --max-depth 4 --limit 1` は 3-hop（KJ法 → Scrapbox情報整理術 → 情報と秩序 → 弱い紐帯）を返した。現状は command ごとに一時 adjacency を構築するため、nishio store では約2-5sで、hot read path ではなく実験的 graph reasoning primitive として扱う。
+- store schema は v5 のまま、public compatibility version は `1.5.5`。検証: `python3 -m unittest discover -s tests` OK（26 tests）、`python3 scripts/lint_wiki.py` OK、`git diff --check` OK。
+
+## [2026-06-23 23:58] file back | path の hop 距離を簡易計測
+- `path <A> <B>` の go/no-go 基準として、`~/.grasp/grasp.sqlite`（project `nishio`, schema v5）で pages ∪ unresolved targets をノード、materialized edges を無向エッジとして距離分布を標本計測した。グラフは 66092 nodes / 115075 undirected edges、最大連結成分 63490 nodes（96.06%）。
+- uniform pages 300 pairs は ≤2-hop 0.3%、≤4-hop 9.0%、≤6-hop 63.3%。top-degree pages 300 pairs でも ≤2-hop 4.3%、≤3-hop 30.0%、≤4-hop 76.7%、≤6-hop 99.3%。「大半が ≤2-hop なら path の純増価値は小さい」という懐疑は少なくともこの標本では成立せず、`path --max-depth 4` の試作価値ありと [[grasp-backlog]] に追記した。
+
 ## [2026-06-23 23:42] implementation | read related snippets を追加
 - [[grasp-backlog]] / [[ai-consumer-feedback-2026-06-23]] の Tier 2 に対応。`grasp read <title> --related-snippets` を追加し、related 2-hop / missing target の source pages に先頭 N 行（`--related-snippet-lines`, default 5）を同梱できるようにした。
 - JSON は related/source item に `snippet_lines` / `snippet_truncated` を opt-in で追加し、text 出力は related item 直下に行を表示する。未指定時の `related[]` shape は維持。

@@ -48,6 +48,7 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
+| `1.5.5` | schema `5` | 2026-06-24 | schema `5` compatible | `related` 空結果に `recovery_hints` を追加。`path <A> <B>` を追加し、pages ∪ unresolved targets を node、materialized internal links を無向 edge として `--max-depth` bounded な shortest path と根拠 line を返す |
 | `1.5.4` | schema `5` | 2026-06-23 | schema `5` compatible | `read --related-snippets` / `--related-snippet-lines N` を追加。related 2-hop / missing target の source pages に先頭 N 行（default 5）を `snippet_lines` として同梱し、Cosense related pane 風の近傍読解を 1 call で行えるようにした |
 | `1.5.3` | schema `5` | 2026-06-23 | schema `5` compatible | `search` の zero-hit 時に normalized fallback を追加。NFKC query 正規化＋長音除去は SQLite `REPLACE` で大規模 store でも使い、text 出力は `[normalized]`、JSON は `match_mode: "normalized"` を返す。完全な kana 変換の Python scan は 50k lines 以下の小規模 store のみに制限 |
 | `1.5.2` | schema `5` | 2026-06-23 | schema `5` compatible | `search` の recall 改善。単一語は従来通り line substring、空白区切り複数語は page 単位 AND で全語を含む page の該当行を返す。`search` 空結果にも `recovery_hints` を追加。SQLite schema / parser semantics は変えない |
@@ -62,6 +63,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.5.4`
+- Current public compatibility version: `1.5.5`
 - Current internal `SCHEMA_VERSION`: `5`
-- Current package metadata should match `1.5.4`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.5.5`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

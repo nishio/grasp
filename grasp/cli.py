@@ -198,7 +198,7 @@ def build_parser() -> argparse.ArgumentParser:
             "For an existing page, return deterministic 2-hop related pages. "
             "For a missing linked target, return source pages that link to it."
         ),
-        returns="query, related[]",
+        returns="query, related[], recovery_hints|null",
         examples=[
             "grasp related 盲点カード --limit 10",
             "grasp related 民主主義 --limit 5",
@@ -207,10 +207,40 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "Existing-page related[] items include score and via[].",
             "Missing-target related[] items include relation=backlink-source and score=link count from that page.",
+            "If related[] is empty, recovery_hints gives title/search/unresolved suggestions.",
         ],
     )
     related_parser.add_argument("title", help="Existing page title or missing linked target.")
     related_parser.add_argument("--limit", type=int, default=50, help="Maximum related items to return.")
+
+    path_parser = add_command_parser(
+        subparsers,
+        "path",
+        help="Find a short undirected graph path between two pages or unresolved targets.",
+        description=(
+            "Find shortest paths in the local graph using pages and unresolved targets as nodes. "
+            "Materialized internal links are treated as undirected edges, so the result explains "
+            "how two concepts are connected through links or co-citation hinges."
+        ),
+        returns=(
+            "query, source|null, target|null, max_depth, paths[], path_count, truncated, recovery_hints|null; "
+            "paths[] items include distance, nodes[], and edge example lines"
+        ),
+        examples=[
+            "grasp path KJ法 弱い紐帯 --max-depth 4",
+            "grasp path KJ法 民主主義 --max-depth 4 --limit 1",
+            "grasp --json path KJ法 弱い紐帯 --max-depth 4 --limit 3",
+        ],
+        notes=[
+            "Nodes are pages plus unresolved targets. This is intentionally broader than page-only traversal.",
+            "The search is bounded by --max-depth; use small depths first because dense hubs can expand quickly.",
+            "Edges include example source lines so the bridge can be checked against source context.",
+        ],
+    )
+    path_parser.add_argument("source", help="Start page title or unresolved target.")
+    path_parser.add_argument("target", help="End page title or unresolved target.")
+    path_parser.add_argument("--max-depth", type=int, default=4, help="Maximum hop count to search.")
+    path_parser.add_argument("--limit", type=int, default=3, help="Maximum shortest paths to return.")
 
     link_stats_parser = add_command_parser(
         subparsers,
@@ -576,10 +606,19 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             "offset": args.offset,
         }
     if args.command == "related":
+        related = store.related(args.title, limit=args.limit)
         return {
             "query": args.title,
-            "related": store.related(args.title, limit=args.limit),
+            "related": related,
+            "recovery_hints": None if related else store.recovery_hints(args.title, limit=3),
         }
+    if args.command == "path":
+        return store.paths_between(
+            args.source,
+            args.target,
+            max_depth=args.max_depth,
+            limit=args.limit,
+        )
     if args.command == "link-stats":
         return store.link_stats(args.title)
     if args.command == "peek":
@@ -677,7 +716,9 @@ def format_result(command: str, result: Any) -> str:
     if command == "backlinks":
         return format_backlinks(result["query"], result["backlinks"], result.get("offset", 0))
     if command == "related":
-        return format_related(result["query"], result["related"])
+        return format_related(result["query"], result["related"], result.get("recovery_hints"))
+    if command == "path":
+        return format_path(result)
     if command == "link-stats":
         return format_link_stats(result)
     if command == "peek":
@@ -838,13 +879,18 @@ def format_edge_list(edges: list[dict[str, Any]]) -> str:
     return "".join(parts)
 
 
-def format_related(query: str, related: list[dict[str, Any]]) -> str:
+def format_related(
+    query: str,
+    related: list[dict[str, Any]],
+    recovery_hints: dict[str, Any] | None = None,
+) -> str:
     heading = "Related source pages" if is_source_page_related(related) else "Related 2-hop"
     parts = [f"# {heading}: {query}\n"]
     if not related:
         parts.append("(none)\n")
     else:
         parts.append(format_related_items(related))
+    parts.append(format_recovery_hints(query, recovery_hints))
     return "".join(parts)
 
 
@@ -866,6 +912,41 @@ def format_related_items(related: list[dict[str, Any]]) -> str:
 
 def is_source_page_related(related: list[dict[str, Any]]) -> bool:
     return bool(related) and all(item.get("relation") == "backlink-source" for item in related)
+
+
+def format_path(result: dict[str, Any]) -> str:
+    source_title = result["query"]["source"]
+    target_title = result["query"]["target"]
+    parts = [
+        f"# Path: {source_title} -> {target_title}\n",
+        f"max_depth: {result['max_depth']}\n",
+    ]
+    if result.get("source") is None:
+        parts.append(f"source: missing ({source_title})\n")
+    if result.get("target") is None:
+        parts.append(f"target: missing ({target_title})\n")
+
+    paths = result.get("paths") or []
+    if not paths:
+        parts.append("(none)\n")
+        recovery = result.get("recovery_hints") or {}
+        parts.append(format_recovery_hints(source_title, recovery.get("source")))
+        parts.append(format_recovery_hints(target_title, recovery.get("target")))
+        return "".join(parts)
+
+    for index, path in enumerate(paths, start=1):
+        titles = " -> ".join(node["title"] for node in path["nodes"])
+        parts.append(f"\n## Path {index} (distance {path['distance']})\n")
+        parts.append(f"{titles}\n")
+        for edge in path["edges"]:
+            direction = "<-" if edge["direction"] == "reverse" else "->"
+            parts.append(
+                f"- {edge['source_title']} {edge['line_id']} {direction} "
+                f"[{edge['target_title']}]: {edge['line_text']}\n"
+            )
+    if result.get("truncated"):
+        parts.append("\ntruncated: true\n")
+    return "".join(parts)
 
 
 def format_link_stats(result: dict[str, Any]) -> str:
