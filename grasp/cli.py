@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from .cosense import CosenseStore
+from .sqlite_store import SQLiteStore, import_export_to_sqlite
 
 
 def default_export_path() -> Path | None:
@@ -21,17 +21,34 @@ def default_export_path() -> Path | None:
     return None
 
 
+def default_store_path() -> Path:
+    env_path = os.environ.get("GRASP_STORE")
+    if env_path:
+        return Path(env_path)
+    return Path.cwd() / ".grasp" / "grasp.sqlite"
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="grasp", description="Read a Cosense/Scrapbox graph export from the CLI.")
+    parser = argparse.ArgumentParser(prog="grasp", description="Read a local Scrapbox/Cosense-style graph store.")
     parser.add_argument(
         "--export",
         type=Path,
         default=default_export_path(),
-        help="Cosense JSON export path. Defaults to $GRASP_EXPORT or raw/nishio.json in the current directory.",
+        help="Cosense JSON export path for initial/import rebuilds. Defaults to $GRASP_EXPORT or raw/nishio.json.",
     )
+    parser.add_argument(
+        "--store",
+        type=Path,
+        default=default_store_path(),
+        help="SQLite store path. Defaults to $GRASP_STORE or .grasp/grasp.sqlite.",
+    )
+    parser.add_argument("--rebuild-store", action="store_true", help="Rebuild the SQLite store from --export before running.")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    import_parser = subparsers.add_parser("import", help="Import a Cosense JSON export into the SQLite store.")
+    import_parser.add_argument("--force", action="store_true", help="Replace an existing store.")
 
     read_parser = subparsers.add_parser("read", help="Read a page with backlinks, 2-hop related pages, and red links.")
     read_parser.add_argument("title")
@@ -67,23 +84,42 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.export is None:
-        parser.error("missing --export path and no raw/nishio.json default was found")
-    if not args.export.exists():
-        parser.error(f"export path does not exist: {args.export}")
+    if args.command == "import":
+        if args.export is None:
+            parser.error("import requires --export or raw/nishio.json")
+        if not args.export.exists():
+            parser.error(f"export path does not exist: {args.export}")
+        if args.store.exists() and not args.force:
+            parser.error(f"store already exists: {args.store} (use import --force to replace it)")
+        result = import_export_to_sqlite(args.export, args.store)
+        emit_result(args, result)
+        return 0
 
-    store = CosenseStore.from_cosense_export(args.export)
-    result = run_command(store, args)
+    if args.rebuild_store or not args.store.exists():
+        if args.export is None:
+            parser.error(f"store does not exist and no --export was found: {args.store}")
+        if not args.export.exists():
+            parser.error(f"export path does not exist: {args.export}")
+        import_export_to_sqlite(args.export, args.store)
 
+    store = SQLiteStore(args.store)
+    try:
+        result = run_command(store, args)
+    finally:
+        store.close()
+    emit_result(args, result)
+    return 0
+
+
+def emit_result(args: argparse.Namespace, result: Any) -> None:
     if args.json:
         json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
         sys.stdout.write("\n")
     else:
         sys.stdout.write(format_result(args.command, result))
-    return 0
 
 
-def run_command(store: CosenseStore, args: argparse.Namespace) -> Any:
+def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
     if args.command == "read":
         return store.read(
             args.title,
@@ -129,6 +165,8 @@ def run_command(store: CosenseStore, args: argparse.Namespace) -> Any:
 
 
 def format_result(command: str, result: Any) -> str:
+    if command == "import":
+        return format_import(result)
     if command == "read":
         return format_read(result)
     if command == "backlinks":
@@ -142,6 +180,17 @@ def format_result(command: str, result: Any) -> str:
     if command == "wanted":
         return format_wanted(result["wanted"])
     return json.dumps(result, ensure_ascii=False, indent=2) + "\n"
+
+
+def format_import(result: dict[str, Any]) -> str:
+    return (
+        f"store: {result['store']}\n"
+        f"schema: {result['schema_version']}\n"
+        f"pages: {result['pages']}\n"
+        f"lines: {result['lines']}\n"
+        f"edges: {result['edges']}\n"
+        f"wanted: {result['wanted']}\n"
+    )
 
 
 def format_read(result: dict[str, Any]) -> str:

@@ -63,6 +63,7 @@ sources:
 MVP（step 1）は実装・smoke 済み。`cosense` との実測比較（[[cosense-cli]]）で出た **2 つの差** を埋めるのが次。write / identity 層はまだ入れない（"before Co-" 維持）。優先順位はこの順。
 
 ### M2-1. on-disk store（SQLite or better）— latency 解消 ★最優先
+- Status 2026-06-23: **実装済み**。`.grasp/grasp.sqlite` default、`grasp import --force` と `--rebuild-store` で再構築。通常 command は store があれば JSON を parse しない。
 - 問題: 起動毎に 123MB JSON を full parse し、全コマンド一律 ~3.4s（cosense は 0.5–1.2s）。「AI が graph を流れるように体験する」中核体験を最も損なう。
 - やること: import（export → page/line/edge/wanted の materialize）を一度だけ実行し、**SQLite もしくはより良いデータ構造に永続**（pages / lines / edges / wanted のテーブル）。次回以降は store を読むだけで起動。**渡された JSON は import 入力にのみ使い保存層では捨てる**（JSON のまま持ち続けない）。
 - 位置づけ: これは [[persistence-custom-format]] の「独自 on-disk store」の最小実体 ＝ native store の seed。Open Q「in-memory のみ or on-disk」を **on-disk = SQLite** で解決。
@@ -108,7 +109,7 @@ write / transclude / rename（identity 層）・Markdown import adapter・vector
 ## Open Questions
 
 - ~~永続化形式~~ → **解決: 独自フォーマット**（[[persistence-custom-format]]）。読込は import adapter の責務に分離。
-- **独自 store の具体**: in-memory のみ（export を毎回読む）か、独自の on-disk 表現を持つか。MVP は前者で可。
+- ~~独自 store の具体~~ → **SQLite store 実装済み**。MVP は in-memory から `.grasp/grasp.sqlite` へ移行。
 - **read の近傍境界**: MVP は `--backlinks-limit` / `--related-limit` / `--wanted-limit` の上位 N。ranking の妥当性（count/views/recency の重み）は実利用で調整。
 - **Cosense link parser の厳しさ**: code/list 由来の false positive を避けるため strict にしたが、短い英数字タイトルなどの false negative は未監査。実測で残 false-positive も判明: `[** x]` 系の複数 `*` 見出し装飾が link 扱いされ `wanted` を汚す（`** 深い思考` count 59）→ M2-3 で修正。
 - **page id をいつ振るか**: 「必要時のみ ＝ 意味判断」の運用ルールを誰がどう発火するか。

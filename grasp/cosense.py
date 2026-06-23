@@ -118,9 +118,12 @@ class Page:
     updated: int | None
     views: int
     lines: tuple[Line, ...]
+    stored_line_count: int | None = None
 
     @property
     def line_count(self) -> int:
+        if self.stored_line_count is not None:
+            return self.stored_line_count
         return len(self.lines)
 
     def to_summary(self) -> dict[str, Any]:

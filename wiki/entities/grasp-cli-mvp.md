@@ -23,6 +23,9 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 ```
 
 - `--export`: Cosense JSON export path。未指定時は `$GRASP_EXPORT` → `raw/nishio.json`。
+- `--store`: SQLite store path。未指定時は `$GRASP_STORE` → `.grasp/grasp.sqlite`。
+- `import --force`: export を SQLite store に materialize。通常 command は store が存在すれば JSON を再 parse しない。
+- `--rebuild-store`: command 実行前に export から store を再構築。
 - `--json`: 機械可読 JSON output。
 - console script `grasp = grasp.cli:main` も定義済み（editable install すれば `grasp ...`）。
 
@@ -38,7 +41,8 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 - `Page`: `id`, `title`, normalized title, created/updated/views, `lines`。
 - `Line`: `line_id`, line index, text, created/updated/userId。MVP の `line_id` は `page.id:line-index`。
 - `Edge`: source page + source line + target title/normalized title。forward/backward は同一 edge の両読み。
-- store は in-memory。起動ごとに 118MB JSON を parse するため、実データでは 1 command 約 4-5 秒。
+- store は SQLite on-disk。`pages` / `lines` / `edges` / materialized `wanted` を保存する。起動ごとに 118MB JSON を parse しない。
+- 実測（2026-06-23）: import 約 8 秒。store 利用時 `read 盲点カード` 約 0.7 秒、`wanted --limit 3` 約 0.7 秒、`backlinks 盲点` 約 0.4 秒。
 
 ## 実装判断
 
@@ -74,7 +78,7 @@ MVP parser は以下を link としない:
 
 [[cosense-cli]] との実測比較で優先順位が確定（→ [[SPEC]] 次マイルストーン）:
 
-- **on-disk store/cache ★最優先**: 毎回 123MB JSON parse で全コマンド一律 ~3.4s（cosense 0.5–1.2s）。中核体験を最も損なう律速。edge/materialized index を on-disk 永続し sub-second に。
+- ~~on-disk store/cache ★最優先~~ → SQLite store 実装済み。edge/materialized wanted を on-disk 永続し、通常 read は JSON parse しない。
 - **本文検索 `search`**: `suggest` はタイトル部分一致のみ。cosense `searchFullText` 比で recall が桁違い（`盲点`: 8 件 vs 100 件）。行レベル（page, line-id, 行テキスト）で返す verb を追加。
 - parser false-positive 修正: `[** x]` 系装飾（`** 深い思考` count 59）が `wanted` を汚す。decoration 判定を複数 `*-_` 群対応に拡張。あわせて false-negative（短い英数字 title）監査。
 - `#tag` を page link と同等に扱うか。
