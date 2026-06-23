@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-23 23:10] implementation | search normalized fallback を追加
+- `search` の literal 0件時に normalized fallback を追加。NFKC query 正規化＋長音除去は SQLite `REPLACE` で実行し、`ﾕｰｻﾞﾃｽﾄ` が `ユーザテスト` / `ユーザーテスト` 行に hit する。text 出力は `[normalized]`、JSON は `match_mode: "normalized"` / `match_terms` を返す。
+- 完全なかな/カナ変換は Python 全行 scan になるため、50k lines 以下の小規模 store のみに制限。nishio 規模での zero-hit kana query は 20s 級だったため、大規模 store では schema/index なしに実行しない。
+- store schema は v5 のまま、public compatibility version は `1.5.3`。検証: `python3 -m unittest discover -s tests` OK、実データで `search ﾕｰｻﾞﾃｽﾄ --limit 5` が normalized hits を返すことを確認。
+
 ## [2026-06-23 22:39] file back | path の Open Q（グラフモデル）を CLAUDE が解決
 - nishio が AI consumer feedback の `path <A> <B>` に「リンクとは？ ページがノード？」と問うた件への回答を [[grasp-backlog]] Graph-native primitives に file back。
 - 回答: **ノード = pages ∪ unresolved targets**（page-only にすると page-less の概念ハブ＝最も中心的な connector を落とす）、**エッジ = materialize 済み internal-link edges を無向で**。

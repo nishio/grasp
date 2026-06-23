@@ -261,7 +261,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Search page body lines and return line-level hits.",
         description=(
             "Search stored line text. Single-term queries use literal line substring search; "
-            "whitespace-separated multi-term queries return lines from pages containing every term."
+            "whitespace-separated multi-term queries return lines from pages containing every term. "
+            "If literal search returns no hits, search retries with normalized fallback matching."
         ),
         returns="query, hits[], count_returned, offset, recovery_hints|null",
         examples=[
@@ -272,8 +273,8 @@ def build_parser() -> argparse.ArgumentParser:
         ],
         notes=[
             "hits[] items: source_page_id, source_title, source_views, "
-            "source_updated, line_id, line_index, line_text.",
-            "For multi-term queries, hits[] may also include match_terms[].",
+            "source_updated, line_id, line_index, line_text, match_mode, match_terms.",
+            "match_mode is literal for direct substring hits and normalized for loose fallback matches.",
         ],
     )
     search_parser.add_argument("query", help="Substring or whitespace-separated terms to find in page text.")
@@ -954,7 +955,8 @@ def format_search(
         parts.append("(none)\n")
     else:
         for hit in hits:
-            parts.append(f"- {hit['source_title']} {hit['line_id']}: {hit['line_text']}\n")
+            match_note = " [normalized]" if hit.get("match_mode") == "normalized" else ""
+            parts.append(f"- {hit['source_title']} {hit['line_id']}{match_note}: {hit['line_text']}\n")
     parts.append(format_recovery_hints(query, recovery_hints))
     return "".join(parts)
 

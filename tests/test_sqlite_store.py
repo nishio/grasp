@@ -105,6 +105,7 @@ class SQLiteStoreTests(unittest.TestCase):
                 hits = store.search("links", limit=2)
                 self.assertEqual([hit["source_title"] for hit in hits], ["A", "B"])
                 self.assertEqual(hits[0]["line_id"], "aaaaaaaaaaaaaaaaaaaaaaaa:1")
+                self.assertEqual(hits[0]["match_mode"], "literal")
 
                 unresolved_targets = store.unresolved_targets()
                 self.assertEqual(unresolved_targets[0]["title"], "Missing")
@@ -304,10 +305,11 @@ class SQLiteStoreTests(unittest.TestCase):
                 self.assertEqual([hit["line_index"] for hit in hits], [1, 2])
                 self.assertEqual(hits[0]["match_terms"], ["alpha"])
                 self.assertEqual(hits[1]["match_terms"], ["beta"])
+                self.assertEqual(hits[0]["match_mode"], "literal")
             finally:
                 store.close()
 
-    def test_zero_hit_recovery_hints_include_search_and_unresolved_candidates(self):
+    def test_search_loose_normalization_matches_long_vowel_and_kana_width(self):
         fixture = {
             "name": "fixture",
             "displayName": "fixture",
@@ -336,13 +338,20 @@ class SQLiteStoreTests(unittest.TestCase):
 
             store = SQLiteStore(store_path)
             try:
+                hits = store.search("ﾕｰｻﾞﾃｽﾄ", limit=3)
+                self.assertEqual(len(hits), 1)
+                self.assertEqual(hits[0]["source_title"], "A")
+                self.assertEqual(hits[0]["line_index"], 1)
+                self.assertEqual(hits[0]["match_mode"], "normalized")
+                self.assertEqual(hits[0]["match_terms"], ["ユザテスト"])
+
                 result = store.read("ユーザテスト", backlink_limit=3, related_limit=3, unresolved_limit=3)
                 self.assertIsNone(result["page"])
                 self.assertEqual(result["backlink_count_total"], 0)
                 hints = result["recovery_hints"]
                 self.assertIsNotNone(hints)
                 self.assertEqual(hints["unresolved_targets"]["targets"][0]["title"], "ユーザーテスト")
-                self.assertEqual(hints["search"]["hits"], [])
+                self.assertEqual(hints["search"]["hits"][0]["match_mode"], "normalized")
             finally:
                 store.close()
 

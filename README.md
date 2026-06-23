@@ -112,7 +112,7 @@ grasp read "<ページタイトル>"
 | verb | 用途 |
 | --- | --- |
 | `read <title>` | 本文＋逆リンク＋related＋未解決を**近傍同梱**で返す（基本の入口） |
-| `search <query>` | 本文行を検索し、単一語は行 substring、空白区切り複数語は page 単位 AND の行ヒットを返す |
+| `search <query>` | 本文行を検索し、単一語は行 substring、空白区切り複数語は page 単位 AND。0件時は NFKC/長音ゆれの normalized fallback を試す |
 | `suggest <partial>` | タイトルの部分一致補完 |
 | `backlinks <title>` | 行レベルの逆リンク（本文の無いターゲットにも効く） |
 | `related <title>` | 既存ページなら 2-hop ページ、本文の無いターゲットならそれを参照する source ページ |

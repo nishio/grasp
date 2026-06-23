@@ -48,6 +48,7 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
+| `1.5.3` | schema `5` | 2026-06-23 | schema `5` compatible | `search` の zero-hit 時に normalized fallback を追加。NFKC query 正規化＋長音除去は SQLite `REPLACE` で大規模 store でも使い、text 出力は `[normalized]`、JSON は `match_mode: "normalized"` を返す。完全な kana 変換の Python scan は 50k lines 以下の小規模 store のみに制限 |
 | `1.5.2` | schema `5` | 2026-06-23 | schema `5` compatible | `search` の recall 改善。単一語は従来通り line substring、空白区切り複数語は page 単位 AND で全語を含む page の該当行を返す。`search` 空結果にも `recovery_hints` を追加。SQLite schema / parser semantics は変えない |
 | `1.5.1` | schema `5` | 2026-06-23 | schema `5` compatible | `grasp acquire <project-url>` を追加。admin export なしに hosted Cosense から読める page を partial corpus として seed する。acquisition metadata は既存 metadata table に key/value として保存し、SQLite schema / parser semantics は変えない |
 | `1.5.0` | schema `5` | 2026-06-23 | `1.4.x` store は rebuild | `#tag` と数字のみ `[1]` / `[2024]` を internal link として edge 化。parser / index semantics が変わるため store generation を更新。zero-hit recovery hints、verb 後 `--json` 受理、store missing diagnostics もこの build に含む |
@@ -60,6 +61,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.5.2`
+- Current public compatibility version: `1.5.3`
 - Current internal `SCHEMA_VERSION`: `5`
-- Current package metadata should match `1.5.2`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.5.3`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

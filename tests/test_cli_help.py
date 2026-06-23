@@ -262,7 +262,7 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(result["page"]["title"], "A")
         self.assertEqual(result["lines"][0]["text"], "A")
 
-    def test_search_json_includes_recovery_hints_when_empty(self):
+    def test_search_json_includes_normalized_match_mode_for_loose_hits(self):
         fixture = {
             "name": "fixture",
             "displayName": "fixture",
@@ -319,12 +319,10 @@ class CliHelpTests(unittest.TestCase):
             )
 
         result = json.loads(completed.stdout)
-        self.assertEqual(result["hits"], [])
-        self.assertIsNotNone(result["recovery_hints"])
-        self.assertEqual(
-            result["recovery_hints"]["unresolved_targets"]["targets"][0]["title"],
-            "ユーザーテスト",
-        )
+        self.assertEqual(len(result["hits"]), 1)
+        self.assertEqual(result["hits"][0]["source_title"], "A")
+        self.assertEqual(result["hits"][0]["match_mode"], "normalized")
+        self.assertIsNone(result["recovery_hints"])
 
     def test_missing_store_stats_returns_friendly_diagnostic(self):
         with tempfile.TemporaryDirectory() as tmpdir:

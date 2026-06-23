@@ -84,7 +84,8 @@ AI consumer 観点の要件（出典 [[ai-consumer-feedback-2026-06-23]] Tier 4 
 
 - **2026-06-23 22:36 実装済み: page 単位の多語 AND**。空白区切り複数語は、同一行でなく同一ページに全語があれば返す。line 検索を page で集約し AND を取る。current facts は [[grasp-v1-implemented]]。
 - **未実装: OR**。スペース区切り AND は済み。明示 OR は別記法で要設計。
-- **未実装: より強い正規化マッチ**。multi-term split は `normalize_title` 相当の case-insensitive＋whitespace folding を query term に使うが、本文側は SQLite `LIKE` の semantics に依存する。日本語のカナ/かな/全半角/長音の揺れはまだ未対応。
+- **2026-06-23 23:10 一部実装済み: normalized fallback**。literal 0件時に NFKC query 正規化＋長音除去を SQLite `REPLACE` で試す。例: `ﾕｰｻﾞﾃｽﾄ` が `ユーザテスト` / `ユーザーテスト` 行に hit し、text では `[normalized]`、JSON では `match_mode: "normalized"` を返す。store schema は変えない。完全なかな/カナ変換の Python scan は 50k lines 以下の小規模 store のみに制限（nishio 規模では 20s 級になるため）。
+- **未実装: 大規模 store での完全なかな/カナ・全半角本文正規化 index**。本文側を materialize した normalized column / FTS hybrid / trigram 等で持たない限り、完全な正規化 search は大規模 store で高コスト。
 - 順序: **recall（AND/正規化）を直してから** FTS5 速度最適化（recall と速度は別軸）。
 
 ### read の近傍 snippet 同梱（AI consumer Tier 2, nishio 採用）

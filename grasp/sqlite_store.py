@@ -9,6 +9,7 @@ import os
 import shutil
 import sqlite3
 import time
+import unicodedata
 from typing import Any
 from urllib.parse import quote
 
@@ -17,6 +18,7 @@ from .cosense import CosenseStore, Edge, Line, Page, normalize_title, parse_cose
 
 SCHEMA_VERSION = "5"
 IMPORT_CACHE_MANIFEST_VERSION = 1
+PYTHON_LOOSE_SEARCH_MAX_LINES = 50_000
 
 
 SCHEMA = """
@@ -891,7 +893,17 @@ class SQLiteStore:
         project = self._require_project()
         terms = _search_terms(query)
         if len(terms) > 1:
-            return self._search_page_and(terms, limit=limit, offset=offset)
+            hits = self._search_page_and(terms, limit=limit, offset=offset)
+            if hits:
+                return hits
+            sql_loose_terms = _sql_loose_search_terms(query)
+            hits = self._search_sql_loose_page_and(sql_loose_terms, limit=limit, offset=offset)
+            if hits:
+                return hits
+            loose_terms = _loose_search_terms(query)
+            if self._can_use_python_loose_search(project) and _needs_python_loose_fallback(query, terms, loose_terms):
+                return self._search_loose_page_and(loose_terms, limit=limit, offset=offset)
+            return hits
 
         like = f"%{_escape_like(query)}%"
         rows = self.connection.execute(
@@ -912,7 +924,7 @@ class SQLiteStore:
             """,
             (project, like, limit, offset),
         ).fetchall()
-        return [
+        hits = [
             {
                 "source_page_id": row["source_page_id"],
                 "source_title": row["source_title"],
@@ -921,9 +933,23 @@ class SQLiteStore:
                 "line_id": row["line_id"],
                 "line_index": row["line_index"],
                 "line_text": row["line_text"],
+                "match_mode": "literal",
+                "match_terms": terms,
             }
             for row in rows
         ]
+        if hits:
+            return hits
+
+        sql_loose_terms = _sql_loose_search_terms(query)
+        hits = self._search_sql_loose_page_and(sql_loose_terms, limit=limit, offset=offset)
+        if hits:
+            return hits
+
+        loose_terms = _loose_search_terms(query)
+        if self._can_use_python_loose_search(project) and _needs_python_loose_fallback(query, terms, loose_terms):
+            return self._search_loose_page_and(loose_terms, limit=limit, offset=offset)
+        return hits
 
     def _search_page_and(self, terms: list[str], limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         project = self._require_project()
@@ -988,9 +1014,150 @@ class SQLiteStore:
                 "line_index": row["line_index"],
                 "line_text": row["line_text"],
                 "match_terms": _matched_search_terms(row["line_text"], terms),
+                "match_mode": "literal",
             }
             for row in rows
         ]
+
+    def _search_sql_loose_page_and(self, terms: list[str], limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        project = self._require_project()
+        if not terms:
+            return []
+
+        likes = [f"%{_escape_like(term)}%" for term in terms]
+        anchor_index = max(range(len(terms)), key=lambda index: len(terms[index]))
+        anchor_like = likes[anchor_index]
+        remaining_likes = [like for index, like in enumerate(likes) if index != anchor_index]
+        remaining_filters = "\n".join(
+            """
+              AND EXISTS (
+                SELECT 1
+                FROM lines other
+                WHERE other.project = ?
+                  AND other.page_id = anchor_pages.page_id
+                  AND REPLACE(other.text, ?, '') LIKE ? ESCAPE '\\'
+              )
+            """
+            for _ in remaining_likes
+        )
+        line_filters = " OR ".join("REPLACE(line.text, ?, '') LIKE ? ESCAPE '\\'" for _ in likes)
+        params: list[Any] = [project, "\u30fc", anchor_like]
+        for like in remaining_likes:
+            params.extend([project, "\u30fc", like])
+        params.append(project)
+        for like in likes:
+            params.extend(["\u30fc", like])
+        params.extend([limit, offset])
+        rows = self.connection.execute(
+            f"""
+            WITH anchor_pages AS (
+              SELECT DISTINCT page_id
+              FROM lines
+              WHERE project = ? AND REPLACE(text, ?, '') LIKE ? ESCAPE '\\'
+            ),
+            matching_pages AS (
+              SELECT page_id
+              FROM anchor_pages
+              WHERE 1 = 1
+              {remaining_filters}
+            )
+            SELECT
+              page.id AS source_page_id,
+              page.title AS source_title,
+              page.views AS source_views,
+              page.updated AS source_updated,
+              line.line_id,
+              line.line_index,
+              line.text AS line_text
+            FROM lines line
+            JOIN pages page ON page.project = line.project AND page.id = line.page_id
+            JOIN matching_pages matched ON matched.page_id = line.page_id
+            WHERE line.project = ? AND ({line_filters})
+            ORDER BY page.views DESC, COALESCE(page.updated, 0) DESC, page.title, line.line_index
+            LIMIT ? OFFSET ?
+            """,
+            params,
+        ).fetchall()
+        return [
+            {
+                "source_page_id": row["source_page_id"],
+                "source_title": row["source_title"],
+                "source_views": row["source_views"],
+                "source_updated": row["source_updated"],
+                "line_id": row["line_id"],
+                "line_index": row["line_index"],
+                "line_text": row["line_text"],
+                "match_terms": _matched_sql_loose_search_terms(row["line_text"], terms),
+                "match_mode": "normalized",
+            }
+            for row in rows
+        ]
+
+    def _search_loose_page_and(self, terms: list[str], limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        project = self._require_project()
+        if not terms:
+            return []
+
+        rows = self.connection.execute(
+            """
+            SELECT
+              page.id AS source_page_id,
+              page.title AS source_title,
+              page.views AS source_views,
+              page.updated AS source_updated,
+              line.line_id,
+              line.line_index,
+              line.text AS line_text
+            FROM lines line
+            JOIN pages page ON page.project = line.project AND page.id = line.page_id
+            WHERE line.project = ?
+            ORDER BY page.views DESC, COALESCE(page.updated, 0) DESC, page.title, line.line_index
+            """,
+            (project,),
+        ).fetchall()
+
+        page_terms: dict[str, set[str]] = {}
+        candidate_rows: list[tuple[sqlite3.Row, list[str]]] = []
+        for row in rows:
+            matched_terms = _matched_loose_search_terms(row["line_text"], terms)
+            if not matched_terms:
+                continue
+            page_id = row["source_page_id"]
+            page_terms.setdefault(page_id, set()).update(matched_terms)
+            candidate_rows.append((row, matched_terms))
+
+        required_terms = set(terms)
+        hits: list[dict[str, Any]] = []
+        skipped = 0
+        for row, matched_terms in candidate_rows:
+            if not required_terms.issubset(page_terms[row["source_page_id"]]):
+                continue
+            if skipped < offset:
+                skipped += 1
+                continue
+            hits.append(
+                {
+                    "source_page_id": row["source_page_id"],
+                    "source_title": row["source_title"],
+                    "source_views": row["source_views"],
+                    "source_updated": row["source_updated"],
+                    "line_id": row["line_id"],
+                    "line_index": row["line_index"],
+                    "line_text": row["line_text"],
+                    "match_terms": matched_terms,
+                    "match_mode": "normalized",
+                }
+            )
+            if limit >= 0 and len(hits) >= limit:
+                break
+        return hits
+
+    def _can_use_python_loose_search(self, project: str) -> bool:
+        row = self.connection.execute(
+            "SELECT lines FROM projects WHERE name = ?",
+            (project,),
+        ).fetchone()
+        return row is not None and int(row["lines"]) <= PYTHON_LOOSE_SEARCH_MAX_LINES
 
     def recovery_hints(self, query: str, limit: int = 3) -> dict[str, Any]:
         return {
@@ -1614,9 +1781,60 @@ def _search_terms(query: str) -> list[str]:
     return [term for term in normalized.split(" ") if term]
 
 
+def _loose_search_terms(query: str) -> list[str]:
+    terms = [term for term in loose_search_key(query).split(" ") if term]
+    return list(dict.fromkeys(terms))
+
+
+def _sql_loose_search_terms(query: str) -> list[str]:
+    terms = [term for term in sql_loose_search_key(query).split(" ") if term]
+    return list(dict.fromkeys(terms))
+
+
 def _matched_search_terms(line_text: str, terms: list[str]) -> list[str]:
     normalized_line = normalize_title(line_text)
     return [term for term in terms if term in normalized_line]
+
+
+def _matched_sql_loose_search_terms(line_text: str, terms: list[str]) -> list[str]:
+    normalized_line = sql_loose_search_key(line_text)
+    return [term for term in terms if term in normalized_line]
+
+
+def _matched_loose_search_terms(line_text: str, terms: list[str]) -> list[str]:
+    normalized_line = loose_search_key(line_text)
+    return [term for term in terms if term in normalized_line]
+
+
+def sql_loose_search_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value)
+    normalized = normalize_title(normalized)
+    return normalized.replace("\u30fc", "")
+
+
+def loose_search_key(value: str) -> str:
+    normalized = sql_loose_search_key(value)
+    normalized = "".join(_katakana_to_hiragana(char) for char in normalized)
+    return normalized
+
+
+def _katakana_to_hiragana(char: str) -> str:
+    codepoint = ord(char)
+    if 0x30A1 <= codepoint <= 0x30F6:
+        return chr(codepoint - 0x60)
+    return char
+
+
+def _needs_python_loose_fallback(query: str, terms: list[str], loose_terms: list[str]) -> bool:
+    return bool(loose_terms) and (loose_terms != terms or _contains_kana(query))
+
+
+def _contains_kana(value: str) -> bool:
+    for char in value:
+        codepoint = ord(char)
+        if 0x3040 <= codepoint <= 0x30FF or 0xFF66 <= codepoint <= 0xFF9F:
+            return True
+    return False
 
 
 def loose_recovery_key(value: str) -> str:
