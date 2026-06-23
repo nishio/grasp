@@ -140,9 +140,11 @@ AI consumer 観点の要件（出典 [[ai-consumer-feedback-2026-06-23]] Tier 4 
 
 ## Output token economy（AI consumer Tier 2）
 
-出典: [[ai-consumer-feedback-2026-06-23]] Tier 2。default 出力は AI が読む前提なので token を削るほど AI の context が空き、多くを読める（原理 [[ai-consumer-cost-and-trust]] 軸1）。未実装:
+出典: [[ai-consumer-feedback-2026-06-23]] Tier 2。default 出力は AI が読む前提なので token を削るほど AI の context が空き、多くを読める（原理 [[ai-consumer-cost-and-trust]] 軸1）。
 
-- **line-id のローカル別名**（nishio agree）。`5928725cba093700118fa5b2:0` のような 24 桁 page-id＋index が全行に付くのは冗長。read 単位で `P1` / `P1:0` の別名＋先頭 legend 1 行にし、安定 id が要る時は `--json` / `--full-ids`。
+実装済み:
+
+- **2026-06-24 実装済み**: line-id のローカル別名。text 出力では `5928725cba093700118fa5b2:0` のような完全 ID を `P1:0` に畳み、先頭付近に `line-id aliases: P1=<page-id>` legend を出す。安定 ID が要る時は `--json`、text で完全 ID が必要な時は `--full-ids`。
 
 却下（nishio 2026-06-23）:
 

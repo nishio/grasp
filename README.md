@@ -139,10 +139,12 @@ grasp read "<ページタイトル>"
   - `--store PATH` / `$GRASP_STORE` … SQLite ストアの場所
   - `--project NAME` / `$GRASP_PROJECT` … 読み書き対象の project namespace
   - `$GRASP_HOME` … home 自体（既定 `~/.grasp`）を差し替え
-- `--store` / `--project` は verb の前に置きます。`--json` は root option ですが、agent が自然に末尾へ置くことが多いため verb 後にも置けます:
+- text 出力の `line-id` は既定で `P1:0` のような実行内ローカル別名に短縮され、先頭付近に `P1=<page-id>` の legend が出ます。安定した完全 ID が必要なら `--json`、人間向け text のまま完全 ID を見たい時は `--full-ids`。
+- `--store` / `--project` は verb の前に置きます。`--json` と `--full-ids` は root option ですが、agent が自然に末尾へ置くことが多いため verb 後にも置けます:
 
   ```bash
   grasp --project your-project read "<ページタイトル>" --backlinks-limit 5 --json
+  grasp read "<ページタイトル>" --full-ids
   ```
 - 空白や記号を含むタイトル・クエリはシェルでクォートしてください（`"..."`）。
 - 機械可読出力が必要なら `--json`。返るキーは各 `grasp <verb> --help` に記載。

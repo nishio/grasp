@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 01:49] implementation | text 出力の line-id をローカル別名化
+- text 出力で `page-id:line-index` を既定で `P1:0` のような実行内ローカル別名に畳み、先頭付近に `line-id aliases: P1=<page-id>` legend を出すようにした。
+- JSON は従来通り完全 `line_id` を返す。text で完全 ID が必要な場合は `--full-ids` を使う。`--full-ids` は root option だが、`--json` と同じく verb 後にも置ける hidden alias として受ける。
+- 対象は `read` / `backlinks` / `related` / `path` / `link-stats` の recovery hints / `peek` / `search` / `unresolved` の text formatter。`export-ai` は本文 bundle なので対象外。
+- store schema は v5 のまま、public compatibility version は `1.5.8`。検証: `python3 -m unittest discover -s tests` OK（28 tests）、`python3 scripts/lint_wiki.py` OK、`git diff --check` OK。
+
 ## [2026-06-24 01:39] implementation | path no-path recovery hints を追加
 - `grasp path <A> <B>` で端点は resolve できるが bounded search 内に経路が無い時、`recovery_hints.path` を返すようにした。
 - JSON は `reason`（`no_path_within_max_depth` / `search_truncated`）、`next_max_depth`、両端の `link_stats`、`related`、`backlinks` を小さく同梱。text 出力は次に試す `path --max-depth N` / `related` / `backlinks` と候補データを表示する。

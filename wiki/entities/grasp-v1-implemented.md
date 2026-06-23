@@ -44,11 +44,12 @@ v1 scope 外:
 - Python 3.10+、runtime dependencies は無し（stdlib `sqlite3`）。
 - `README.md` は「主たるユーザは人間 CLI operator ではなく AI agent」という前提に更新済み。
 - `skills/grasp/SKILL.md` が「いつ使うか」を持ち、CLI mechanics は `grasp <cmd> --help` に寄せる。
-- `--store` / `--project` は root option として command 前に置く。`--json` は agent が末尾へ置くミスを回復するため、command 後にも hidden alias として受ける。
+- `--store` / `--project` は root option として command 前に置く。`--json` / `--full-ids` は agent が末尾へ置くミスを回復するため、command 後にも hidden alias として受ける。
+- text 出力の line-id は既定で実行内ローカル別名（`P1:0` など）に短縮し、先頭付近に `line-id aliases: P1=<page-id>` legend を出す。JSON は従来通り完全 `page.id:line-index` を返す。text で完全 ID が必要な時は `--full-ids`。
 
 ## store
 
-- current public compatibility version は `1.5.7`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.5.8`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -97,7 +98,7 @@ v1 scope 外:
 
 ## import and parser facts
 
-- Cosense export の line には安定 id が無いので、v1 は `page.id:line-index` を `line-id` として採番する。
+- Cosense export の line には安定 id が無いので、v1 は `page.id:line-index` を `line-id` として採番する。text 出力では token 節約のため local alias に畳むが、JSON と `--full-ids` は完全 ID を出す。
 - link graph は export に保存されないため、line text から edge を materialize する。
 - title / link resolve は case-insensitive + whitespace folding。
 - Cosense title 行 `lines[0]` は本文に残す。完全性と line-id 安定性を優先する。

@@ -129,7 +129,8 @@ description: >-
 - `grasp import --cosense <json>` で Cosense JSON export を import する。以降は sub-second。別パスは `--store` / `$GRASP_STORE`、別 home は `$GRASP_HOME`。
 - import 済み JSON は store 横の `<store>.imports/` に復旧用コピーとして保持される。通常 command が古い schema の store を見つけた時は、復旧用コピーからサイレントに current schema へ再構築して続行する。`stats` は診断用なので自動再構築しない。hosted の最新差分は復旧後も `sync` の責務。
 - 複数 project がある store で読む時は `grasp --project <name> read "ページタイトル"` のように project を指定する。project が1つだけなら省略可。
-- 機械可読が要る時は `--json`。root option だが verb 後にも置ける: `grasp --project <name> read "ページタイトル" --backlinks-limit 3 --json`。`--store` / `--project` は verb の前。
+- text 出力の `line_id` は既定で `P1:0` のような実行内ローカル別名に短縮され、先頭付近に `P1=<page-id>` の legend が出る。親へ根拠として返す時は、必要なら `source_title` とこの alias ではなく `--json` の完全 `line_id` を使う。
+- 機械可読が要る時は `--json`。root option だが verb 後にも置ける: `grasp --project <name> read "ページタイトル" --backlinks-limit 3 --json`。text のまま完全 line id を見たい時は `--full-ids`（これも verb 後可）。`--store` / `--project` は verb の前。
 - 空白・記号を含む title / query は shell でクォートする（`'...'`）。
 
 ## 回答の形式

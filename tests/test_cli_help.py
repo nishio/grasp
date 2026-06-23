@@ -40,6 +40,7 @@ class CliHelpTests(unittest.TestCase):
         help_text = run_grasp_help()
         self.assertIn("Mechanics SSoT", help_text)
         self.assertIn("--json is also", help_text)
+        self.assertIn("--full-ids", help_text)
         self.assertNotIn("--store .grasp/grasp.sqlite", help_text)
         self.assertNotIn("--export", help_text)
         self.assertNotIn("--rebuild-store", help_text)
@@ -293,6 +294,87 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(result["related"][0]["title"], "C")
         self.assertEqual(result["related"][0]["snippet_lines"][0]["text"], "C")
         self.assertTrue(result["related"][0]["snippet_truncated"])
+
+    def test_text_output_uses_local_line_id_aliases_by_default(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "A",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 1,
+                    "views": 0,
+                    "lines": [
+                        {"text": "A", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "body", "created": 1, "updated": 2, "userId": "u"},
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--cosense",
+                    str(export_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            compact = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "peek",
+                    "A",
+                    "--line-limit",
+                    "2",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            full = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "peek",
+                    "A",
+                    "--line-limit",
+                    "1",
+                    "--full-ids",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        self.assertIn("line-id aliases: P1=aaaaaaaaaaaaaaaaaaaaaaaa", compact.stdout)
+        self.assertIn("P1:0  A", compact.stdout)
+        self.assertIn("P1:1  body", compact.stdout)
+        self.assertNotIn("aaaaaaaaaaaaaaaaaaaaaaaa:0", compact.stdout)
+        self.assertNotIn("line-id aliases:", full.stdout)
+        self.assertIn("aaaaaaaaaaaaaaaaaaaaaaaa:0  A", full.stdout)
 
     def test_search_json_includes_normalized_match_mode_for_loose_hits(self):
         fixture = {

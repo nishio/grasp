@@ -24,7 +24,7 @@ AI にとって 1 回の `grasp` 呼び出しは:
 
 - `read --related-snippets`: hub 探索を 1 往復で（各 related の中身を追加 read せずに見る。default は Cosense UI 同様 先頭 ~5 行）。
 - `gather "<query>" --budget`: 問いから「最小ページ集合＋近傍」を token 予算内で返す retrieval orchestration。
-- read 単位の **line-id 別名**: 24 桁 page-id＋index を全行に付けるのは冗長なので `P1:0` 等に畳み context を空ける。
+- text 出力の **line-id 別名**（2026-06-24 実装済み）: 24 桁 page-id＋index を全行に付けるのは冗長なので `P1:0` 等に畳み context を空ける。完全 ID は `--json` / `--full-ids`。
 
 ただし token 削減は**意味のある token を捨てない範囲**で。`[nishio.icon]`（block の著者）や bare image URL（人間に画像提示・将来 AI も読む）のような decoration を畳む `--strip-decoration` は **却下**（[[grasp-backlog]]）— decoration は noise でなく情報。cost 軸は「畳めるところを畳む」のであって「fidelity を捨てる」ことではない。
 
