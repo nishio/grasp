@@ -25,13 +25,33 @@ sources:
 
 5. **書く ＝ グラフ自動更新** — `[[X]]` を書けば X 側の逆リンクが自動で立つ。二度目の編集ゼロ。「壊れたリンク / 孤立 / 逆リンク漏れ」は lint が後から検出する欠陥でなく、**ランタイムが構造的に保証する不変条件**。
 
+## 保存形式 = 独自フォーマット（Markdown ではない）
+
+決定: native の保存形式は **独自フォーマット**。Markdown にしない。理由は [[persistence-custom-format]]:
+- Markdown ではリンクは「ファイル内のテキスト」で **逆リンクはどこにも保存されない**→ 全文スキャンで導出 or 相手ページに書き戻して「維持」。これが逃げたかった **しがらみの発生源**。
+- 独自フォーマットならリンクは **グラフのエッジ**。逆リンクは同じエッジを逆から読むだけで「維持」概念が消える（リンク／逆リンクが *2つの別テキスト事実* でなく *1つの事実*）。
+- 「独自」＝ゼロから発明ではなく、**Cosense のグラフ／行モデルを正規化して native にする**（下記 import が seed）。
+
+## 入力 = import adapter（native format とは独立）
+
+「既存資産を読める」は native format でなく **import の責務**。native は独自のまま、複数の adapter で取り込む:
+- **初手（MVP の入力）= Cosense JSON export**。pages → lines ＋ リンク構造を既に持つ ＝ native モデルの自然な seed。
+- 後で Markdown adapter も足せる（既存 llm-wiki 森 40+ を読める）。← native を Markdown にしなくても達成。
+- 注意（Codex が実物で確認）: Cosense の link 構文は `[title]`（単角括弧。`[[...]]` は bold）。export の `lines` は安定 line-id を持たない可能性 → **import 時に grasp が line-id を採番**（原理4「line-id は機械自動採番」と整合）。
+
 ## データモデル（暫定）
 
 - **page**: `id`（安定・不変, 必要時のみ採番）, `title`（表示・変更可, `aliases[]` 可）, `lines[]`
-- **line**: `line-id`（機械が自動採番・安定）, `text`（forward links は text 中の `[[...]]` から導出）
-- **link graph**: forward links は line から導出、**backlinks は materialize**（O(1) lookup）。2-hop はグラフ隣接。
-- **wanted（red link）**: link target で page が存在しないもの。
-- 永続化形式は Open Q（下記）。
+- **line**: `line-id`（機械が自動採番・安定）, `text`（forward links は text から parse）
+- **link graph**: **エッジを native に保持**。forward / backward は同一エッジの両読み（backlinks の「維持」は不要、O(1)）。2-hop はグラフ隣接。
+- **wanted（red link）**: link target で page が存在しないエッジ。
+
+## MVP（Codex 最初の一歩）
+
+**Cosense JSON export 1ファイルを読み取り専用で CLI から扱う**。書き込み・identity 層・Markdown adapter は後。
+- import: Cosense export → 正規化（page/line/edge、line-id 採番）→ in-memory（or 独自 store）
+- 動詞: `read`（近傍同梱）/ `backlinks`（行つき）/ `wanted`（赤リンク）の3つ
+- これで「AI が CLI だけで Scrapbox グラフを体験する」中核仮説を **実データ（nishio の Cosense project）** で検証できる。
 
 ## CLI 動詞（surface）
 
@@ -53,7 +73,8 @@ sources:
 
 ## Open Questions
 
-- **永続化形式**: 既存 llm-wiki の Markdown 群と互換にするか、独自フォーマットか。互換なら **既存の wiki森を即 grasp で読める**（大きな利点）。
+- ~~永続化形式~~ → **解決: 独自フォーマット**（[[persistence-custom-format]]）。読込は import adapter の責務に分離。
+- **独自 store の具体**: in-memory のみ（export を毎回読む）か、独自の on-disk 表現を持つか。MVP は前者で可。
 - **read の近傍境界**: 2-hop までか、逆リンクは全件か上位 N か、赤リンクの優先順位づけ。
 - **page id をいつ振るか**: 「必要時のみ ＝ 意味判断」の運用ルールを誰がどう発火するか。
 - **行リンクの文脈窓**: 該当行だけか、前後数行か。
