@@ -124,6 +124,7 @@ AI consumer 観点の要件（出典 [[ai-consumer-feedback-2026-06-23]] Tier 4 
   - **go/no-go の実測基準（実用性懐疑への決着法）**: nishio のような密グラフでは大半の概念対が既に ≤2-hop（related が繋ぐ）。path の純増価値は「>2-hop 離れ かつ 共有近傍なし」の対だけ＝おそらく稀。**試作前にランダム概念対の hop 距離分布を測り**、大半が ≤2 なら marginal value は小さい → 工数は Tier-1 recall に回す。これで「作るか否か」を falsifiable に判定できる。
   - **2026-06-23 23:58 簡易実測（`~/.grasp/grasp.sqlite`, project `nishio`, schema v5）**: nodes = pages with edges 23322 + unresolved targets 42770 = 66092、undirected edges = 115075、最大連結成分 = 63490 nodes（96.06%）。ページ間距離の標本では「大半が ≤2-hop」は成立しなかった。uniform pages 300 pairs は ≤2 が 0.3%、≤4 が 9.0%、≤6 が 63.3%。top-degree pages 300 pairs でも ≤2 が 4.3%、≤3 が 30.0%、≤4 が 76.7%、≤6 が 99.3%。**含意: `related`（2-hop）外に意味のある接続は多く、`path --max-depth 4` の試作価値はある**。ただし uniform pages には日記・低次数 leaf が混ざるので、実用評価は user が問う概念ペア（高次数/タイトル明示）でさらに dogfood する。
   - **2026-06-24 00:05 初期実装済み**: `grasp path <A> <B> --max-depth 4 --limit 3` を追加。JSON は source/target node、paths[]、distance、nodes[]、edge example lines、truncated を返す。node は page / unresolved、edge は line-level materialized link を無向に畳む。dogfood: `path KJ法 弱い紐帯 --max-depth 4 --limit 1 --json` が 3-hop（KJ法 → Scrapbox情報整理術 → 情報と秩序 → 弱い紐帯）を返した。**残課題**: dense hub での performance（nishio store で約4-5s）、neighbor ranking、複数 shortest paths の出し方、実用的に意味のある経路かの継続 dogfood。
+  - **2026-06-24 01:39 no-path recovery 実装済み**: 端点が resolve できるが bounded search で経路が見つからない時、`recovery_hints.path` に reason / next_max_depth / related / backlinks / link-stats を返す。negative-result contract は path no-path まで揃った。残課題は dense hub performance、neighbor ranking、複数 shortest paths の出し方、実用的に意味のある経路かの継続 dogfood。
 - **backlinks の finer ranking**（nishio agree）: 既に `backlinks` は `source.views DESC, updated DESC, title, line_index` でランク済み（related と同じ primary signal、[[grasp-v1-implemented]]）。未済は **link 密度 / multiplicity / recency の重み付け**で「最も中心的な 20 件」精度を上げること。コア（views ランク）は済んでいる。
 - ~~**近傍クラスタリング `--cluster`**~~ → **却下（nishio 2026-06-23）**。クラスタリングは **AI がやるべき**（AI の方が賢い）＝grasp は raw＋ranking を返し AI が sub-theme に畳む（feedback 著者自身の「default raw、AI にクラスタさせる」選好とも一致、原理 [[ai-consumer-cost-and-trust]] の fidelity 方針）。CLI 側でやるなら **embeddings 導入後に雑な embedding クラスタリング**を optional で足す程度。そもそも **100+ リンクのハブは rare case** なので動機自体が稀。
 
@@ -135,7 +136,7 @@ AI consumer 観点の要件（出典 [[ai-consumer-feedback-2026-06-23]] Tier 4 
 
 未実装:
 
-- empty result contract が今後追加する retrieval verb（例: `path` no path / `gather`）でも揃っているかの継続監査。
+- empty result contract が今後追加する retrieval verb（例: `gather`）でも揃っているかの継続監査。
 
 ## Output token economy（AI consumer Tier 2）
 

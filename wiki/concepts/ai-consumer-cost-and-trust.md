@@ -39,7 +39,7 @@ AI にとって 1 回の `grasp` 呼び出しは:
 - **絶対的不在**: ストアにその概念が無い（→ ユーザに「書かれていない」と言える）
 - **マッチ失敗**: 有るが surface form / 検索意味論で取れなかった（→ 別の引き方を試すべき・断定してはいけない）
 
-grasp の `read` / `link-stats` の zero-hit、`search` の空結果、`related` の空結果は `recovery_hints` を返す（実装済み）。ヒントは command 文字列だけでなく **実データ**（近い title 候補・正規化で寄せた候補・部分一致 line）を載せると、1 往復節約＋判断材料になる。この contract は今後追加する retrieval verb（例: `path` / `gather`）にも揃える。
+grasp の `read` / `link-stats` の zero-hit、`search` の空結果、`related` の空結果、`path` の no-path は `recovery_hints` を返す（実装済み）。ヒントは command 文字列だけでなく **実データ**（近い title 候補・正規化で寄せた候補・部分一致 line、related/backlinks/link-stats）を載せると、1 往復節約＋判断材料になる。この contract は今後追加する retrieval verb（例: `gather`）にも揃える。
 
 これが **recall（明示 boolean / page scope / 正規化マッチ）を vector search より先に直す**理由でもある: 沈黙の偽陰性は AI には人間より危険なので、embeddings の前に boolean/正規化/negative-contract で底上げするのが AI 価値の順序。page 単位 AND は 2026-06-23 に一度 implicit に実装したが、2026-06-24 に default literal + 明示 `--mode boolean --scope page` へ変更した。`search` 空結果の recovery hints は 2026-06-23 に実装済み。
 

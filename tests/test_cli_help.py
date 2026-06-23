@@ -565,6 +565,26 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
+            no_path_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "path",
+                    "A",
+                    "B",
+                    "--max-depth",
+                    "1",
+                    "--limit",
+                    "1",
+                    "--json",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
 
         result = json.loads(completed.stdout)
         self.assertEqual(result["path_count"], 1)
@@ -572,6 +592,13 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual([node["title"] for node in result["paths"][0]["nodes"]], ["A", "Shared", "B"])
         self.assertEqual(result["paths"][0]["nodes"][1]["kind"], "unresolved")
         self.assertEqual(result["paths"][0]["edges"][0]["line_text"], "links to [Shared]")
+
+        no_path_result = json.loads(no_path_completed.stdout)
+        self.assertEqual(no_path_result["path_count"], 0)
+        self.assertEqual(no_path_result["recovery_hints"]["path"]["reason"], "no_path_within_max_depth")
+        self.assertEqual(no_path_result["recovery_hints"]["path"]["next_max_depth"], 2)
+        self.assertEqual(no_path_result["recovery_hints"]["path"]["source_link_stats"]["title"], "A")
+        self.assertEqual(no_path_result["recovery_hints"]["path"]["target_link_stats"]["title"], "B")
 
     def test_missing_store_stats_returns_friendly_diagnostic(self):
         with tempfile.TemporaryDirectory() as tmpdir:

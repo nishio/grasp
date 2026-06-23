@@ -235,6 +235,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Nodes are pages plus unresolved targets. This is intentionally broader than page-only traversal.",
             "The search is bounded by --max-depth; use small depths first because dense hubs can expand quickly.",
             "Edges include example source lines so the bridge can be checked against source context.",
+            "If both endpoints resolve but no path is found, recovery_hints.path includes next-depth, related, backlinks, and link stats cues.",
         ],
     )
     path_parser.add_argument("source", help="Start page title or unresolved target.")
@@ -950,6 +951,7 @@ def format_path(result: dict[str, Any]) -> str:
         recovery = result.get("recovery_hints") or {}
         parts.append(format_recovery_hints(source_title, recovery.get("source")))
         parts.append(format_recovery_hints(target_title, recovery.get("target")))
+        parts.append(format_path_recovery_hints(source_title, target_title, recovery.get("path")))
         return "".join(parts)
 
     for index, path in enumerate(paths, start=1):
@@ -964,6 +966,67 @@ def format_path(result: dict[str, Any]) -> str:
             )
     if result.get("truncated"):
         parts.append("\ntruncated: true\n")
+    return "".join(parts)
+
+
+def format_path_recovery_hints(
+    source_title: str,
+    target_title: str,
+    recovery_hints: dict[str, Any] | None,
+) -> str:
+    if not recovery_hints:
+        return ""
+
+    related_limit = recovery_hints.get("related_limit", 3)
+    backlinks_limit = recovery_hints.get("backlinks_limit", 3)
+    next_max_depth = recovery_hints.get("next_max_depth")
+    parts = [
+        "\n## Path Recovery Hints\n",
+        f"reason: {recovery_hints.get('reason', 'no_path')}\n",
+    ]
+    if next_max_depth is not None:
+        parts.append(
+            f"try: grasp path {shlex.quote(source_title)} {shlex.quote(target_title)} "
+            f"--max-depth {next_max_depth}\n"
+        )
+    parts.extend(
+        [
+            f"try: grasp related {shlex.quote(source_title)} --limit {related_limit}\n",
+            f"try: grasp related {shlex.quote(target_title)} --limit {related_limit}\n",
+            f"try: grasp backlinks {shlex.quote(source_title)} --limit {backlinks_limit}\n",
+            f"try: grasp backlinks {shlex.quote(target_title)} --limit {backlinks_limit}\n",
+        ]
+    )
+
+    source_stats = recovery_hints.get("source_link_stats")
+    target_stats = recovery_hints.get("target_link_stats")
+    if source_stats or target_stats:
+        parts.append("\nLink stats:\n")
+        if source_stats:
+            parts.append(f"- source {source_stats['title']}: {format_link_stats_summary(source_stats)}")
+        if target_stats:
+            parts.append(f"- target {target_stats['title']}: {format_link_stats_summary(target_stats)}")
+
+    source_related = recovery_hints.get("source_related") or []
+    if source_related:
+        parts.append("\nSource related:\n")
+        parts.append(format_related_items(source_related))
+
+    target_related = recovery_hints.get("target_related") or []
+    if target_related:
+        parts.append("\nTarget related:\n")
+        parts.append(format_related_items(target_related))
+
+    source_backlinks = recovery_hints.get("source_backlinks") or []
+    if source_backlinks:
+        parts.append("\nBacklinks to source:\n")
+        parts.append(format_edge_list(source_backlinks))
+
+    target_backlinks = recovery_hints.get("target_backlinks") or []
+    if target_backlinks:
+        parts.append("\nBacklinks to target:\n")
+        parts.append(format_edge_list(target_backlinks))
+
     return "".join(parts)
 
 

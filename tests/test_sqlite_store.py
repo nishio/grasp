@@ -146,6 +146,18 @@ class SQLiteStoreTests(unittest.TestCase):
                     [[node["kind"] for node in path_item["nodes"]] for path_item in path["paths"]],
                 )
 
+                too_shallow_path = store.paths_between("A", "C", max_depth=1, limit=1)
+                self.assertEqual(too_shallow_path["path_count"], 0)
+                self.assertEqual(too_shallow_path["source"]["title"], "A")
+                self.assertEqual(too_shallow_path["target"]["title"], "C")
+                path_hints = too_shallow_path["recovery_hints"]["path"]
+                self.assertEqual(path_hints["reason"], "no_path_within_max_depth")
+                self.assertEqual(path_hints["next_max_depth"], 2)
+                self.assertEqual(path_hints["source_link_stats"]["title"], "A")
+                self.assertEqual(path_hints["target_link_stats"]["title"], "C")
+                self.assertEqual(path_hints["source_related"][0]["title"], "C")
+                self.assertTrue(path_hints["source_backlinks"])
+
                 missing_hinge_path = store.paths_between("A", "Missing", max_depth=1, limit=1)
                 self.assertEqual(missing_hinge_path["path_count"], 1)
                 self.assertEqual(missing_hinge_path["paths"][0]["distance"], 1)

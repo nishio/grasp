@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 01:39] implementation | path no-path recovery hints を追加
+- `grasp path <A> <B>` で端点は resolve できるが bounded search 内に経路が無い時、`recovery_hints.path` を返すようにした。
+- JSON は `reason`（`no_path_within_max_depth` / `search_truncated`）、`next_max_depth`、両端の `link_stats`、`related`、`backlinks` を小さく同梱。text 出力は次に試す `path --max-depth N` / `related` / `backlinks` と候補データを表示する。
+- これで negative-result contract は `read` / `link-stats` / `search` / `related` / `path no-path` まで揃った。`gather` など将来 verb は継続監査。
+- store schema は v5 のまま、public compatibility version は `1.5.7`。検証: `python3 -m unittest discover -s tests` OK（27 tests）。
+
 ## [2026-06-24 00:56] implementation | search を default literal + explicit boolean/scope に変更
 - nishio 指摘: 空白で query を刻んで AND 検索する既定は「クエリーを書けない人間向け」の interface で、英文 phrase を検索するなら既定は入力文字列通りの literal search が自然。AND / OR / NOT と行単位 / ページ単位を明示的に組み合わせられる方が良い。
 - `grasp search <query>` の既定を、空白も含む literal line substring に戻した。literal 0件時の normalized fallback は維持。

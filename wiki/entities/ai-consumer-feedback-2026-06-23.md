@@ -61,3 +61,5 @@ findings 表は feedback の faithful record。各候補への nishio の adjudi
 2026-06-24 00:56: 空白区切りを暗黙 page AND にする仕様をやめ、既定は空白を含む literal line substring に戻した。明示検索として `--mode boolean`（AND/OR/NOT/括弧/quoted phrase/implicit AND）と `--scope line|page` を追加。OR は実装済み。設計理由と現状は [[grasp-backlog]] / [[grasp-v1-implemented]]。
 
 2026-06-24 00:05: related 空結果 contract は実装済み。`path <A> <B>` も初期実装し、pages ∪ unresolved targets の bounded shortest path と根拠 line を返す。`path` は dogfood 継続（performance / ranking / 実用性評価）が残る。
+
+2026-06-24 01:39: `path` の no-path recovery hints を実装。端点が resolve できるが bounded search で経路が見つからない時、`recovery_hints.path` に reason / next_max_depth / related / backlinks / link-stats を返す。

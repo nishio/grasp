@@ -886,6 +886,7 @@ class SQLiteStore:
         recovery_hints = {
             "source": None if source_node is not None else self.recovery_hints(source_title, limit=3),
             "target": None if target_node is not None else self.recovery_hints(target_title, limit=3),
+            "path": None,
         }
         result = {
             "query": {"source": source_title, "target": target_title},
@@ -895,7 +896,7 @@ class SQLiteStore:
             "paths": [],
             "path_count": 0,
             "truncated": False,
-            "recovery_hints": recovery_hints if recovery_hints["source"] or recovery_hints["target"] else None,
+            "recovery_hints": _nonempty_recovery_hints(recovery_hints),
         }
         if source_node is None or target_node is None or limit == 0:
             return result
@@ -963,7 +964,45 @@ class SQLiteStore:
         result["path_count"] = len(result["paths"])
         if queue and len(paths) >= limit:
             result["truncated"] = True
+        if not result["paths"]:
+            recovery_hints["path"] = self._path_no_path_recovery_hints(
+                source_title,
+                target_title,
+                max_depth=max_depth,
+                truncated=bool(result["truncated"]),
+            )
+            result["recovery_hints"] = _nonempty_recovery_hints(recovery_hints)
         return result
+
+    def _path_no_path_recovery_hints(
+        self,
+        source_title: str,
+        target_title: str,
+        *,
+        max_depth: int,
+        truncated: bool,
+        related_limit: int = 3,
+        backlinks_limit: int = 3,
+    ) -> dict[str, Any]:
+        return {
+            "reason": "search_truncated" if truncated else "no_path_within_max_depth",
+            "max_depth": max_depth,
+            "next_max_depth": max_depth + 1,
+            "related_limit": related_limit,
+            "backlinks_limit": backlinks_limit,
+            "source_link_stats": self.link_stats(source_title),
+            "target_link_stats": self.link_stats(target_title),
+            "source_related": self.related(source_title, limit=related_limit),
+            "target_related": self.related(target_title, limit=related_limit),
+            "source_backlinks": [
+                edge.to_dict()
+                for edge in self.backlinks(source_title, limit=backlinks_limit)
+            ],
+            "target_backlinks": [
+                edge.to_dict()
+                for edge in self.backlinks(target_title, limit=backlinks_limit)
+            ],
+        }
 
     def _resolve_graph_node(self, title: str) -> dict[str, Any] | None:
         page = self.resolve_page(title)
@@ -2277,6 +2316,11 @@ def _search_positive_terms(expression: SearchExpression, *, positive: bool = Tru
 def _normalized_unique_terms(terms: list[str]) -> list[str]:
     normalized_terms = [normalize_title(term) for term in terms if normalize_title(term)]
     return list(dict.fromkeys(normalized_terms))
+
+
+def _nonempty_recovery_hints(recovery_hints: dict[str, Any]) -> dict[str, Any] | None:
+    compact = {key: value for key, value in recovery_hints.items() if value}
+    return compact or None
 
 
 def _write_metadata(connection: sqlite3.Connection, values: dict[str, str]) -> None:

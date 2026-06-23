@@ -48,6 +48,7 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
+| `1.5.7` | schema `5` | 2026-06-24 | schema `5` compatible | `path` の no-path negative-result contract を追加。端点が resolve できるが bounded search で経路が見つからない時、`recovery_hints.path` に reason / next_max_depth / related / backlinks / link-stats を返す |
 | `1.5.6` | schema `5` | 2026-06-24 | schema `5` compatible | `search` の既定を空白も含む literal line substring に戻し、`--mode boolean` と `--scope line|page` を追加。boolean は AND/OR/NOT、括弧、quoted phrase、隣接 term の implicit AND を扱う。旧 page 単位 AND は `--mode boolean --scope page` で明示 |
 | `1.5.5` | schema `5` | 2026-06-24 | schema `5` compatible | `related` 空結果に `recovery_hints` を追加。`path <A> <B>` を追加し、pages ∪ unresolved targets を node、materialized internal links を無向 edge として `--max-depth` bounded な shortest path と根拠 line を返す |
 | `1.5.4` | schema `5` | 2026-06-23 | schema `5` compatible | `read --related-snippets` / `--related-snippet-lines N` を追加。related 2-hop / missing target の source pages に先頭 N 行（default 5）を `snippet_lines` として同梱し、Cosense related pane 風の近傍読解を 1 call で行えるようにした |
@@ -64,6 +65,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.5.6`
+- Current public compatibility version: `1.5.7`
 - Current internal `SCHEMA_VERSION`: `5`
-- Current package metadata should match `1.5.6`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.5.7`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

@@ -74,7 +74,7 @@ description: >-
 → `grasp related <title>`。existing page なら 2-hop ページ、page なし target ならそれを参照する source pages。
 
 ### 「この概念とこの概念はどう繋がるか」
-→ `grasp path <A> <B> --max-depth 4`。pages と page なし target をどちらも node として扱い、materialized internal links を無向 edge として短い経路を返す。経路の edge には根拠 line が付くので、bridge が意味的に妥当かを確認する。密な hub では展開が大きくなるため、まず `--max-depth 4 --limit 1` で見る。
+→ `grasp path <A> <B> --max-depth 4`。pages と page なし target をどちらも node として扱い、materialized internal links を無向 edge として短い経路を返す。経路の edge には根拠 line が付くので、bridge が意味的に妥当かを確認する。密な hub では展開が大きくなるため、まず `--max-depth 4 --limit 1` で見る。端点は見つかったが経路が無い時も `recovery_hints.path` に次に試す depth、related、backlinks、link-stats が入るので、単なる不在として扱わない。
 
 ### 被リンクの濃さだけ知りたい / その概念が既出か
 → `grasp link-stats <title>`。incoming `link_count` と 0/1/N（none/single/multi）。
@@ -111,7 +111,7 @@ description: >-
 | `suggest <partial>` | タイトル補完 |
 | `backlinks <title>` | 行レベル逆リンク（page なし target も） |
 | `related <title>` | 2-hop ページ / page なし target の source pages |
-| `path <A> <B>` | pages / page なし target 間の短いリンク経路 |
+| `path <A> <B>` | pages / page なし target 間の短いリンク経路（no-path 時も recovery hints） |
 | `link-stats <title>` | incoming link count と 0/1/N |
 | `unresolved` | 未解決 target の rank view（TODO ではない） |
 | `peek <title>` | 本文行のみ |

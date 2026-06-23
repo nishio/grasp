@@ -116,7 +116,7 @@ grasp read "<ページタイトル>"
 | `suggest <partial>` | タイトルの部分一致補完 |
 | `backlinks <title>` | 行レベルの逆リンク（本文の無いターゲットにも効く） |
 | `related <title>` | 既存ページなら 2-hop ページ、本文の無いターゲットならそれを参照する source ページ |
-| `path <A> <B>` | 2つのページ / 未解決ターゲットがリンクグラフ上でどう繋がるかを短い経路で見る |
+| `path <A> <B>` | 2つのページ / 未解決ターゲットがリンクグラフ上でどう繋がるかを短い経路で見る。経路なしでも related / backlinks などの recovery hints を返す |
 | `link-stats <title>` | incoming リンク数と 0 / 1 / N（none / single / multi）区別 |
 | `unresolved` | 本文の無いリンクターゲットをランク付けして一覧（後述の注意あり） |
 | `peek <title>` | 本文行のみ（近傍は返さない） |
