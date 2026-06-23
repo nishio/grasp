@@ -1,5 +1,9 @@
 # Log
 
+## [2026-06-23 20:53] file back | README を「AI が主たるユーザ」前提で再センタリング
+- nishio 指示「主たるユーザは CLI を直接叩かず、AI に Skill として入れて AI が CLI を使う」を [[delivery-cli-plus-skill]] に Update として固定（「AI＝設計上のユーザ」の human-facing copy への operationalize）。README lede が「主たる使い方は `grasp` コマンドを叩くことではない」を明示、install に skill symlink を first-class step 化、quickstart の主経路を `grasp read` 直叩きでなく「AI に聞く」に。
+- あわせて user docs hygiene を記録: ジャーゴン（"before Co-" 等）と内部 dev wiki（SPEC / decisions）への導線をユーザ向け README に出さない（F1 README で適用済み, [[v1-todo]]）。
+
 ## [2026-06-23 20:52] lint | `stats` README 説明粒度 file back 後の wiki lint
 - `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。既存の孤立 `v1-todo` は index 登録済みのまま。
 

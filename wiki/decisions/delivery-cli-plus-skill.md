@@ -53,3 +53,14 @@ cosense の `read-page.md` が長いのは、hosted/多人数ゆえ **traversal 
 - trigger 語の具体（「思い出して」「関連は」「何が未解決か」「この概念どこで言及した」等）。over-trigger と under-trigger の調整。
 - MCP を将来併設するか（cosense は CLI+Skill と MCP server の両方を持つ）。当面は不要。
 - write/identity 層が入った時の Skill 拡張（cosense の edit-page.md 相当。`[[...]]` write 記法の説明はここで初めて要る）。
+
+## Updates
+
+### 2026-06-23: README/onboarding は「人間＝CLI operator」前提を外す
+
+nishio 指示「**主たるユーザは CLI を直接叩くのではなく、AI に Skill としてインストールして AI が CLI を使う**」。本 decision の「AI＝設計上のユーザ」（[[why-not-scrapbox-clone]] 人間 UI なし）を **human-facing copy に operationalize** したもの。F1 README（[[v1-todo]]）で反映:
+
+- lede が「主たる使い方は `grasp` コマンドを叩くことではない」を明示。人間は (1) AI エージェント（Claude Code 等）に Skill を登録し、(2) 自然言語で AI に問いかける主体、(3) CLI は AI が裏で呼ぶ基盤、と位置づける。
+- install は「CLI を PATH に通す」＋「skill を `~/.claude/skills/grasp` に symlink」を first-class な2ステップに。quickstart の主経路は `grasp read` 直叩きでなく「AI に聞く」。
+
+**How to apply**: 今後の README / docs / GTM copy で、人間が verb を覚えて叩くフローを主役に据え直さない。CLI surface の詳細（出力フォーマット等）は人間向け本文に展開せず `grasp <verb> --help` / `--json` に寄せる（本 decision の mechanics SSoT 方針と同根）。ユーザ向け docs にはジャーゴン（"before Co-"・CRDT 等）や内部開発 wiki（SPEC / decisions）への導線を出さない。
