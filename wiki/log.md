@@ -1,5 +1,18 @@
 # Log
 
+## [2026-06-23 21:54] lint | 長大ページ subagent 委譲 file back 後の検証
+- `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。
+- `python3 -m unittest discover -s tests` OK（20 tests）。`git diff --check` OK。
+- 既存の孤立ページ警告 `multi-project-store` は継続（index 登録済み）。
+
+## [2026-06-23 21:52] file back | 長大ページ処理の責務を Skill / subagent 側に寄せる判断
+- Claude Code / OpenCode 系 harness の shell output は tool result として model に返るが、大きい出力は harness 側で truncate され full output file への導線を返す。subagent は独立 context で探索し、親 conversation には最終結果だけを返す。
+- ∴ P0-2 long page navigation は CLI に WebFetch 風 summarizer を入れる話ではなく、Skill が長大ページ探索を subagent / Explore agent に委譲し、親には要約・根拠 page・line-id だけ返す運用を持つのが本筋、と [[delivery-cli-plus-skill]] / [[grasp-backlog]] に file back。
+
+## [2026-06-23 21:52] implementation | Skill に長大ページの subagent 委譲手順を追加
+- `skills/grasp/SKILL.md` に「長大ページ・ログページを読む」節を追加。親 conversation に長い `read` 出力を直接持ち込まず、探索用 subagent / Explore agent が `search` / `peek` / limit 付き `read` を使って読み、親には結論・根拠ページ・該当 `line_id`・短い引用/要約だけ返す、と明記。
+- CLI は LLM 依存の要約をしない deterministic graph reader として維持し、`search --context N` / `read --around-line <line-id>` は実運用で不足が出た時の bounded primitive 候補に留める。
+
 ## [2026-06-23 21:52] lint | persona1 P0 friction file back 後の wiki lint
 - `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。
 - 既存の孤立ページ警告 `multi-project-store` は継続（index 登録済み）。

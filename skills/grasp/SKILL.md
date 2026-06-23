@@ -57,6 +57,12 @@ description: >-
 → `grasp search <query>` で**本文行**を検索（行レベル hit）し、良さそうな `source_title` を `grasp read` で開く。タイトルの当たりが付くなら `grasp suggest <partial>`（タイトル補完）。
 - `search` はリテラル substring 検索。OR 検索は無いので、語を分けて複数回叩く。
 
+### 長大ページ・ログページを読む
+→ 親 conversation に長い `read` 出力を直接持ち込まない。まず探索用 subagent / Explore agent に任せ、subagent 側で `search` / `peek` / limit 付き `read` を使って読む。
+- 親に返すのは、結論・根拠ページ・該当 `line_id`・必要な短い引用/要約だけにする。中間の大量 stdout、長大本文、網羅的検索結果は subagent context に閉じ込める。
+- CLI 側は要約しない。grasp は LLM 依存の summarizer ではなく、行 ID 付きの deterministic graph reader。要約と取捨選択は Skill / subagent の責務。
+- 長大ページを直接開く必要がある時も、先に `grasp search <query>` で hit line を見つけ、`grasp read <title> --line-limit <N>` などで範囲を絞る。親へ戻す時は再アクセスできる `source_title` と `line_id` を残す。
+
 ### 「この概念にどこで言及したか」
 → `grasp backlinks <title>`（`(source_title, line-id, 行テキスト)`）。`read` の Backlinks 節と同じものを単体で。page が無い概念にも効く。
 

@@ -31,11 +31,15 @@ sources:
 
 現状: 長大ログ page の default `read` は CLI 一括出力として多すぎることがある。
 
+2026-06-23 21:52 判断: P0 としては CLI に summarizer を持たせない。Claude Code / OpenCode のような harness は大きい shell output を truncate / 保存し、subagent は中間 tool output を親 conversation へ返さない。したがって長大ページの読解はまず Skill 側で subagent / Explore agent に委譲し、親には要約・根拠 page・line-id だけを返す。詳細は [[delivery-cli-plus-skill]]。
+
 候補:
 
 - `search --context N`
 - `read --around-line <line-id>`
 - `peek --line-offset`
+
+これらは Skill/subagent 運用で不足が見えた時に足す bounded primitive。LLM 要約は CLI ではなく agent 層の責務。
 
 ## Markdown / Obsidian indexed mirror
 
