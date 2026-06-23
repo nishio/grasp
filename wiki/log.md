@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-24 02:36] file back | KJ法 hub の desired state を明文化
+- [[kj-link-hub-audit-2026-06-24]] に、改善後の姿を「`[KJ法]` を増やす」ではなく **root link + 用途別 slice handle** に分岐することとして追記した。
+- 具体例: `[KJ法]` は KJ法そのもの・川喜田二郎・原理・全体像に残し、通常言及は `表札づくり` / `グループ編成` / `考える花火` / `Kozaneba` / `探検ネット` / `AIにKJ法を教える` へ逃がす。本文の `KJ法` は bare text のままでよく、link は後で読みたい retrieval handle に付ける。
+- [[grasp-backlog]] の `gather` 候補に success contract を追加: huge hub banner、exact / bare mention counts、top co-link slices、unlinked mention candidates、`co-links` / `mentions --unlinked` recipes、AI clustering handoff 用 bounded rows を返す。
+
 ## [2026-06-24 02:30] file back | search hit に bounded context を同梱
 - `search --context N` を追加し、検索 semantics は literal / boolean / scope とも既存のまま、返却 hit に前後 N 行の `context_lines[]` と `context_window` を同梱する形にした。
 - text 出力では hit 直下に `context: lines A-B` と周辺行を表示する。JSON では `context` top-level と per-hit context fields を返す。既定 `context=0` では既存 hit に context fields を付けない。

@@ -183,11 +183,14 @@ line_tombstones(project, id, page_id, deleted_at, last_text?)
 
 2026-06-24 KJ法 hub audit（[[kj-link-hub-audit-2026-06-24]]）で、巨大 hub は単に backlinks が多いだけでなく、**リンク化を避けた bare mention が graph 外に大量にある**ことが分かった。`KJ法` は exact `[KJ法]` 151 links / 144 pages だが、literal `KJ法` は 681 pages / 2,333 lines / 2,765 occurrences、body bare mention は 490 pages / 1,777 lines / 2,156 occurrences。全部リンク化すると hub を悪化させるため、`gather` は「リンク済み backlinks」だけでなく、bare mention / co-link slice / omitted count を扱う必要がある。
 
+2026-06-24 追加判断: 改善の成功条件は「`[KJ法]` backlinks が増える」ことではなく、`KJ法` が **root link + 用途別 slice handle** に分岐すること。`[KJ法]` は KJ法そのもの・原理・全体像に残し、通常言及は `表札づくり` / `グループ編成` / `考える花火` / `Kozaneba` / `探検ネット` / `AIにKJ法を教える` などの narrower handle へ逃がす。agent が `[KJ法]` hub 全体を読まず、最初に 5-10 個の use cluster / slice を見て必要な slice だけ読める状態を success とする。
+
 未実装候補:
 
 - `mentions <query>` or `search --mentions --link-gap`: literal mentions outside parsed internal-link spansを、page already has exact link / no exact link / no query-containing link target で分けて返す。目的は bulk link 化ではなく、link gap と意図的 non-link を見分けること。
 - `co-links <query>` or `backlinks --co-links`: query を含む行で同時に出る internal links を rank し、巨大 hub の slice handle を出す。`KJ法` では `考える花火` / `こざね法` / `グループ編成` / `探検ネット` / `付箋` / `川喜田 二郎` / `発想法` / `表札*` が自然な絞り込み軸だった。
-- `gather` は huge hub を token budget 内で扱う時、ranked backlink lines + representative co-link slices + bare mention samples + omitted counts を返す。
+- `gather` は huge hub を token budget 内で扱う時、ranked backlink lines + representative co-link slices + bare mention samples + omitted counts を返す。例: `gather KJ法` は huge hub banner、exact link count、body bare mention count、top slices、unlinked mention candidates、次に実行すべき `co-links` / `mentions --unlinked` recipes を返す。
+- AI clustering handoff: CLI は固定 cluster label を確定しないが、AI が `表札` / `ツール` / `AI応用` / `講義資料` などへ仮分類できるだけの bounded rows と sample provenance を返す。
 
 ## Graph-native reasoning primitives（AI consumer Tier 3）
 
