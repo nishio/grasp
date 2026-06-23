@@ -58,6 +58,12 @@ cosense の `read-page.md` が長いのは、hosted/多人数ゆえ **traversal 
 
 ## Updates
 
+### 2026-06-24: `/ship-next` と Skill の応答言語は日本語運用に寄せる
+
+grasp repo の開発ループは wiki 自体が日本語で、nishio との運用会話も日本語なので、`/ship-next` の最終 summary / "what's next?" は日本語で返す。Skill 側もユーザの言語に合わせ、nishio/grasp の開発 wiki や ship loop について答える時は日本語を default にする。
+
+加えて、この repo の `wiki/` を Markdown mirror の dogfood corpus にする方針は backlog 化済みだが、mirror はまだ未実装。Skill は現時点で `wiki/` を `grasp import --cosense` に渡すよう誘導せず、通常の file/rg/lint で読む。将来 mirror が入る時は `[[...]]` を grasp 内 edge、バックティックのプレーン名を親 wiki 参照の非 edge として扱う。
+
 ### 2026-06-23: 長大ページ処理は CLI 要約でなく Skill / subagent の責務
 
 P0-2「long page navigation」は、CLI に WebFetch 風 summarizer を入れる話ではない。Claude Code / OpenCode 系 harness では Bash / shell output は tool result として model に返るが、大きい出力は harness 側で truncate され、full output は session-local file に保存される。さらに subagent は独立 context window で探索し、親 conversation には最終結果だけを返す。∴ 長大ページ・ログページを読む時の基本方針は **Skill が subagent / Explore agent に探索を委譲し、親には要約・根拠 page・line-id だけを返す**。

@@ -33,6 +33,7 @@ description: >-
   ```
 
 - store が無い、または指定 JSON が見つからない場合は、勝手な別データで代用せず、JSON export path か store path を確認する。
+- ユーザが Markdown / Obsidian folder、またはこの repo の `wiki/` を調べたいだけの場合、現時点では Markdown mirror は未実装。`grasp import --cosense` に folder を渡して代用しない。通常の file/rg/lint で読む。将来 mirror が入る時、この repo の `wiki/` では `[[...]]` を grasp 内リンクの edge、バックティックのプレーン名を親 wiki 参照の非 edge として扱う方針。
 
 ## grasp とはどういう物か
 
@@ -133,6 +134,7 @@ description: >-
 
 - 情報源（ページタイトル）を示しながらユーザーの問いに直接答える。
 - 本文の無い概念について答える時は「本文なし、関連 N ページの文脈から」と限界を明示する。
+- 回答言語はユーザの言語に合わせる。nishio/grasp の開発 wiki や `/ship-next` 運用について答える時は、特に指定がなければ日本語で簡潔に返す。
 - 固定テンプレートは規定しない。
 
 ## hosted Cosense との使い分け

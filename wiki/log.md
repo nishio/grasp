@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-24 00:33] implementation | `/ship-next` と Skill の日本語応答方針を反映
+- nishio 指摘「日本語で(skillも更新しといて)」を受け、`.claude/commands/ship-next.md` の最終 summary / "what's next?" を日本語で返す運用に更新。
+- `skills/grasp/SKILL.md` の回答形式に「ユーザの言語に合わせ、nishio/grasp の開発 wiki / ship loop は日本語 default」を追記。
+- 併せて、Markdown mirror は未実装なので、この repo の `wiki/` を読む時に `grasp import --cosense` で folder を代用しないこと、将来 mirror では `[[...]]` を grasp 内 edge、バックティックのプレーン名を親 wiki 非 edge と扱うことを Skill / [[delivery-cli-plus-skill]] に反映。
+
 ## [2026-06-24 00:24] file back | grasp wiki 自身を Markdown mirror 層の最初の dogfood corpus にする動機 ＋ dual-link policy 論点を backlog に追記
 - nishio 「いつかのタイミングでこのプロジェクトの wiki 自体をこのシステムで作りたい」を受け、[[grasp-backlog]] の Markdown / Obsidian indexed mirror 節に小節を追加。
 - 動機: grasp wiki（`wiki/`, Markdown+frontmatter+`[[...]]`）を mirror 層の最初のテスト corpus にすると「設計判断グラフを近傍同梱で辿りながら次を実装する」ループが閉じる。段階は read-only mirror が write 層より先。

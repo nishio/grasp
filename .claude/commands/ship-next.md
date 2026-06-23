@@ -1,6 +1,6 @@
 ---
 allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(python3 -m unittest discover -s tests:*), Bash(python3 scripts/lint_wiki.py:*), Bash(git diff --check:*), Bash(date:*), Bash(rg:*), Bash(sed:*), Read, Edit, MultiEdit, TodoWrite
-description: File back grasp work, commit, push, and propose what to build next
+description: File back grasp work, commit, push, and propose what to build next in Japanese
 ---
 
 ## Context
@@ -12,7 +12,7 @@ description: File back grasp work, commit, push, and propose what to build next
 
 ## Your task
 
-Close the current grasp work loop: **file back, verify, commit, push, then answer "what's next?"**
+Close the current grasp work loop: **file back, verify, commit, push, then answer "what's next?" in Japanese**
 
 Follow these steps:
 
@@ -29,11 +29,11 @@ Follow these steps:
    - `git diff --check`
    - If relevant, run one small dogfood command and file back any important observation.
 4. Stage all intentional changes, commit once with a concise message, and push the current branch to `origin`.
-5. Finish with a short summary:
+5. Finish with a short Japanese summary:
    - commit hash and pushed branch
    - verification results
    - any caveat or known residual risk
-   - "What's next?" with the top 1-3 concrete next implementation candidates from `wiki/grasp-backlog.md`, ordered by current leverage.
+   - "次にやるなら" with the top 1-3 concrete next implementation candidates from `wiki/grasp-backlog.md`, ordered by current leverage.
 
 Constraints:
 
