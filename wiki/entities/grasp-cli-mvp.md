@@ -19,6 +19,7 @@ sources:
 python3 -m grasp wanted --limit 10
 python3 -m grasp backlinks 盲点 --limit 5
 python3 -m grasp read 盲点カード --line-limit 8 --backlinks-limit 3 --related-limit 3 --wanted-limit 3
+python3 -m grasp search 盲点 --limit 5
 python3 -m grasp --json backlinks 盲点 --limit 2
 ```
 
@@ -34,6 +35,7 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 - `read <title>`: 本文 lines + line-level backlinks + deterministic 2-hop related + page-local wanted。
 - `backlinks <title>`: `(source_page, line-id, line_text)`。red link target にも効く。
 - `wanted`: 未作成 target を ranking して返す。
+- `search <query>`: 本文行を substring 検索し、`(page, line-id, line_text)` を page.views 優先で返す。
 - helper: `related`, `peek`, `suggest`。MVP 必須ではないが read-only なので追加。
 
 ## data model 実装
@@ -79,7 +81,7 @@ MVP parser は以下を link としない:
 [[cosense-cli]] との実測比較で優先順位が確定（→ [[SPEC]] 次マイルストーン）:
 
 - ~~on-disk store/cache ★最優先~~ → SQLite store 実装済み。edge/materialized wanted を on-disk 永続し、通常 read は JSON parse しない。
-- **本文検索 `search`**: `suggest` はタイトル部分一致のみ。cosense `searchFullText` 比で recall が桁違い（`盲点`: 8 件 vs 100 件）。行レベル（page, line-id, 行テキスト）で返す verb を追加。
+- ~~本文検索 `search`~~ → 実装済み。SQLite `lines.text LIKE` で行本文を検索し、行レベル hits を返す。
 - parser false-positive 修正: `[** x]` 系装飾（`** 深い思考` count 59）が `wanted` を汚す。decoration 判定を複数 `*-_` 群対応に拡張。あわせて false-negative（短い英数字 title）監査。
 - `#tag` を page link と同等に扱うか。
 - line context window: backlink は現状 hit line のみ。前後行を付けるか。

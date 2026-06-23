@@ -75,6 +75,10 @@ class SQLiteStoreTests(unittest.TestCase):
                 backlinks = store.backlinks("b")
                 self.assertEqual([edge.source_title for edge in backlinks], ["A", "C"])
 
+                hits = store.search("links", limit=2)
+                self.assertEqual([hit["source_title"] for hit in hits], ["A", "B"])
+                self.assertEqual(hits[0]["line_id"], "aaaaaaaaaaaaaaaaaaaaaaaa:1")
+
                 wanted = store.wanted()
                 self.assertEqual(wanted[0]["title"], "Missing")
                 self.assertEqual(wanted[0]["count"], 2)

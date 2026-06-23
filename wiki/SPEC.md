@@ -70,6 +70,7 @@ MVP（step 1）は実装・smoke 済み。`cosense` との実測比較（[[cosen
 - 受け入れ: 2 回目以降の `read` / `backlinks` / `wanted` が sub-second。store は M2-4 の差分更新を見据え **upsert 可能**に設計する（immutable index にしない）。
 
 ### M2-2. `search <query>` — 本文検索（cosense 比較で最大の機能差）
+- Status 2026-06-23: **実装済み**。SQLite `lines.text LIKE` で本文行を検索し、行レベル hits を返す。
 - 問題: `suggest` は**タイトル部分一致のみ**。cosense `searchFullText` は本文ヒットで recall が桁違い（`盲点`: grasp 8 件 vs cosense 100 件）。
 - やること: 行本文を対象にした substring/full-text 検索 verb を追加。返却は backlinks と同じ **行レベル `(page, line-id, 行テキスト)`** に揃える（行リンク機構を再利用）。
 - ranking: 暫定で page.views → 出現順。`suggest`（title 補完）は別 verb として残す。
@@ -97,6 +98,7 @@ write / transclude / rename（identity 層）・Markdown import adapter・vector
 | `related <title>` | 2-hop ページ（リンクを共有するページ） | 2-hop 表示 |
 | `peek <title>` | 本文だけ（飛ばずプレビュー） | リンク hover |
 | `suggest <partial>` | title 補完候補 | `[[` 補完 |
+| `search <query>` | 本文行検索。`(page, line-id, 行テキスト)` のリスト | 全文検索 |
 | `wanted` | 未作成 link target 一覧（自己宛キュー） | 赤リンク |
 | `write <title> <body>` | ページ作成 / 更新 ＋ グラフ自動更新 | 編集 |
 | `transclude <line-id>` | 行の埋め込み / 参照 | 行参照 |

@@ -337,6 +337,39 @@ class SQLiteStore:
         ).fetchall()
         return [self._page_from_row(row).to_summary() for row in rows]
 
+    def search(self, query: str, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        like = f"%{_escape_like(query)}%"
+        rows = self.connection.execute(
+            """
+            SELECT
+              page.id AS source_page_id,
+              page.title AS source_title,
+              page.views AS source_views,
+              page.updated AS source_updated,
+              line.line_id,
+              line.line_index,
+              line.text AS line_text
+            FROM lines line
+            JOIN pages page ON page.id = line.page_id
+            WHERE line.text LIKE ? ESCAPE '\\'
+            ORDER BY page.views DESC, COALESCE(page.updated, 0) DESC, page.title, line.line_index
+            LIMIT ? OFFSET ?
+            """,
+            (like, limit, offset),
+        ).fetchall()
+        return [
+            {
+                "source_page_id": row["source_page_id"],
+                "source_title": row["source_title"],
+                "source_views": row["source_views"],
+                "source_updated": row["source_updated"],
+                "line_id": row["line_id"],
+                "line_index": row["line_index"],
+                "line_text": row["line_text"],
+            }
+            for row in rows
+        ]
+
     def read(
         self,
         title: str,

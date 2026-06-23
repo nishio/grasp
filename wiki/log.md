@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-23 18:14] implementation | M2-2 行レベル本文検索 `search` を追加
+- `grasp search <query>` を追加。SQLite `lines.text LIKE` で本文行を検索し、`source_page_id/title/views/updated`, `line_id`, `line_index`, `line_text` を返す。text output は backlinks と同じ行リスト形式、`--json` 対応。
+- ranking は SPEC 通り暫定: page.views → updated → title → line_index。`suggest` は title 補完として維持。
+- 検証: `python3 -m unittest discover -s tests` OK。実データ `search 盲点 --limit 5` は約 0.7 秒で行レベル hits を返した。
+
 ## [2026-06-23 18:12] implementation | M2-1 SQLite on-disk store を実装
 - `grasp import --force` と `--store` / `--rebuild-store` を追加。default store は `.grasp/grasp.sqlite`（gitignored）。通常 command は store が存在すれば `raw/nishio.json` を再 parse しない。
 - SQLite schema: `metadata`, `pages`, `lines`, `edges`, `wanted`。`wanted` は import 時に materialize（毎回 group-by しない）。`Page.line_count` は SQLite row 由来の `stored_line_count` を持てるようにした。

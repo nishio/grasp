@@ -74,6 +74,11 @@ def build_parser() -> argparse.ArgumentParser:
     suggest_parser.add_argument("partial")
     suggest_parser.add_argument("--limit", type=int, default=20)
 
+    search_parser = subparsers.add_parser("search", help="Search page body lines and return line-level hits.")
+    search_parser.add_argument("query")
+    search_parser.add_argument("--limit", type=int, default=50)
+    search_parser.add_argument("--offset", type=int, default=0)
+
     wanted_parser = subparsers.add_parser("wanted", help="List ranked red links.")
     wanted_parser.add_argument("--limit", type=int, default=50)
 
@@ -157,6 +162,14 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             "query": args.partial,
             "suggestions": store.suggest(args.partial, limit=args.limit),
         }
+    if args.command == "search":
+        hits = store.search(args.query, limit=args.limit, offset=args.offset)
+        return {
+            "query": args.query,
+            "hits": hits,
+            "count_returned": len(hits),
+            "offset": args.offset,
+        }
     if args.command == "wanted":
         return {
             "wanted": store.wanted(limit=args.limit),
@@ -177,6 +190,8 @@ def format_result(command: str, result: Any) -> str:
         return format_peek(result)
     if command == "suggest":
         return format_suggest(result["query"], result["suggestions"])
+    if command == "search":
+        return format_search(result["query"], result["hits"], result.get("offset", 0))
     if command == "wanted":
         return format_wanted(result["wanted"])
     return json.dumps(result, ensure_ascii=False, indent=2) + "\n"
@@ -285,6 +300,16 @@ def format_suggest(query: str, suggestions: list[dict[str, Any]]) -> str:
     else:
         for page in suggestions:
             parts.append(f"- {page['title']} (views {page['views']}, lines {page['line_count']})\n")
+    return "".join(parts)
+
+
+def format_search(query: str, hits: list[dict[str, Any]], offset: int = 0) -> str:
+    parts = [f"# Search: {query}\n", f"offset: {offset}\n"]
+    if not hits:
+        parts.append("(none)\n")
+    else:
+        for hit in hits:
+            parts.append(f"- {hit['source_title']} {hit['line_id']}: {hit['line_text']}\n")
     return "".join(parts)
 
 
