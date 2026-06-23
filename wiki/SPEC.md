@@ -37,7 +37,7 @@ sources:
 「既存資産を読める」は native format でなく **import の責務**。native は独自のまま、複数の adapter で取り込む:
 - **初手（MVP の入力）= Cosense JSON export**。pages → lines ＋ リンク構造を既に持つ ＝ native モデルの自然な seed。
 - **最新化は export 反復でなく cosense-cli 差分更新**: 初回 export を seed、以降は cosense-cli で最近更新ページだけ取得して upsert（[[incremental-sync]]）。∴ import adapter は bulk seed と incremental delta の2モード（M2-4）。
-- 後で Markdown adapter も足せる（既存 llm-wiki 森 40+ を読める）。← native を Markdown にしなくても達成。
+- 後で Markdown / Obsidian adapter も足せる（既存 llm-wiki 森 40+ や persona2 の vault を読める）。これは folder を native store にするのでなく、**read-only indexed mirror** として取り込む（[[markdown-obsidian-indexed-mirror]]）。← native を Markdown にしなくても達成。
 - 実物の export で確定（スキーマ詳細は [[cosense-json-export]]）: ① **lines に安定 id は無い** → import 時に grasp が line-id を採番（原理4 と整合）。② **link graph は export に保存されない** → line.text を parse してエッジを materialize。③ link 構文 `[...]` は overloaded（内部リンクは 62.7%、残りは外部 URL / icon / 装飾 `[* ]` / cross-project `[/p/x]`）。`[[...]]` は **bold でリンクでない**（grasp の `[[wikilink]]` と逆）。④ リンク解決は normalize（case-insensitive ＋ 空白畳み込み）。
 - MVP parser は上記に加え、実データで code/list/decoration 記法が unresolved target 上位を汚すため **inline backtick 内・ASCII index 風 `xs[i]` / `func()[0]`・数字のみ `[1]`・連続 `*`/`-`/`_` 装飾 `[** x]` を link としない**。この strict parser で `raw/nishio.json` は 120693 edge / unresolved target 41750（先の 133022 / 61613 / 45703 は broad bracket 分類）。
 
@@ -53,7 +53,7 @@ sources:
 **Cosense JSON export 1ファイルを読み取り専用で CLI から扱う**。書き込み・identity 層・Markdown adapter は後。
 - import: Cosense export → 正規化（page/line/edge、line-id 採番）→ SQLite store。明示 import は `grasp import --cosense <json> --force`（future adapter と混同しないため source 名を option に出す）。暗黙 seed / legacy `--export` は持たない。
 - 実装: Python package `grasp`。`python3 -m grasp ...`（または console script `grasp`）で起動。store は単一 AI 所有の global home に 1 個（default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`）。`--json` は root option（verb の前）で機械可読出力。
-- 動詞: MVP 必須の `read`（近傍同梱）/ `backlinks`（行つき）/ `unresolved`（未解決 target ranking）に加え、read-only helper として `related` / `link-stats` / `peek` / `suggest` / `export-ai` も持つ。
+- 動詞: MVP 必須の `read`（近傍同梱）/ `backlinks`（行つき）/ `unresolved`（未解決 target ranking）に加え、read-only helper として `related` / `link-stats` / `peek` / `suggest` / `search` / `export-ai` も持つ。
 - read は lines[0]（Cosense title 行）を本文に残す。完全性と line-id 安定性を優先し、重複表示は formatter 側の問題として扱う。
 - `link-stats` は existing page / unresolved target の両方に対して incoming `link_count`, `source_page_count`, `link_multiplicity` (`none` / `single` / `multi`) を返す。
 - `related <existing-page>` は既存 page 間 edge の 2-hop pages を返す。`related <unresolved-target>` は 2-hop ではなく、その target へ link している source pages を返す。
@@ -63,7 +63,7 @@ sources:
 
 ## 次のマイルストーン（post-MVP / step 2, なお read-only）
 
-MVP（step 1）は実装・smoke 済み。`cosense` との実測比較（[[cosense-cli]]）で出た **2 つの差** を埋めるのが次。write / identity 層はまだ入れない（"before Co-" 維持）。優先順位はこの順。
+MVP（step 1）は実装・smoke 済み。`cosense` との実測比較（[[cosense-cli]]）で出た差を M2-1〜M2-4 で埋め、persona1 dogfooding（[[persona1-user-test-2026-06-23]]）で出た CLI 体験の摩擦を M2-5 に積む。write / identity 層はまだ入れない（"before Co-" 維持）。
 
 ### M2-1. on-disk store（SQLite or better）— latency 解消 ★最優先
 - Status 2026-06-23: **実装済み**。`~/.grasp/grasp.sqlite` global default、`grasp import --cosense <json> --force` で構築/再構築。通常 command は store があれば JSON を parse しない。`$GRASP_HOME` で home を差し替え可能。
@@ -91,8 +91,14 @@ MVP（step 1）は実装・smoke 済み。`cosense` との実測比較（[[cosen
 - 位置づけ: "Co-" でなく単一所有 mirror の最新化（[[why-not-scrapbox-clone]] スコープ内）。import adapter が bulk seed と incremental delta の2モードになる。
 - 前提: M2-1 の store が upsert 可能であること。
 
+### M2-5. persona1 dogfooding UX fixes（read-only）
+- Status 2026-06-23: **未実装**。[[persona1-user-test-2026-06-23]] で発見。
+- 問題1: 日本語表記ゆれや記憶違いで `read` / `link-stats` が missing + 0 incoming になると体験が切れる（例: `ユーザテスト` vs `ユーザーテスト`）。やること: zero-hit 時に `suggest <query>` と `search <query> --limit 3` 相当の recovery hints を返す。
+- 問題2: root option を verb 後に置く自然なミス（例: `grasp read 民主主義 --json`）が回復案なしの argparse error になる。やること: subcommand 後の `--json` を受ける、または error に `grasp --json read ...` の具体例を出す。
+- 問題3: 長大ログ page の default `read` が CLI では多すぎることがある。やること: search hit line から周辺本文へ移動する surface（候補: `read --around-line <line-id>`, `peek --line-offset`, `search --context N`）を検討する。
+
 ### この step でもまだスコープ外
-write / transclude / rename（identity 層）・Markdown import adapter・vector 検索。
+write / transclude / rename（identity 層）・Markdown / Obsidian indexed mirror adapter・vector 検索。
 
 ## CLI 動詞（surface）
 
@@ -119,11 +125,13 @@ write / transclude / rename（identity 層）・Markdown import adapter・vector
 ## Open Questions
 
 - ~~永続化形式~~ → **解決: 独自フォーマット**（[[persistence-custom-format]]）。読込は import adapter の責務に分離。
-- ~~独自 store の具体~~ → **SQLite store 実装済み**。MVP は in-memory から `.grasp/grasp.sqlite` へ移行。
+- ~~独自 store の具体~~ → **SQLite store 実装済み**。MVP は in-memory から `~/.grasp/grasp.sqlite` global store へ移行。
 - **read の近傍境界**: MVP は `--backlinks-limit` / `--related-limit` / `--unresolved-limit` の上位 N。ranking の妥当性（link count/views/recency の重み）は実利用で調整。
 - **Cosense link parser の厳しさ**: code/list/decoration 由来の false positive を避けるため strict にしたが、短い英数字タイトルなどの false negative は未監査。
 - **page id をいつ振るか**: 「必要時のみ ＝ 意味判断」の運用ルールを誰がどう発火するか。
 - **行リンクの文脈窓**: 該当行だけか、前後数行か。
+- **zero-hit recovery**: missing + 0 incoming の時に title suggestions / body search / 近い unresolved target をどう提示するか。
+- **root option recovery**: `--json` などを verb 後に置いた時に受理するか、明示的な回復メッセージに留めるか。
 - ~~Codex からの呼び方: 純 CLI か MCP server 化か~~ → **解決: CLI + Agent Skill**（[[delivery-cli-plus-skill]]）。MCP は当面採らない。`--help` を mechanics の SSoT、`skills/grasp/SKILL.md` が「いつ/どう使うか」を持つ。
 - **2-hop のコスト**: グラフが育ったとき related の計算量。
 

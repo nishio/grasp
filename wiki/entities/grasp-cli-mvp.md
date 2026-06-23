@@ -57,6 +57,8 @@ python3 -m grasp --json backlinks 盲点 --limit 2
 - `search` は SQLite FTS5 trigram を試したが、2文字日本語 query（例: `盲点`）は `MATCH` に乗らず、FTS table `LIKE` は一部日本語 substring（例: `盲点カード`）の recall を落とした。現状は correctness 優先で `lines.text LIKE` を維持。
 - Update 2026-06-23: 「link があるが page がない」こと自体は unresolved graph node と整理。互換性を考えず `wanted` command / JSON field / schema 名は削除し、`unresolved` / `unresolved_targets` に破壊的変更した。`link-stats` は missing target の 0/1/N を materialized `unresolved_targets` row から高速に返し、existing page は `edges.target_norm` index で count する。`related <missing-target>` は source pages を `relation=backlink-source` として返す。
 - Update 2026-06-23: argparse help を mechanics SSoT として拡張。root help は global options と SSoT 方針、各 subcommand help は arguments / Returns (`--json`) / Examples / Notes を持つ。`tests/test_cli_help.py` で全 command に Returns/Examples があることを固定。
+- Update 2026-06-23: store default を cwd-local `.grasp/grasp.sqlite` から `~/.grasp/grasp.sqlite` に寄せた。`$GRASP_HOME` で home を差し替え可能。理由は「単一 AI が所有する local graph store」というモデルに合わせ、どの cwd からも flag なしで同じ store を読むため。暗黙 seed は持たず、store 作成は `grasp import --cosense <json> --force` に一本化。
+- Update 2026-06-23: [[persona1-user-test-2026-06-23]] で dogfooding UX の摩擦を記録。価値の核（`read=近傍同梱`, page なし target を source pages で読む）は成立。残課題は (1) missing + 0 incoming 時の recovery hints（例: `ユーザテスト` vs `ユーザーテスト`）、(2) verb 後 `--json` の回復、(3) search hit line から周辺本文へ行く surface。
 
 ### FTS5 trigram 検証メモ（2026-06-23）
 
@@ -124,6 +126,9 @@ MVP parser は以下を link としない:
 - ~~本文検索 `search`~~ → 実装済み。SQLite `lines.text LIKE` で行本文を検索し、行レベル hits を返す。
 - ~~parser false-positive 修正~~ → `[** x]` 系装飾は除外済み。false-negative（短い英数字 title）監査は残る。
 - **cosense-cli 差分更新**: `grasp sync` 実装済み。削除/rename tombstone は未対応。
+- missing + 0 incoming の時の recovery hints（`suggest` / `search` / 近い unresolved target）。
+- verb 後に置かれた root option（特に `--json`）の受理 or friendly error。
+- search hit line から周辺本文へ移動する surface（`read --around-line`, `peek --line-offset`, `search --context` など）。
 - `#tag` を page link と同等に扱うか。
 - line context window: backlink は現状 hit line のみ。前後行を付けるか。
 - `unresolved` ranking の重み調整: link count/views/recency の順で十分かは利用で検証。
