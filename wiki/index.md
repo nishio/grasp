@@ -12,6 +12,7 @@ Codex が実装し、本 wiki が実装済み事実・backlog・設計判断・g
 | [why-not-scrapbox-clone](decisions/why-not-scrapbox-clone.md) | なぜこの形か。Scrapbox 忠実 clone でなく identity-without-name を足したあるべき姿を作る（内部呼称 design B） |
 | [persistence-custom-format](decisions/persistence-custom-format.md) | 保存形式は独自フォーマット（Markdown ではない＝逆リンク維持の発生源）。読込は import adapter の別責務。on-disk store = SQLite（or better） |
 | [incremental-sync](decisions/incremental-sync.md) | 最新化は export 反復でなく初回 seed＋cosense-cli で最近更新ページのみ差分 upsert。cosense-cli は比較対象から freshness 経路へ昇格（post-MVP） |
+| [multi-project-store](decisions/multi-project-store.md) | 複数 Cosense JSON export は同じ graph に merge せず、1つの SQLite store 内で project name namespace ごとに保持する |
 | [delivery-cli-plus-skill](decisions/delivery-cli-plus-skill.md) | AI に使わせる面 = CLI + Agent Skill（cosense-cli パターン）。旧 SPEC Open Q「純 CLI か MCP か」を決着。`--help`=mechanics SSoT / SKILL.md=いつ・どう使うか。read=近傍同梱が Skill を薄くする |
 | [language-and-distribution](decisions/language-and-distribution.md) | 実装言語と配布チャネルは別軸。言語論点は実測で溶ける（仕事は全部 SQLite、warm store で起動 ~30ms・read ~83ms）。当面 Python+pipx、native(Go/Rust)→npm は「Python 不要 agent 環境」trigger 待ち。SQLite store 契約が段階移行を de-risk |
 | [positioning-two-personas](decisions/positioning-two-personas.md) | audience は2層。driver=persona1（JP Cosense ヘビーユーザ＝nishio dogfooding）／upside-risk=persona2（世界の Markdown 束ユーザ）。substrate 共有・value prop と on-ramp は別。persona2 は addition（Markdown adapter＋英語 docs＋一般化 pitch）で狙い設計は曲げない。GTM=HN/Reddit、lede は「Markdown 束でなく local graph store」 |

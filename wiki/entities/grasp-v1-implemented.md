@@ -22,6 +22,7 @@ v1 = **エクスポート済み Scrapbox / Cosense JSON を、AI が CLI + Agent
 実装済み:
 
 - Cosense JSON export を `grasp import --cosense <json>` で SQLite store に materialize する。
+- 1つの SQLite store に複数 Cosense project を `project` namespace で保持する。project 内の graph は混ぜない。
 - `read` が本文だけでなく、行レベル backlinks・related・page-local unresolved targets を一体で返す。
 - page が存在しない linked target も graph node として扱い、`backlinks` / `related` / `link-stats` で source context を読める。
 - home 配下の global store 1 個を default にする。
@@ -44,17 +45,19 @@ v1 scope 外:
 ## store
 
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
-- `grasp import --cosense <json>` は初回構築と再構築を兼ねる。既存 store は確認なしで置き換える。
+- project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
+- `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
+- 既存 v4 store への import は他 project を保持する。古い schema の store に import する時は v4 schema として作り直す。
 - legacy `--export` / `--rebuild-store` / `--force` / 暗黙 seed は v1 surface には無い。
-- SQLite schema は pages / lines / edges / unresolved_targets / unresolved_target_examples を持つ。
-- `stats` は store path, schema version, source export, imported_at, counts などを返す。
+- SQLite schema は projects / pages / lines / edges / unresolved_targets / unresolved_target_examples を持つ。pages/lines/edges/unresolved は project 列で namespace 化し、page id / line id は project と組にした複合 key で扱う。
+- `stats` は store path, selected project, project list, schema version, source export, imported_at, counts などを返す。project 未指定かつ複数 project がある時は aggregate counts と `projects[]` を返す。
 
 ## commands
 
 | command | v1 implemented behavior |
 |---|---|
-| `import --cosense <json>` | Cosense JSON export から SQLite graph store を構築・置換 |
-| `stats` | store の schema / metadata / count を表示 |
+| `import --cosense <json>` | Cosense JSON export を project namespace に構築・置換。他 project は保持 |
+| `stats` | store の schema / project list / metadata / count を表示 |
 | `read <title>` | existing page は本文 + backlinks + related + unresolved。missing linked target は link stats + backlinks + source pages |
 | `backlinks <title>` | `(source page, line-id, line text)` の行レベル backlinks。missing target にも効く |
 | `related <title>` | existing page は page 間 edge の 2-hop pages。missing target は source pages |

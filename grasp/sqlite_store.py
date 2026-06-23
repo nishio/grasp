@@ -13,7 +13,7 @@ from urllib.parse import quote
 from .cosense import CosenseStore, Edge, Line, Page, normalize_title, parse_cosense_links
 
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 
 
 SCHEMA = """
@@ -24,88 +24,145 @@ CREATE TABLE metadata (
   value TEXT NOT NULL
 );
 
+CREATE TABLE projects (
+  name TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL DEFAULT '',
+  source_export TEXT NOT NULL,
+  exported INTEGER,
+  imported_at INTEGER NOT NULL,
+  pages INTEGER NOT NULL,
+  lines INTEGER NOT NULL,
+  edges INTEGER NOT NULL,
+  unresolved_targets INTEGER NOT NULL
+);
+
 CREATE TABLE pages (
-  id TEXT PRIMARY KEY,
+  project TEXT NOT NULL,
+  id TEXT NOT NULL,
   title TEXT NOT NULL,
   norm_title TEXT NOT NULL,
   created INTEGER,
   updated INTEGER,
   views INTEGER NOT NULL DEFAULT 0,
-  line_count INTEGER NOT NULL DEFAULT 0
+  line_count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(project, id),
+  FOREIGN KEY(project) REFERENCES projects(name) ON DELETE CASCADE
 );
 
 CREATE TABLE lines (
-  line_id TEXT PRIMARY KEY,
+  project TEXT NOT NULL,
+  line_id TEXT NOT NULL,
   page_id TEXT NOT NULL,
   line_index INTEGER NOT NULL,
   text TEXT NOT NULL,
   created INTEGER,
   updated INTEGER,
   user_id TEXT,
-  FOREIGN KEY(page_id) REFERENCES pages(id) ON DELETE CASCADE
+  PRIMARY KEY(project, line_id),
+  FOREIGN KEY(project) REFERENCES projects(name) ON DELETE CASCADE,
+  FOREIGN KEY(project, page_id) REFERENCES pages(project, id) ON DELETE CASCADE
 );
 
 CREATE TABLE edges (
   id INTEGER PRIMARY KEY,
+  project TEXT NOT NULL,
   source_page_id TEXT NOT NULL,
   line_id TEXT NOT NULL,
   target_title TEXT NOT NULL,
   target_norm TEXT NOT NULL,
-  FOREIGN KEY(source_page_id) REFERENCES pages(id) ON DELETE CASCADE,
-  FOREIGN KEY(line_id) REFERENCES lines(line_id) ON DELETE CASCADE
+  FOREIGN KEY(project) REFERENCES projects(name) ON DELETE CASCADE,
+  FOREIGN KEY(project, source_page_id) REFERENCES pages(project, id) ON DELETE CASCADE,
+  FOREIGN KEY(project, line_id) REFERENCES lines(project, line_id) ON DELETE CASCADE
 );
 
 CREATE TABLE unresolved_targets (
-  target_norm TEXT PRIMARY KEY,
+  project TEXT NOT NULL,
+  target_norm TEXT NOT NULL,
   title TEXT NOT NULL,
   link_count INTEGER NOT NULL,
   source_page_count INTEGER NOT NULL,
   total_source_views INTEGER NOT NULL,
-  latest_source_updated INTEGER NOT NULL
+  latest_source_updated INTEGER NOT NULL,
+  PRIMARY KEY(project, target_norm),
+  FOREIGN KEY(project) REFERENCES projects(name) ON DELETE CASCADE
 );
 
 CREATE TABLE unresolved_target_examples (
+  project TEXT NOT NULL,
   target_norm TEXT NOT NULL,
   rank INTEGER NOT NULL,
   source_page_id TEXT NOT NULL,
   line_id TEXT NOT NULL,
   target_title TEXT NOT NULL,
-  PRIMARY KEY(target_norm, rank)
+  PRIMARY KEY(project, target_norm, rank),
+  FOREIGN KEY(project) REFERENCES projects(name) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_pages_norm_title ON pages(norm_title);
-CREATE INDEX idx_pages_title ON pages(title);
-CREATE INDEX idx_lines_page_index ON lines(page_id, line_index);
-CREATE INDEX idx_edges_target_norm ON edges(target_norm);
-CREATE INDEX idx_edges_source_page ON edges(source_page_id);
-CREATE INDEX idx_edges_line ON edges(line_id);
-CREATE INDEX idx_unresolved_targets_rank ON unresolved_targets(link_count DESC, source_page_count DESC, total_source_views DESC, latest_source_updated DESC, title);
-CREATE INDEX idx_unresolved_target_examples_norm_rank ON unresolved_target_examples(target_norm, rank);
+CREATE INDEX idx_pages_project_norm_title ON pages(project, norm_title);
+CREATE INDEX idx_pages_project_title ON pages(project, title);
+CREATE INDEX idx_lines_project_page_index ON lines(project, page_id, line_index);
+CREATE INDEX idx_edges_project_target_norm ON edges(project, target_norm);
+CREATE INDEX idx_edges_project_source_page ON edges(project, source_page_id);
+CREATE INDEX idx_edges_project_line ON edges(project, line_id);
+CREATE INDEX idx_unresolved_targets_project_rank ON unresolved_targets(project, link_count DESC, source_page_count DESC, total_source_views DESC, latest_source_updated DESC, title);
+CREATE INDEX idx_unresolved_target_examples_project_norm_rank ON unresolved_target_examples(project, target_norm, rank);
 """
 
 
-def import_export_to_sqlite(export_path: str | Path, store_path: str | Path) -> dict[str, Any]:
+def import_export_to_sqlite(
+    export_path: str | Path,
+    store_path: str | Path,
+    *,
+    project_name: str | None = None,
+) -> dict[str, Any]:
     export_path = Path(export_path)
     store_path = Path(store_path)
-    store_path.parent.mkdir(parents=True, exist_ok=True)
-
-    tmp_path = store_path.with_name(f"{store_path.name}.tmp")
-    if tmp_path.exists():
-        tmp_path.unlink()
-
     source = CosenseStore.from_cosense_export(export_path)
-    connection = sqlite3.connect(tmp_path)
+    project = normalize_project_name(project_name or source.project_name or export_path.stem)
+    if not project:
+        raise ValueError(f"could not determine project name for export: {export_path}")
+
+    ensure_store_schema(store_path)
+    connection = sqlite3.connect(store_path)
     try:
-        connection.executescript(SCHEMA)
+        connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA synchronous = NORMAL")
         with connection:
+            _delete_project(connection, project)
+            connection.execute(
+                """
+                INSERT INTO projects (
+                  name,
+                  display_name,
+                  source_export,
+                  exported,
+                  imported_at,
+                  pages,
+                  lines,
+                  edges,
+                  unresolved_targets
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+                """,
+                (
+                    project,
+                    source.display_name or project,
+                    str(export_path),
+                    _int_or_none(source.exported),
+                    int(time.time()),
+                    len(source.pages),
+                    sum(page.line_count for page in source.pages),
+                    len(source.edges),
+                ),
+            )
             connection.executemany(
                 """
-                INSERT INTO pages (id, title, norm_title, created, updated, views, line_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO pages (project, id, title, norm_title, created, updated, views, line_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     (
+                        project,
                         page.id,
                         page.title,
                         page.norm_title,
@@ -119,11 +176,12 @@ def import_export_to_sqlite(export_path: str | Path, store_path: str | Path) -> 
             )
             connection.executemany(
                 """
-                INSERT INTO lines (line_id, page_id, line_index, text, created, updated, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     (
+                        project,
                         line.line_id,
                         page.id,
                         line.index,
@@ -138,11 +196,12 @@ def import_export_to_sqlite(export_path: str | Path, store_path: str | Path) -> 
             )
             connection.executemany(
                 """
-                INSERT INTO edges (source_page_id, line_id, target_title, target_norm)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO edges (project, source_page_id, line_id, target_title, target_norm)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     (
+                        project,
                         edge.source_page_id,
                         edge.line_id,
                         edge.target_title,
@@ -151,37 +210,89 @@ def import_export_to_sqlite(export_path: str | Path, store_path: str | Path) -> 
                     for edge in source.edges
                 ),
             )
-            rebuild_unresolved_targets(connection)
+            rebuild_unresolved_targets(connection, project)
+            unresolved_count = len(
+                {
+                    edge.target_norm
+                    for edge in source.edges
+                    if edge.target_norm not in source.pages_by_norm
+                }
+            )
+            connection.execute(
+                """
+                UPDATE projects
+                SET unresolved_targets = ?
+                WHERE name = ?
+                """,
+                (unresolved_count, project),
+            )
             _write_metadata(
                 connection,
                 {
                     "schema_version": SCHEMA_VERSION,
-                    "source_export": str(export_path),
-                    "imported_at": str(int(time.time())),
-                    "pages": str(len(source.pages)),
-                    "lines": str(sum(page.line_count for page in source.pages)),
-                    "edges": str(len(source.edges)),
-                    "unresolved_targets": str(
-                        len(
-                            {
-                                edge.target_norm
-                                for edge in source.edges
-                                if edge.target_norm not in source.pages_by_norm
-                            }
-                        )
-                    ),
+                    "last_imported_project": project,
+                    "last_source_export": str(export_path),
+                    "last_imported_at": str(int(time.time())),
                 },
             )
     finally:
         connection.close()
 
+    store = SQLiteStore(store_path, project=project)
+    try:
+        return store.stats()
+    finally:
+        store.close()
+
+
+def ensure_store_schema(store_path: str | Path) -> None:
+    store_path = Path(store_path)
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    if store_path.exists() and _store_schema_version(store_path) == SCHEMA_VERSION:
+        return
+
+    tmp_path = store_path.with_name(f"{store_path.name}.tmp")
+    if tmp_path.exists():
+        tmp_path.unlink()
+    connection = sqlite3.connect(tmp_path)
+    try:
+        connection.executescript(SCHEMA)
+        _write_metadata(connection, {"schema_version": SCHEMA_VERSION})
+        connection.commit()
+    finally:
+        connection.close()
     os.replace(tmp_path, store_path)
-    return SQLiteStore(store_path).stats()
+
+
+def _store_schema_version(store_path: Path) -> str | None:
+    try:
+        connection = sqlite3.connect(store_path)
+        try:
+            row = connection.execute("SELECT value FROM metadata WHERE key = 'schema_version'").fetchone()
+            return None if row is None else str(row[0])
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return None
+
+
+def normalize_project_name(project_name: str) -> str:
+    return project_name.strip()
+
+
+def _delete_project(connection: sqlite3.Connection, project: str) -> None:
+    connection.execute("DELETE FROM unresolved_target_examples WHERE project = ?", (project,))
+    connection.execute("DELETE FROM unresolved_targets WHERE project = ?", (project,))
+    connection.execute("DELETE FROM edges WHERE project = ?", (project,))
+    connection.execute("DELETE FROM lines WHERE project = ?", (project,))
+    connection.execute("DELETE FROM pages WHERE project = ?", (project,))
+    connection.execute("DELETE FROM projects WHERE name = ?", (project,))
 
 
 class SQLiteStore:
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, project: str | None = None):
         self.path = Path(path)
+        self.project = normalize_project_name(project) if project is not None else None
         self.connection = sqlite3.connect(self.path)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
@@ -192,17 +303,25 @@ class SQLiteStore:
     def stats(self) -> dict[str, Any]:
         metadata = self.metadata()
         schema_version = metadata.get("schema_version")
+        project = self._selected_project_or_none()
+        projects = self.projects()
+        project_row = self.project_metadata(project) if project is not None else None
+        source_export = metadata.get("last_source_export") or metadata.get("source_export")
+        imported_at = _int_or_none(metadata.get("last_imported_at") or metadata.get("imported_at"))
         return {
             "store": str(self.path),
+            "project": project,
+            "project_count": len(projects),
+            "projects": projects,
             "schema_version": schema_version,
             "current_schema_version": SCHEMA_VERSION,
             "schema_ok": schema_version == SCHEMA_VERSION,
-            "source_export": metadata.get("source_export"),
-            "imported_at": _int_or_none(metadata.get("imported_at")),
-            "pages": self._count_if_exists("pages"),
-            "lines": self._count_if_exists("lines"),
-            "edges": self._count_if_exists("edges"),
-            "unresolved_targets": self._count_if_exists("unresolved_targets"),
+            "source_export": project_row.get("source_export") if project_row is not None else source_export,
+            "imported_at": project_row.get("imported_at") if project_row is not None else imported_at,
+            "pages": self._count_if_exists("pages", project=project),
+            "lines": self._count_if_exists("lines", project=project),
+            "edges": self._count_if_exists("edges", project=project),
+            "unresolved_targets": self._count_if_exists("unresolved_targets", project=project),
         }
 
     def metadata(self) -> dict[str, str]:
@@ -210,6 +329,78 @@ class SQLiteStore:
             row["key"]: row["value"]
             for row in self.connection.execute("SELECT key, value FROM metadata")
         }
+
+    def projects(self) -> list[dict[str, Any]]:
+        try:
+            rows = self.connection.execute(
+                """
+                SELECT
+                  name,
+                  display_name,
+                  source_export,
+                  exported,
+                  imported_at,
+                  pages,
+                  lines,
+                  edges,
+                  unresolved_targets
+                FROM projects
+                ORDER BY name
+                """
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [dict(row) for row in rows]
+
+    def project_names(self) -> list[str]:
+        return [project["name"] for project in self.projects()]
+
+    def project_metadata(self, project: str | None = None) -> dict[str, Any] | None:
+        project = self._require_project(project)
+        row = self.connection.execute(
+            """
+            SELECT
+              name,
+              display_name,
+              source_export,
+              exported,
+              imported_at,
+              pages,
+              lines,
+              edges,
+              unresolved_targets
+            FROM projects
+            WHERE name = ?
+            """,
+            (project,),
+        ).fetchone()
+        return None if row is None else dict(row)
+
+    def _selected_project_or_none(self) -> str | None:
+        if self.project:
+            return self.project
+        names = self.project_names()
+        if len(names) == 1:
+            return names[0]
+        return None
+
+    def _require_project(self, project: str | None = None) -> str:
+        names = self.project_names()
+        if project:
+            if project not in names:
+                available = ", ".join(names) or "(none)"
+                raise ValueError(f"project does not exist: {project}; available projects: {available}")
+            return project
+        selected = self._selected_project_or_none()
+        if selected is not None:
+            if selected not in names:
+                available = ", ".join(names) or "(none)"
+                raise ValueError(f"project does not exist: {selected}; available projects: {available}")
+            return selected
+        if not names:
+            raise ValueError("store has no projects; run `grasp import --cosense <json>` first")
+        available = ", ".join(names)
+        raise ValueError(f"multiple projects in store; specify --project <name> (available: {available})")
 
     def schema_version(self) -> str | None:
         return self.metadata().get("schema_version")
@@ -228,7 +419,11 @@ class SQLiteStore:
             )
 
     def page_updated(self, page_id: str) -> int | None:
-        row = self.connection.execute("SELECT updated FROM pages WHERE id = ?", (page_id,)).fetchone()
+        project = self._require_project()
+        row = self.connection.execute(
+            "SELECT updated FROM pages WHERE project = ? AND id = ?",
+            (project, page_id),
+        ).fetchone()
         if row is None:
             return None
         return row["updated"]
@@ -236,47 +431,52 @@ class SQLiteStore:
     def upsert_cosense_pages(self, pages: list[dict[str, Any]]) -> None:
         if not pages:
             return
+        project = self._require_project()
         with self.connection:
             for page in pages:
-                self._upsert_cosense_page(page)
-            rebuild_unresolved_targets(self.connection)
+                self._upsert_cosense_page(page, project)
+            rebuild_unresolved_targets(self.connection, project)
+            self._refresh_project_counts(project)
 
     def resolve_page(self, title: str) -> Page | None:
+        project = self._require_project()
         row = self.connection.execute(
             """
             SELECT * FROM pages
-            WHERE norm_title = ?
+            WHERE project = ? AND norm_title = ?
             ORDER BY rowid
             LIMIT 1
             """,
-            (normalize_title(title),),
+            (project, normalize_title(title)),
         ).fetchone()
         return self._page_from_row(row) if row is not None else None
 
     def page_lines(self, page: Page, limit: int | None = None) -> tuple[list[Line], bool]:
+        project = self._require_project()
         if limit is None or limit < 0:
             rows = self.connection.execute(
                 """
                 SELECT * FROM lines
-                WHERE page_id = ?
+                WHERE project = ? AND page_id = ?
                 ORDER BY line_index
                 """,
-                (page.id,),
+                (project, page.id),
             ).fetchall()
             return [self._line_from_row(row) for row in rows], False
 
         rows = self.connection.execute(
             """
             SELECT * FROM lines
-            WHERE page_id = ?
+            WHERE project = ? AND page_id = ?
             ORDER BY line_index
             LIMIT ?
             """,
-            (page.id, limit),
+            (project, page.id, limit),
         ).fetchall()
         return [self._line_from_row(row) for row in rows], page.line_count > limit
 
     def backlinks(self, title: str, limit: int | None = None, offset: int = 0) -> list[Edge]:
+        project = self._require_project()
         query = """
             SELECT
               e.source_page_id,
@@ -289,12 +489,12 @@ class SQLiteStore:
               e.target_title,
               e.target_norm
             FROM edges e
-            JOIN pages source ON source.id = e.source_page_id
-            JOIN lines line ON line.line_id = e.line_id
-            WHERE e.target_norm = ?
+            JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
+            JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
+            WHERE e.project = ? AND e.target_norm = ?
             ORDER BY source.views DESC, COALESCE(source.updated, 0) DESC, source.title, line.line_index
         """
-        params: list[Any] = [normalize_title(title)]
+        params: list[Any] = [project, normalize_title(title)]
         if limit is not None and limit >= 0:
             query += " LIMIT ? OFFSET ?"
             params.extend([limit, offset])
@@ -304,12 +504,13 @@ class SQLiteStore:
         return [self._edge_from_row(row) for row in self.connection.execute(query, params)]
 
     def link_stats(self, title: str) -> dict[str, Any]:
+        project = self._require_project()
         norm = normalize_title(title)
         page = self.resolve_page(title)
         if page is None:
             unresolved_target = self.connection.execute(
-                "SELECT * FROM unresolved_targets WHERE target_norm = ?",
-                (norm,),
+                "SELECT * FROM unresolved_targets WHERE project = ? AND target_norm = ?",
+                (project, norm),
             ).fetchone()
             link_count = int(unresolved_target["link_count"]) if unresolved_target is not None else 0
             source_page_count = int(unresolved_target["source_page_count"]) if unresolved_target is not None else 0
@@ -319,9 +520,9 @@ class SQLiteStore:
                 """
                 SELECT COUNT(*) AS link_count, COUNT(DISTINCT source_page_id) AS source_page_count
                 FROM edges
-                WHERE target_norm = ?
+                WHERE project = ? AND target_norm = ?
                 """,
-                (norm,),
+                (project, norm),
             ).fetchone()
             link_count = int(row["link_count"])
             source_page_count = int(row["source_page_count"])
@@ -339,35 +540,47 @@ class SQLiteStore:
         }
 
     def unresolved_targets(self, limit: int | None = None) -> list[dict[str, Any]]:
+        project = self._require_project()
         if limit is None or limit < 0:
             rows = self.connection.execute(
                 """
                 SELECT * FROM unresolved_targets
+                WHERE project = ?
                 ORDER BY link_count DESC, source_page_count DESC, total_source_views DESC, latest_source_updated DESC, title
-                """
+                """,
+                (project,),
             ).fetchall()
         else:
             rows = self.connection.execute(
                 """
                 SELECT * FROM unresolved_targets
+                WHERE project = ?
                 ORDER BY link_count DESC, source_page_count DESC, total_source_views DESC, latest_source_updated DESC, title
                 LIMIT ?
                 """,
-                (limit,),
+                (project, limit),
             ).fetchall()
         return self._unresolved_target_materialized_rows_to_dicts(rows)
 
     def _unresolved_targets_dynamic(self, limit: int | None = None) -> list[dict[str, Any]]:
+        project = self._require_project()
+        params: list[Any] = [project]
+        if limit is not None and limit >= 0:
+            params.append(limit)
         rows = self.connection.execute(
             self._unresolved_target_stats_sql(limit),
-            [] if limit is None or limit < 0 else [limit],
+            params,
         ).fetchall()
         return [self._unresolved_target_row_to_dict(row) for row in rows]
 
     def unresolved_targets_from_page(self, page: Page, limit: int | None = None) -> list[dict[str, Any]]:
+        project = self._require_project()
+        params: list[Any] = [project, page.id]
+        if limit is not None and limit >= 0:
+            params.append(limit)
         rows = self.connection.execute(
             self._unresolved_target_stats_sql(limit, source_page_id=page.id),
-            [page.id] if limit is None or limit < 0 else [page.id, limit],
+            params,
         ).fetchall()
         return [self._unresolved_target_row_to_dict(row, source_page_id=page.id) for row in rows]
 
@@ -404,6 +617,7 @@ class SQLiteStore:
         return related_pages
 
     def _related_missing_target(self, title: str, limit: int | None = None) -> list[dict[str, Any]]:
+        project = self._require_project()
         norm = normalize_title(title)
         query = """
             SELECT
@@ -411,12 +625,12 @@ class SQLiteStore:
               COUNT(*) AS score,
               MIN(e.target_title) AS target_title
             FROM edges e
-            JOIN pages source ON source.id = e.source_page_id
-            WHERE e.target_norm = ?
+            JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
+            WHERE e.project = ? AND e.target_norm = ?
             GROUP BY source.id
             ORDER BY score DESC, source.views DESC, COALESCE(source.updated, 0) DESC, source.title
         """
-        params: list[Any] = [norm]
+        params: list[Any] = [project, norm]
         if limit is not None and limit >= 0:
             query += " LIMIT ?"
             params.append(limit)
@@ -433,24 +647,26 @@ class SQLiteStore:
         ]
 
     def suggest(self, partial: str, limit: int = 20) -> list[dict[str, Any]]:
+        project = self._require_project()
         norm_partial = normalize_title(partial)
         like = f"%{_escape_like(norm_partial)}%"
         prefix = f"{_escape_like(norm_partial)}%"
         rows = self.connection.execute(
             """
             SELECT * FROM pages
-            WHERE norm_title LIKE ? ESCAPE '\\'
+            WHERE project = ? AND norm_title LIKE ? ESCAPE '\\'
             ORDER BY
               CASE WHEN norm_title LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END,
               views DESC,
               title
             LIMIT ?
             """,
-            (like, prefix, limit),
+            (project, like, prefix, limit),
         ).fetchall()
         return [self._page_from_row(row).to_summary() for row in rows]
 
     def search(self, query: str, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        project = self._require_project()
         like = f"%{_escape_like(query)}%"
         rows = self.connection.execute(
             """
@@ -463,12 +679,12 @@ class SQLiteStore:
               line.line_index,
               line.text AS line_text
             FROM lines line
-            JOIN pages page ON page.id = line.page_id
-            WHERE line.text LIKE ? ESCAPE '\\'
+            JOIN pages page ON page.project = line.project AND page.id = line.page_id
+            WHERE line.project = ? AND line.text LIKE ? ESCAPE '\\'
             ORDER BY page.views DESC, COALESCE(page.updated, 0) DESC, page.title, line.line_index
             LIMIT ? OFFSET ?
             """,
-            (like, limit, offset),
+            (project, like, limit, offset),
         ).fetchall()
         return [
             {
@@ -640,6 +856,7 @@ class SQLiteStore:
         return pages
 
     def _outgoing_existing_pages(self, page: Page) -> list[Page]:
+        project = self._require_project()
         rows = self.connection.execute(
             """
             SELECT DISTINCT
@@ -647,17 +864,18 @@ class SQLiteStore:
               MIN(line.line_index) AS first_line_index,
               MIN(e.id) AS first_edge_id
             FROM edges e
-            JOIN lines line ON line.line_id = e.line_id
-            JOIN pages target ON target.norm_title = e.target_norm
-            WHERE e.source_page_id = ? AND target.id != ?
+            JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
+            JOIN pages target ON target.project = e.project AND target.norm_title = e.target_norm
+            WHERE e.project = ? AND e.source_page_id = ? AND target.id != ?
             GROUP BY target.id
             ORDER BY first_line_index, first_edge_id
             """,
-            (page.id, page.id),
+            (project, page.id, page.id),
         ).fetchall()
         return [self._page_from_row(row) for row in rows]
 
     def _pages_from_backlink_sources(self, title: str, limit: int | None) -> list[Page]:
+        project = self._require_project()
         norm = normalize_title(title)
         query = """
             SELECT
@@ -665,13 +883,13 @@ class SQLiteStore:
               COUNT(*) AS link_count,
               MIN(line.line_index) AS first_line_index
             FROM edges e
-            JOIN pages source ON source.id = e.source_page_id
-            JOIN lines line ON line.line_id = e.line_id
-            WHERE e.target_norm = ?
+            JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
+            JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
+            WHERE e.project = ? AND e.target_norm = ?
             GROUP BY source.id
             ORDER BY link_count DESC, source.views DESC, COALESCE(source.updated, 0) DESC, source.title, first_line_index
         """
-        params: list[Any] = [norm]
+        params: list[Any] = [project, norm]
         if limit is not None and limit >= 0:
             query += " LIMIT ?"
             params.append(limit)
@@ -679,6 +897,7 @@ class SQLiteStore:
         return [self._page_from_row(row) for row in rows]
 
     def _pages_sharing_outgoing_targets(self, page: Page) -> list[Page]:
+        project = self._require_project()
         rows = self.connection.execute(
             """
             SELECT DISTINCT
@@ -689,15 +908,15 @@ class SQLiteStore:
               MIN(source_line.line_index) AS first_source_line_index,
               MIN(e.id) AS first_edge_id
             FROM edges seed
-            JOIN lines seed_line ON seed_line.line_id = seed.line_id
-            JOIN edges e ON e.target_norm = seed.target_norm
-            JOIN pages source ON source.id = e.source_page_id
-            JOIN lines source_line ON source_line.line_id = e.line_id
-            WHERE seed.source_page_id = ? AND source.id != ?
+            JOIN lines seed_line ON seed_line.project = seed.project AND seed_line.line_id = seed.line_id
+            JOIN edges e ON e.project = seed.project AND e.target_norm = seed.target_norm
+            JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
+            JOIN lines source_line ON source_line.project = e.project AND source_line.line_id = e.line_id
+            WHERE seed.project = ? AND seed.source_page_id = ? AND source.id != ?
             GROUP BY source.id, e.target_norm
             ORDER BY seed_line_index, seed_edge_id, source.views DESC, COALESCE(source.updated, 0) DESC, source.title, first_source_line_index
             """,
-            (page.id, page.id),
+            (project, page.id, page.id),
         ).fetchall()
         pages: list[Page] = []
         seen: set[str] = set()
@@ -723,9 +942,9 @@ class SQLiteStore:
             WITH unresolved_edges AS (
               SELECT e.target_norm, e.target_title, e.source_page_id, source.views, source.updated
               FROM edges e
-              JOIN pages source ON source.id = e.source_page_id
-              LEFT JOIN pages target ON target.norm_title = e.target_norm
-              WHERE target.id IS NULL
+              JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
+              LEFT JOIN pages target ON target.project = e.project AND target.norm_title = e.target_norm
+              WHERE e.project = ? AND target.id IS NULL
               {source_filter}
             ),
             edge_stats AS (
@@ -811,6 +1030,7 @@ class SQLiteStore:
     def _unresolved_target_materialized_examples(self, target_norms: list[str]) -> dict[str, list[Edge]]:
         if not target_norms:
             return {}
+        project = self._require_project()
         placeholders = ",".join("?" for _ in target_norms)
         try:
             rows = self.connection.execute(
@@ -827,12 +1047,12 @@ class SQLiteStore:
                   example.target_title,
                   example.rank
                 FROM unresolved_target_examples example
-                JOIN pages source ON source.id = example.source_page_id
-                JOIN lines line ON line.line_id = example.line_id
-                WHERE example.target_norm IN ({placeholders})
+                JOIN pages source ON source.project = example.project AND source.id = example.source_page_id
+                JOIN lines line ON line.project = example.project AND line.line_id = example.line_id
+                WHERE example.project = ? AND example.target_norm IN ({placeholders})
                 ORDER BY example.target_norm, example.rank
                 """,
-                target_norms,
+                [project, *target_norms],
             ).fetchall()
         except sqlite3.OperationalError:
             return {norm: self._unresolved_target_examples(norm) for norm in target_norms}
@@ -851,6 +1071,7 @@ class SQLiteStore:
         limit: int | None = None,
         source_page_id: str | None = None,
     ) -> list[Edge]:
+        project = self._require_project()
         source_filter = "AND e.source_page_id = ?" if source_page_id is not None else ""
         query = """
             SELECT
@@ -864,13 +1085,13 @@ class SQLiteStore:
               e.target_title,
               e.target_norm
             FROM edges e
-            JOIN pages source ON source.id = e.source_page_id
-            JOIN lines line ON line.line_id = e.line_id
-            WHERE e.target_norm = ?
+            JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
+            JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
+            WHERE e.project = ? AND e.target_norm = ?
             {source_filter}
             ORDER BY source.views DESC, COALESCE(source.updated, 0) DESC, source.title, line.line_index
         """.format(source_filter=source_filter)
-        params: list[Any] = [target_norm]
+        params: list[Any] = [project, target_norm]
         if source_page_id is not None:
             params.append(source_page_id)
         if limit is not None and limit >= 0:
@@ -879,48 +1100,55 @@ class SQLiteStore:
         return [self._edge_from_row(row) for row in self.connection.execute(query, params)]
 
     def _neighbor_ids(self, page_id: str, norm_title: str) -> set[str]:
+        project = self._require_project()
         rows = self.connection.execute(
             """
             SELECT target.id AS page_id
             FROM edges e
-            JOIN pages target ON target.norm_title = e.target_norm
-            WHERE e.source_page_id = ? AND target.id != ?
+            JOIN pages target ON target.project = e.project AND target.norm_title = e.target_norm
+            WHERE e.project = ? AND e.source_page_id = ? AND target.id != ?
             UNION
             SELECT e.source_page_id AS page_id
             FROM edges e
-            WHERE e.target_norm = ? AND e.source_page_id != ?
+            WHERE e.project = ? AND e.target_norm = ? AND e.source_page_id != ?
             """,
-            (page_id, page_id, norm_title, page_id),
+            (project, page_id, page_id, project, norm_title, page_id),
         ).fetchall()
         return {row["page_id"] for row in rows}
 
     def _sort_page_ids(self, page_ids: set[str]) -> list[str]:
+        project = self._require_project()
         rows = self.connection.execute(
             f"""
             SELECT id, title, views
             FROM pages
-            WHERE id IN ({",".join("?" for _ in page_ids)})
+            WHERE project = ? AND id IN ({",".join("?" for _ in page_ids)})
             ORDER BY title, views DESC
             """,
-            list(page_ids),
+            [project, *page_ids],
         ).fetchall() if page_ids else []
         return [row["id"] for row in rows]
 
     def _page_by_id(self, page_id: str) -> Page | None:
-        row = self.connection.execute("SELECT * FROM pages WHERE id = ?", (page_id,)).fetchone()
+        project = self._require_project()
+        row = self.connection.execute(
+            "SELECT * FROM pages WHERE project = ? AND id = ?",
+            (project, page_id),
+        ).fetchone()
         return self._page_from_row(row) if row is not None else None
 
-    def _upsert_cosense_page(self, page: dict[str, Any]) -> None:
+    def _upsert_cosense_page(self, page: dict[str, Any], project: str) -> None:
         page_id = str(page["id"])
         title = str(page["title"])
         lines = page.get("lines") or []
-        self.connection.execute("DELETE FROM pages WHERE id = ?", (page_id,))
+        self.connection.execute("DELETE FROM pages WHERE project = ? AND id = ?", (project, page_id))
         self.connection.execute(
             """
-            INSERT INTO pages (id, title, norm_title, created, updated, views, line_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO pages (project, id, title, norm_title, created, updated, views, line_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                project,
                 page_id,
                 title,
                 normalize_title(title),
@@ -939,6 +1167,7 @@ class SQLiteStore:
             user = line.get("user") or {}
             line_rows.append(
                 (
+                    project,
                     line_id,
                     page_id,
                     line_index,
@@ -949,21 +1178,35 @@ class SQLiteStore:
                 )
             )
             for target_title in parse_cosense_links(text):
-                edge_rows.append((page_id, line_id, target_title, normalize_title(target_title)))
+                edge_rows.append((project, page_id, line_id, target_title, normalize_title(target_title)))
 
         self.connection.executemany(
             """
-            INSERT INTO lines (line_id, page_id, line_index, text, created, updated, user_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             line_rows,
         )
         self.connection.executemany(
             """
-            INSERT INTO edges (source_page_id, line_id, target_title, target_norm)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO edges (project, source_page_id, line_id, target_title, target_norm)
+            VALUES (?, ?, ?, ?, ?)
             """,
             edge_rows,
+        )
+
+    def _refresh_project_counts(self, project: str) -> None:
+        self.connection.execute(
+            """
+            UPDATE projects
+            SET
+              pages = (SELECT COUNT(*) FROM pages WHERE project = ?),
+              lines = (SELECT COUNT(*) FROM lines WHERE project = ?),
+              edges = (SELECT COUNT(*) FROM edges WHERE project = ?),
+              unresolved_targets = (SELECT COUNT(*) FROM unresolved_targets WHERE project = ?)
+            WHERE name = ?
+            """,
+            (project, project, project, project, project),
         )
 
     def _page_from_row(self, row: sqlite3.Row) -> Page:
@@ -1001,19 +1244,24 @@ class SQLiteStore:
             target_norm=row["target_norm"],
         )
 
-    def _count(self, table: str) -> int:
-        return self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    def _count(self, table: str, *, project: str | None = None) -> int:
+        if project is None:
+            return self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        return self.connection.execute(f"SELECT COUNT(*) FROM {table} WHERE project = ?", (project,)).fetchone()[0]
 
-    def _count_if_exists(self, table: str) -> int | None:
+    def _count_if_exists(self, table: str, *, project: str | None = None) -> int | None:
         try:
-            return self._count(table)
+            return self._count(table, project=project)
         except sqlite3.OperationalError:
             return None
 
 
 def _write_metadata(connection: sqlite3.Connection, values: dict[str, str]) -> None:
     connection.executemany(
-        "INSERT INTO metadata (key, value) VALUES (?, ?)",
+        """
+        INSERT INTO metadata (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
         values.items(),
     )
 
@@ -1163,12 +1411,13 @@ def link_multiplicity(link_count: int) -> str:
     return "multi"
 
 
-def rebuild_unresolved_targets(connection: sqlite3.Connection) -> None:
-    connection.execute("DELETE FROM unresolved_targets")
-    connection.execute("DELETE FROM unresolved_target_examples")
+def rebuild_unresolved_targets(connection: sqlite3.Connection, project: str) -> None:
+    connection.execute("DELETE FROM unresolved_targets WHERE project = ?", (project,))
+    connection.execute("DELETE FROM unresolved_target_examples WHERE project = ?", (project,))
     connection.execute(
         """
         INSERT INTO unresolved_targets (
+          project,
           target_norm,
           title,
           link_count,
@@ -1179,9 +1428,9 @@ def rebuild_unresolved_targets(connection: sqlite3.Connection) -> None:
         WITH unresolved_edges AS (
           SELECT e.target_norm, e.target_title, e.source_page_id, source.views, source.updated
           FROM edges e
-          JOIN pages source ON source.id = e.source_page_id
-          LEFT JOIN pages target ON target.norm_title = e.target_norm
-          WHERE target.id IS NULL
+          JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
+          LEFT JOIN pages target ON target.project = e.project AND target.norm_title = e.target_norm
+          WHERE e.project = ? AND target.id IS NULL
         ),
         edge_stats AS (
           SELECT
@@ -1216,6 +1465,7 @@ def rebuild_unresolved_targets(connection: sqlite3.Connection) -> None:
           WHERE rn = 1
         )
         SELECT
+          ? AS project,
           edge_stats.target_norm,
           title_choice.target_title,
           edge_stats.link_count,
@@ -1225,15 +1475,17 @@ def rebuild_unresolved_targets(connection: sqlite3.Connection) -> None:
         FROM edge_stats
         JOIN source_stats ON source_stats.target_norm = edge_stats.target_norm
         JOIN title_choice ON title_choice.target_norm = edge_stats.target_norm
-        """
+        """,
+        (project, project),
     )
-    rebuild_unresolved_target_examples(connection)
+    rebuild_unresolved_target_examples(connection, project)
 
 
-def rebuild_unresolved_target_examples(connection: sqlite3.Connection) -> None:
+def rebuild_unresolved_target_examples(connection: sqlite3.Connection, project: str) -> None:
     connection.execute(
         """
         INSERT INTO unresolved_target_examples (
+          project,
           target_norm,
           rank,
           source_page_id,
@@ -1251,13 +1503,14 @@ def rebuild_unresolved_target_examples(connection: sqlite3.Connection) -> None:
             e.line_id,
             e.target_title
           FROM edges e
-          JOIN pages source ON source.id = e.source_page_id
-          JOIN lines line ON line.line_id = e.line_id
-          LEFT JOIN pages target ON target.norm_title = e.target_norm
-          WHERE target.id IS NULL
+          JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
+          JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
+          LEFT JOIN pages target ON target.project = e.project AND target.norm_title = e.target_norm
+          WHERE e.project = ? AND target.id IS NULL
         )
-        SELECT target_norm, rank, source_page_id, line_id, target_title
+        SELECT ? AS project, target_norm, rank, source_page_id, line_id, target_title
         FROM ranked
         WHERE rank <= 5
-        """
+        """,
+        (project, project),
     )

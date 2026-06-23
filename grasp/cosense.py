@@ -170,9 +170,21 @@ class Edge:
 
 
 class CosenseStore:
-    def __init__(self, pages: list[Page], edges: list[Edge], title_collisions: dict[str, list[str]]):
+    def __init__(
+        self,
+        pages: list[Page],
+        edges: list[Edge],
+        title_collisions: dict[str, list[str]],
+        *,
+        project_name: str = "",
+        display_name: str = "",
+        exported: int | None = None,
+    ):
         self.pages = pages
         self.edges = edges
+        self.project_name = project_name
+        self.display_name = display_name
+        self.exported = exported
         self.pages_by_id = {page.id: page for page in pages}
         self.pages_by_norm: dict[str, Page] = {}
         for page in pages:
@@ -254,7 +266,14 @@ class CosenseStore:
             for norm, titles in title_buckets.items()
             if len(set(titles)) > 1 and first_title_by_norm.get(norm) is not None
         }
-        return cls(pages=pages, edges=edges, title_collisions=title_collisions)
+        return cls(
+            pages=pages,
+            edges=edges,
+            title_collisions=title_collisions,
+            project_name=str(data.get("name") or ""),
+            display_name=str(data.get("displayName") or data.get("name") or ""),
+            exported=data.get("exported"),
+        )
 
     def resolve_page(self, title: str) -> Page | None:
         return self.pages_by_norm.get(normalize_title(title))

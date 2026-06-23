@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-23 21:17] implementation | 複数 project を1 store 内の namespace として保持
+- nishio 指摘: 複数 JSON は同じ graph に merge する必要はないが、store file を分けるのでなく1つの store に project 名ごとに保持すべき。
+- SQLite schema を v4 に更新。`projects` table を追加し、pages / lines / edges / unresolved_targets / unresolved_target_examples を `project` 列で namespace 化。`grasp import --cosense <json>` は export root `name` を project 名にし、同名 project だけを置き換える。他 project は保持する。`grasp import --project <name> --cosense <json>` で override 可能。
+- read/search/backlinks/related/unresolved/sync は selected project 内だけを見る。store に1 project だけなら `--project` 省略可、複数 project なら `--project <name>` / `$GRASP_PROJECT` が必要。`stats` は project list と aggregate/project counts を返す。
+- [[multi-project-store]] を追加し、[[grasp-v1-implemented]] / README / Skill を更新。検証: `python3 scripts/lint_wiki.py` OK（壊れた wikilink 0、index 未登録 0、frontmatter 不備 0）、`python3 -m unittest discover -s tests` OK（13 tests）、`git diff --check` OK。
+
 ## [2026-06-23 21:11] refactor | 旧 SPEC / v1-todo を実装済み facts と backlog に分解
 - nishio 判断: `SPEC.md` は定義ではなく v0.5 を実装するための一時指示、`v1-todo.md` も一時 TODO。v1 リリース後に保つ必要はない。
 - `[[grasp-v1-implemented]]` を追加し、v1 時点で実装済みの CLI surface / store / parser / delivery / performance facts を集約。`[[grasp-backlog]]` を追加し、旧 SPEC / 旧 v1-todo にあった未実装項目（`#tag`, 数字 link, zero-hit recovery, root option recovery, Markdown adapter, write/identity, search/vector/sync 残課題など）を集約。

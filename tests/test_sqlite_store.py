@@ -49,6 +49,27 @@ FIXTURE = {
 }
 
 
+OTHER_FIXTURE = {
+    "name": "other",
+    "displayName": "other",
+    "exported": 2,
+    "users": [],
+    "pages": [
+        {
+            "title": "A",
+            "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+            "created": 2,
+            "updated": 40,
+            "views": 5,
+            "lines": [
+                {"text": "A", "created": 2, "updated": 2, "userId": "u"},
+                {"text": "other project links to [OtherMissing]", "created": 2, "updated": 3, "userId": "u"},
+            ],
+        }
+    ],
+}
+
+
 class SQLiteStoreTests(unittest.TestCase):
     def test_import_export_to_sqlite_and_query(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -140,6 +161,44 @@ class SQLiteStoreTests(unittest.TestCase):
                 self.assertNotIn('<Page title="Missing"', missing_export["text"])
             finally:
                 store.close()
+
+    def test_imports_multiple_projects_into_one_store_without_mixing_graphs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            other_export_path = Path(tmpdir) / "other.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
+            other_export_path.write_text(json.dumps(OTHER_FIXTURE), encoding="utf-8")
+
+            fixture_stats = import_export_to_sqlite(export_path, store_path)
+            other_stats = import_export_to_sqlite(other_export_path, store_path)
+
+            self.assertEqual(fixture_stats["project"], "fixture")
+            self.assertEqual(other_stats["project"], "other")
+            self.assertEqual(other_stats["project_count"], 2)
+
+            aggregate_store = SQLiteStore(store_path)
+            fixture_store = SQLiteStore(store_path, project="fixture")
+            other_store = SQLiteStore(store_path, project="other")
+            try:
+                aggregate_stats = aggregate_store.stats()
+                self.assertIsNone(aggregate_stats["project"])
+                self.assertEqual(aggregate_stats["project_count"], 2)
+                self.assertEqual(aggregate_stats["pages"], 4)
+
+                with self.assertRaises(ValueError):
+                    aggregate_store.resolve_page("A")
+
+                fixture_page = fixture_store.resolve_page("A")
+                other_page = other_store.resolve_page("A")
+                self.assertEqual(fixture_page.views, 100)
+                self.assertEqual(other_page.views, 5)
+                self.assertEqual(fixture_store.unresolved_targets()[0]["title"], "Missing")
+                self.assertEqual(other_store.unresolved_targets()[0]["title"], "OtherMissing")
+            finally:
+                aggregate_store.close()
+                fixture_store.close()
+                other_store.close()
 
 
 if __name__ == "__main__":

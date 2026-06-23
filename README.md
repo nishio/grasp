@@ -72,6 +72,12 @@ grasp import --cosense your-project.json
 
 `~/.grasp/grasp.sqlite` に SQLite のグラフストアが構築されます（数万ページで十数秒程度）。以降のコマンドはこのストアを読むだけなので**サブ秒**で返ります。
 
+同じ SQLite store には複数の Cosense project を入れられます。project 名は export JSON の `name` を既定で使い、同名 project を再 import した場合はその project namespace だけを置き換えます。複数 project が入っている store を読む時は `--project` を指定します。
+
+```bash
+grasp --project your-project read "<ページタイトル>"
+```
+
 ### 3. AI に聞く
 
 Skill を登録してあれば、あとは AI エージェントに自然言語で話しかけるだけです。
@@ -106,7 +112,7 @@ grasp read "<ページタイトル>"
 | `peek <title>` | 本文行のみ（近傍は返さない） |
 | `export-ai <title>` | main + 1-hop / 2-hop ページ本文を 1 テキストへ展開（alias `export-for-ai`） |
 | `stats` | ストアの件数・更新日時などを確認 |
-| `import --cosense <json>` | Cosense JSON エクスポートからストアを構築・再構築 |
+| `import --cosense <json>` | Cosense JSON エクスポートを project namespace に取り込み・再構築 |
 | `sync <project-url>` | hosted Cosense の最近更新ページを差分取り込み（保守用・要 `cosense` CLI install + 認証） |
 
 > `unresolved` は「埋めるべき TODO リスト」ではありません。多くのページから参照される未解決ターゲットは、本文が無くても**他ページの文脈で既に意味を持つ概念ノード**です。次に書く候補や調査の起点として眺めるのはよいですが、全部を埋めるべき穴とは解釈しないでください。
@@ -116,14 +122,17 @@ grasp read "<ページタイトル>"
 ## ストアと環境変数
 
 - ストアは home に 1 個（**`~/.grasp/grasp.sqlite`**）。AI が単一で所有する想定なので、**どの作業ディレクトリからも動きます**。
+- 1つの store に複数 project を保持できます。`grasp import --cosense <json>` は export の `name` を project namespace として使い、同名 project だけを置き換えます。project 名を変える場合は `grasp import --project <name> --cosense <json>`。
+- 複数 project がある store で読む時は `--project <name>` / `$GRASP_PROJECT` を指定してください。project が1つだけなら省略できます。
 - パスを変えたいとき:
   - `--store PATH` / `$GRASP_STORE` … SQLite ストアの場所
+  - `--project NAME` / `$GRASP_PROJECT` … 読み書き対象の project namespace
   - `$GRASP_HOME` … home 自体（既定 `~/.grasp`）を差し替え
   - `--export PATH` / `$GRASP_EXPORT` … 自動リビルド用の JSON エクスポート
-- **グローバルオプション（`--json` / `--store` / `--export`）は verb の前**に置きます:
+- **グローバルオプション（`--json` / `--store` / `--project` / `--export`）は verb の前**に置きます:
 
   ```bash
-  grasp --json read "<ページタイトル>" --backlinks-limit 5
+  grasp --project your-project --json read "<ページタイトル>" --backlinks-limit 5
   ```
 - 空白や記号を含むタイトル・クエリはシェルでクォートしてください（`"..."`）。
 - 機械可読出力が必要なら `--json`。返るキーは各 `grasp <verb> --help` に記載。

@@ -17,6 +17,7 @@ description: >-
 
 - ユーザが JSON export path を指定している場合は、その JSON を使う。**特定ユーザ名・固定パス・固定 project URL を仮定しない**。
 - 既に store がある前提の依頼なら `grasp stats` で store の状態を確認してから読む。
+- `grasp stats` の `project_count` が 2 以上なら、ユーザの意図または問いの文脈から対象 project を選び、以後は `--project <name>`（または `$GRASP_PROJECT`）を付ける。project を推測できない時は確認する。
 - 一回限りの JSON 調査では、既定 store を上書きしないよう task-local store を使う:
 
   ```bash
@@ -97,10 +98,12 @@ description: >-
 ## 実行方法
 
 - 形式: **`grasp <verb> ...`**。store は既定では home に1個 `~/.grasp/grasp.sqlite`（global default）。
-- 一回限りのユーザ指定 JSON を読む時は、必要に応じて `--store <task-local.sqlite>` を使い、既定 store を上書きしない。
+- 1つの store に複数 project namespace を保持できる。`grasp import --cosense <json>` は export JSON の `name` を project 名として使い、同名 project だけを置き換える。project 名を明示する時は `grasp import --project <name> --cosense <json>`。
+- 一回限りのユーザ指定 JSON を読む時は、必要に応じて `--store <task-local.sqlite>` を使い、既定 store に project を増やさない。
 - 未インストール環境では grasp repository root から `python3 -m grasp <verb>`（`pip install -e <grasp-repo>` 済みなら `grasp` が PATH）。
-- `grasp import --cosense <json>` で Cosense JSON export を import する。既存 store があってもそのまま置き換える。以降は sub-second。別パスは `--store` / `$GRASP_STORE`、別 home は `$GRASP_HOME`。
-- 機械可読が要る時は `--json`。**root option なので verb の前**に置く: `grasp --json read "ページタイトル" --backlinks-limit 3`。`--store` も同様に verb の前。
+- `grasp import --cosense <json>` で Cosense JSON export を import する。以降は sub-second。別パスは `--store` / `$GRASP_STORE`、別 home は `$GRASP_HOME`。
+- 複数 project がある store で読む時は `grasp --project <name> read "ページタイトル"` のように project を指定する。project が1つだけなら省略可。
+- 機械可読が要る時は `--json`。**root option なので verb の前**に置く: `grasp --project <name> --json read "ページタイトル" --backlinks-limit 3`。`--store` / `--project` も同様に verb の前。
 - 空白・記号を含む title / query は shell でクォートする（`'...'`）。
 
 ## 回答の形式

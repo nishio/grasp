@@ -31,6 +31,10 @@ def default_store_path() -> Path:
     return grasp_home() / "grasp.sqlite"
 
 
+def default_project() -> str | None:
+    return os.environ.get("GRASP_PROJECT")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="grasp",
@@ -64,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=default_store_path(),
         help="SQLite store path. Defaults to $GRASP_STORE or ~/.grasp/grasp.sqlite (one global store).",
     )
+    parser.add_argument(
+        "--project",
+        default=default_project(),
+        help="Project namespace to read/update. Defaults to $GRASP_PROJECT, or the only project in the store.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
 
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="command")
@@ -74,7 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Import a Cosense JSON export into the SQLite store.",
         description="Build or replace the SQLite graph store from a Cosense JSON export.",
         returns=(
-            "store, schema_version, current_schema_version, schema_ok, "
+            "store, project, project_count, projects[], schema_version, current_schema_version, schema_ok, "
             "source_export, imported_at, pages, lines, edges, unresolved_targets"
         ),
         examples=[
@@ -83,8 +92,15 @@ def build_parser() -> argparse.ArgumentParser:
         ],
         notes=[
             "Uses --cosense for the Cosense JSON export path and global --store for the destination store.",
-            "If the destination store exists, import replaces it.",
+            "Import replaces only the selected project namespace. Other projects in the same store are preserved.",
+            "Project name defaults to the export's name field. Use --project to override.",
         ],
+    )
+    import_parser.add_argument(
+        "--project",
+        dest="import_project",
+        default=None,
+        help="Project namespace to store this export under. Defaults to the export's name field.",
     )
     import_parser.add_argument(
         "--cosense",
@@ -100,7 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show SQLite store stats and schema status.",
         description="Inspect the configured SQLite store without requiring schema compatibility.",
         returns=(
-            "store, schema_version, current_schema_version, schema_ok, "
+            "store, project, project_count, projects[], schema_version, current_schema_version, schema_ok, "
             "source_export, imported_at, pages, lines, edges, unresolved_targets"
         ),
         examples=[
@@ -108,7 +124,11 @@ def build_parser() -> argparse.ArgumentParser:
             "grasp --json stats",
             "grasp --store /tmp/grasp.sqlite stats",
         ],
-        notes=["For old stores, unresolved_targets may be null and schema_ok will be false."],
+        notes=[
+            "If --project is omitted and the store contains one project, stats shows that project.",
+            "If --project is omitted and the store contains multiple projects, stats shows aggregate counts and projects[].",
+            "For old stores, unresolved_targets may be null and schema_ok will be false.",
+        ],
     )
 
     read_parser = add_command_parser(
@@ -387,21 +407,28 @@ def main(argv: list[str] | None = None) -> int:
         export_path = args.cosense_export
         if not export_path.exists():
             parser.error(f"export path does not exist: {export_path}")
-        result = import_export_to_sqlite(export_path, args.store)
+        project = args.import_project or args.project
+        try:
+            result = import_export_to_sqlite(export_path, args.store, project_name=project)
+        except ValueError as error:
+            parser.error(str(error))
         emit_result(args, result)
         return 0
 
     if not args.store.exists():
         parser.error(f"store does not exist: {args.store} (run `grasp import --cosense <json>` first)")
 
-    store = SQLiteStore(args.store)
+    store = SQLiteStore(args.store, project=args.project)
     try:
         if args.command != "stats" and not store.schema_ok():
             parser.error(
                 f"store schema is {store.schema_version()}, current is {SCHEMA_VERSION}; "
                 "run `grasp import --cosense <json>` to rebuild"
             )
-        result = run_command(store, args)
+        try:
+            result = run_command(store, args)
+        except ValueError as error:
+            parser.error(str(error))
     finally:
         store.close()
     emit_result(args, result)
@@ -526,6 +553,7 @@ def format_result(command: str, result: Any) -> str:
 def format_import(result: dict[str, Any]) -> str:
     return (
         f"store: {result['store']}\n"
+        f"project: {result['project']}\n"
         f"schema: {result['schema_version']}\n"
         f"pages: {result['pages']}\n"
         f"lines: {result['lines']}\n"
@@ -535,8 +563,15 @@ def format_import(result: dict[str, Any]) -> str:
 
 
 def format_stats(result: dict[str, Any]) -> str:
+    project_lines = "".join(
+        f"- {project['name']} (pages {project['pages']}, source {project['source_export']})\n"
+        for project in result.get("projects", [])
+    )
+    project_section = project_lines if project_lines else "(none)\n"
     return (
         f"store: {result['store']}\n"
+        f"project: {result['project']}\n"
+        f"project_count: {result['project_count']}\n"
         f"schema: {result['schema_version']}\n"
         f"current_schema: {result['current_schema_version']}\n"
         f"schema_ok: {result['schema_ok']}\n"
@@ -546,6 +581,7 @@ def format_stats(result: dict[str, Any]) -> str:
         f"lines: {result['lines']}\n"
         f"edges: {result['edges']}\n"
         f"unresolved_targets: {result['unresolved_targets']}\n"
+        f"\n## Projects\n{project_section}"
     )
 
 
