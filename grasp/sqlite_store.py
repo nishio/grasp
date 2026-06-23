@@ -3,8 +3,10 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 from html import escape as escape_html
+import json
 from pathlib import Path
 import os
+import shutil
 import sqlite3
 import time
 from typing import Any
@@ -14,6 +16,7 @@ from .cosense import CosenseStore, Edge, Line, Page, normalize_title, parse_cose
 
 
 SCHEMA_VERSION = "4"
+IMPORT_CACHE_MANIFEST_VERSION = 1
 
 
 SCHEMA = """
@@ -238,6 +241,7 @@ def import_export_to_sqlite(
     finally:
         connection.close()
 
+    _cache_import_source(export_path, store_path, project)
     store = SQLiteStore(store_path, project=project)
     try:
         return store.stats()
@@ -274,6 +278,148 @@ def _store_schema_version(store_path: Path) -> str | None:
             connection.close()
     except sqlite3.Error:
         return None
+
+
+def recover_store_from_import_cache(store_path: str | Path) -> bool:
+    """Rebuild an outdated store from cached import JSONs kept beside it."""
+    store_path = Path(store_path)
+    if _store_schema_version(store_path) == SCHEMA_VERSION:
+        return True
+
+    sources = _cached_import_sources(store_path)
+    if not sources:
+        metadata = _read_metadata_if_possible(store_path)
+        source_export = metadata.get("last_source_export") or metadata.get("source_export")
+        if source_export and Path(source_export).exists():
+            sources = [
+                {
+                    "project": metadata.get("last_imported_project"),
+                    "path": source_export,
+                    "source_export": source_export,
+                }
+            ]
+
+    if not sources:
+        return False
+
+    for source in sources:
+        source_path = Path(source["path"])
+        if not source_path.exists():
+            return False
+    for source in sources:
+        import_export_to_sqlite(
+            source["path"],
+            store_path,
+            project_name=source.get("project") or None,
+        )
+    return _store_schema_version(store_path) == SCHEMA_VERSION
+
+
+def import_cache_dir(store_path: str | Path) -> Path:
+    store_path = Path(store_path)
+    return store_path.with_name(f"{store_path.name}.imports")
+
+
+def import_cache_manifest_path(store_path: str | Path) -> Path:
+    return import_cache_dir(store_path) / "manifest.json"
+
+
+def _cache_import_source(export_path: Path, store_path: Path, project: str) -> None:
+    cache_dir = import_cache_dir(store_path)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{quote(project, safe='') or '_default'}.cosense.json"
+    tmp_path = cache_path.with_name(f"{cache_path.name}.tmp")
+
+    try:
+        same_file = export_path.resolve() == cache_path.resolve()
+    except FileNotFoundError:
+        same_file = False
+    if not same_file:
+        shutil.copyfile(export_path, tmp_path)
+        os.replace(tmp_path, cache_path)
+
+    manifest = _read_import_cache_manifest(store_path)
+    projects = manifest.setdefault("projects", {})
+    now = int(time.time())
+    projects[project] = {
+        "project": project,
+        "path": str(cache_path),
+        "source_export": str(export_path),
+        "cached_at": now,
+    }
+    manifest["version"] = IMPORT_CACHE_MANIFEST_VERSION
+    manifest["last_imported_project"] = project
+    manifest["last_cached_at"] = now
+    _write_import_cache_manifest(store_path, manifest)
+
+
+def _cached_import_sources(store_path: Path) -> list[dict[str, Any]]:
+    manifest = _read_import_cache_manifest(store_path)
+    projects = manifest.get("projects")
+    if isinstance(projects, dict):
+        sources = []
+        for project in sorted(projects):
+            item = projects[project]
+            if not isinstance(item, dict):
+                continue
+            path = item.get("path")
+            if path:
+                sources.append(
+                    {
+                        "project": item.get("project") or project,
+                        "path": path,
+                        "source_export": item.get("source_export"),
+                    }
+                )
+        if sources:
+            return sources
+
+    cache_dir = import_cache_dir(store_path)
+    return [
+        {"project": None, "path": str(path), "source_export": None}
+        for path in sorted(cache_dir.glob("*.cosense.json"))
+    ]
+
+
+def _read_import_cache_manifest(store_path: str | Path) -> dict[str, Any]:
+    manifest_path = import_cache_manifest_path(store_path)
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"version": IMPORT_CACHE_MANIFEST_VERSION, "projects": {}}
+    if not isinstance(data, dict):
+        return {"version": IMPORT_CACHE_MANIFEST_VERSION, "projects": {}}
+    if not isinstance(data.get("projects"), dict):
+        data["projects"] = {}
+    return data
+
+
+def _write_import_cache_manifest(store_path: str | Path, manifest: dict[str, Any]) -> None:
+    manifest_path = import_cache_manifest_path(store_path)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = manifest_path.with_name(f"{manifest_path.name}.tmp")
+    tmp_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(tmp_path, manifest_path)
+
+
+def _read_metadata_if_possible(store_path: Path) -> dict[str, str]:
+    if not store_path.exists():
+        return {}
+    try:
+        connection = sqlite3.connect(store_path)
+        connection.row_factory = sqlite3.Row
+        try:
+            return {
+                str(row["key"]): str(row["value"])
+                for row in connection.execute("SELECT key, value FROM metadata")
+            }
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return {}
 
 
 def normalize_project_name(project_name: str) -> str:

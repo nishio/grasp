@@ -70,7 +70,7 @@ ln -s "$PWD/skills/grasp" ~/.claude/skills/grasp
 grasp import --cosense your-project.json
 ```
 
-`~/.grasp/grasp.sqlite` に SQLite のグラフストアが構築されます（数万ページで十数秒程度）。以降のコマンドはこのストアを読むだけなので**サブ秒**で返ります。
+`~/.grasp/grasp.sqlite` に SQLite のグラフストアが構築されます（数万ページで十数秒程度）。以降のコマンドはこのストアを読むだけなので**サブ秒**で返ります。import した JSON はストア横の `grasp.sqlite.imports/` に復旧用コピーとして保持され、古い schema の store を通常コマンドで開いた時はそこから自動再構築します。hosted の最新差分は引き続き `sync` の責務です。
 
 同じ SQLite store には複数の Cosense project を入れられます。project 名は export JSON の `name` を既定で使い、同名 project を再 import した場合はその project namespace だけを置き換えます。複数 project が入っている store を読む時は `--project` を指定します。
 
@@ -128,8 +128,7 @@ grasp read "<ページタイトル>"
   - `--store PATH` / `$GRASP_STORE` … SQLite ストアの場所
   - `--project NAME` / `$GRASP_PROJECT` … 読み書き対象の project namespace
   - `$GRASP_HOME` … home 自体（既定 `~/.grasp`）を差し替え
-  - `--export PATH` / `$GRASP_EXPORT` … 自動リビルド用の JSON エクスポート
-- **グローバルオプション（`--json` / `--store` / `--project` / `--export`）は verb の前**に置きます:
+- **グローバルオプション（`--json` / `--store` / `--project`）は verb の前**に置きます:
 
   ```bash
   grasp --project your-project --json read "<ページタイトル>" --backlinks-limit 5

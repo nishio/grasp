@@ -30,6 +30,14 @@ sources:
 - hosted line id は採用せず、grasp の既存方針 `page.id:line-index` を維持する。
 - `--dry-run` は changed page の列挙のみで `readPage` / upsert しない。
 
+## Update (2026-06-23): page count mismatch 解消を実測
+
+export seed 直後の local store は `nishio` 25791 pages、hosted `cosense listPages https://scrapbox.io/nishio/ --sort updated --limit 1` の `count` は 25792 pages だった。`grasp sync --dry-run --limit 20` は新規ページ `タブUI` 1 件だけを changed として検出し、実 sync はこれを upsert した。
+
+同期後の local `grasp stats` は 25792 pages / 724986 lines になり、hosted count 25792 と一致。再 dry-run は changed 0。少なくとも「export 後に追加された最近更新ページ」については、現行 sync path で page count mismatch を解消できる。
+
+制約: 停止条件は「recent updated walk で既知ページに到達」なので、古い更新日時のまま local に存在しないページ、削除、rename の検出はこの実測では解決していない。削除・rename は引き続き Open Questions。
+
 ## 帰結
 
 - import adapter は **2モード**: bulk seed（export）と incremental delta（cosense-cli）。native store（[[persistence-custom-format]]）はどちらの入力も同じ正規化先。

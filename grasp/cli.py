@@ -9,7 +9,7 @@ from textwrap import dedent
 from typing import Any
 
 from .cosense_cli import CosenseCliClient, sync_from_cosense
-from .sqlite_store import SCHEMA_VERSION, SQLiteStore, import_export_to_sqlite
+from .sqlite_store import SCHEMA_VERSION, SQLiteStore, import_export_to_sqlite, recover_store_from_import_cache
 
 
 class GraspHelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
@@ -94,6 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Uses --cosense for the Cosense JSON export path and global --store for the destination store.",
             "Import replaces only the selected project namespace. Other projects in the same store are preserved.",
             "Project name defaults to the export's name field. Use --project to override.",
+            "A cached copy of each imported JSON is kept beside the store for automatic schema recovery.",
         ],
     )
     import_parser.add_argument(
@@ -418,19 +419,25 @@ def main(argv: list[str] | None = None) -> int:
     if not args.store.exists():
         parser.error(f"store does not exist: {args.store} (run `grasp import --cosense <json>` first)")
 
-    store = SQLiteStore(args.store, project=args.project)
+    store: SQLiteStore | None = SQLiteStore(args.store, project=args.project)
     try:
         if args.command != "stats" and not store.schema_ok():
-            parser.error(
-                f"store schema is {store.schema_version()}, current is {SCHEMA_VERSION}; "
-                "run `grasp import --cosense <json>` to rebuild"
-            )
+            schema_version = store.schema_version()
+            store.close()
+            store = None
+            if not recover_store_from_import_cache(args.store):
+                parser.error(
+                    f"store schema is {schema_version}, current is {SCHEMA_VERSION}; "
+                    "run `grasp import --cosense <json>` to rebuild"
+                )
+            store = SQLiteStore(args.store, project=args.project)
         try:
             result = run_command(store, args)
         except ValueError as error:
             parser.error(str(error))
     finally:
-        store.close()
+        if store is not None:
+            store.close()
     emit_result(args, result)
     return 0
 

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from grasp.sqlite_store import SQLiteStore, import_export_to_sqlite
+from grasp.sqlite_store import SQLiteStore, import_cache_manifest_path, import_export_to_sqlite
 
 
 FIXTURE = {
@@ -83,6 +83,10 @@ class SQLiteStoreTests(unittest.TestCase):
             self.assertEqual(stats["lines"], 6)
             self.assertEqual(stats["edges"], 5)
             self.assertEqual(stats["unresolved_targets"], 1)
+            manifest = json.loads(import_cache_manifest_path(store_path).read_text(encoding="utf-8"))
+            cached_path = Path(manifest["projects"]["fixture"]["path"])
+            self.assertEqual(manifest["last_imported_project"], "fixture")
+            self.assertTrue(cached_path.exists())
 
             store = SQLiteStore(store_path)
             try:

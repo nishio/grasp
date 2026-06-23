@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -134,6 +135,71 @@ class CliHelpTests(unittest.TestCase):
         result = json.loads(completed.stdout)
         self.assertEqual(result["pages"], 2)
         self.assertEqual(result["lines"], 2)
+
+    def test_old_schema_store_recovers_silently_from_cached_import(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "A",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 1,
+                    "views": 0,
+                    "lines": [{"text": "A", "created": 1, "updated": 1, "userId": "u"}],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--cosense",
+                    str(export_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            export_path.unlink()
+            with sqlite3.connect(store_path) as connection:
+                connection.execute(
+                    "UPDATE metadata SET value = '3' WHERE key = 'schema_version'"
+                )
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "peek",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        result = json.loads(completed.stdout)
+        self.assertEqual(completed.stderr, "")
+        self.assertEqual(result["page"]["title"], "A")
+        self.assertEqual([line["text"] for line in result["lines"]], ["A"])
 
 
 if __name__ == "__main__":

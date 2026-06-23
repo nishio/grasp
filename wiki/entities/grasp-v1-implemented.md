@@ -51,6 +51,8 @@ v1 scope 外:
 - legacy `--export` / `--rebuild-store` / `--force` / 暗黙 seed は v1 surface には無い。
 - SQLite schema は projects / pages / lines / edges / unresolved_targets / unresolved_target_examples を持つ。pages/lines/edges/unresolved は project 列で namespace 化し、page id / line id は project と組にした複合 key で扱う。
 - `stats` は store path, selected project, project list, schema version, source export, imported_at, counts などを返す。project 未指定かつ複数 project がある時は aggregate counts と `projects[]` を返す。
+- import 済み JSON は store 横の `<store>.imports/` に project ごとの復旧用コピーとして保持する。manifest は project override と cached path を持つ。
+- 古い schema の store でも `stats` は診断用に読める。`read` / `peek` など通常 command は schema mismatch を検出すると、復旧用コピーからサイレントに current schema へ再構築してから続行する。復旧用コピーが無い古い store では、metadata の `last_source_export` / `source_export` が存在すればそれを fallback に使う。どちらも無ければ従来通り手動 `grasp import --cosense <json>` を促す。import cache は seed snapshot なので、hosted の最新差分は復旧後も `sync` の責務。
 
 ## commands
 
@@ -68,6 +70,13 @@ v1 scope 外:
 | `export-ai <title>` / `export-for-ai` | main + 1-hop/2-hop page 本文を Cosense Export for AI 風に単一テキスト化 |
 | `sync <project-url>` | optional freshness path。`cosense` CLI で最近更新ページを取得し、SQLite store に upsert |
 | `unresolved` | page 実体のない linked target を ranking して返す。TODO list ではない |
+
+## sync facts
+
+- `sync` は `cosense listPages --sort updated` の metadata を store の `pages.updated` と比較し、changed page だけ `cosense readPage` で本文取得して upsert する。upsert 後に unresolved target を再 materialize し、project counts を更新する。
+- `--dry-run` は changed page の検出だけを行い、`readPage` / upsert はしない。
+- 2026-06-23 実測: export seed 由来の local `nishio` store は 25791 pages、hosted count は 25792 pages。`sync --limit 20` が新規ページ `タブUI` を upsert し、local stats は 25792 pages / 724986 lines になった。再 dry-run は changed 0。
+- この検証は「最近更新された missing/new page」の解消を確認したもの。削除・rename・古い更新日時のまま local に無いページの検出は [[incremental-sync]] の Open Questions のまま。
 
 ## import and parser facts
 

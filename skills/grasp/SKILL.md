@@ -102,6 +102,7 @@ description: >-
 - 一回限りのユーザ指定 JSON を読む時は、必要に応じて `--store <task-local.sqlite>` を使い、既定 store に project を増やさない。
 - 未インストール環境では grasp repository root から `python3 -m grasp <verb>`（`pip install -e <grasp-repo>` 済みなら `grasp` が PATH）。
 - `grasp import --cosense <json>` で Cosense JSON export を import する。以降は sub-second。別パスは `--store` / `$GRASP_STORE`、別 home は `$GRASP_HOME`。
+- import 済み JSON は store 横の `<store>.imports/` に復旧用コピーとして保持される。通常 command が古い schema の store を見つけた時は、復旧用コピーからサイレントに current schema へ再構築して続行する。`stats` は診断用なので自動再構築しない。hosted の最新差分は復旧後も `sync` の責務。
 - 複数 project がある store で読む時は `grasp --project <name> read "ページタイトル"` のように project を指定する。project が1つだけなら省略可。
 - 機械可読が要る時は `--json`。**root option なので verb の前**に置く: `grasp --project <name> --json read "ページタイトル" --backlinks-limit 3`。`--store` / `--project` も同様に verb の前。
 - 空白・記号を含む title / query は shell でクォートする（`'...'`）。

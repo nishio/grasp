@@ -1,5 +1,27 @@
 # Log
 
+## [2026-06-23 21:38] lint | sync file back 後の wiki lint
+- `python3 scripts/lint_wiki.py` OK。真の壊れた wikilink 0、index 未登録 0、フロントマター不備 0。
+- 既存の孤立ページ警告 `multi-project-store` は継続（index 登録済み）。
+
+## [2026-06-23 21:35] implementation | import JSON cache から旧 schema store を自動復旧
+- nishio 提案「最後に import した JSON を store のそばに置き、旧 schema store をサイレントに回復」に対応。
+- `grasp import --cosense <json>` は import 成功後、store 横の `<store>.imports/` に project ごとの Cosense JSON コピーと `manifest.json` を保存する。`--project` override も manifest に保持する。
+- `read` / `peek` など通常 command は schema mismatch を検出したら、まず import cache から current schema store を再構築し、そのまま元の command を続行する。`stats` は診断用なので自動復旧しない。cache が無い旧 store では metadata の `last_source_export` / `source_export` を fallback に使う。import cache は seed snapshot なので、hosted の最新差分は復旧後も `sync` の責務。
+- 検証: original export を削除し metadata `schema_version` だけ `3` に戻した store に対して `grasp --json --store <path> peek A` が stderr なしで成功する test を追加。
+
+## [2026-06-23 21:35] verification | sync で hosted/local の page count 一致を確認
+- 同期前: `grasp --json stats` は local store `~/.grasp/grasp.sqlite` / project `nishio` が 25791 pages。`cosense listPages https://scrapbox.io/nishio/ --sort updated --limit 1` は hosted count 25792。
+- `grasp --json sync https://scrapbox.io/nishio/ --limit 20 --dry-run` は `タブUI` 1 件だけを changed として検出。同期前の `grasp read タブUI` は page なし / backlinks なし。
+- 実行: `grasp --json sync https://scrapbox.io/nishio/ --limit 20`。`タブUI` 1 件を upsert し、updated 1。
+- 同期後: local stats は 25792 pages / 724986 lines、hosted count 25792。再 dry-run は changed 0 で停止点 `タブUI`。page count mismatch は解消。
+
+## [2026-06-23 21:31] verification | cosense-cli と grasp で同一ページ取得を smoke
+- 対象: `盲点カード`。hosted は `cosense readPage https://scrapbox.io/nishio/盲点カード`、local は `grasp --project nishio --json peek 盲点カード`。
+- 最初の `grasp peek` は既定 store が schema 3 / current 4 だったため `store schema is 3, current is 4; run \`grasp import --cosense <json>\` to rebuild` で失敗。`grasp import --cosense /Users/nishio/grasp/raw/nishio.json` で `~/.grasp/grasp.sqlite` を schema 4 / project `nishio` として再構築した。
+- 再構築後、本文行の full diff は差分なし。両者 124 lines、SHA-256 は `362d6da6a9f2b48693d8b1be7b187cd9d5ee5b082d7c8f3c811918e470fa8357`。`grasp read` も同じページで backlinks / related / unresolved を返すことを確認。
+- 付記: `cosense listPages https://scrapbox.io/nishio/ --limit 1` の hosted count は 25792、local store は export snapshot 由来で 25791 pages。freshness は引き続き import/sync の責務。
+
 ## [2026-06-23 21:28] release | MIT ライセンスを明示
 - `LICENSE` に MIT License を追加し、`pyproject.toml` の package metadata と README に MIT 表記を追加。
 
