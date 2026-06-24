@@ -360,6 +360,85 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--offset", type=int, default=0, help="Number of ranked line hits to skip.")
     search_parser.add_argument("--context", type=int, default=0, help="Number of lines before and after each hit to include.")
 
+    mentions_parser = add_command_parser(
+        subparsers,
+        "mentions",
+        help="Find bare literal mentions outside parsed internal-link spans.",
+        description=(
+            "Audit literal mentions of a query and classify them by whether the source page "
+            "already has an exact link, a query-containing link target, or no link handle. "
+            "By default only lines with bare occurrences are returned."
+        ),
+        returns="query, mode, context, summary, mentions[]",
+        examples=[
+            "grasp mentions KJ法 --limit 20",
+            "grasp mentions KJ法 --include-linked --limit 20",
+            "grasp mentions KJ法 --context 2 --limit 10",
+            "grasp --json mentions KJ法 --limit 5",
+        ],
+        notes=[
+            "mentions[] items include line fields plus occurrence counts, classification, page link status, query_link_targets[], and line_link_targets[].",
+            "summary counts all literal line hits before limit/offset; returned lines are bounded by --limit.",
+            "This is a link-gap and come-from audit primitive, not a bulk-link instruction.",
+        ],
+    )
+    mentions_parser.add_argument("query", help="Literal text to find.")
+    mentions_parser.add_argument("--limit", type=int, default=50, help="Maximum mention lines to return.")
+    mentions_parser.add_argument("--offset", type=int, default=0, help="Number of ranked mention lines to skip.")
+    mentions_parser.add_argument("--include-linked", action="store_true", help="Also return lines where every occurrence is inside a parsed internal link span.")
+    mentions_parser.add_argument("--context", type=int, default=0, help="Number of lines before and after each returned mention to include.")
+
+    co_links_parser = add_command_parser(
+        subparsers,
+        "co-links",
+        help="Rank internal links that co-occur on lines containing a query.",
+        description=(
+            "For lines containing a literal query, rank the other internal links on those lines. "
+            "This surfaces narrower slice handles for broad hubs."
+        ),
+        returns="query, co_links[], count_returned",
+        examples=[
+            "grasp co-links KJ法 --limit 20",
+            "grasp co-links KJ法 --sample-limit 2 --limit 10",
+            "grasp --json co-links KJ法 --limit 5",
+        ],
+        notes=[
+            "co_links[] items include title, normalized_title, link_count, line_count, source_page_count, total_source_views, latest_source_updated, and examples[].",
+            "The exact query target is excluded by default; use --include-self to include it.",
+        ],
+    )
+    co_links_parser.add_argument("query", help="Literal text to find in source lines.")
+    co_links_parser.add_argument("--limit", type=int, default=50, help="Maximum co-link targets to return.")
+    co_links_parser.add_argument("--sample-limit", type=int, default=3, help="Maximum example lines per co-link target.")
+    co_links_parser.add_argument("--include-self", action="store_true", help="Include links whose target exactly matches the query.")
+
+    gather_parser = add_command_parser(
+        subparsers,
+        "gather",
+        help="Return a bounded retrieval bundle for a query.",
+        description=(
+            "Compose link stats, bare mention summary, co-link slices, representative mentions, "
+            "and backlinks into one small bundle. This is an initial thin gather surface, not "
+            "exact token packing."
+        ),
+        returns="query, budget, limits, banner|null, link_stats, mention_summary, mentions[], co_links[], backlinks[], recipes[]",
+        examples=[
+            "grasp gather KJ法",
+            "grasp gather KJ法 --budget 8000",
+            "grasp gather KJ法 --mentions-limit 5 --co-links-limit 10 --backlinks-limit 5",
+            "grasp --json gather KJ法 --budget 4000",
+        ],
+        notes=[
+            "--budget selects bounded row limits approximately; JSON returns budget_note to make this explicit.",
+            "For huge hubs, banner explains that bulk-linking bare mentions is the wrong direction.",
+        ],
+    )
+    gather_parser.add_argument("query", help="Literal query to gather around.")
+    gather_parser.add_argument("--budget", type=int, default=4000, help="Approximate token budget used to choose default row limits.")
+    gather_parser.add_argument("--mentions-limit", type=int, default=None, help="Maximum bare mention lines to include; defaults from --budget.")
+    gather_parser.add_argument("--co-links-limit", type=int, default=None, help="Maximum co-link targets to include; defaults from --budget.")
+    gather_parser.add_argument("--backlinks-limit", type=int, default=None, help="Maximum backlink lines to include; defaults from --budget.")
+
     export_ai_parser = add_command_parser(
         subparsers,
         "export-ai",
@@ -739,6 +818,37 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             "offset": args.offset,
             "recovery_hints": None if hits else store.recovery_hints(args.query, limit=3),
         }
+    if args.command == "mentions":
+        result = store.mentions(
+            args.query,
+            limit=args.limit,
+            offset=args.offset,
+            include_linked=args.include_linked,
+            context=args.context,
+        )
+        result["offset"] = args.offset
+        return result
+    if args.command == "co-links":
+        co_links = store.co_links(
+            args.query,
+            limit=args.limit,
+            sample_limit=args.sample_limit,
+            include_self=args.include_self,
+        )
+        return {
+            "query": args.query,
+            "co_links": co_links,
+            "count_returned": len(co_links),
+            "include_self": args.include_self,
+        }
+    if args.command == "gather":
+        return store.gather(
+            args.query,
+            budget=args.budget,
+            backlink_limit=args.backlinks_limit,
+            mention_limit=args.mentions_limit,
+            co_link_limit=args.co_links_limit,
+        )
     if args.command in {"export-ai", "export-for-ai"}:
         result = store.export_ai(
             args.title,
@@ -869,6 +979,12 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
             context=result.get("context", 0),
             aliases=aliases,
         )
+    if command == "mentions":
+        return format_mentions(result, aliases=aliases)
+    if command == "co-links":
+        return format_co_links(result, aliases=aliases)
+    if command == "gather":
+        return format_gather(result, aliases=aliases)
     if command in {"export-ai", "export-for-ai"}:
         return format_export_ai(result)
     if command == "unresolved":
@@ -1311,6 +1427,138 @@ def format_search(
                 for line in hit.get("context_lines", []):
                     parts.append(f"  {aliases.format_line_id(line['line_id'])}  {line['text']}\n")
     parts.append(format_recovery_hints(query, recovery_hints, aliases=aliases))
+    return with_alias_legend("".join(parts), aliases)
+
+
+def format_mentions(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
+    parts = [
+        f"# Mentions: {result['query']}\n",
+        f"mode: {result['mode']}\n",
+        f"offset: {result.get('offset', 0)}\n",
+    ]
+    if result.get("context"):
+        parts.append(f"context: {result['context']}\n")
+    parts.append(format_mention_summary(result["summary"]))
+    mentions = result.get("mentions") or []
+    parts.append("\n## Lines\n")
+    if mentions:
+        parts.append(format_mention_items(mentions, aliases=aliases))
+    else:
+        parts.append("(none)\n")
+    return with_alias_legend("".join(parts), aliases)
+
+
+def format_mention_summary(summary: dict[str, Any]) -> str:
+    parts = [
+        "\n## Summary\n",
+        f"total: {summary['total_occurrences']} occurrences on {summary['total_lines']} lines / {summary['total_pages']} pages\n",
+        f"bare: {summary['bare_occurrences']} occurrences on {summary['bare_lines']} lines / {summary['bare_pages']} pages\n",
+        f"linked: {summary['linked_occurrences']} occurrences\n",
+        f"returned_lines: {summary['returned_lines']}\n",
+    ]
+    status_counts = summary.get("page_status_counts") or {}
+    if status_counts:
+        parts.append("page_status_counts:\n")
+        for key in ("exact-link-page", "query-link-page", "unlinked-page"):
+            item = status_counts.get(key) or {}
+            parts.append(
+                f"- {key}: {item.get('bare_occurrences', 0)} bare occurrences, "
+                f"{item.get('lines', 0)} lines, {item.get('pages', 0)} pages\n"
+            )
+    return "".join(parts)
+
+
+def format_mention_items(mentions: list[dict[str, Any]], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
+    parts: list[str] = []
+    for hit in mentions:
+        parts.append(
+            f"- {hit['source_title']} {aliases.format_line_id(hit['line_id'])} "
+            f"[{hit['classification']}; bare {hit['bare_occurrence_count']}; linked {hit['linked_occurrence_count']}]: "
+            f"{hit['line_text']}\n"
+        )
+        query_targets = hit.get("query_link_targets") or []
+        if query_targets:
+            parts.append("  query_link_targets: " + ", ".join(target["title"] for target in query_targets[:5]) + "\n")
+        line_targets = hit.get("line_link_targets") or []
+        if line_targets:
+            parts.append("  line_link_targets: " + ", ".join(target["title"] for target in line_targets[:5]) + "\n")
+        window = hit.get("context_window")
+        if window:
+            parts.append(
+                f"  context: lines {window['start_index']}-{window['end_index']} "
+                f"(around {aliases.format_line_id(window['around_line_id'])})\n"
+            )
+            for line in hit.get("context_lines", []):
+                parts.append(f"  {aliases.format_line_id(line['line_id'])}  {line['text']}\n")
+    return "".join(parts)
+
+
+def format_co_links(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
+    parts = [f"# Co-links: {result['query']}\n"]
+    if result.get("include_self"):
+        parts.append("include_self: true\n")
+    co_links = result.get("co_links") or []
+    if co_links:
+        parts.append(format_co_link_items(co_links, aliases=aliases))
+    else:
+        parts.append("(none)\n")
+    return with_alias_legend("".join(parts), aliases)
+
+
+def format_co_link_items(co_links: list[dict[str, Any]], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
+    parts: list[str] = []
+    for item in co_links:
+        parts.append(
+            f"- {item['title']} (links {item['link_count']}, lines {item['line_count']}, "
+            f"pages {item['source_page_count']}, views {item['total_source_views']})\n"
+        )
+        for example in item.get("examples", [])[:2]:
+            parts.append(f"  - {example['source_title']} {aliases.format_line_id(example['line_id'])}: {example['line_text']}\n")
+    return "".join(parts)
+
+
+def format_gather(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
+    parts = [
+        f"# Gather: {result['query']}\n",
+        f"budget: {result['budget']} ({result['budget_note']})\n",
+    ]
+    limits = result.get("limits") or {}
+    parts.append(
+        "limits: "
+        f"mentions {limits.get('mentions')}, co_links {limits.get('co_links')}, backlinks {limits.get('backlinks')}\n"
+    )
+    banner = result.get("banner")
+    if banner:
+        parts.append(f"\n## Banner\n{banner['kind']}: {banner['message']}\n")
+
+    parts.append("\n## Link Stats\n")
+    parts.append(format_link_stats_summary(result.get("link_stats", {})))
+
+    parts.append(format_mention_summary(result["mention_summary"]))
+
+    parts.append("\n## Co-link Slices\n")
+    co_links = result.get("co_links") or []
+    parts.append(format_co_link_items(co_links, aliases=aliases) if co_links else "(none)\n")
+
+    parts.append("\n## Bare Mention Samples\n")
+    mentions = result.get("mentions") or []
+    parts.append(format_mention_items(mentions, aliases=aliases) if mentions else "(none)\n")
+
+    parts.append("\n## Backlinks\n")
+    backlinks = result.get("backlinks") or []
+    parts.append(format_edge_list(backlinks, aliases=aliases) if backlinks else "(none)\n")
+
+    recipes = result.get("recipes") or []
+    if recipes:
+        parts.append("\n## Recipes\n")
+        for recipe in recipes:
+            command = " ".join(shlex.quote(str(part)) for part in recipe["command"])
+            parts.append(f"- {command}\n  {recipe['why']}\n")
     return with_alias_legend("".join(parts), aliases)
 
 

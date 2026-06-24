@@ -51,7 +51,7 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.5.12`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.5.13`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -80,6 +80,9 @@ v1 scope 外:
 | `peek <title>` | page lines のみ。`--line-offset N --line-limit M` で本文行だけをページングし、JSON は `line_offset`, `lines_truncated_before`, `lines_truncated_after` を返す |
 | `suggest <partial>` | title 部分一致候補 |
 | `search <query>` | 既定は空白も含む literal line substring search。`--mode boolean` で AND/OR/NOT、括弧、quoted phrase、隣接 term の implicit AND を扱う。`--scope line` は行単位、`--scope page` はページ単位で式を評価する。`--context N` で各 hit に前後 N 行の `context_lines[]` と `context_window` を同梱し、text 出力でも hit 直下に bounded context を表示する。literal 0件時は NFKC query 正規化＋長音除去の normalized fallback を試し、text は `[normalized]`、JSON は `match_mode: "normalized"` を返す。空結果時は `recovery_hints` も返す |
+| `mentions <query>` | literal query の出現を行単位で探し、parsed internal-link span 外の **bare mention** を既定で返す。summary は全 literal hit の total/bare/linked occurrence 数、bare line/page 数、page status counts を返す。各行は `exact-link-page` / `query-link-page` / `unlinked-page` に分類し、`--include-linked` で全 occurrence が link span 内の行も返す。`--context N` で周辺行同梱 |
+| `co-links <query>` | literal query を含む行で同時に出る internal links を target ごとに rank する。exact query target は既定で除外し、`--include-self` で含める。各 item は link_count / line_count / source_page_count / total_source_views / examples を返す |
+| `gather <query>` | link stats、bare mention summary、representative bare mentions、co-link slices、backlinks、次に実行する recipe を bounded bundle として返す。`--budget` は row limit を選ぶ近似であり厳密 token packing ではない。huge hub では bulk-linking を避ける banner を返す |
 | `export-ai <title>` / `export-for-ai` | main + 1-hop/2-hop page 本文を Cosense Export for AI 風に単一テキスト化 |
 | `sync <project-url>` | optional freshness path。`cosense` CLI で最近更新ページを取得し、SQLite store に upsert |
 | `acquire <project-url>` | admin export なしの hosted Cosense 初回 seed / partial corpus acquisition。`--search` / `--filter` / `--full-list` / `--from-page` / `--seed-file` |
@@ -136,6 +139,7 @@ parser が link から除外するもの:
 - `read` は sub-100ms。
 - `backlinks` / `unresolved` は約 50-80ms。
 - 既定 `search` は `LIKE` 全行 scan 律速で約 180ms。boolean page scope は SQL の `EXISTS` でページ単位に条件判定し、該当 positive term を含む行を返す。literal 0件時の normalized fallback は NFKC query 正規化＋長音除去を SQLite `REPLACE` で行う。完全なかな/カナ変換 Python scan は 50k lines 以下の小規模 store に限る。FTS5 trigram hybrid は [[fts5-trigram-search]] の通り未実装候補。
+- `mentions` / `co-links` / `gather` は既存 `lines` / `edges` / `pages` から都度計算する schema-compatible retrieval primitive。query literal の `LIKE` hit 行を起点にするため、巨大・一般語 query では `search` 同様に scan cost を払う。`gather --budget` は厳密 token budget ではなく bounded row limit selector。
 - `path` は実験的 command で、現状は command ごとに pages ∪ unresolved targets の一時 adjacency を構築する。nishio store の dogfood（66092 nodes / 115075 undirected edges）では `path KJ法 弱い紐帯 --max-depth 4 --limit 1` が約2-5s。hot read path ではなく graph reasoning primitive として扱う。
 - 初回 import は 1 回だけ数秒から十数秒程度。
 

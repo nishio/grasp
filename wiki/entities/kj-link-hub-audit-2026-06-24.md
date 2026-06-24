@@ -133,7 +133,7 @@ Tool-level success criterion:
 
 - `gather KJ法` detects a huge hub and reports both graph and lexical surfaces: exact links, body bare mentions, pages with bare mention but no exact link, pages with no `KJ法`-related link, top co-link slices, representative samples, and omitted counts.
 - `co-links KJ法` ranks same-line slice handles (`考える花火`, `こざね法`, `グループ編成`, `探検ネット`, `表札*`, etc.).
-- `mentions KJ法 --unlinked` returns bare mention lines with enough page/link context to decide whether to add a narrower link.
+- `mentions KJ法` returns bare mention lines with enough page/link context to decide whether to add a narrower link.
 - AI clustering consumes this raw material and proposes 5-10 use clusters, but the durable page/link names remain human-reviewed.
 
 The practical success condition is: opening `[KJ法]` backlinks should no longer require reading the whole hub. The first view should expose a handful of use clusters and let the agent read only the relevant slice.
@@ -143,12 +143,14 @@ The practical success condition is: opening `[KJ法]` backlinks should no longer
 - `KJ法` is a counterexample to the earlier "100+ link hubs are rare case" dismissal. It is rare but load-bearing enough to deserve first-class retrieval handling.
 - Do not bulk-convert bare `KJ法` to `[KJ法]`. That would amplify the hub and dilute attention.
 - Keep `[KJ法]` as root concept / representative link. Use more specific links for routine mentions: `表札づくり`, `グループ編成`, `考える花火`, `Kozaneba`, `探検ネット`, `こざね法`, etc.
-- Add tool support for **link gap / bare mention audit**: "literal mentions of X outside parsed link spans, grouped by page and whether the page already has an exact link".
-- Add tool support for **co-link slices**: top links co-occurring on lines containing a query / target, and search recipes for those slices.
-- `gather "<query>" --budget` should treat huge hubs as a budgeted sampling problem: top ranked lines, representative co-link slices, omitted counts, and explicit "remaining N pages omitted".
+2026-06-24 12:32 initial tool support: `mentions <query>` implements link gap / bare mention audit as a separate verb; `co-links <query>` implements same-line co-link slices; `gather <query>` returns a bounded bundle with link stats, bare mention summary, representative mentions, co-links, backlinks, and next recipes.
+
+Residual implications:
+
+- `gather "<query>" --budget` should eventually treat huge hubs as a stricter token-packing problem with explicit omitted counts. Current `--budget` only selects row limits.
+- `mentions` still needs higher-level classification for AI-authored default bare text, intentional non-links, and come-from promotion candidates.
 
 ## Open Questions
 
-- Should `grasp` expose `mentions <query>` as a separate verb, or fold this into `search --mentions --link-gap`?
-- Should co-link slice counts be computed from same-line only, same-page, or windowed context?
+- Should co-link slice counts eventually support same-page or windowed context in addition to the implemented same-line default?
 - What is the right output contract for AI clustering: raw rows only, or a compact "candidate clusters" section explicitly labeled as heuristic?

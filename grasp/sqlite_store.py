@@ -14,8 +14,18 @@ import unicodedata
 from typing import Any
 from urllib.parse import quote
 
-from .cosense import CosenseStore, Edge, Line, Page, normalize_title, parse_cosense_links
-from .markdown import MarkdownMirror, MarkdownPageRecord
+from .cosense import (
+    CosenseStore,
+    Edge,
+    Line,
+    Page,
+    is_ascii_index_syntax,
+    is_internal_cosense_link,
+    normalize_title,
+    parse_cosense_hash_tag,
+    parse_cosense_links,
+)
+from .markdown import MarkdownMirror, MarkdownPageRecord, markdown_wikilink_target
 
 
 SCHEMA_VERSION = "5"
@@ -1598,6 +1608,440 @@ class SQLiteStore:
         ).fetchall()
         return [self._page_from_row(row).to_summary() for row in rows]
 
+    def mentions(
+        self,
+        query: str,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        include_linked: bool = False,
+        context: int = 0,
+    ) -> dict[str, Any]:
+        if not query:
+            raise ValueError("mentions query is empty")
+
+        offset = max(0, offset)
+        context = max(0, context)
+        rows = self._literal_line_rows(query)
+        line_targets = self._line_link_targets_for_literal_query(query)
+        page_targets = self._page_link_targets_containing_query(query)
+        norm_query = normalize_title(query)
+
+        all_page_ids: set[str] = set()
+        bare_page_ids: set[str] = set()
+        status_line_counts: Counter[str] = Counter()
+        status_page_ids: dict[str, set[str]] = {}
+        status_bare_occurrences: Counter[str] = Counter()
+        filtered_hits: list[dict[str, Any]] = []
+        total_occurrences = 0
+        bare_occurrences = 0
+        linked_occurrences = 0
+        total_line_count = 0
+        bare_line_count = 0
+
+        for row in rows:
+            occurrence_spans = _literal_occurrence_spans(row["line_text"], query)
+            if not occurrence_spans:
+                continue
+
+            total_line_count += 1
+            all_page_ids.add(row["source_page_id"])
+            edge_targets = line_targets.get(row["line_id"], [])
+            edge_norms = {target["normalized_title"] for target in edge_targets}
+            link_spans = _line_internal_link_spans(row["line_text"], edge_norms)
+            line_linked_occurrences = sum(
+                1
+                for span in occurrence_spans
+                if _span_is_inside_any(span, link_spans)
+            )
+            line_total_occurrences = len(occurrence_spans)
+            line_bare_occurrences = line_total_occurrences - line_linked_occurrences
+
+            total_occurrences += line_total_occurrences
+            linked_occurrences += line_linked_occurrences
+            bare_occurrences += line_bare_occurrences
+
+            page_query_targets = page_targets.get(row["source_page_id"], {})
+            page_has_exact_link = norm_query in page_query_targets
+            page_has_query_link = bool(page_query_targets)
+            classification = (
+                "exact-link-page"
+                if page_has_exact_link
+                else "query-link-page"
+                if page_has_query_link
+                else "unlinked-page"
+            )
+
+            if line_bare_occurrences:
+                bare_line_count += 1
+                bare_page_ids.add(row["source_page_id"])
+                status_line_counts[classification] += 1
+                status_page_ids.setdefault(classification, set()).add(row["source_page_id"])
+                status_bare_occurrences[classification] += line_bare_occurrences
+
+            if not include_linked and line_bare_occurrences == 0:
+                continue
+
+            filtered_hits.append(
+                self._mention_hit_from_row(
+                    row,
+                    occurrence_count=line_total_occurrences,
+                    bare_occurrence_count=line_bare_occurrences,
+                    linked_occurrence_count=line_linked_occurrences,
+                    page_has_exact_link=page_has_exact_link,
+                    page_has_query_link=page_has_query_link,
+                    query_link_targets=[
+                        {"title": target_title, "normalized_title": target_norm}
+                        for target_norm, target_title in sorted(page_query_targets.items(), key=lambda item: item[1].casefold())
+                    ],
+                    line_link_targets=edge_targets,
+                    classification=classification,
+                )
+            )
+
+        if limit is not None and limit >= 0:
+            returned_hits = filtered_hits[offset : offset + limit]
+        else:
+            returned_hits = filtered_hits[offset:]
+        returned_hits = self._search_hits_with_context(returned_hits, context=context)
+
+        page_status_counts = {
+            classification: {
+                "lines": status_line_counts[classification],
+                "pages": len(status_page_ids.get(classification, set())),
+                "bare_occurrences": status_bare_occurrences[classification],
+            }
+            for classification in ("exact-link-page", "query-link-page", "unlinked-page")
+        }
+        return {
+            "query": query,
+            "mode": "all" if include_linked else "bare",
+            "context": context,
+            "summary": {
+                "total_lines": total_line_count,
+                "total_pages": len(all_page_ids),
+                "total_occurrences": total_occurrences,
+                "bare_lines": bare_line_count,
+                "bare_pages": len(bare_page_ids),
+                "bare_occurrences": bare_occurrences,
+                "linked_occurrences": linked_occurrences,
+                "returned_lines": len(returned_hits),
+                "page_status_counts": page_status_counts,
+            },
+            "mentions": returned_hits,
+        }
+
+    def _literal_line_rows(self, query: str) -> list[sqlite3.Row]:
+        project = self._require_project()
+        like = f"%{_escape_like(query)}%"
+        return self.connection.execute(
+            """
+            SELECT
+              page.id AS source_page_id,
+              page.title AS source_title,
+              page.views AS source_views,
+              page.updated AS source_updated,
+              line.line_id,
+              line.line_index,
+              line.text AS line_text
+            FROM lines line
+            JOIN pages page ON page.project = line.project AND page.id = line.page_id
+            WHERE line.project = ? AND line.text LIKE ? ESCAPE '\\'
+            ORDER BY page.views DESC, COALESCE(page.updated, 0) DESC, page.title, line.line_index
+            """,
+            (project, like),
+        ).fetchall()
+
+    def _line_link_targets_for_literal_query(self, query: str) -> dict[str, list[dict[str, str]]]:
+        project = self._require_project()
+        like = f"%{_escape_like(query)}%"
+        rows = self.connection.execute(
+            """
+            SELECT e.line_id, e.target_title, e.target_norm
+            FROM edges e
+            JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
+            WHERE e.project = ? AND line.text LIKE ? ESCAPE '\\'
+            ORDER BY e.line_id, e.id
+            """,
+            (project, like),
+        ).fetchall()
+        targets_by_line: dict[str, list[dict[str, str]]] = {}
+        seen_by_line: dict[str, set[str]] = {}
+        for row in rows:
+            line_id = row["line_id"]
+            seen = seen_by_line.setdefault(line_id, set())
+            if row["target_norm"] in seen:
+                continue
+            seen.add(row["target_norm"])
+            targets_by_line.setdefault(line_id, []).append(
+                {
+                    "title": row["target_title"],
+                    "normalized_title": row["target_norm"],
+                }
+            )
+        return targets_by_line
+
+    def _page_link_targets_containing_query(self, query: str) -> dict[str, dict[str, str]]:
+        project = self._require_project()
+        norm_query = normalize_title(query)
+        if not norm_query:
+            return {}
+        rows = self.connection.execute(
+            """
+            SELECT source_page_id, target_norm, MIN(target_title) AS target_title
+            FROM edges
+            WHERE project = ? AND target_norm LIKE ? ESCAPE '\\'
+            GROUP BY source_page_id, target_norm
+            ORDER BY source_page_id, target_title
+            """,
+            (project, f"%{_escape_like(norm_query)}%"),
+        ).fetchall()
+        targets_by_page: dict[str, dict[str, str]] = {}
+        for row in rows:
+            targets_by_page.setdefault(row["source_page_id"], {})[row["target_norm"]] = row["target_title"]
+        return targets_by_page
+
+    @staticmethod
+    def _mention_hit_from_row(
+        row: sqlite3.Row,
+        *,
+        occurrence_count: int,
+        bare_occurrence_count: int,
+        linked_occurrence_count: int,
+        page_has_exact_link: bool,
+        page_has_query_link: bool,
+        query_link_targets: list[dict[str, str]],
+        line_link_targets: list[dict[str, str]],
+        classification: str,
+    ) -> dict[str, Any]:
+        hit = SQLiteStore._search_hit_from_row(row, match_terms=[], match_mode="literal")
+        hit.update(
+            {
+                "occurrence_count": occurrence_count,
+                "bare_occurrence_count": bare_occurrence_count,
+                "linked_occurrence_count": linked_occurrence_count,
+                "page_has_exact_link": page_has_exact_link,
+                "page_has_query_link": page_has_query_link,
+                "query_link_targets": query_link_targets,
+                "line_link_targets": line_link_targets,
+                "classification": classification,
+            }
+        )
+        return hit
+
+    def co_links(
+        self,
+        query: str,
+        limit: int = 50,
+        *,
+        sample_limit: int = 3,
+        include_self: bool = False,
+    ) -> list[dict[str, Any]]:
+        if not query:
+            raise ValueError("co-links query is empty")
+
+        project = self._require_project()
+        norm_query = normalize_title(query)
+        target_filter = "" if include_self else "AND e.target_norm != ?"
+        params: list[Any] = [project, f"%{_escape_like(query)}%"]
+        if not include_self:
+            params.append(norm_query)
+        if limit is not None and limit >= 0:
+            params.append(limit)
+
+        limit_clause = "" if limit is None or limit < 0 else "LIMIT ?"
+        rows = self.connection.execute(
+            f"""
+            WITH query_edges AS (
+              SELECT
+                e.target_norm,
+                e.target_title,
+                e.line_id,
+                e.source_page_id,
+                source.views,
+                source.updated
+              FROM lines line
+              JOIN edges e ON e.project = line.project AND e.line_id = line.line_id
+              JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
+              WHERE line.project = ? AND line.text LIKE ? ESCAPE '\\'
+              {target_filter}
+            ),
+            edge_stats AS (
+              SELECT
+                target_norm,
+                COUNT(*) AS link_count,
+                COUNT(DISTINCT line_id) AS line_count,
+                COUNT(DISTINCT source_page_id) AS source_page_count,
+                MAX(COALESCE(updated, 0)) AS latest_source_updated
+              FROM query_edges
+              GROUP BY target_norm
+            ),
+            source_stats AS (
+              SELECT target_norm, SUM(views) AS total_source_views
+              FROM (
+                SELECT DISTINCT target_norm, source_page_id, views
+                FROM query_edges
+              )
+              GROUP BY target_norm
+            ),
+            title_choice AS (
+              SELECT target_norm, target_title
+              FROM (
+                SELECT
+                  target_norm,
+                  target_title,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY target_norm
+                    ORDER BY COUNT(*) DESC, target_title
+                  ) AS rn
+                FROM query_edges
+                GROUP BY target_norm, target_title
+              )
+              WHERE rn = 1
+            )
+            SELECT
+              edge_stats.target_norm,
+              title_choice.target_title,
+              edge_stats.link_count,
+              edge_stats.line_count,
+              edge_stats.source_page_count,
+              COALESCE(source_stats.total_source_views, 0) AS total_source_views,
+              edge_stats.latest_source_updated
+            FROM edge_stats
+            JOIN source_stats ON source_stats.target_norm = edge_stats.target_norm
+            JOIN title_choice ON title_choice.target_norm = edge_stats.target_norm
+            ORDER BY
+              edge_stats.line_count DESC,
+              edge_stats.source_page_count DESC,
+              total_source_views DESC,
+              edge_stats.latest_source_updated DESC,
+              title_choice.target_title
+            {limit_clause}
+            """,
+            params,
+        ).fetchall()
+        return [
+            {
+                "title": row["target_title"],
+                "normalized_title": row["target_norm"],
+                "link_count": row["link_count"],
+                "line_count": row["line_count"],
+                "source_page_count": row["source_page_count"],
+                "total_source_views": row["total_source_views"],
+                "latest_source_updated": row["latest_source_updated"],
+                "examples": [
+                    edge.to_dict()
+                    for edge in self._co_link_examples(query, row["target_norm"], limit=sample_limit)
+                ],
+            }
+            for row in rows
+        ]
+
+    def _co_link_examples(self, query: str, target_norm: str, limit: int = 3) -> list[Edge]:
+        if limit <= 0:
+            return []
+        project = self._require_project()
+        rows = self.connection.execute(
+            """
+            SELECT
+              e.source_page_id,
+              source.title AS source_title,
+              source.views AS source_views,
+              source.updated AS source_updated,
+              e.line_id,
+              line.line_index,
+              line.text AS line_text,
+              e.target_title,
+              e.target_norm
+            FROM edges e
+            JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
+            JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
+            WHERE e.project = ? AND e.target_norm = ? AND line.text LIKE ? ESCAPE '\\'
+            ORDER BY source.views DESC, COALESCE(source.updated, 0) DESC, source.title, line.line_index
+            LIMIT ?
+            """,
+            (project, target_norm, f"%{_escape_like(query)}%", limit),
+        ).fetchall()
+        return [self._edge_from_row(row) for row in rows]
+
+    def gather(
+        self,
+        query: str,
+        *,
+        budget: int = 4000,
+        backlink_limit: int | None = None,
+        mention_limit: int | None = None,
+        co_link_limit: int | None = None,
+    ) -> dict[str, Any]:
+        if not query:
+            raise ValueError("gather query is empty")
+
+        budget = max(0, budget)
+        default_limit = _gather_default_limit(budget)
+        backlink_limit = default_limit if backlink_limit is None else max(0, backlink_limit)
+        mention_limit = default_limit if mention_limit is None else max(0, mention_limit)
+        co_link_limit = default_limit if co_link_limit is None else max(0, co_link_limit)
+
+        link_stats = self.link_stats(query)
+        mention_result = self.mentions(query, limit=mention_limit, include_linked=False)
+        co_links = self.co_links(query, limit=co_link_limit, sample_limit=2)
+        backlinks = [
+            edge.to_dict()
+            for edge in self.backlinks(query, limit=backlink_limit)
+        ]
+        mention_summary = mention_result["summary"]
+        huge_hub = (
+            link_stats["link_count"] >= 100
+            or mention_summary["bare_pages"] >= 100
+            or mention_summary["total_pages"] >= 100
+        )
+        banner = None
+        if huge_hub:
+            banner = {
+                "kind": "huge-hub",
+                "message": (
+                    "This query is a broad hub. Do not bulk-link every bare mention; "
+                    "use co-link slices, representative backlinks, and come-from candidates."
+                ),
+                "thresholds": {
+                    "link_count": 100,
+                    "bare_pages": 100,
+                    "total_pages": 100,
+                },
+            }
+
+        recipes = [
+            {
+                "command": ["grasp", "co-links", query, "--limit", str(co_link_limit)],
+                "why": "Find narrower slice handles that co-occur with this query.",
+            },
+            {
+                "command": ["grasp", "mentions", query, "--limit", str(mention_limit)],
+                "why": "Inspect bare mentions and page-level link status before adding links.",
+            },
+            {
+                "command": ["grasp", "backlinks", query, "--limit", str(backlink_limit)],
+                "why": "Read already linked, author-declared retrieval context.",
+            },
+        ]
+        return {
+            "query": query,
+            "budget": budget,
+            "budget_note": "budget is an approximate selector for bounded rows; it is not exact token packing",
+            "limits": {
+                "backlinks": backlink_limit,
+                "mentions": mention_limit,
+                "co_links": co_link_limit,
+            },
+            "banner": banner,
+            "link_stats": link_stats,
+            "mention_summary": mention_summary,
+            "mentions": mention_result["mentions"],
+            "co_links": co_links,
+            "backlinks": backlinks,
+            "recipes": recipes,
+        }
+
     def search(
         self,
         query: str,
@@ -2806,6 +3250,88 @@ def _search_positive_terms(expression: SearchExpression, *, positive: bool = Tru
 def _normalized_unique_terms(terms: list[str]) -> list[str]:
     normalized_terms = [normalize_title(term) for term in terms if normalize_title(term)]
     return list(dict.fromkeys(normalized_terms))
+
+
+def _literal_occurrence_spans(text: str, query: str) -> list[tuple[int, int]]:
+    if not query:
+        return []
+    folded_text = text.casefold()
+    folded_query = query.casefold()
+    spans: list[tuple[int, int]] = []
+    start = 0
+    while True:
+        index = folded_text.find(folded_query, start)
+        if index < 0:
+            return spans
+        end = index + len(query)
+        spans.append((index, end))
+        start = end
+
+
+def _span_is_inside_any(span: tuple[int, int], containers: list[tuple[int, int]]) -> bool:
+    start, end = span
+    return any(container_start <= start and end <= container_end for container_start, container_end in containers)
+
+
+def _line_internal_link_spans(text: str, edge_norms: set[str]) -> list[tuple[int, int]]:
+    if not edge_norms:
+        return []
+
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "#":
+            tag = parse_cosense_hash_tag(text, index)
+            if tag is not None:
+                target, end = tag
+                if normalize_title(target) in edge_norms:
+                    spans.append((index, end))
+                index = end
+                continue
+            index += 1
+            continue
+
+        if char != "[":
+            index += 1
+            continue
+
+        start = index
+        if start + 1 < len(text) and text[start + 1] == "[":
+            close = text.find("]]", start + 2)
+            if close == -1:
+                break
+            if not _is_inside_inline_code(text, start):
+                target = markdown_wikilink_target(text[start + 2 : close])
+                if target and normalize_title(target) in edge_norms:
+                    spans.append((start, close + 2))
+            index = close + 2
+            continue
+
+        close = text.find("]", start + 1)
+        if close == -1:
+            break
+        if not _is_inside_inline_code(text, start) and not is_ascii_index_syntax(text, start):
+            content = text[start + 1 : close].strip()
+            if is_internal_cosense_link(content) and normalize_title(content) in edge_norms:
+                spans.append((start, close + 1))
+        index = close + 1
+
+    return spans
+
+
+def _is_inside_inline_code(text: str, position: int) -> bool:
+    return text[:position].count("`") % 2 == 1
+
+
+def _gather_default_limit(budget: int) -> int:
+    if budget <= 1500:
+        return 5
+    if budget <= 4000:
+        return 10
+    if budget <= 8000:
+        return 20
+    return 30
 
 
 def _nonempty_recovery_hints(recovery_hints: dict[str, Any]) -> dict[str, Any] | None:
