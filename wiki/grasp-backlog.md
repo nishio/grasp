@@ -222,6 +222,24 @@ line_tombstones(project, id, page_id, deleted_at, last_text?)
 - `gather --budget` は厳密 token packing / omitted token count ではない。row 単位 omitted counts は実装済みだが、token budget 内への packing、omitted token estimate、代表サンプル選択の精密化は未実装。
 - AI clustering handoff: CLI は固定 cluster label を確定しないが、AI が `表札` / `ツール` / `AI応用` / `講義資料` などへ仮分類できるだけの bounded rows と sample provenance を返す、という方針は継続。
 
+### use-case report composition（icon/person history）
+
+2026-06-24 `villagepump` `[nishio.icon]` 抽出から、巨大抽出系の「いい感じ」な outcome には report composition 層が必要だと分かった（原理は [[use-case-experiment-as-outcome-story]]）。raw hits 6,488 paragraphs は到達としては成功だが、そのままでは読めない。agent が `公開共同日記から見る grasp 前史 30 scene` のような bounded narrative artifact へ組むには、CLI / acquisition 側が次を返すとよい:
+
+- icon/person slice の取得条件: project, diary page rule, date range, icon/user handle, coverage, failures。
+- `icon_hit_kind`: author marker / sentence signed at end / prefix speaker / reaction icon list / mention-of-person / other。最低限、`[nishio.icon]さん` 型の言及と reaction-only rows を本文発話から分ける。
+- representative candidate bundle: year/month counts, top linked targets, keyword/theme counts, longest blocks, high-signal examples with source page title, hosted line id, line index, snippet。
+- report handoff contract: CLI は narrative を確定しない。agent/report layer がユーザ言語で timeline・themes・代表 scene・caveat・source links を書く。
+
+仮 surface:
+
+```text
+grasp acquire https://scrapbox.io/villagepump/ --diary --icon nishio --until 2026-06-24
+grasp report icon-history nishio --themes ai,scrapbox,community --top 30
+```
+
+surface 名は未決。重要なのは、raw dump ではなく **bounded candidate bundle + agent-authored report** を標準 workflow にすること。
+
 2026-06-24（come-from / link overloading、親 llm-wiki 設計対話、原理は [[come-from-declared-gather]]）:
 
 巨大 hub が膨れる *why* を言語化できた。[[kj-link-hub-audit-2026-06-24]] の exact 144 → bare 490 は「リンク漏れ」ではなく**判断レベルと帰結レベルのミスマッチ**: Cosense のリンクは per-occurrence の局所判断だが双方向で大域帰結（hub）を創発する。誰も「KJ法 を 490-backlink hub にしよう」と決めていないのに、各ページの親切な `[KJ法]` の副作用として hub が出来る。∴ 対処は「もっとリンク」でも「リンクを消す」でもなく、**判断を帰結と同じ用語-大域レベルに上げる**こと（= come-from）。`gather` の banner / rationale にこの一文を入れると「リンク化を増やす方向が誤り」を原理で言える。
@@ -283,6 +301,16 @@ line_tombstones(project, id, page_id, deleted_at, last_text?)
 
 2026-06-23 22:04: 初期 `grasp acquire <project-url>` を実装済み。`cosense searchFullText` による `--search` seed、`listPages --filter` による `--filter` seed、bounded `--full-list` seed、`readPage` + parsed links による `--from-page --depth` crawl、`--seed-file` に対応。対象 project namespace は append せず置き換える。`--project` 省略時は既存 full export project を誤って潰さないよう `<remote-project>:acquire` を default local namespace にする。store metadata に acquisition mode / coverage / seed / depth / limit / fetched / failed を保存し、`stats` に Acquisition 節を出す。partial corpus では backlinks / related / unresolved が取得済み subset 内の結果であることを CLI / Skill / README に明記済み。current facts は [[grasp-v1-implemented]]。
 
+2026-06-24 dogfood: `/nishio` の `[/` cross-project refs から semantic refs 上位 project を `--seed-file` acquire した（[[cross-project-reference-acquire-2026-06-24]]）。観測:
+
+- raw `[/` refs は `.icon` と project-root refs が多く、semantic seed 生成前に target class 分類が必要。
+- 現行 `grasp search` は line text retrieval なので、`--mode boolean` の `NOT .icon` は line-level workaround に過ぎない。同じ行の semantic link まで落とし、root refs は残り、複数 link target の個別分類はできない。cross-project refs には parsed link target query / extraction surface が必要。
+- `cosense` binary への絶対パスを `--cosense-command` に渡しても、shebang が `#!/usr/bin/env node` なので PATH に対応する `node` が無いと exit 127 になる。docs / diagnostics は "cosense exists" だけでなく "node is resolvable" も見るべき。
+- `acquire` は全 candidate が `failed_pages` に落ちても exit 0 で partial acquisition result を返す。機械処理には一貫しているが、agent-facing には `fetched=0 && failed>0` を強く警告する field / text が必要。
+- `failed_pages.error` は non-zero exit status だけで、permission / nonpersistent / not found / command-env failure の区別が薄い。compact error class を持たせたい。
+
+2026-06-24 dogfood: public `https://scrapbox.io/villagepump/` の日記ページから `[nishio.icon]` 付き段落を抽出する use case で、実行環境に `cosense` binary がなく `grasp acquire` を使えなかった。Scrapbox public API 自体は `curl https://scrapbox.io/api/pages/villagepump?...` と `curl https://scrapbox.io/api/pages/villagepump/<title>` で読めたため、read-only public project には `cosense-cli` 依存なしの direct API fallback があると agent 実験の摩擦が下がる。副観測: `search/query?q=[nishio.icon]` は 100 件固定で `skip` が効かず、網羅抽出には `pages?sort=title` で date title を列挙して各 page を読む必要があった。
+
 候補:
 
 - **full list seed**: `cosense listPages <projectUrl> --sort ... --skip ...` で readable page metadata を pagination し、各 page を `readPage` で取得する。export に近いが、非 admin project で全ページ列挙できるか、rate limit / private page / permission error を要実測。
@@ -290,6 +318,8 @@ line_tombstones(project, id, page_id, deleted_at, last_text?)
 - **author/icon filter seed**: `cosense listPages --filter <name>` は本文中の `[name.icon]` と、その user が編集した page を返す。自分が管理者でない project の「自分が関わった page」取得に使える可能性がある。
 - **link crawl seed**: 指定 page / title / URL から `readPage` し、本文の internal links / `projectLinks` を parse して BFS で辿る。`--depth`, `--limit`, `--include-cross-project`, `--same-project-only` のような境界が必要。孤立 page や seed から到達不能な page は拾えない。
 - **manual seed list**: URL/title のリストを渡して `readPage` する。Slack や会話ログから抽出した page list、または user が明示した重要 page 群の取り込みに向く。
+- **direct public API fallback**: `cosense` binary / Node が無い環境でも、public project は Scrapbox API で page list / page body を読める。公式 CLI の挙動差を吸収する adapter として実装するなら、auth が必要な project では従来通り `cosense-cli` に戻す。
+- **parsed cross-project refs seed**: local store の parsed edges / line text から `[/project/page]` refs を抽出し、target class（semantic/icon/root）・source page spread・example lines を返す。`search "[/"` + external script ではなく、seed-file generation まで行う cross-project acquisition preflight。
 
 設計上の注意:
 
@@ -305,11 +335,14 @@ surface 候補:
 - `grasp acquire <project-url> --filter <name> [--limit N]`（初期実装済み）
 - `grasp acquire <project-url> --from-page <title-or-url> --depth N --limit N`（初期実装済み）
 - `grasp acquire <project-url> --seed-file pages.txt`（初期実装済み）
+- `grasp cross-project-refs [--exclude-icons] [--json]` または `grasp links --cross-project --classify-targets`（未実装案）
 
 Open Questions:
 
 - `listPages` は非 admin readable project で全ページを pageinate できるか。
 - `searchFullText` は `[nishio.icon]` や `[/nishio/` を literal に扱うか。検索上限を超えた場合の pagination / continuation はあるか。
+- parsed link extraction を `search` の option に足すべきか、`links` / `cross-project-refs` の別 verb にするべきか。`search` に足すと text retrieval と link-target query の責務が混ざる。
+- direct public API fallback を入れる場合、Scrapbox API と cosense-cli の metadata / auth / rate limit / search semantics の差をどこまで surface に出すか。
 - `readPage` の hosted line id を採用するか。現行方針は export/sync と同じく grasp 側で `page.id:line-index` を維持。
 - partial corpus で `sync` する時、seed predicate 外の recently updated page を取り込むべきか、acquisition mode ごとの sync 動詞に分けるべきか。
 
