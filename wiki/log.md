@@ -1,5 +1,30 @@
 # Log
 
+## [2026-06-24 21:49] implementation | cross-project-acquire の取得後 summary を拡張
+- `cross-project-acquire` の successful project row に `reciprocal_refs` と `top_internal_links` を追加。取得した `<project>:semantic` slice 内で source project へ戻る `[/source/...]` refs と、partial corpus 内の上位 internal link targets を bounded に返す。
+- `SQLiteStore.cross_project_refs_to()` と `SQLiteStore.top_internal_links()` を追加。どちらも既存 lines/edges を読む summary primitive で、store schema は v5 のまま。
+- public compatibility version は `1.5.22`。README / Skill / current facts / backlog / cross-project dogfood entity / outcome-story concept を更新した。
+
+## [2026-06-24 21:26] implementation | cross-project-acquire を追加
+- `cross-project-acquire` command を追加。選択中 source project の `cross-project-refs --semantic-only` 相当の seed titles から、複数 target project を `<project>:semantic` namespace に順次 partial acquire する。
+- `--dry-run` で plan のみ確認可能。実行結果は target project ごとの status / fetched / failed / skipped_nonpersistent / diagnostic / page_sample / failed_page_sample を bounded summary として返し、full acquire payload は返さない。
+- public compatibility version は `1.5.21`。store schema は v5 のまま。README / Skill / current facts / backlog / cross-project dogfood entity / outcome-story concept を更新した。
+
+## [2026-06-24 20:47] implementation | acquire fetch failure diagnostics を追加
+- `acquire` の page fetch failure に `failed_pages[].error_class` を追加し、全 candidate fetch 失敗時は `diagnostic.type=all_failed` / `severity=warning` / `next_actions[]` を返すようにした。`cosense` symlink は存在するが shebang の `env node` が失敗する case は `command-env` に分類する。
+- text output でも Diagnostic 節を出し、空の partial corpus を成功結果として誤読しにくくした。exit code は partial acquisition report として従来通り 0。
+- public compatibility version は `1.5.20`。current facts / history / backlog / cross-project dogfood entity / README / Skill を更新した。
+
+## [2026-06-24 20:26] implementation | cross-project-refs seed preflight を追加
+- `cross-project-refs` に seed preflight を追加。各 target project に semantic `seed_titles` / `seed_candidates` / `acquire_recipe` を返し、`--seed-dir <folder>` 指定時は project 別 seed file を書いて runnable `grasp --project <project>:semantic acquire <url> --seed-file <file> --limit N` command を出す。
+- `--seed-limit` / `--project-url-base` / `--acquire-limit` を追加。通常の extraction は read-only のまま、seed file 書き込みは明示 option の時だけ。
+- public compatibility version は `1.5.19`。current facts / history / backlog / cross-project dogfood entity / README / Skill を更新した。
+
+## [2026-06-24 19:30] implementation | cross-project-refs を追加
+- `cross-project-refs` command を追加。保存済み行テキストから Cosense shorthand `[/project/page]` を parsed link target として抽出し、semantic / icon / project-root / self-project に分類して target project ごとに rank する。既定では self-project refs を除外し、`--semantic-only` で `.icon` / project root / self-project を落とした acquisition seed 向け view を返す。
+- 通常 internal edge parser / materialized graph は変えず、schema v5 compatible の extraction primitive として実装。`search "[/"` + one-off script の gap は解消し、残るのは seed-file generation / acquire preflight、cosense/node diagnostics、all-failed acquisition warning、direct public API fallback。
+- public compatibility version は `1.5.18`。current facts は [[grasp-v1-implemented]]、残課題は [[grasp-backlog]] と [[cross-project-reference-acquire-2026-06-24]] に反映した。
+
 ## [2026-06-24 18:47] file back | icon-history report 化の観察
 - `villagepump` `[nishio.icon]` raw 抽出を `nishio in villagepump: 公開共同日記から見る grasp 前史 30 scene` へ再構成した過程の学びを [[use-case-experiment-as-outcome-story]] に追記。
 - 核: 抽出と report composition は別工程。CLI は raw dump でなく、icon hit kind 分類、年/月 counts、theme counts、代表候補、hosted line id / snippet 付き provenance を返し、agent/report layer がユーザ言語で bounded narrative artifact を書くのがよい。

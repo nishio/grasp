@@ -63,7 +63,11 @@ Important dogfood finding: raw `[/` is dominated by `.icon` author/community dec
 
 Treating all three as the same signal makes `villagepump` look even more dominant than it already is and selects low-value seed pages.
 
-2026-06-24 follow-up from process observation: current `grasp search` cannot do this classification by itself. `search "[/"` is line text retrieval, and `search "[/ AND NOT .icon" --mode boolean --scope line` only excludes lines that contain the literal string `.icon`. That loses lines that contain both a semantic cross-project link and an icon mention, keeps root refs, and never classifies each parsed link target. The right primitive is target-aware extraction over parsed links, not more boolean text search.
+2026-06-24 follow-up from process observation: at dogfood time, `grasp search` could not do this classification by itself. `search "[/"` is line text retrieval, and `search "[/ AND NOT .icon" --mode boolean --scope line` only excludes lines that contain the literal string `.icon`. That loses lines that contain both a semantic cross-project link and an icon mention, keeps root refs, and never classifies each parsed link target. The right primitive is target-aware extraction over parsed links, not more boolean text search.
+
+2026-06-24 implementation follow-up: `grasp cross-project-refs` now provides that target-aware extraction. It scans stored line text for Cosense shorthand `[/project/page]`, classifies targets as `semantic` / `icon` / `project-root` / `self-project`, ranks target projects, and supports `--semantic-only` for seed bibliography review. `--seed-dir` writes per-project seed files and returns runnable `acquire --seed-file` commands. `grasp cross-project-acquire` is the executing counterpart: it takes those semantic seed titles, acquires multiple target projects into `<project>:semantic` namespaces, and returns bounded per-project summaries including reciprocal refs to the source project and top internal links inside the acquired slice.
+
+2026-06-24 diagnostics follow-up: `acquire` fetch failures now include compact `failed_pages[].error_class`, and all-candidate fetch failure returns `diagnostic.type=all_failed` with `next_actions`. The observed `cosense` symlink / missing `node` case is classified as `command-env`. This reduces the risk that an agent treats an empty partial corpus as a useful acquisition result.
 
 ## Top Semantic Projects
 
@@ -130,27 +134,29 @@ This supports the [[multi-project-store]] decision: merging project graphs into 
 
 ## Operational Gotchas
 
-- `cosense` existed at `/Users/nishio/.nvm/versions/node/v24.16.0/bin/cosense`, but the shell PATH used by this task did not include the matching `node`. Direct `--cosense-command` to the symlink failed with exit 127 because the shebang is `#!/usr/bin/env node`. A temporary wrapper that prepended `/Users/nishio/.nvm/versions/node/v24.16.0/bin` to PATH fixed acquisition.
-- `grasp acquire` can complete with exit code 0 while fetching 0 pages and putting all candidates into `failed_pages`. That is technically a successful partial-acquisition report, but for agent UX it needs a prominent "all failed" warning.
+- `cosense` existed at `/Users/nishio/.nvm/versions/node/v24.16.0/bin/cosense`, but the shell PATH used by this task did not include the matching `node`. Direct `--cosense-command` to the symlink failed with exit 127 because the shebang is `#!/usr/bin/env node`. A temporary wrapper that prepended `/Users/nishio/.nvm/versions/node/v24.16.0/bin` to PATH fixed acquisition. Follow-up: fetch failures now classify this as `command-env`.
+- `grasp acquire` can complete with exit code 0 while fetching 0 pages and putting all candidates into `failed_pages`. That is technically a successful partial-acquisition report, so fetch-stage failures now return `diagnostic.type=all_failed` / `failed_pages[].error_class` instead of relying on exit status alone.
 - A raw seed list sorted only by target frequency selected many `.icon` pages. For cross-project analysis, seed generation should have a semantic filter or at least report target classes before fetching.
 - A lexical workaround such as boolean `NOT .icon` is only a stopgap. It filters whole lines, not link targets. It cannot answer "which `[/project/page]` links on this line are semantic?".
-- Failed `readPage` stderr is not surfaced in detail by current `failed_pages` beyond non-zero exit status. For permission/nonpersistent/moved-page diagnosis, acquisition output should retain a compact error class.
+- Failed `readPage` stderr is now reduced to a compact `failed_pages[].error_class` plus first stderr line where available. Remaining diagnostic gap is seed discovery (`searchFullText` / `listPages`) failures before page fetch starts.
 - Friction should not be the headline of this use-case. It becomes implementation input: the desirable user-facing surface is "discover a cross-project map from `[/`", with diagnostics only when the happy path cannot be completed.
 
 ## Implications
 
 - The `[/` use case is a strong dogfood case for `acquire --seed-file`: `/nishio` already contains a curated outbound bibliography into other Cosense projects.
 - The useful unit is not "fetch all referenced projects"; it is "fetch semantic slices per referenced project". Full acquisition of 183 projects would be expensive and would mix private/inaccessible/noisy refs.
-- A future cross-project workflow could be:
+- Current first-class cross-project workflow:
   1. Extract parsed cross-project links from the source project.
   2. classify link targets into semantic/icon/root.
   3. rank projects by semantic refs and source-page spread.
   4. generate per-project seed files.
-  5. `acquire` each project into `<project>:<slice>` namespaces.
-  6. summarize reciprocal `[/source-project/` refs and top internal link targets.
+  5. `cross-project-acquire` or `acquire --seed-file` each project into `<project>:<slice>` namespaces.
+  6. read the bounded per-project acquisition summary.
+
+Future richer report layer: cluster / narrate the reciprocal refs and top internal links into an agent-authored map rather than just listing ranked rows.
 
 ## Open Questions
 
-- Should `grasp` grow a first-class `cross-project-refs` verb, or should this remain a recipe around `search --json` plus external seed generation?
-- Should `acquire` treat "all seed pages failed" as non-zero, or keep exit 0 but add a stronger diagnostic field?
+- `cross-project-acquire` now runs semantic seed acquisition as a multi-project workflow and returns reciprocal refs plus top internal links. Should the next layer cluster / narrate those signals, or should that remain an agent/report-layer step?
+- Now that `acquire` returns `diagnostic.type=all_failed` while keeping exit 0, is that enough for agent workflows, or should a separate strict mode turn all-failed acquisition into non-zero exit?
 - How should cross-project links with slash in the target title, such as `[/takker/takker99/ScrapBubble]`, be interpreted: project `takker` + page `takker99/ScrapBubble`, or nested project-like path?

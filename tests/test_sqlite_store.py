@@ -129,6 +129,13 @@ class SQLiteStoreTests(unittest.TestCase):
                 self.assertEqual(missing_stats["source_page_count"], 2)
                 self.assertEqual(missing_stats["link_multiplicity"], "multi")
 
+                top_links = store.top_internal_links(limit=2, sample_limit=1)
+                self.assertEqual([item["title"] for item in top_links], ["B", "Missing"])
+                self.assertTrue(top_links[0]["target_page_exists"])
+                self.assertFalse(top_links[1]["target_page_exists"])
+                self.assertEqual(top_links[0]["link_count"], 2)
+                self.assertEqual(top_links[0]["examples"][0]["target_title"], "B")
+
                 absent_stats = store.link_stats("Nope")
                 self.assertFalse(absent_stats["page_exists"])
                 self.assertEqual(absent_stats["link_count"], 0)
@@ -512,6 +519,90 @@ class SQLiteStoreTests(unittest.TestCase):
                 self.assertEqual(gather["co_link_rank_mode"], "slice")
                 self.assertEqual(gather["row_count_basis"]["mentions"], "bare mention lines")
                 self.assertEqual(gather["recipes"][0]["command"][:2], ["grasp", "co-links"])
+            finally:
+                store.close()
+
+    def test_cross_project_refs_classifies_and_ranks_slash_links(self):
+        fixture = {
+            "name": "nishio",
+            "displayName": "nishio",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "A",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 20,
+                    "views": 100,
+                    "lines": [
+                        {"text": "A", "created": 1, "updated": 1, "userId": "u"},
+                        {
+                            "text": "refs [/villagepump/Page A] and [/villagepump/nishio.icon] and [/plurality-japanese]",
+                            "created": 1,
+                            "updated": 2,
+                            "userId": "u",
+                        },
+                    ],
+                },
+                {
+                    "title": "B",
+                    "id": "bbbbbbbbbbbbbbbbbbbbbbbb",
+                    "created": 1,
+                    "updated": 10,
+                    "views": 50,
+                    "lines": [
+                        {"text": "B", "created": 1, "updated": 1, "userId": "u"},
+                        {
+                            "text": "self [/nishio/Self] and slash title [/takker/takker99/ScrapBubble]",
+                            "created": 1,
+                            "updated": 2,
+                            "userId": "u",
+                        },
+                    ],
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture, ensure_ascii=False), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+
+            store = SQLiteStore(store_path)
+            try:
+                refs = store.cross_project_refs(limit=10, sample_limit=1)
+                self.assertEqual(
+                    refs["summary"]["target_class_counts"],
+                    {"semantic": 2, "icon": 1, "project-root": 1, "self-project": 1},
+                )
+                self.assertEqual(refs["summary"]["filtered_refs"], 4)
+                self.assertEqual([item["project"] for item in refs["projects"]], ["villagepump", "plurality-japanese", "takker"])
+                self.assertEqual(refs["projects"][0]["mention_count"], 2)
+                self.assertEqual(
+                    refs["projects"][0]["target_class_counts"],
+                    {"semantic": 1, "icon": 1, "project-root": 0, "self-project": 0},
+                )
+                self.assertEqual(refs["projects"][0]["seed_titles"], ["Page A"])
+                self.assertEqual(refs["projects"][0]["examples"][0]["target_title"], "Page A")
+
+                semantic_refs = store.cross_project_refs(limit=10, semantic_only=True, seed_limit=1)
+                self.assertEqual(semantic_refs["summary"]["filtered_refs"], 2)
+                self.assertEqual([item["project"] for item in semantic_refs["projects"]], ["villagepump", "takker"])
+                self.assertEqual(semantic_refs["projects"][1]["top_targets"][0]["title"], "takker99/ScrapBubble")
+                self.assertEqual(semantic_refs["projects"][1]["seed_titles"], ["takker99/ScrapBubble"])
+                self.assertEqual(semantic_refs["projects"][1]["seed_title_limit"], 1)
+
+                with_self = store.cross_project_refs(limit=10, include_self=True)
+                self.assertEqual(with_self["summary"]["filtered_refs"], 5)
+                self.assertIn("nishio", [item["project"] for item in with_self["projects"]])
+
+                to_nishio = store.cross_project_refs_to("nishio", limit=2, sample_limit=1)
+                self.assertEqual(to_nishio["mention_count"], 1)
+                self.assertEqual(to_nishio["source_page_count"], 1)
+                self.assertEqual(to_nishio["top_targets"][0]["title"], "Self")
+                self.assertEqual(to_nishio["examples"][0]["target_project"], "nishio")
             finally:
                 store.close()
 

@@ -20,6 +20,8 @@ COMMANDS = [
     "search",
     "mentions",
     "co-links",
+    "cross-project-refs",
+    "cross-project-acquire",
     "gather",
     "export-ai",
     "sync",
@@ -1057,6 +1059,167 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(read_result["page"]["title"], "A")
         self.assertEqual(read_result["backlink_count_total"], 1)
         self.assertEqual(read_result["unresolved_targets"][0]["title"], "Missing")
+
+    def test_cross_project_refs_writes_acquire_seed_files(self):
+        fixture = {
+            "name": "nishio",
+            "displayName": "nishio",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "A",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 1,
+                    "views": 100,
+                    "lines": [
+                        {"text": "A", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "refs [/villagepump/Page A] and [/villagepump/nishio.icon]", "created": 1, "updated": 1, "userId": "u"},
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            seed_dir = Path(tmpdir) / "seeds"
+            export_path.write_text(json.dumps(fixture, ensure_ascii=False), encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--cosense",
+                    str(export_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "nishio",
+                    "cross-project-refs",
+                    "--semantic-only",
+                    "--limit",
+                    "1",
+                    "--seed-limit",
+                    "1",
+                    "--seed-dir",
+                    str(seed_dir),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+            result = json.loads(completed.stdout)
+            seed_file = seed_dir / "villagepump.txt"
+            self.assertEqual(seed_file.read_text(encoding="utf-8"), "Page A\n")
+            self.assertEqual(result["acquire_plan"]["seed_files_written"], 1)
+            recipe = result["projects"][0]["acquire_recipe"]
+            self.assertTrue(recipe["seed_file_written"])
+            self.assertEqual(recipe["seed_file"], str(seed_file))
+            self.assertEqual(
+                recipe["command"],
+                [
+                    "grasp",
+                    "--project",
+                    "villagepump:semantic",
+                    "acquire",
+                    "https://scrapbox.io/villagepump/",
+                    "--seed-file",
+                    str(seed_file),
+                    "--limit",
+                    "1",
+                ],
+            )
+
+    def test_cross_project_acquire_dry_run_returns_plan(self):
+        fixture = {
+            "name": "nishio",
+            "displayName": "nishio",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "A",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 1,
+                    "views": 100,
+                    "lines": [
+                        {"text": "A", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "refs [/villagepump/PageA] and [/villagepump/PageB]", "created": 1, "updated": 1, "userId": "u"},
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture, ensure_ascii=False), encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--cosense",
+                    str(export_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "nishio",
+                    "cross-project-acquire",
+                    "--limit",
+                    "1",
+                    "--seed-limit",
+                    "2",
+                    "--acquire-limit",
+                    "2",
+                    "--dry-run",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+            result = json.loads(completed.stdout)
+            self.assertTrue(result["dry_run"])
+            self.assertEqual(result["summary"]["planned_projects"], 1)
+            self.assertEqual(result["summary"]["attempted_projects"], 0)
+            project = result["projects"][0]
+            self.assertEqual(project["project"], "villagepump")
+            self.assertEqual(project["local_project"], "villagepump:semantic")
+            self.assertEqual(project["seed_titles"], ["PageA", "PageB"])
+            self.assertEqual(project["command"][-2:], ["--limit", "2"])
 
 
 if __name__ == "__main__":

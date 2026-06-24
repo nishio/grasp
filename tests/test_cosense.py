@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from grasp.cosense import CosenseStore, normalize_title, parse_cosense_links
+from grasp.cosense import CosenseStore, normalize_title, parse_cosense_cross_project_links, parse_cosense_links
 
 
 class CosenseParsingTests(unittest.TestCase):
@@ -26,6 +26,44 @@ class CosenseParsingTests(unittest.TestCase):
 
     def test_parse_cosense_links_allows_hash_tags_embedded_in_japanese_text(self):
         self.assertEqual(parse_cosense_links("人間が#盲点 に気づく"), ["盲点"])
+
+    def test_parse_cosense_cross_project_links_classifies_targets(self):
+        text = (
+            "[/villagepump/Page A] [/villagepump/nishio.icon] [/plurality-japanese] "
+            "[/takker/takker99/ScrapBubble] [/ italic] xs[/bad] `[/code/Page]` [[/bold/Page]]"
+        )
+
+        links = parse_cosense_cross_project_links(text)
+
+        self.assertEqual(
+            [link.to_dict() for link in links],
+            [
+                {
+                    "raw": "/villagepump/Page A",
+                    "project": "villagepump",
+                    "title": "Page A",
+                    "target_class": "semantic",
+                },
+                {
+                    "raw": "/villagepump/nishio.icon",
+                    "project": "villagepump",
+                    "title": "nishio.icon",
+                    "target_class": "icon",
+                },
+                {
+                    "raw": "/plurality-japanese",
+                    "project": "plurality-japanese",
+                    "title": "",
+                    "target_class": "project-root",
+                },
+                {
+                    "raw": "/takker/takker99/ScrapBubble",
+                    "project": "takker",
+                    "title": "takker99/ScrapBubble",
+                    "target_class": "semantic",
+                },
+            ],
+        )
 
 
 class CosenseStoreTests(unittest.TestCase):
