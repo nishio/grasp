@@ -702,3 +702,9 @@
 - dogfood: temp store で `wiki/` を import し、32 pages / 3831 lines / 365 edges / unresolved 5。前回の同条件 580 edges から log/index outgoing edges が落ち、`read grasp backlog` の backlinks から `Log` が消えた。一方で `search "first H1"` は `Log` に hit し、検索対象として残ることを確認。
 - file back: [[grasp-v1-implemented]] / [history](history.md) / [[grasp-backlog]] / [[markdown-obsidian-indexed-mirror]] を更新。
 - 検証: bundled Python 3.12.13 で `python3 -m unittest discover -s tests` / `python3 scripts/lint_wiki.py` / `git diff --check` OK。
+
+## [2026-06-25 02:50] dogfood | Markdown LLM Wiki が grasp 経由で LLM context として使えるかを検証
+- temp store に `wiki/` を `import --markdown wiki --project grasp-wiki` し、32 pages / 3836 lines / 365 edges / unresolved 5 として materialize できることを確認。
+- `search "non-semantic" --context 2` は `Log` だけでなく [[grasp-backlog]] と [[markdown-obsidian-indexed-mirror]] の該当行を line_id + 周辺文脈つきで返した。`search "first H1"` は [[grasp-v1-implemented]] / [[grasp-backlog]] / decision / `Log` の実装履歴を拾い、Markdown に file back した current facts と履歴が CLI から再利用できることを確認。
+- `read "grasp backlog" --related-snippets --related-snippet-mode edge` は本文・行レベル backlinks・2-hop related・page-local unresolved を同梱し、`backlinks "grasp backlog"` / `related "grasp backlog"` は `Log` に支配されず content pages を返した。`search` では `Log` が残るが、artifact outgoing edge 除外により graph 近傍の汚染は抑えられている。
+- `unresolved` は `#2` / `#4` 系 target に system `semantic_annotation` を出し、`path "grasp backlog" "entity: grasp v1 implemented surface"` は根拠 line つき direct path を返した。現状の答え: **Markdown の LLM Wiki に書き込まれたものは、再 import 後、Cosense export と同じ `search` / `read` / `backlinks` / `related` / `path` primitives で LLM が使える**。未解決の差は hosted 最新性や write layer で、Markdown mirror 自体は read-only indexed graph として成立している。
