@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 22:10] file back | 開発弧の自己観察を concept 化（retrieval 厚く authoring 未着手）
+- 親 llm-wiki での「最近の grasp 開発を観察して考察」session の成果を grasp 側へ file back。新ページ [[development-arc-retrieval-ahead-of-authoring]]（concepts/）。
+- 主張3点: ①2日 87 commits の速度は「層を分けて束ねを解く」単一原理の再適用ゆえ（[[why-not-scrapbox-clone]]/[[come-from-declared-gather]]/[[cosense-delite-howm-synthesis]]/[[delivery-cli-plus-skill]] が同じ手）。②[[history]] の x/y store-compat 規律は本番 dogfooding の帰結（parser 変更=「意味が違う」になる）。③retrieval は厚いが差別化核の authoring（id-link write / come-from declare・render）は全部 [[grasp-backlog]] 未着手＝次の山。
+- index.md concepts/ に1行追加。親側 file back は llm-wiki `analyses/graspは親llm-wikiの理論が数時間でコードになる-20260624`（親子の数時間ループ観点はあちら）。
+- 既存ページとの非重複: [[cosense-delite-howm-synthesis]] は製品組成、本ページは開発弧。current facts は [[grasp-v1-implemented]] / [[grasp-backlog]] を参照（重複させない）。
+
 ## [2026-06-24 21:58] implementation | acquire の取得条件・日時範囲記録と未更新ページ reuse を追加
 - `grasp acquire` が acquisition criteria fingerprint / candidate updated range / page manifest を store metadata に保存するようにした。同じ criteria で再実行した時、hosted metadata の `updated` と前回 manifest / local page が一致するページは `readPage` せず local store から再利用する。
 - JSON/text に `remote_fetched` / `reused` / `same_criteria_as_previous` を追加し、`stats` の Acquisition 節でも criteria fingerprint と updated range を確認できるようにした。updated metadata が無い search/seed 由来候補は stale 回避のため従来通り読む。
