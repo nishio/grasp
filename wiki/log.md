@@ -1,5 +1,14 @@
 # Log
 
+## [2026-06-24 03:55] file back | come-from（宣言された用語単位の gather）を設計に取り込み
+- 親 llm-wiki の 2026-06-24 設計対話（link overloading → grasp-最適）から grasp に効く部分を取り込んだ。背景厚めの原理ページ [[come-from-declared-gather]] を新規作成。
+- 核の言語化: リンクには4仕事（recall / attention / navigation / **読者ケア**）があり、Cosense は substrate が他チャネルを持たないため全部を1つの `[X]` に束ねる。これが [[kj-link-hub-audit-2026-06-24]] の exact 144 → bare 490 の根。原因は **per-occurrence 局所判断 × 双方向 → hub という大域帰結のレベルミスマッチ**（誰も hub を作ろうと決めていない、親切な個別 `[KJ法]` の副作用で創発）。
+- come-from（howm 由来）は判断単位を出現→用語に上げ、判断と帰結を用語-大域で揃える。「この語は一般に伝わりにくい」の1判断で全出現が読者に親切。read 側は grasp `mentions`（＝nishio 2022 howm 考察「キーワードページ＝仮想出現一覧」）で既に体現、declare 層と render 層（Markdown mirror で裸出現を自動リンク化）が未実装。
+- backlog 反映: (1) `gather` 節に hub 膨張の why（レベルミスマッチ）と come-from declare/render 候補、`mentions --unlinked` の3分類化（(a)意図的 / (b)gap / (c)**AI 作 default 裸**＝`🌀KJ法` 266occ は AI 作）＋ come-from 昇格候補（uncommon×頻度×一意）。(2) "Local write and identity layer" に **リンク2型を別 first-class object に**（felt-sense=行キー / come-from=用語キー）要件。安全域＝必要域（uncommon≈一意）。
+- decision 反映: [[ai-consumer-cost-and-trust]] に `## Updates` で第3消費者軸（substrate を持たない公開人間読者。読者ケアは AI 2軸モデルの外。公開面を frozen にすると届かない。come-from-at-render が軽量機構。grasp scope 判断点は nishio）。
+- 親 llm-wiki 側の対応ページ: `come-fromリンクは1宣言で全出現を親切にする` / `grasp最適設計はlinkからrecallを剥がす-20260624` / `KJ法リンクハブはリンク密度でなく用法分解で扱う-20260624`。
+- 統合: concepts/ 新ページ + grasp-backlog.md 2節追記 + ai-consumer-cost-and-trust.md Updates + index.md concepts に1行。
+
 ## [2026-06-24 02:38] file back | peek に line offset を追加
 - `peek --line-offset N` を追加し、`--line-limit M` と組み合わせて本文行だけをページングできるようにした。既定 offset は 0。
 - JSON は `line_offset`, `lines_truncated_before`, `lines_truncated_after` を返す。互換用の `lines_truncated` は後方省略（`lines_truncated_after`）と同じ値を維持する。text 出力は前方/後方省略を `...` で表示し、offset 指定時は `line_offset: N` を出す。

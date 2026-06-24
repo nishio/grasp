@@ -46,3 +46,13 @@ grasp の `read` / `link-stats` の zero-hit、`search` の空結果、`related`
 ## 根
 
 両軸の根は同じ — grasp は AI 消費者にとって **round-trip が実費で、沈黙が主張**。capability の絶対量でなく recall と往復コストに AI は依存する。この model が read=近傍同梱（implemented）を正当化し、Tier 1-2 backlog（remaining recall・negative-contract・snippets・gather・token economy）の優先度を決める。dated な観測元は [[ai-consumer-feedback-2026-06-23]]。
+
+## Updates
+
+### 2026-06-24: 第3の消費者軸 — substrate を持たない公開人間読者
+
+本ページは主ユーザを「CLI 越しに読む AI（人間 UI なし）」と明示し、[[positioning-two-personas]] も author / Markdown 束ユーザの2層。come-from 対話（[[come-from-declared-gather]] §8）で、この2軸モデルの**外**にいる第3の消費者が surface した: **公開された PKM を読む人間ストレンジャー**（個人 PKM ×世界公開という二重性が生む）。
+
+この消費者は **grasp を実行できない**（substrate を持たない）。AI 消費者の「round-trip / negative-contract」とは別の失敗モードを持つ —— リンクの4番目の仕事「読者ケア」（一般的でない語の説明へ辿らせる親切）が、公開面が frozen 静的エクスポートだと届かない。これは backlog が index/log で警戒する「frozen view」問題を**本文 hub と公開人間読者**へ拡張したもの。
+
+grasp scope の判断点（nishio）: 「substrate-backed な公開 view を出す」を grasp が担うか publish に委譲か。少なくとも come-from-at-render（[[come-from-declared-gather]] §4 render 層）が、著者を over-link させずにこの消費者を served にする軽量機構。本 2軸モデルは AI 消費者に閉じているが、**読者ケア軸はその外にある**ことを明記しておく。

@@ -23,7 +23,8 @@ Codex が実装し、本 wiki が実装済み事実・backlog・設計判断・g
 
 | ページ | 役割 |
 |---|---|
-| [ai-consumer-cost-and-trust](concepts/ai-consumer-cost-and-trust.md) | grasp の設計上の主たるユーザ＝CLI 越しにグラフを読む AI の cost-and-trust model。軸1 round-trip/token の経済（read=近傍同梱の why、gather/snippets/token economy backlog の ranking 原理）、軸2 negative-result contract（沈黙の偽陰性 = absence の hallucination、recall を vector より先に直す理由） |
+| [ai-consumer-cost-and-trust](concepts/ai-consumer-cost-and-trust.md) | grasp の設計上の主たるユーザ＝CLI 越しにグラフを読む AI の cost-and-trust model。軸1 round-trip/token の経済（read=近傍同梱の why、gather/snippets/token economy backlog の ranking 原理）、軸2 negative-result contract（沈黙の偽陰性 = absence の hallucination、recall を vector より先に直す理由）。2026-06-24 Updates: 第3の消費者軸＝substrate を持たない公開人間読者（読者ケアは2軸モデルの外） |
+| [come-from-declared-gather](concepts/come-from-declared-gather.md) | リンクの4仕事（recall/attention/navigation/読者ケア）と、Cosense が全部を1リンクに束ねる→ hub 膨張（KJ法 144→490）の *why*＝per-occurrence 局所判断×双方向の大域帰結ミスマッチ。howm の come-from（用語1宣言→全出現 gather）が判断と帰結を用語-大域で揃える。grasp 3層: read=既存 `mentions`（nishio 2022 howm 仮想出現一覧）/ declare・render=未実装。write/identity は come-from（用語キー）と felt-sense link（行キー）を別 object に。`mentions --unlinked` は (a)意図的/(b)gap/(c)AI default 裸 を分け come-from 昇格候補を出す。第3消費者＝公開人間読者 |
 
 _他に: read＝近傍同梱 / 行リンク / 未解決 link target / identity-without-name が実装・設計をまたいで育ったら切り出す。_
 
