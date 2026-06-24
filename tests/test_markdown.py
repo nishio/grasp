@@ -165,6 +165,54 @@ class MarkdownImportTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_markdown_import_excludes_named_directories(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "A.md").write_text("# A\nlinks to [[B]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            (root / "raw").mkdir()
+            (root / "raw" / "Raw.md").write_text("# Raw\nraw-only links to [[A]]\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            first = import_markdown_folder_to_sqlite(
+                root,
+                store_path,
+                project_name="wiki",
+                exclude_dirs=("raw",),
+            )
+
+            self.assertEqual(first["pages"], 2)
+            self.assertEqual(first["edges"], 1)
+
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                self.assertEqual(store.search("raw-only", limit=5), [])
+                self.assertEqual(store.link_stats("A")["link_count"], 0)
+            finally:
+                store.close()
+
+            second = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            self.assertEqual(second["markdown_import"]["mode"], "full")
+            self.assertEqual(second["markdown_import"]["full_rebuild_reason"], "identity_changed")
+            self.assertEqual(second["pages"], 3)
+            self.assertEqual(second["edges"], 2)
+
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                self.assertEqual([hit["source_title"] for hit in store.search("raw-only", limit=5)], ["Raw"])
+                self.assertEqual(store.link_stats("A")["link_count"], 1)
+            finally:
+                store.close()
+
+    def test_markdown_exclude_dir_rejects_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "directory basename"):
+                MarkdownMirror.from_folder(root, exclude_dirs=("raw/private",))
+
     def test_first_h1_is_title_when_frontmatter_title_is_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

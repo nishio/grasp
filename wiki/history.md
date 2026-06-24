@@ -60,6 +60,7 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
+| `1.5.28` | schema `5` | 2026-06-25 | schema `5` compatible | Markdown import に `--markdown-exclude-dir <name>` を追加。指定した directory basename 配下の `.md` を read-only mirror から除外し、`raw/` など heavy source directory を森スケール dogfood で避けられる。Markdown manifest version は `3` になり、exclude dirs も manifest identity に含めるため条件変更時は full rebuild。SQLite schema は不変 |
 | `1.5.27` | schema `5` | 2026-06-25 | schema `5` compatible | Markdown import が `index.md` / `forest-index.md` / `maps/` / `views/` / frontmatter `role: navigation` を navigation、`log.md` / `log/*.md` / frontmatter `type: log-entry` を log artifact と分類し、これらの outgoing edges を既定 content graph から除外する。本文 lines は store に残るので `search` は hit する。Markdown manifest version は `2` になり、既存 Markdown project は次回 re-import で full rebuild される。SQLite schema は不変 |
 | `1.5.26` | schema `5` | 2026-06-25 | schema `5` compatible | `PR #2` / `Open Question #4` のような issue-number 由来 numeric hashtag edge に system `semantic_annotation` を付ける初期 heuristic を追加。raw edge は保持し、`Edge.to_dict()` / path edge example / unresolved examples に annotation を出す。`unresolved` は sampled examples がすべて non-semantic な target を既定 ranking で後ろへ回す。store schema は不変 |
 | `1.5.25` | schema `5` | 2026-06-25 | schema `5` compatible | Markdown import の title resolution に first H1 fallback を追加。frontmatter `title` が無い file は first H1、さらに無ければ file stem を page title にする。file stem は引き続き alias。既存 Markdown store はそのまま読めるが、H1 title を反映するには `grasp import --markdown <folder>` の再実行が必要。store schema は不変 |
@@ -97,6 +98,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.5.27`
+- Current public compatibility version: `1.5.28`
 - Current internal `SCHEMA_VERSION`: `5`
-- Current package metadata should match `1.5.27`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.5.28`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

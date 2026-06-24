@@ -711,3 +711,9 @@
 
 ## [2026-06-25 02:54] file back | Markdown mirror dogfood の結論を current facts / decision へ昇格
 - 直前の dogfood 結論を [[markdown-obsidian-indexed-mirror]] と [[grasp-v1-implemented]] へ反映。log だけでなく、Markdown mirror の決定根拠と実装済み facts から「file back された Markdown LLM Wiki は再 import 後に LLM context として使える」と読めるようにした。
+
+## [2026-06-25 02:59] implementation | Markdown import に heavy directory 除外を追加
+- `grasp import --markdown <folder>` に `--markdown-exclude-dir <name>` を追加。指定した directory basename 配下の `.md` を再帰 import から除外する。森スケール dogfood で `raw/` の大量 source md を mirror に混ぜないための前提。
+- Markdown manifest version を `3` に更新し、exclude dirs を manifest identity に含めた。exclude 条件を変えて同じ project を re-import した時は safe full rebuild する。SQLite schema は v5 のまま、public compatibility version は `1.5.28`。
+- file back: [[grasp-v1-implemented]] / [history](history.md) / [[grasp-backlog]] / [[markdown-obsidian-indexed-mirror]] / README / Skill を更新。
+- 検証: bundled Python 3.12.13 で `python3 -m unittest discover -s tests`（63 tests）/ `python3 scripts/lint_wiki.py` / `git diff --check` OK。temp store で `grasp --json --store <tmp> import --markdown wiki --project grasp-wiki --markdown-exclude-dir raw` も成功。
