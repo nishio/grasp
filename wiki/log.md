@@ -1,5 +1,9 @@
 # Log
 
+## [2026-06-25 00:02] file back | GitHub connector merge 後の local/remote divergence gotcha
+- PR #2 の merge で判明した運用 gotcha を AGENTS.md に追記。`gh` が無く HTTPS push もできない環境では、GitHub connector で PR merge 自体は成功する一方、local main 側に手元の別 merge commit / follow-up commit が残り、`origin/main` と `ahead/behind` に分岐しうる。
+- 対応方針: connector merge 後は `git fetch origin main` → `git log --left-right --cherry-pick origin/main...main` で remote merge commit と local commit を照合する。重複 merge commit をそのまま push せず、必要なら remote merge commit を取り込んで follow-up だけを rebase/cherry-pick する。
+
 ## [2026-06-24 23:56] file back | 開発弧の非対称を「行動に移した」と概念へ追補 + 並行 main commit の運用 gotcha
 - この session の未捕捉知見を file back。
 - [[development-arc-retrieval-ahead-of-authoring]] に `## Updates` 追補: §3 の非対称（retrieval≫authoring）は観察で終わらず同じ弧の中で着手判断に変わった（write 層に alpha 着手 [[write-layer-alpha-and-replay-test]]）。nishio の問い「ローカルキャッシュの改良ばかりで書き込みが進まない／今後どうなるか」が持続メカニズムをあぶり出した＝retrieval は tight dogfood loop（hub 観察→同日 ship）を持つが write は各 session に重い open question しか出さないので後回しは構造的（default で retrieval が勝つ）、崩すには意図的決定が要る。決定は §3 Open Q（authoring で dogfood 駆動が効かないリスク）に replay test（authoring 専用 loop）＋cadence A（big-bang 回避）で直接答える。
