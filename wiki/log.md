@@ -677,3 +677,9 @@
 - 方針（分業 + ページルールに沿う）: 実装済み narration は [[grasp-v1-implemented]]（current facts の SSoT）と本 [[log]]（*いつ* やったかの時系列）に既に二重記録されているので backlog からは消す。事実は失われない（v1-implemented に全 surface が載っていることを突き合わせ確認）。却下案（`--cluster` / `--strip-decoration`）は経緯を畳んで各節末「却下（再提案しない）」の理由つき1行ガードに。設計根拠は `decisions/` / `concepts/` 側にあり backlog はリンクのみ。
 - 残したもの: 未実装項目（parser 監査 / Markdown mirror 残 / 森 dogfood 拡張 / navigation・log artifact handling / write・identity 層 / typed link / stable line identity / search recall 残 / gather・mentions・co-links 残課題 / use-case report / come-from declare・render / path・backlinks ranking / sync freshness / cross-project v6 / acquisition 残 / packaging）と、それらに効く settled な設計制約 + 出典リンク。
 - 検証: `python3 scripts/lint_wiki.py`（broken link / orphan 増なし）/ `python3 -m unittest discover -s tests`。コード変更なし、wiki のみ。
+
+## [2026-06-25 02:04] implementation | Markdown import の first H1 title resolution を実装
+- `grasp import --markdown <folder>` の title resolution を frontmatter `title` → first H1 → file stem に変更。first H1 extractor は frontmatter と fenced code block 内の `# ...` を title とみなさない。file stem は従来通り alias として残るため、`[[file-stem]]` は canonical H1 title へ解決する。
+- H1 title が変わると manifest の title / alias map が変わるので、既存の safe full rebuild path に乗る。SQLite table shape は変えないため schema は `5` のまま、public compatibility version は `1.5.25`。既存 Markdown store はそのまま読めるが、H1 title を反映するには `grasp import --markdown <folder>` の再実行が必要。
+- file back: [[grasp-v1-implemented]] の Markdown facts を更新し、[[grasp-backlog]] から first H1 title resolution を削除。[[markdown-obsidian-indexed-mirror]] の Open Question から title resolution 問いを閉じ、[history](history.md) に `1.5.25` を追加。README も title resolution 説明を更新。
+- 検証: bundled Python 3.12.13 で `python3 -m unittest tests.test_markdown` / `python3 -m unittest discover -s tests` / `python3 scripts/lint_wiki.py` / `git diff --check` OK。system `/usr/bin/python3` は 3.9.6 で package の `>=3.10` 要件を満たさず、既存 union type で失敗する。
