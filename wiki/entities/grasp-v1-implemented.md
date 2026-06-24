@@ -51,7 +51,7 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.5.14`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.5.15`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -80,7 +80,7 @@ v1 scope 外:
 | `peek <title>` | page lines のみ。`--line-offset N --line-limit M` で本文行だけをページングし、JSON は `line_offset`, `lines_truncated_before`, `lines_truncated_after` を返す |
 | `suggest <partial>` | title 部分一致候補 |
 | `search <query>` | 既定は空白も含む literal line substring search。`--mode boolean` で AND/OR/NOT、括弧、quoted phrase、隣接 term の implicit AND を扱う。`--scope line` は行単位、`--scope page` はページ単位で式を評価する。`--context N` で各 hit に前後 N 行の `context_lines[]` と `context_window` を同梱し、text 出力でも hit 直下に bounded context を表示する。literal 0件時は NFKC query 正規化＋長音除去の normalized fallback を試し、text は `[normalized]`、JSON は `match_mode: "normalized"` を返す。空結果時は `recovery_hints` も返す |
-| `mentions <query>` | literal query の出現を行単位で探し、parsed internal-link span 外の **bare mention** を既定で返す。summary は全 literal hit の total/bare/linked occurrence 数、bare line/page 数、page status counts を返す。各行は `exact-link-page` / `query-link-page` / `unlinked-page` に分類し、`--include-linked` で全 occurrence が link span 内の行も返す。`--context N` で周辺行同梱 |
+| `mentions <query>` | literal query の出現を行単位で探し、parsed internal-link span 外の **bare mention** を既定で返す。summary は全 literal hit の total/bare/linked occurrence 数、bare line/page 数、page status counts を返す。各行は `exact-link-page` / `query-link-page` / `unlinked-page` に分類し、`--unlinked` で page に query-containing link target が無い行だけ返す。`--include-linked` で全 occurrence が link span 内の行も返す。`--context N` で周辺行同梱 |
 | `co-links <query>` | literal query を含む行で同時に出る internal links を target ごとに rank する。exact query target は既定で除外し、`--include-self` で含める。各 item は link_count / line_count / source_page_count / total_source_views / examples を返す |
 | `gather <query>` | link stats、bare mention summary、representative bare mentions、co-link slices、backlinks、次に実行する recipe を bounded bundle として返す。`--budget` は row limit を選ぶ近似であり厳密 token packing ではない。huge hub では bulk-linking を避ける banner を返す |
 | `export-ai <title>` / `export-for-ai` | main + 1-hop/2-hop page 本文を Cosense Export for AI 風に単一テキスト化 |

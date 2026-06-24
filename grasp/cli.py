@@ -375,6 +375,7 @@ def build_parser() -> argparse.ArgumentParser:
         returns="query, mode, context, summary, mentions[]",
         examples=[
             "grasp mentions KJ法 --limit 20",
+            "grasp mentions KJ法 --unlinked --limit 20",
             "grasp mentions KJ法 --include-linked --limit 20",
             "grasp mentions KJ法 --context 2 --limit 10",
             "grasp --json mentions KJ法 --limit 5",
@@ -389,6 +390,7 @@ def build_parser() -> argparse.ArgumentParser:
     mentions_parser.add_argument("--limit", type=int, default=50, help="Maximum mention lines to return.")
     mentions_parser.add_argument("--offset", type=int, default=0, help="Number of ranked mention lines to skip.")
     mentions_parser.add_argument("--include-linked", action="store_true", help="Also return lines where every occurrence is inside a parsed internal link span.")
+    mentions_parser.add_argument("--unlinked", action="store_true", help="Only return bare mention lines from pages with no query-containing link target.")
     mentions_parser.add_argument("--context", type=int, default=0, help="Number of lines before and after each returned mention to include.")
 
     co_links_parser = add_command_parser(
@@ -829,6 +831,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             limit=args.limit,
             offset=args.offset,
             include_linked=args.include_linked,
+            unlinked_only=args.unlinked,
             context=args.context,
         )
         result["offset"] = args.offset

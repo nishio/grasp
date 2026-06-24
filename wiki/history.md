@@ -48,6 +48,7 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
+| `1.5.15` | schema `5` | 2026-06-24 | schema `5` compatible | `mentions --unlinked` を追加。bare mention のうち、page に query-containing link target が無い `unlinked-page` だけを返す明示 surface。summary は全 literal hit の監査値を維持し、returned lines のみ絞る。store schema は不変 |
 | `1.5.14` | schema `5` | 2026-06-24 | schema `5` compatible | `read --related-snippets --related-snippet-mode edge` を追加。related/source item の冒頭ではなく、その item を導いたリンク行を `snippet_lines[]` と `snippet_window` に同梱できる。既定 mode は従来通り `lead`。store schema は不変 |
 | `1.5.13` | schema `5` | 2026-06-24 | schema `5` compatible | `mentions <query>` / `co-links <query>` / `gather <query>` を追加。裸言及を parsed internal-link span 外で数え、page-level link status で分類し、query 行の co-link slice と bounded gather bundle を返す。store schema は不変 |
 | `1.5.12` | schema `5` | 2026-06-24 | schema `5` compatible | `peek --line-offset N` を追加。`--line-limit M` と組み合わせて本文行だけをページングし、JSON は `line_offset`, `lines_truncated_before`, `lines_truncated_after` を返す。store schema は不変 |
@@ -72,6 +73,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.5.14`
+- Current public compatibility version: `1.5.15`
 - Current internal `SCHEMA_VERSION`: `5`
-- Current package metadata should match `1.5.14`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.5.15`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

@@ -1615,6 +1615,7 @@ class SQLiteStore:
         offset: int = 0,
         *,
         include_linked: bool = False,
+        unlinked_only: bool = False,
         context: int = 0,
     ) -> dict[str, Any]:
         if not query:
@@ -1681,6 +1682,8 @@ class SQLiteStore:
 
             if not include_linked and line_bare_occurrences == 0:
                 continue
+            if unlinked_only and classification != "unlinked-page":
+                continue
 
             filtered_hits.append(
                 self._mention_hit_from_row(
@@ -1715,7 +1718,7 @@ class SQLiteStore:
         }
         return {
             "query": query,
-            "mode": "all" if include_linked else "bare",
+            "mode": "unlinked" if unlinked_only else "all" if include_linked else "bare",
             "context": context,
             "summary": {
                 "total_lines": total_line_count,
