@@ -43,7 +43,7 @@ Derived page sets:
 | body has bare `KJ法` and page has exact `[KJ法]` somewhere | 75 |
 | body has bare `KJ法` but page has no `KJ法`-containing link target at all | 339 |
 
-Interpretation: the graph sees `KJ法` as a 144-page hub, while lexical usage spans 681 pages. If every body bare mention were converted to `[KJ法]`, backlinks could jump from 144 pages toward ~559 pages (exact current source pages plus pages with bare body mentions but no exact link). This is the wrong direction.
+Interpretation: the graph sees `KJ法` as a 144-page hub, while lexical usage spans 681 pages. If every body bare mention were converted to `[KJ法]`, backlinks could jump from 144 pages toward ~559 pages (exact current source pages plus pages with bare body mentions but no exact link). This is the wrong direction. なぜ wrong direction か（per-occurrence の局所判断 × 双方向 → hub という大域帰結のレベルミスマッチ）と、正しい対処（come-from = 判断を出現でなく用語-大域へ上げる）の原理は [[come-from-declared-gather]]。
 
 ## Top bare mention pages
 
