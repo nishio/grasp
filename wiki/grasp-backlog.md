@@ -304,6 +304,22 @@ surface 名は未決。重要なのは、raw dump ではなく **bounded candida
 - rename detection。
 - last-sync cursor の運用精度。
 
+## Cross-project graph を first-class edge に + whole-store retrieval（v6）
+
+2026-06-24 決定（[[whole-store-graph-and-cross-project-edges]]）: 互換性を捨て、store を v6 に bump して理想形に作り直す。store = 外部 source から再生成可能な projection なので schema bump + 再 import は安全（`recover_store_from_import_cache` 機構が既存）。現状の parse-on-read `cross_project_refs`（`LIKE '%[/%'` 全スキャン + 毎回 re-parse/re-classify、edge にならない）を置換する。
+
+実装項目:
+
+- **cross-project link を materialize**: `edges` に `target_project` / `link_kind`（internal / cross-semantic / cross-icon / cross-root）を追加。`source_project` へ rename。`CrossProjectLink`（`raw/project/title/target_class`）をそのまま流す。`raw` 保存で slash-in-title 再解決可能に。
+- **解決と unresolved 再構築**: `[/P/T]` を (P, norm(T)) に解決。存在チェックを target_project の pages に対して行い、`unresolved_targets` を `(target_project, target_norm)` で集計。materialized page 0 の namespace も unresolved の値に取れる。
+- **whole-store default retrieval**: `_require_project` の「複数 project で error」を削除。`search` / `read` / `backlinks` / `related` / `path` / `unresolved` / `mentions` / `co-links` / `gather` は default で全 project から、`--project` で絞る。結果は project ラベル付き。`import` / `sync` / `acquire` は project-targeted のまま。
+- **read 多義の disambiguation**: 同名 page が複数 namespace にある時、error せず全候補を project ラベル + summary で返し `--project` / page-id で絞らせる。
+- **node 状態 = page 単位の materialized / referenced-only**: project は namespace。「未取得 project」は categorical でなく coverage（materialized page 数）の派生量。acquire = referenced-only node の materialize。`unresolved`(whole-store) が「参照済みだが未取得の知識圏」を link_count 順で出し、acquire の seed bibliography になる（[[cross-project-reference-acquire-2026-06-24]] dogfood の手作業を primitive 化）。
+- **出力契約**: discover-broad-filter-post-hoc。relevance で pre-filter せず target_project / link_kind / scope ラベル付きで surface、絞りは post-hoc flag、出力量は rank + omitted-count で bound、性能は bound で対処し hide しない。現 `cross_project_refs` の `--semantic-only` / `--exclude-icons` / `--include-self` は「pre-filter」から「surface 済み集合への post-hoc filter」に位置づけ直す。
+- **history**: store format / materialized index semantics が変わるため [[history]] の `x` を進める（再 import 要）。
+
+未決（decision の Open Questions）: referenced-only namespace の coverage rollup surface 形 / slash-in-title 確定規則の実データ検証 / dense graph での whole-store related/path bound / **同名 bare 赤リンクの cross-project 統合**（[[multi-project-store]] tentative Update との diverge、nishio 判断待ち）。
+
 ## Hosted Cosense acquisition without admin export
 
 背景: `import --cosense <json>` は管理画面の JSON export を初回 seed にするため、user が管理者でない project では使えなかった。`sync` は full seed 済み project の freshness path なので、seed なしの project 取得とは意味を分ける。
