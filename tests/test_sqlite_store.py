@@ -377,6 +377,73 @@ class SQLiteStoreTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_unresolved_ranks_issue_number_hashtags_as_non_semantic_edges(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "A",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 10,
+                    "views": 100,
+                    "lines": [
+                        {"text": "A", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "PR #2 fixes import and links to [Missing]", "created": 1, "updated": 2, "userId": "u"},
+                    ],
+                },
+                {
+                    "title": "B",
+                    "id": "bbbbbbbbbbbbbbbbbbbbbbbb",
+                    "created": 1,
+                    "updated": 20,
+                    "views": 50,
+                    "lines": [
+                        {"text": "B", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "Open Question #2 remains", "created": 1, "updated": 2, "userId": "u"},
+                    ],
+                },
+                {
+                    "title": "C",
+                    "id": "cccccccccccccccccccccccc",
+                    "created": 1,
+                    "updated": 30,
+                    "views": 10,
+                    "lines": [
+                        {"text": "C", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "notes for #2024", "created": 1, "updated": 2, "userId": "u"},
+                    ],
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+            stats = import_export_to_sqlite(export_path, store_path)
+
+            store = SQLiteStore(store_path)
+            try:
+                self.assertEqual(stats["edges"], 4)
+                self.assertEqual(store.link_stats("2")["link_count"], 2)
+                unresolved_targets = store.unresolved_targets()
+                self.assertEqual([item["title"] for item in unresolved_targets], ["Missing", "2024", "2"])
+
+                issue_target = unresolved_targets[-1]
+                self.assertEqual(issue_target["semantic_annotation"]["graph_scope"], "non-semantic")
+                self.assertEqual(issue_target["semantic_annotation"]["semantic_role"], "issue-number")
+                self.assertEqual(
+                    issue_target["examples"][0]["semantic_annotation"]["semantic_role"],
+                    "issue-number",
+                )
+                self.assertNotIn("semantic_annotation", unresolved_targets[1])
+            finally:
+                store.close()
+
     def test_mentions_co_links_and_gather_surface_hub_slices(self):
         fixture = {
             "name": "fixture",

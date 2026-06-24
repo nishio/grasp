@@ -120,6 +120,7 @@ v1 scope 外:
 - Cosense `[[...]]` は bold markup であり link ではない。v1 importer は link として扱わない。
 - `[2024]` のような数字のみ bracket token は valid internal link として扱う。`xs[0]` / `func()[1]` のように `[` の直前が ASCII 非空白の index 風 syntax は false positive として除外する。
 - `#tag` は `[tag]` と同等の internal link として edge 化する。`# ` は空 token なので除外し、`https://example.com/#fragment` のような URL fragment は hashtag boundary で除外する。
+- `PR #2` / `Open Question #4` のような issue-number 由来 numeric hashtag edge は parser で捨てず、system `semantic_annotation`（`semantic_role=issue-number`, `graph_scope=non-semantic`, `annotator=system`）を output に付ける。raw edge は保持する。`unresolved` は sampled examples がすべて non-semantic な target を既定 ranking で後ろへ回す。これは schema-compatible output/ranking heuristic で、永続 annotation table は未実装。
 
 Markdown mirror facts:
 

@@ -22,14 +22,14 @@ sources:
 
 ### link-shaped but non-semantic edge annotation
 
-`#1` / `#2` が hashtag link になることは、`log.md` artifact handling とは別問題。Scrapbox 互換では `#1` は link-shaped expression であり、人間側も必要なら `` `#1` `` のように escape してきた。grasp は parser で勝手に捨てるより、edge を保持した上で「表現としてはリンクだが、意味のある概念リンクではない」と annotation できる層を持つべき。
+`#1` / `#2` が hashtag link になることは、`log.md` artifact handling とは別問題。Scrapbox 互換では `#1` は link-shaped expression であり、人間側も必要なら `` `#1` `` のように escape してきた。grasp は parser で勝手に捨てるより、edge を保持した上で「表現としてはリンクだが、意味のある概念リンクではない」と annotation できる層を持つべき。初期 system heuristic として、`PR #2` / `Open Question #4` のような issue-number edge に output annotation を付け、`unresolved` で sampled examples がすべて non-semantic な target を後ろへ回す処理は実装済み（[[grasp-v1-implemented]]）。
 
 未実装:
 
 - edge annotation schema（候補: `semantic_role`, `graph_scope`, `confidence`, `annotator=system|llm|human`, `reason`）。`link_kind` / typed link / `connection_strength` とは直交する軸。
-- system heuristic annotation: `PR #2`, `Open Question #4`, version/changelog の `#1` などは `issue-number` / `ordinal-reference` として rank down し、unresolved concept hub から外す。ただし raw edge は消さない。
+- system heuristic annotation の拡張: `../[[..]]` placeholder、version/changelog の ordinal reference、issue number 以外の link-shaped non-semantic 表現を分類する。raw edge は消さない。
 - LLM annotation workflow: grasp 自身は候補 edge + source line +近傍を出し、LLM が「意味リンクではない」判断を返して store に annotation する。判断は reversible / provenance 付きにする。
-- retrieval policy: `unresolved` / `related` / `path` / backlink ranking は既定で non-semantic edge を弱く扱い、必要なら `--include-non-semantic` で見る。
+- retrieval policy の拡張: `related` / `path` / backlink ranking でも既定で non-semantic edge を弱く扱い、必要なら `--include-non-semantic` で見る。
 
 ## CLI and agent UX
 

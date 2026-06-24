@@ -688,3 +688,10 @@
 - nishio 指摘: grasp wiki dogfood で見えた `log.md` が graph を汚す問題と、`PR #2` / `Open Q #4` のような `#1` 系が hashtag edge になる問題は別。前者は page/file の artifact handling、後者は link-shaped expression が意味ある概念リンクかの annotation 問題。
 - 方針修正: Scrapbox 互換では `#1` は link として成立するので parser で消さない。人間は必要なら `` `#1` `` のように escape してきた。grasp 側は edge を保持したまま、system / LLM / human が「表現としてはリンクだが意味リンクではない」と annotation し、`unresolved` / `related` / `path` ranking で弱く扱う。
 - file back: [[grasp-backlog]] に link-shaped but non-semantic edge annotation 節を追加。[[markdown-obsidian-indexed-mirror]] に correction を追記し、log/navigation artifact handling と edge annotation を混同しないよう明記。
+
+## [2026-06-25 02:39] implementation | issue-number hashtag edge の system annotation を追加
+- `PR #2` / `Open Question #4` のような numeric hashtag edge に system `semantic_annotation` を付ける初期 heuristic を追加。annotation は `semantic_role=issue-number`, `graph_scope=non-semantic`, `annotator=system`。parser は edge を捨てず、`Edge.to_dict()` / path edge example / unresolved examples に annotation を出す。
+- `unresolved` は既定で少し多めに候補を取得し、sampled examples がすべて non-semantic な target を ranking の後ろへ回す。`link_stats("2")` など raw edge count は保持する。永続 annotation table / LLM annotation workflow / `related`・`path` の本格 ranking policy は未実装として [[grasp-backlog]] に残す。
+- dogfood: temp store で `wiki/` を import し、`PR #2` / `PR #1` / `Open Q #4` 由来 target に annotation が付くことを確認。`[[..]]` 由来の `..` は別の link-shaped non-semantic 表現として未対応。
+- file back: [[grasp-v1-implemented]] に current facts、[history](history.md) に `1.5.26`、[[grasp-backlog]] に残課題を反映。
+- 検証: bundled Python 3.12.13 で `python3 -m unittest discover -s tests` / `python3 scripts/lint_wiki.py` / `git diff --check` OK。
