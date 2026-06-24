@@ -655,3 +655,10 @@
   - [[why-not-scrapbox-clone]]（decisions/, 旧 why-design-B）— Scrapbox を Co-層 / グラフモデル層に分解、A（忠実clone, name=identity欠陥相続）vs B（あるべき姿, identity-without-name 追加）の fork で B 採用。用途は（あ）LLM-author 向け・人間UIなし。cosense-cli との区別。
 - **次**: 永続化形式（既存 Markdown 互換 or 独自）の決定 → Codex に最小プロトタイプ（read / backlinks / wanted の 3 動詞、読み取り専用）を渡す。
 - メタ: 親 llm-wiki の `LLM Wiki 設計のトレードオフ` 軸5（機械 vs 意味）× `名前ではなくIDで識別する設計`（identity-without-name）の収束として本プロジェクトが立った。
+
+## [2026-06-25 00:02] ingest | ScrapBubble (takker99) を entity 化、grasp の read 模型の「双子（別消費者）」として file back
+- 出典: github.com/takker99/ScrapBubble（README: "Show n-hop link destination pages beyond projects" / TypeScript+Deno / Preact / ~45 releases, 最新 0.9.15）、scrapbox villagepump/ScrapBubble・takker/takker99%2FScrapBubble、関連 villagepump/複数のprojectを透過的に扱う・takker/ScrapBubbleのcache戦略。全文 raw は raw/scrapbubble--*.json（gitignored）。
+- 新ページ [[scrapbubble]]（entities/）: Scrapbox UserScript。リンク hover で**遷移せず**飛び先を吹き出し表示（text-bubble=本文 / card-bubble=関連2-hop）、逆リンクへ再帰潜行、`whiteList` で複数 project 透過、赤リンクは接続検知で blue 切替（全 project 空は全走査要）、cache-first・最大3 fetch・api/projects 更新時刻チェック、`?followRename=true` で改名追従。
+- 核となる読み: **ScrapBubble = grasp の read グラフ模型を消費者だけ替えて実装した双子**（ScrapBubble=人間ブラウザ hover GUI / grasp=AI CLI）。bubble=人間版の近傍同梱。grasp の whole-store cross-project（v6）/ read=近傍同梱（[[ai-consumer-cost-and-trust]] 軸1）/ [[incremental-sync]] cache reuse / identity-without-name を**別経路で裏付ける先行例**。
+- 3つの sharpening: ① `followRename` = grasp が data model で直す name=identity 欠陥を fetch 時 workaround で当てた downstream 証拠（[[why-not-scrapbox-clone]] に Update）。② `whiteList` 透過は Co-（他者 project 読み）と非 Co-（自分 public+private 統合）を束ね、grasp が継ぐ cross-project は後者だけ → cross-project は Co- 無しでも価値（[[whole-store-graph-and-cross-project-edges]] に Update、本決定が使う `[/takker/ScrapBubble]` の出元）。③ daiiz の「リンク貼って満足／育てる vs preview」deferral は come-from・第3消費者軸に接続。
+- index.md に entities/ 1行追加。why-not-scrapbox-clone と whole-store-graph に各1 Update 追記。

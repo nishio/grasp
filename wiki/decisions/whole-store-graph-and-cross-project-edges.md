@@ -99,3 +99,11 @@ unresolved_targets(
   - **同綴り別概念の誤接続**（別 project で `Apple`=会社/果物）。nishio は value 優先で受容。`link_kind` / source project provenance を残し、後から判別・分割可能にする。実データで誤接続頻度を dogfood する（tentative なので撤回しうる）。
   - **赤-materialized 境界**: 別 project に materialized page X があるとき、他 project の bare 赤 `[X]` をその materialized X に解決するか（cross-project name resolution）、それとも赤-赤統合のみか。tentative Update の原意は赤-赤のみ。materialized は namespaced のままで、discoverability は whole-store labeling で別途確保する、が暫定。
   - **explicit `[/P/T]` との関係**: P 指定の cross link は (P, norm T) の namespaced 解決のままで、bare 赤統合（project 非依存 key）とは別経路か。両者の node identity の整合を実装時に確定する。
+
+## Updates
+
+### 2026-06-25: ScrapBubble の whiteList 透過が prior art（cross-project は Co- 無しでも価値）
+
+[[scrapbubble]]（takker99 の Scrapbox 閲覧 UserScript、本ページが slash-in-title の実例に使う `[/takker/ScrapBubble]` の出元）を ingest した対比。ScrapBubble の `whiteList` は複数 project を**透過的に**繋ぎ、本決定の whole-store cross-project と同じ価値（project を跨いで「あるキーワードについて書いたこと」を一望）を**人間ブラウザ GUI で先に実装**している。重要な分解: whiteList の魅力は2層あり、villagepump が「多分これが一番魅力的」と呼ぶのは **自分の public + private project の統合（非 Co-、単一所有者）** の方で、TamperMonkey 版の**他者 project 読み（Co-、多人数）**は別軸。grasp は Co- を削ぐ（[[why-not-scrapbox-clone]]）ので本決定の whole-store cross-project が継ぐのは前者＝1 AI が複数 store（namespace）を所有して横断する形。∴ ScrapBubble は「**cross-project graph は Co- が無くても（むしろ自分の public+private 統合こそが）価値**」を実例で示し、本決定を裏付ける。
+
+実装の borrow 候補（[[scrapbubble]] Open Questions）: ① ScrapBubble の `links2hops` 先回り prefetch（ページ内全リンクの空判定を一括取得）は whole-store `unresolved` 再構築の bulk 化のヒント。② 「全 project で空なリンクは全 project を取得しないと赤判定できない」edge case は、本決定の target_project 存在チェックが whole-store 化で払う同じコスト。③ ScrapBubble が「実装したい」とする**リンク同一判定のカスタム化／表記ゆれ吸収**（`yyyy/MM/dd` ⇄ `yyyy-MM-dd`）は point 7 の赤 node normalize-title 統合と同問題で、normalize 規則を揃える価値がある。
