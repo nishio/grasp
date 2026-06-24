@@ -1,6 +1,6 @@
 ---
 type: entity
-summary: grasp の release / store compatibility history。v1 系の version は 1.x.y とし、x は store format / materialized index semantics が変わる時、y は store format が変わらない時に進める。
+summary: grasp の release / store compatibility history。version は `<major>.x.y`。major は product line（`1`=read line / `2`=write・authoring line）、x は store format / materialized index semantics が変わる時、y は store format が変わらない時に進める。write の alpha/stable は version でなく write 系 verb の SLA ラベルで表す（version 非依存）。
 sources:
   - wiki/log.md
   - wiki/entities/grasp-v1-implemented.md
@@ -23,6 +23,18 @@ v1 系では public version を `1.x.y` とする。
 - `y`: store compatible change。CLI UX、command 追加、formatter、recovery hints、docs、Skill、performance、sync logic など、既存 current store を再構築しなくてもよい変更で上げる。
 
 `grasp.sqlite_store.SCHEMA_VERSION` は内部の store compatibility key として単調増加する整数文字列を維持する。`x` が上がる時は原則 `SCHEMA_VERSION` も上がる。`y` だけの変更では `SCHEMA_VERSION` は変えない。
+
+### Major version = product line（`2` = write/authoring line）
+
+メジャー番号は **product line** を標す。これは厳密 semver でなく store-compat 台帳の major（nishio 合意 2026-06-24、根拠は [[write-layer-alpha-and-replay-test]]）。
+
+- `1` = **read line**。AI が CLI + Skill で local graph store を**読む** line（`1.x.y`、v1 系）。
+- `2` = **authoring line**。read line に加えて write/identity（id-link write・rename で参照不壊・transclude・come-from declare/render）を持つ line（`2.x.y`）。read-only(`1`) → read+write は本プロジェクト最大の概念変化（[[development-arc-retrieval-ahead-of-authoring]]）なのでメジャーで標す。
+- `x` / `y` の意味は major を跨いでも同じ（`x`=store generation、`y`=store-compatible）。
+
+**alpha は version に載せない**: write が alpha かどうかは version 番号でなく **write 系 verb に付く SLA ラベル**で表す（read=stable / write=alpha を別 SLA、[[write-layer-alpha-and-replay-test]] 決定1）。∴ `2.0.0` は write verb が alpha ラベル付きで載った最初の line。`2.0.0-alpha.N` の prerelease に逃げず、alpha→stable はラベルを外す SLA 変更として version bump と独立に扱う。
+
+**`2.0.0` 境界（cadence A）**: 最高リスクのスライス（stable identity + re-import diff、次いで rename）が replay test（この repo の過去 wiki 編集の再現、[[write-layer-alpha-and-replay-test]] 決定2）を通った時点で main に merge し、そこを `2.0.0` とする。write系完了を待つ big-bang merge はしない（[[development-arc-retrieval-ahead-of-authoring]] の tight dogfood loop を失わないため）。以降 write / transclude / come-from は `2.x.y`。store generation `x` は `2.0.0` で 1 から再採番せず、`SCHEMA_VERSION`（内部整数）は単調増加を維持する。
 
 ## Store bump criteria
 
