@@ -63,4 +63,16 @@ felt-sense link（行キー・著者 retrieval 意図）と come-from link（用
 - alpha の store authority/undo を具体的にどう表現するか（journal / 原典との二層 / snapshot）。決定1は「原典は書き換えない」までで、store 内 undo 表現は実装で詰める。
 - replay test の「一致」判定の厳密さ。line id まで一致を要求するか、page/edge/text の意味一致で足すか。identity 引き継ぎ自体を測るテストなので、id 一致は別レイヤの assertion にする。
 - 単一 dogfooder（nishio）の git history を ground truth にするので、編集パターンが nishio 固有（file-back skill 経由が多い）。外部 persona2 の編集様式（手編集・rename 頻度）は別 corpus が要るかもしれない（[[development-arc-retrieval-ahead-of-authoring]] の dogfood 転移リスク）。
-- write を alpha と明示することと、read を含む grasp 全体の version（[[history]] の 1.x.y）の関係。write 着手で store generation `x` が上がるか、alpha surface は別 channel にするか。
+
+## Updates
+
+### 2026-06-24: write line の versioning — メジャー `2`、alpha は SLA ラベル（version 非依存）、cadence A
+
+nishio と合意（上の Open Questions #4 を解決、versioning policy 本体は [[history]]）。
+
+- **メジャー `2` ＝「grasp が write/authoring line を持つ」**。read-only(`1`) → read+write は本プロジェクト最大の概念変化（[[development-arc-retrieval-ahead-of-authoring]]：「存在理由の半分」がここで埋まる）なので、store-compat 台帳（[[history]]）のメジャーを上げて標す。`1` = read line、`2` = authoring line を持つ line。`x` / `y` の意味は major を跨いでも同じ。
+- **alpha/stable は version 番号に載せない**。決定1の「read=stable / write=alpha を別 SLA」をそのまま使い、alpha かどうかは **write 系 verb に付く SLA ラベル**（直交チャネル）で表す。version は product line(major) / store generation(`x`) / compatible(`y`) を追う。∴ `2.0.0` は write verb が alpha ラベル付きで載った最初の line として出せる。`2.0.0-alpha.N` の prerelease 運用に逃げず、alpha→stable 卒業はラベルを外す SLA 変更として version bump と独立に扱う。
+- **cadence A（big-bang を避ける）**。worktree で並行開発するのは「最高リスクのスライス（決定3 ① stable identity + re-import diff、次いで ② rename）が replay test を通る」まで。そこで main に merge し、その merge を `2.0.0` 境界にする（store generation が上がり、最初の authoring verb=rename が alpha ラベルで載る）。以降 ③ write / ④ transclude・come-from は `2.x.y`。
+  - 理由: write系完了まで merge しない長寿命ブランチは、[[development-arc-retrieval-ahead-of-authoring]] が warn した「authoring が tight dogfood loop を失う」罠そのもの。かつ決定1（原典は書き換えず local store に write、re-import 安全網を write 対象の外に残す）が**隔離の安全上の必要を消した**ので、完了まで隔離する理由がない。`1.5.x` の retrieval 改良が main で動いている間の branch drift も避ける。
+  - worktree は探索 churn を散らかさない用途として ①（最高リスク・schema が動く）まで保つ。②以降は main 上で alpha ラベル付きで刻んでよい。
+- ~~write を alpha と明示することと、read を含む grasp 全体の version（[[history]] の 1.x.y）の関係。write 着手で store generation `x` が上がるか、alpha surface は別 channel にするか。~~ → **解決（下記 Updates 2026-06-24）**: メジャー `2` ＝ write/authoring line、alpha は SLA ラベルで version 非依存、cadence A で ①+② が replay test を通った時点を `2.0.0` 境界にする。

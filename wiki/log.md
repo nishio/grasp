@@ -1,9 +1,23 @@
 # Log
 
+## [2026-06-24 23:41] file back | takker 試用の非自明な結論を分析して既存ページへ追補
+- 「takker の経験から何が言えるか」の分析を distill して既存ページに追補（新規ページなし）。
+- [[takker-opencode-villagepump-test-2026-06-24]] 含意を強い順に再構成: ①grasp はモデル水準を下げる（構造化出力を CLI が作り agent は薄い recipe→安いモデルで完走、[[delivery-cli-plus-skill]] 境界の正しさ）②意図した retrieval loop が外部 agent で自然発生（AI consumer option が理由を知らない agent に選ばれた）③scale 余裕は read のみ証明・path/gather 未証明 ④takker が向けたのは Co- corpus＝read には問題ないが write/identity の単一所有前提（[[write-layer-alpha-and-replay-test]]）と将来衝突する伏線 ⑤インサイダーは「offline cosense-cli」= Scrapbox/persona1 枠に入れる→persona2 framing 未検証。
+- [[positioning-two-personas]] `## Updates` 追記: インサイダーは Scrapbox 枠 / モデル水準を下げる（persona2 GTM 追い風）/ 公開 dogfooding flywheel は高利回りだが persona1 止まり（PR #2 がその実例、別チャネルが要る）。
+- [[grasp-backlog]] Parser fidelity の PR #2 一般化を原理化: admin metadata-ON export は in-the-wild の代表でない→外部 export は fuzz test→import 堅牢性は恒常コスト＝persona2 を狙う代償。tolerant import + 実 export variant を fixture 化。
+- 並行で Codex が PR #2 merge（1.5.24）・v6 decision [[whole-store-graph-and-cross-project-edges]] を追加済み。takker entity の PR #2 status は merged に揃っている。自分の hunk だけ commit。
+
 ## [2026-06-24 23:29] implementation | PR #2 を mergeし Cosense string line import を許容
 - GitHub PR #2（takker99 `fix/string-lines-cosense-import`, `f139c516`）を review し、ローカル main に merge。`grasp/cosense.py` は Cosense JSON export の line が plain string の場合、metadata なし本文行（created/updated/user_id = `None`）として import する。string line 内の `[B]` なども通常通り edge 抽出対象。
 - 回帰テスト `tests/test_cosense.py::CosenseStoreTests.test_store_imports_plain_string_lines_without_metadata` を追加。`python3` が system 3.9 だと既存 `requires-python >=3.10` / union type 構文で失敗するため、検証は Codex bundled Python 3.12 を使用。
 - public compatibility version を `1.5.24` に bump。store schema は v5 のまま。[[grasp-v1-implemented]] / [[history]] / [[cosense-json-export]] / [[grasp-backlog]] / [[takker-opencode-villagepump-test-2026-06-24]] / README に反映。
+
+## [2026-06-24 23:28] decision | write line の versioning を合意 — メジャー 2 = authoring line / alpha は SLA ラベル / cadence A
+- nishio の問い「write系完了まで worktree で並行開発 → merge の段階で 2.x.y にする感じ?」を起点に合意形成。3点を file back。
+- ①メジャー `2` = 「grasp が write/authoring line を持つ」。read-only(`1`)→read+write は本プロジェクト最大の概念変化（[[development-arc-retrieval-ahead-of-authoring]]）なので store-compat 台帳のメジャーで標す。②alpha/stable は version 番号に載せず、write 系 verb の SLA ラベルで表す（決定1の read=stable/write=alpha 別 SLA をそのまま使う）→ `2.0.0` は alpha ラベル付き write verb が載る最初の line。③cadence A: worktree 並行は最高リスクスライス（① stable identity ② rename）が replay test を通るまで、そこで merge して `2.0.0` 境界、以降 `2.x.y`。big-bang merge を避ける（authoring が tight dogfood loop を失う罠を回避、決定1 で隔離の安全上の必要も消えた）。
+- [[write-layer-alpha-and-replay-test]] に Updates 追記＋ Open Q #4 を解決、[[history]] の Versioning policy に「major=product line / alpha=SLA ラベル / 2.0.0 境界」を追記。
+- worktree `feat/write-identity-alpha` を main に fast-forward して Codex の context を最新化。
+
 
 ## [2026-06-24 23:21] ingest | Scrapbox `villagepump/grasp` の公開設計対話 + takker 外部試用ログを取り込み
 - 出典: https://scrapbox.io/villagepump/grasp （raw/grasp-villagepump-page_2026-06-24.txt に保存, gitignored）。既出と重複しない新規分のみ file back。
