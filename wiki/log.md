@@ -1,5 +1,13 @@
 # Log
 
+## [2026-06-24 23:09] decision | write/identity 層に着手 — alpha testing 位置づけ・過去 wiki 編集 replay でテスト・最高リスク先行
+
+- nishio 指示2点: ①「当面書き込み機能は alpha testing と位置付ける。信用してここに大事なものを預ける人は自己責任。テスト方法はこのリポジトリの過去の wiki 編集を grasp で同様にやれるかとする」②「実装順序は最もリスクが高いものの検証を先にすべき」。これを言語化して Codex が読む context に固定した。
+- 新 decision [[write-layer-alpha-and-replay-test]]（decisions/）: ①位置づけ＝write は alpha、read(v1 stable)/write(alpha) を別 SLA、原典(Cosense export / Markdown mirror)は書き換えず local store に対して write し re-import 安全網を write 対象の外に残す。②テスト方法＝この repo 自身の git history（page 作成/rename/本文編集/リンク変更の実列、既に markdown mirror dogfood corpus）を ground truth に、連続 revision の diff を grasp write/rename で適用し「素朴 import との一致」＋「rename で `[[..]]` 参照不壊・redirect stub なし・参照文保存」を実データで検証（[[use-case-experiment-as-outcome-story]] の authoring 版）。③実装順序＝危険な順: stable identity + re-import diff（最高リスク, stable ID requires memory）→ rename → write → transclude/come-from。
+- [[grasp-backlog]]「Local write and identity layer」冒頭に着手判断と decision 参照を追記、未実装リストを「楽な順でなく危険な順に読む」と明示。index に decision 行追加。
+- 背景は [[development-arc-retrieval-ahead-of-authoring]]（retrieval≫authoring の非対称）。差別化核 identity-without-name（[[why-not-scrapbox-clone]] / [[positioning-two-personas]]）の write 半分を埋めにいく。
+- 次: 本 wiki を main に固定後、`feat/write-identity-alpha` worktree を切り Codex が①から実装。判明した制約は file back。
+
 ## [2026-06-24 22:40] file back | 「MD 全読み vs grep vs grasp search」速度比較を実測 → 速度は非論点・token が論点
 - nishio の問い「大規模 MD を読むのと grep の速度比較」を本番コーパス（store project `nishio`, 25,798 pages）で実測。全行を flat MD（53.2MB ≈ 14M token, `/tmp/nishio_flat.md`）に dump し、cat / `grep -n` / `python3 -m grasp search` を `/usr/bin/time` で計測。
 - 結論が反転: ①ディスク wall-clock は3手法とも sub-second（cat 0.02s / grep 0.3s / grasp 0.25–0.75s）で**論点でない**。効くのは context に入る token 量で、MD 全読みは ~14M token = 1M window の14倍で**そもそも入らない**。②grep vs grasp は速度でなく出力規律の差（grep 無制限: `民主主義` 1 クエリ 498KB≈125K token / grasp bounded 7–14KB）。③∴ grasp の対 grep 優位は「速さ」では立証できず「同等 wall-clock で bounded・ranked・structured」が立つ。
