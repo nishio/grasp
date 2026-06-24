@@ -1,6 +1,9 @@
 # Log
 
-## [2026-06-25 00:02] file back | GitHub connector merge 後の local/remote divergence gotcha
+## [2026-06-25 00:08] file back | cross-project 接続に強弱（strong/weak）軸を追加（v6 決定の境界2点を解決）
+- nishio が cross-project 統合の残る境界2点を決定: ①別 project に materialized X があれば、他 project の bare 赤 `[X]` はそれに解決する（「自 project だけでは得られない content を他から発見できる」）②赤ベースの接続は**弱い接続=AI 向けヒント**、人間が書いた明示リンクは**強い接続**。
+- [[whole-store-graph-and-cross-project-edges]] に **point 8（接続強弱）** を追加。strong=authored（intra `[X]` / explicit `[/P/T]`）、weak=grasp が normalize title の cross-project 一致で推論。赤-materialized 解決も weak。**誤接続（同綴り別概念）は weak 層に閉じる**ので authored グラフを汚さない＝strength が point 7 の誤接続リスクの封じ込め機構。`edges.connection_strength` を schema に追加、retrieval は strength を label し weak を下に rank。`link_kind` や typed/directional 軸とは直交。
+- 旧 Open Q の「赤-materialized 境界」「explicit `[/P/T]` 整合」は point 8 で解決。残るは weak の rank/閾値・誤接続頻度 dogfood・表記ゆれ吸収（[[scrapbubble]]）。backlog v6 spec・index 行も更新。
 - PR #2 の merge で判明した運用 gotcha を AGENTS.md に追記。`gh` が無く HTTPS push もできない環境では、GitHub connector で PR merge 自体は成功する一方、local main 側に手元の別 merge commit / follow-up commit が残り、`origin/main` と `ahead/behind` に分岐しうる。
 - 対応方針: connector merge 後は `git fetch origin main` → `git log --left-right --cherry-pick origin/main...main` で remote merge commit と local commit を照合する。重複 merge commit をそのまま push せず、必要なら remote merge commit を取り込んで follow-up だけを rebase/cherry-pick する。
 

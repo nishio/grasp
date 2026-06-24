@@ -1,6 +1,6 @@
 ---
 type: decision
-summary: grasp store は外部 source から再生成可能な projection なので schema は自由に壊してよい（v6 へ）。cross-project link `[/P/T]` を import 時に first-class edge として materialize し、intra link と同じ backlinks/related/path/unresolved 機構に乗せる。retrieval は whole-store default（`--project` は絞り込み、結果は project ラベル付き、materialized page node は namespace 分離のまま）。node 状態は page 単位の materialized / referenced-only で、project は単なる namespace、acquire = referenced-only node の materialize。**referenced-only（赤）node は normalize title で project 横断統合**（Cosense にない概念ハブ、nishio tentative）。原則は discover-broad-filter-post-hoc（relevance で pre-filter せず、ラベル付きで全部 surface、絞りは post-hoc、性能は bound で対処し hide しない）。multi-project-store の2 clause を supersede。
+summary: grasp store は外部 source から再生成可能な projection なので schema は自由に壊してよい（v6 へ）。cross-project link `[/P/T]` を import 時に first-class edge として materialize し、intra link と同じ backlinks/related/path/unresolved 機構に乗せる。retrieval は whole-store default（`--project` は絞り込み、結果は project ラベル付き、materialized page node は namespace 分離のまま）。node 状態は page 単位の materialized / referenced-only で、project は単なる namespace、acquire = referenced-only node の materialize。**referenced-only（赤）node は normalize title で project 横断統合**（Cosense にない概念ハブ、nishio tentative）。cross-project の名前一致接続は **弱い接続（AI 向けヒント）**、人間の明示リンクは **強い接続** として区別する。原則は discover-broad-filter-post-hoc（relevance で pre-filter せず、ラベル付きで全部 surface、絞りは post-hoc、性能は bound で対処し hide しない）。multi-project-store の2 clause を supersede。
 sources:
   - nishio 設計対話 2026-06-24（cross-project-refs を互換重視で実装する方針への反論「互換性を捨ててどうあるのが理想か」）
   - nishio 判断 2026-06-24「人間が気付けないものを AI が気づくのは良い。不要なものは見つけた後に filter」「明示的に project を限定しない限り default で全体から検索」「project でなく page 単位で『参照されているがまだ実体取得していない』がある」
@@ -29,6 +29,13 @@ sources:
 
 7. **referenced-only（赤）node は normalize title で project 横断統合する（nishio 2026-06-24、tentative・撤回あり）。** 別 project の同名 bare 赤リンク `[X]`（どの namespace でも materialized でない unresolved target）は、normalize title を **project 非依存 key** として **1つの cross-project 概念 node に束ねる**。これで「自分の全 project を通じて、誰も本文を書いていないが皆が指している X」が見える＝**project ごとに別 Scrapbox である Cosense が構造的に出せない価値**。materialized page node は (project, id) で namespaced のまま（point 4）で、統合するのは赤 node だけ。nishio は「自信は低いが、一旦この方針で行く方が Cosense にない価値を生む」と判断。同綴り別概念の誤接続リスクは受容（下記 Open Questions で provenance を残して後から判別可能にする）。これにより [[multi-project-store]] の tentative Update（villagepump 由来）と本決定は **この点で収束**した。
 
+8. **接続には強弱がある（nishio 2026-06-25）。強 = 人間が書いた明示リンク、弱 = grasp が名前一致で推論した cross-project 接続（AI 向けヒント）。** これは `link_kind`（semantic/icon/root）や将来の typed/directional 軸（[[grasp-backlog]] 前景後景）とは **直交する別軸** で、strength = 「誰が・どれだけ確かに主張したか」。
+   - **強い接続（strong）**: 著者が書いた link。intra `[X]`（著者は自 project の X を意図）と explicit `[/P/T]`（著者は P の T を明示指定）。author-asserted。
+   - **弱い接続（weak）**: grasp が **normalize title の cross-project 一致** で推論した接続。著者は書いていない。主張ではなく「AI 向けのヒント」。
+   - **赤-materialized 解決もこれ**（旧 Open Q を解決、nishio「そのプロジェクトの中だけでは得られないコンテンツを他から発見できる」）: project Q の bare 赤 `[X]` は、他 project P に materialized page X があれば **弱い接続** でそこへ解決する。far side が materialized でも red でも、cross-project 名前一致は一律 weak。
+   - **誤接続リスクはこの weak 層に閉じる**: 同綴り別概念（`Apple`=会社/果物）が誤接続しても弱いヒントとして label されるだけで、authored（strong）グラフを汚さない。strength 区別が、point 7 で受容した誤接続リスクの **封じ込め機構** になる。
+   - retrieval は strong / weak を **label して返し、weak は strong より下に rank** する。AI / 人間が weight を決める（discover-broad-filter-post-hoc: weak も surface するが「弱い」と分かる形で）。
+
 ## 理由
 
 - cross ref を二級市民にしているのは互換性のためだけだった。[[cross-project-reference-acquire-2026-06-24]] dogfood は `/nishio` が 183 project / 4,141 refs を外に張り、取得した外部 page が `/nishio` へ reciprocal ref を返すこと（共同知識圏の輪郭）を実測した。cross ref を edge にすれば、この reciprocal が **本物の backlink** になり、Scrapbox の自動双方向・2-hop・赤リンクが project を跨いで効く。これは grasp の存在理由（Scrapbox のグラフモデルを CLI で体験させる）そのもの。
@@ -46,7 +53,8 @@ edges(
   target_project,        -- ★追加。intra は source_project と同値、[/P/T] は P
   target_title,
   target_norm,
-  link_kind              -- ★追加 'internal' | 'cross-semantic' | 'cross-icon' | 'cross-root'
+  link_kind,             -- ★追加 'internal' | 'cross-semantic' | 'cross-icon' | 'cross-root'
+  connection_strength    -- ★追加 'strong'（authored: intra [X] / explicit [/P/T]）| 'weak'（inferred: cross-project 名前一致）
 )
 
 unresolved_targets(
@@ -59,7 +67,8 @@ unresolved_targets(
 - `rebuild_unresolved_targets` の変更点は1つ: 存在チェックを source project でなく **target_project の pages** に対して行い、`(target_project, target_norm)` で集計する。
 - `target_class`（semantic/icon/root）は import 時に `link_kind` として格納（dogfood の `.icon` 1,713 件ノイズを `WHERE` 一発で除外可能に、re-parse しない）。`raw` も保存し slash-in-title の再解決を可能にする。
 - 「project の存在」は projects table の行ではなく「その namespace に node（materialized か referenced-only か問わず）がある」で含意。referenced-only namespace を実体行にするかは Open Question。
-- **赤 node（referenced-only）は normalize title を project 非依存 key として1ノードに統合する（point 7）。** `unresolved_targets` は per-source provenance（どの project の何ページが赤リンクしたか）を保持しつつ、graph node は norm でまとめる。これにより「N project を跨いで参照される未-written 概念」を **cross-project spread として rank** できる（Cosense にない signal）。materialized page との解決チェック（norm(X) の materialized page がどこかの namespace にあるか）の扱いは Open Question。
+- **赤 node（referenced-only）は normalize title を project 非依存 key として1ノードに統合する（point 7）。** `unresolved_targets` は per-source provenance（どの project の何ページが赤リンクしたか）を保持しつつ、graph node は norm でまとめる。これにより「N project を跨いで参照される未-written 概念」を **cross-project spread として rank** できる（Cosense にない signal）。
+- **bare 赤 `[X]` は他 project の materialized X に弱い接続で解決する（point 8）。** norm(X) の materialized page がどこかの namespace にあれば、その bare 赤リンクは `connection_strength='weak'` の edge でそこへ繋がる（cross-project discovery）。authored な intra/explicit edge は `'strong'`。
 
 ## query 既定（design intent）
 
@@ -74,6 +83,8 @@ unresolved_targets(
 | `import` / `sync` / `acquire` | project-targeted のまま | 1 source への操作。whole-store ではない |
 
 `_require_project` の「複数 project で error」は削除。
+
+全 retrieval は project ラベルに加えて **connection strength（strong/weak）** も label し、weak（cross-project 名前一致の推論接続）は strong（authored）より下に rank する（point 8）。
 
 ## supersede するもの
 
@@ -95,10 +106,10 @@ unresolved_targets(
 - referenced-only namespace（materialized page 0 の project）の coverage rollup を `stats` / `projects` でどう surface するか。実体行は作らず query で出す方針だが表示形は未定。
 - slash-in-title（`[/takker/takker99/ScrapBubble]`）の確定規則: 第1 segment=project / 残り=title とし、`raw` 保持で規則変更時に再解決可能にする、で暫定。実データで nested project-like path がどれだけあるか要確認。
 - whole-store `related` / `path` の cross-project frontier をどこまで bound するか（dense graph 性能の継続 dogfood）。
-- **同名 bare 赤リンクの cross-project 統合は採用（point 7、nishio 2026-06-24）。残る境界 Q:**
-  - **同綴り別概念の誤接続**（別 project で `Apple`=会社/果物）。nishio は value 優先で受容。`link_kind` / source project provenance を残し、後から判別・分割可能にする。実データで誤接続頻度を dogfood する（tentative なので撤回しうる）。
-  - **赤-materialized 境界**: 別 project に materialized page X があるとき、他 project の bare 赤 `[X]` をその materialized X に解決するか（cross-project name resolution）、それとも赤-赤統合のみか。tentative Update の原意は赤-赤のみ。materialized は namespaced のままで、discoverability は whole-store labeling で別途確保する、が暫定。
-  - **explicit `[/P/T]` との関係**: P 指定の cross link は (P, norm T) の namespaced 解決のままで、bare 赤統合（project 非依存 key）とは別経路か。両者の node identity の整合を実装時に確定する。
+- **同名 bare 赤リンクの cross-project 統合は採用（point 7、nishio 2026-06-24）。境界は point 8 の strength 軸で解決:**
+  - **赤-materialized**（解決済み, nishio 2026-06-25 yes）: bare 赤 `[X]` は他 project の materialized X に **弱い接続** で解決する（cross-project discovery）。
+  - **explicit `[/P/T]`**（解決済み）: **強い接続** で (P, norm T) namespaced 解決。weak な名前一致統合とは別 tier として共存。
+  - 残る dogfood: 同綴り別概念の誤接続「頻度」を実データで測る（weak 層に閉じるので致命ではないが、weak の rank / 閾値調整に要る）。表記ゆれ（`yyyy/MM/dd` ⇄ `yyyy-MM-dd`、[[scrapbubble]] が「実装したい」と挙げた link 同一判定）を normalize でどこまで吸収するか。
 
 ## Updates
 
