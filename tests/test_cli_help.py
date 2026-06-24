@@ -68,6 +68,7 @@ class CliHelpTests(unittest.TestCase):
         self.assertIn("--unresolved-limit", read_help)
         self.assertIn("--around-line", read_help)
         self.assertIn("line_window", read_help)
+        self.assertIn("--related-snippet-mode", read_help)
         self.assertIn("--line-offset", run_grasp_help("peek"))
         self.assertIn("--context", search_help)
         self.assertIn("context_window", search_help)
@@ -297,6 +298,28 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
+            edge_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "read",
+                    "A",
+                    "--json",
+                    "--line-limit",
+                    "1",
+                    "--related-snippets",
+                    "--related-snippet-lines",
+                    "1",
+                    "--related-snippet-mode",
+                    "edge",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
 
         result = json.loads(completed.stdout)
         self.assertEqual(result["page"]["title"], "A")
@@ -304,7 +327,13 @@ class CliHelpTests(unittest.TestCase):
         self.assertIsNone(result["line_window"])
         self.assertEqual(result["related"][0]["title"], "C")
         self.assertEqual(result["related"][0]["snippet_lines"][0]["text"], "C")
+        self.assertEqual(result["related"][0]["snippet_mode"], "lead")
         self.assertTrue(result["related"][0]["snippet_truncated"])
+
+        edge_result = json.loads(edge_completed.stdout)
+        self.assertEqual(edge_result["related"][0]["snippet_lines"][0]["text"], "links to [B]")
+        self.assertEqual(edge_result["related"][0]["snippet_mode"], "edge")
+        self.assertEqual(edge_result["related"][0]["snippet_window"]["context_line_id"], "cccccccccccccccccccccccc:1")
 
     def test_read_around_line_json_returns_bounded_window(self):
         fixture = {

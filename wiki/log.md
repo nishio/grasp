@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 12:52] implementation | related snippet に edge mode を追加
+- `read --related-snippets --related-snippet-mode edge` を追加。従来の先頭行 snippet（`lead`）は既定のまま維持し、`edge` では related/source item を導いたリンク行を中心に `snippet_lines[]` を返す。
+- JSON では `snippet_mode` と `snippet_window` を返す。text 出力では edge mode の根拠 line-id と target を `snippet: edge ...` として表示する。
+- store schema は v5 のまま、public compatibility version は `1.5.14`。current facts は [[grasp-v1-implemented]]、backlog の「該当行モード」は実装済みに移した。
+- 検証: `python3 -m unittest discover -s tests` OK（43 tests）、`python3 scripts/lint_wiki.py` OK、skill validator OK。
+
 ## [2026-06-24 12:32] implementation | mentions / co-links / gather 初期 surface を追加
 - `mentions <query>` を追加。literal query の occurrence を parsed internal-link span 内/外に分け、既定では bare mention 行だけ返す。summary は total / bare / linked occurrence、bare line/page、page status counts を返し、各行を `exact-link-page` / `query-link-page` / `unlinked-page` に分類する。`--include-linked` と `--context N` あり。
 - `co-links <query>` を追加。query を含む行で同時に出る internal links を target ごとに rank し、link_count / line_count / source_page_count / examples を返す。exact query target は既定で除外し、`--include-self` で含められる。
