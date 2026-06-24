@@ -266,8 +266,17 @@ class CosenseStore:
             page_id = str(page_data["id"])
             title = str(page_data["title"])
             norm_title = normalize_title(title)
-            lines = tuple(
-                Line(
+            def _parse_line(line_data: dict | str, line_index: int) -> Line:
+                if isinstance(line_data, str):
+                    return Line(
+                        line_id=f"{page_id}:{line_index}",
+                        index=line_index,
+                        text=line_data,
+                        created=None,
+                        updated=None,
+                        user_id=None,
+                    )
+                return Line(
                     line_id=f"{page_id}:{line_index}",
                     index=line_index,
                     text=str(line_data.get("text", "")),
@@ -275,6 +284,8 @@ class CosenseStore:
                     updated=line_data.get("updated"),
                     user_id=line_data.get("userId"),
                 )
+            lines = tuple(
+                _parse_line(line_data, line_index)
                 for line_index, line_data in enumerate(page_data.get("lines", []))
             )
             pages.append(
