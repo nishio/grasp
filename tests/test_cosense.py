@@ -67,6 +67,48 @@ class CosenseParsingTests(unittest.TestCase):
 
 
 class CosenseStoreTests(unittest.TestCase):
+    def test_store_imports_plain_string_lines_without_metadata(self):
+        data = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "A",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 10,
+                    "views": 100,
+                    "lines": [
+                        "A",
+                        "plain string links to [B]",
+                        {"text": "dict line", "created": 1, "updated": 2, "userId": "u"},
+                    ],
+                },
+                {
+                    "title": "B",
+                    "id": "bbbbbbbbbbbbbbbbbbbbbbbb",
+                    "created": 1,
+                    "updated": 20,
+                    "views": 50,
+                    "lines": ["B"],
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "export.json"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            store = CosenseStore.from_cosense_export(path)
+
+        read = store.read("A", backlink_limit=10, related_limit=10, unresolved_limit=10)
+        self.assertEqual(read["lines"][1]["text"], "plain string links to [B]")
+        self.assertIsNone(read["lines"][1]["created"])
+        self.assertIsNone(read["lines"][1]["updated"])
+        self.assertIsNone(read["lines"][1]["user_id"])
+        self.assertEqual(store.backlinks("B")[0].line_text, "plain string links to [B]")
+
     def test_store_materializes_backlinks_unresolved_targets_and_related(self):
         data = {
             "name": "fixture",

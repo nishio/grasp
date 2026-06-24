@@ -52,7 +52,7 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.5.23`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.5.24`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -70,7 +70,7 @@ v1 scope 外:
 
 | command | v1 implemented behavior |
 |---|---|
-| `import --cosense <json>` | Cosense JSON export を project namespace に構築・置換。他 project は保持 |
+| `import --cosense <json>` | Cosense JSON export を project namespace に構築・置換。他 project は保持。line は metadata dict と plain string の両方を許容する |
 | `import --markdown <folder>` | Markdown folder を read-only mirror として project namespace に構築・置換。他 project は保持。frontmatter `title` / `id` / `aliases` / `tags` を読み、`[[wikilink]]` / `#tag` を edge にする |
 | `stats` | store の schema / project list / metadata / count を表示。store missing 時は diagnostic と next actions を返す |
 | `read <title>` | existing page は本文 + backlinks + related + unresolved。missing linked target は link stats + backlinks + source pages。zero-hit 時は `recovery_hints` も返す。`--related-snippets` で related/source pages の snippet を同梱する。既定 `--related-snippet-mode lead` は先頭 N 行（default 5）、`edge` は related/source item を導いたリンク行を中心に `snippet_lines` / `snippet_window` を返す。`--around-line <line-id> --line-context N` で完全 line_id からページを解決し、中心行の前後 N 行だけを `lines[]` と `line_window` で返す |
@@ -113,6 +113,7 @@ v1 scope 外:
 ## import and parser facts
 
 - Cosense export の line には安定 id が無いので、v1 は `page.id:line-index` を `line-id` として採番する。これは read-only snapshot 内の **positional locator** であり、行挿入や write / transclude を跨ぐ安定 line identity ではない。text 出力では token 節約のため local alias に畳むが、JSON と `--full-ids` は完全 ID を出す。stable line identity の設計要件は [[grasp-backlog]]。
+- Cosense export の line は metadata ON の `{text, created, updated, userId}` dict と、metadata なしの plain string の両方を許容する。plain string line は `text=<その文字列>`、`created/updated/user_id=None` として import し、リンク抽出対象にもする。
 - link graph は export に保存されないため、line text から edge を materialize する。
 - title / link resolve は case-insensitive + whitespace folding。
 - Cosense title 行 `lines[0]` は本文に残す。完全性と line-id 安定性を優先する。

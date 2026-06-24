@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-24 23:29] implementation | PR #2 を mergeし Cosense string line import を許容
+- GitHub PR #2（takker99 `fix/string-lines-cosense-import`, `f139c516`）を review し、ローカル main に merge。`grasp/cosense.py` は Cosense JSON export の line が plain string の場合、metadata なし本文行（created/updated/user_id = `None`）として import する。string line 内の `[B]` なども通常通り edge 抽出対象。
+- 回帰テスト `tests/test_cosense.py::CosenseStoreTests.test_store_imports_plain_string_lines_without_metadata` を追加。`python3` が system 3.9 だと既存 `requires-python >=3.10` / union type 構文で失敗するため、検証は Codex bundled Python 3.12 を使用。
+- public compatibility version を `1.5.24` に bump。store schema は v5 のまま。[[grasp-v1-implemented]] / [[history]] / [[cosense-json-export]] / [[grasp-backlog]] / [[takker-opencode-villagepump-test-2026-06-24]] / README に反映。
+
 ## [2026-06-24 23:21] ingest | Scrapbox `villagepump/grasp` の公開設計対話 + takker 外部試用ログを取り込み
 - 出典: https://scrapbox.io/villagepump/grasp （raw/grasp-villagepump-page_2026-06-24.txt に保存, gitignored）。既出と重複しない新規分のみ file back。
 - 新ページ [[takker-opencode-villagepump-test-2026-06-24]]（entities/）: **nishio 以外の第三者による初の実走**。takker が OpenCode + Deepseek v4 flash で bare 指示「このリポジトリを設定して」から self-setup → `villagepump.json`（43,742 pages / 1,454,430 lines / 413,605 edges / 171,316 unresolved ≈ nishio store の pages 1.7x・lines 2x）を import → グラフ理論 / リンク構造 / カテゴリ論争の多ターン retrieval を完走。確認3点: persona1 が nishio 固有でなく一般化 / cross-agent（OpenCode）・cross-model（Deepseek）portability / scale headroom。観測の主役は答えでなく `suggest→search(--context/--scope)→read(--related-snippets/--backlinks-limit)→related 辿り` のツール列＝read=近傍同梱 loop の実走証跡（nishio メタ観察「答えより LLM がどう使うかが重要」）。
