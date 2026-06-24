@@ -448,6 +448,10 @@ class SQLiteStoreTests(unittest.TestCase):
                     summary["page_status_counts"]["unlinked-page"],
                     {"lines": 1, "pages": 1, "bare_occurrences": 1},
                 )
+                candidate = summary["come_from_candidate"]
+                self.assertTrue(candidate["is_candidate"])
+                self.assertGreaterEqual(candidate["score"], candidate["thresholds"]["score"])
+                self.assertEqual(candidate["signals"]["unlinked_pages"], 1)
 
                 all_mentions = store.mentions("KJ法", limit=10, include_linked=True)
                 self.assertEqual([hit["source_title"] for hit in all_mentions["mentions"]], ["Root", "Slice", "LinkedOnly", "QueryLink"])
@@ -463,11 +467,25 @@ class SQLiteStoreTests(unittest.TestCase):
                 self.assertEqual(co_links[0]["line_count"], 1)
                 self.assertEqual(co_links[0]["examples"][0]["source_title"], "Root")
 
-                gather = store.gather("KJ法", budget=1500)
-                self.assertEqual(gather["limits"]["mentions"], 5)
+                gather = store.gather("KJ法", budget=1500, mention_limit=1, co_link_limit=1, backlink_limit=1)
+                self.assertEqual(gather["limits"]["mentions"], 1)
                 self.assertEqual(gather["mention_summary"]["bare_occurrences"], 3)
-                self.assertEqual([item["title"] for item in gather["co_links"]], ["表札づくり", "グループ編成", "KJ法応用"])
+                self.assertTrue(gather["mention_summary"]["come_from_candidate"]["is_candidate"])
+                self.assertEqual([item["title"] for item in gather["co_links"]], ["表札づくり"])
                 self.assertEqual(gather["backlinks"][0]["source_title"], "Root")
+                self.assertEqual(
+                    gather["returned_counts"],
+                    {"mentions": 1, "co_links": 1, "backlinks": 1},
+                )
+                self.assertEqual(
+                    gather["total_counts"],
+                    {"mentions": 3, "co_links": 3, "backlinks": 2},
+                )
+                self.assertEqual(
+                    gather["omitted_counts"],
+                    {"mentions": 2, "co_links": 2, "backlinks": 1},
+                )
+                self.assertEqual(gather["row_count_basis"]["mentions"], "bare mention lines")
                 self.assertEqual(gather["recipes"][0]["command"][:2], ["grasp", "co-links"])
             finally:
                 store.close()

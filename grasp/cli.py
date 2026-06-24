@@ -1482,6 +1482,12 @@ def format_mention_summary(summary: dict[str, Any]) -> str:
                 f"- {key}: {item.get('bare_occurrences', 0)} bare occurrences, "
                 f"{item.get('lines', 0)} lines, {item.get('pages', 0)} pages\n"
             )
+    candidate = summary.get("come_from_candidate")
+    if candidate:
+        label = "yes" if candidate.get("is_candidate") else "no"
+        parts.append(f"come_from_candidate: {label} (score {candidate.get('score', 0)})\n")
+        for reason in (candidate.get("rationale") or [])[:3]:
+            parts.append(f"- {reason}\n")
     return "".join(parts)
 
 
@@ -1548,6 +1554,30 @@ def format_gather(result: dict[str, Any], aliases: LineIdAliases | None = None) 
         "limits: "
         f"mentions {limits.get('mentions')}, co_links {limits.get('co_links')}, backlinks {limits.get('backlinks')}\n"
     )
+    returned_counts = result.get("returned_counts") or {}
+    total_counts = result.get("total_counts") or {}
+    omitted_counts = result.get("omitted_counts") or {}
+    if returned_counts and total_counts and omitted_counts:
+        parts.append(
+            "row_counts: "
+            f"mentions {returned_counts.get('mentions', 0)}/{total_counts.get('mentions', 0)}, "
+            f"co_links {returned_counts.get('co_links', 0)}/{total_counts.get('co_links', 0)}, "
+            f"backlinks {returned_counts.get('backlinks', 0)}/{total_counts.get('backlinks', 0)}\n"
+        )
+        parts.append(
+            "omitted_rows: "
+            f"mentions {omitted_counts.get('mentions', 0)}, "
+            f"co_links {omitted_counts.get('co_links', 0)}, "
+            f"backlinks {omitted_counts.get('backlinks', 0)}\n"
+        )
+    row_count_basis = result.get("row_count_basis") or {}
+    if row_count_basis:
+        parts.append(
+            "row_count_basis: "
+            f"mentions={row_count_basis.get('mentions')}; "
+            f"co_links={row_count_basis.get('co_links')}; "
+            f"backlinks={row_count_basis.get('backlinks')}\n"
+        )
     banner = result.get("banner")
     if banner:
         parts.append(f"\n## Banner\n{banner['kind']}: {banner['message']}\n")

@@ -148,6 +148,7 @@ The practical success condition is: opening `[KJ法]` backlinks should no longer
 - `mention_summary` counted all literal lines, not body-only lines: 681 pages / 2,333 lines / 2,765 occurrences total; 519 bare pages / 1,866 bare lines / 2,246 bare occurrences; 519 linked occurrences. This aligns with the "any literal" audit rows. The body-only 490-page figure remains a separate filtered diagnostic, not the default `mentions` summary.
 - page status counts for bare mentions were: `exact-link-page` 92 pages / 699 bare occurrences, `query-link-page` 80 pages / 630 bare occurrences, `unlinked-page` 347 pages / 917 bare occurrences.
 - Top `co-links` were `KJ法 渾沌をして語らしめる`, `KJ法勉強会@ロフトワーク`, `考える花火`, `「面白い」のKJ法`, `AIにKJ法を教える`.
+- 2026-06-24 16:03 implementation follow-up: `mentions` now returns an initial `come_from_candidate` score/signals/rationale, and `gather` now returns row-basis returned/total/omitted counts. The counts are row omissions, not token packing.
 
 Implication: same-line `co-links` is a useful raw slice primitive, but simple count ranking does not only surface narrow practice handles. Query-containing bibliographic / session / title pages can rank above narrower handles like `考える花火` or `グループ編成`. This is acceptable for raw fidelity, but a future slice view should distinguish broad query-containing page titles from use-slice handles.
 
@@ -160,8 +161,8 @@ Implication: same-line `co-links` is a useful raw slice primitive, but simple co
 
 Residual implications:
 
-- `gather "<query>" --budget` should eventually treat huge hubs as a stricter token-packing problem with explicit omitted counts. Current `--budget` only selects row limits.
-- `mentions` still needs higher-level classification for AI-authored default bare text, intentional non-links, and come-from promotion candidates.
+- `gather "<query>" --budget` should eventually treat huge hubs as a stricter token-packing problem. Current omitted counts are row counts; token packing / omitted token estimates are still absent.
+- `mentions` still needs higher-level classification for AI-authored default bare text, intentional non-links, and refined come-from promotion thresholds.
 
 ## Open Questions
 
