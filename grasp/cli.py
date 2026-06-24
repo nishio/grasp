@@ -110,8 +110,9 @@ def build_parser() -> argparse.ArgumentParser:
             "Uses --cosense for a Cosense JSON export file, or --markdown for a read-only Markdown folder mirror.",
             "Import replaces only the selected project namespace. Other projects in the same store are preserved.",
             "Project name defaults to the export's name field or folder name. Use --project to override.",
-            "Markdown mirror v1 uses frontmatter title/id/aliases/tags when present, falls back to file stems, and parses [[wikilinks]] plus #tags as internal edges.",
-            "Markdown re-import uses a manifest: content-only file changes update incrementally; title/alias/id/file-set changes trigger a safe full rebuild.",
+            "Markdown mirror uses frontmatter title/id/aliases/tags when present, falls back to first H1 then file stem, and parses [[wikilinks]] plus #tags as internal edges.",
+            "Use --markdown-exclude-dir to skip heavy generated/source directories such as raw in Markdown mirrors.",
+            "Markdown re-import uses a manifest: content-only file changes update incrementally; title/alias/id/graph-role/exclude-dir/file-set changes trigger a safe full rebuild.",
             "A cached copy of each imported Cosense JSON is kept beside the store for automatic schema recovery.",
         ],
     )
@@ -133,6 +134,13 @@ def build_parser() -> argparse.ArgumentParser:
         dest="markdown_folder",
         type=Path,
         help="Markdown folder to index as a read-only mirror.",
+    )
+    import_parser.add_argument(
+        "--markdown-exclude-dir",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Directory basename to skip when importing a Markdown mirror. Repeat for multiple names, e.g. --markdown-exclude-dir raw.",
     )
 
     add_command_parser(
@@ -714,7 +722,12 @@ def main(argv: list[str] | None = None) -> int:
                     parser.error(f"Markdown folder does not exist: {markdown_folder}")
                 if not markdown_folder.is_dir():
                     parser.error(f"import --markdown expects a folder, not a file: {markdown_folder}")
-                result = import_markdown_folder_to_sqlite(markdown_folder, args.store, project_name=project)
+                result = import_markdown_folder_to_sqlite(
+                    markdown_folder,
+                    args.store,
+                    project_name=project,
+                    exclude_dirs=tuple(args.markdown_exclude_dir),
+                )
         except ValueError as error:
             parser.error(str(error))
         emit_result(args, result)

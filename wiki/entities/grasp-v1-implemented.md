@@ -52,7 +52,7 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.5.24`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.5.28`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -71,7 +71,7 @@ v1 scope 外:
 | command | v1 implemented behavior |
 |---|---|
 | `import --cosense <json>` | Cosense JSON export を project namespace に構築・置換。他 project は保持。line は metadata dict と plain string の両方を許容する |
-| `import --markdown <folder>` | Markdown folder を read-only mirror として project namespace に構築・置換。他 project は保持。frontmatter `title` / first H1 / file stem で title を決め、frontmatter `id` / `aliases` / `tags` を読み、`[[wikilink]]` / `#tag` を edge にする |
+| `import --markdown <folder>` | Markdown folder を read-only mirror として project namespace に構築・置換。他 project は保持。frontmatter `title` / first H1 / file stem で title を決め、frontmatter `id` / `aliases` / `tags` を読み、`[[wikilink]]` / `#tag` を edge にする。`--markdown-exclude-dir <name>` で heavy source directory を除外できる |
 | `stats` | store の schema / project list / metadata / count を表示。store missing 時は diagnostic と next actions を返す |
 | `read <title>` | existing page は本文 + backlinks + related + unresolved。missing linked target は link stats + backlinks + source pages。zero-hit 時は `recovery_hints` も返す。`--related-snippets` で related/source pages の snippet を同梱する。既定 `--related-snippet-mode lead` は先頭 N 行（default 5）、`edge` は related/source item を導いたリンク行を中心に `snippet_lines` / `snippet_window` を返す。`--around-line <line-id> --line-context N` で完全 line_id からページを解決し、中心行の前後 N 行だけを `lines[]` と `line_window` で返す |
 | `backlinks <title>` | `(source page, line-id, line text)` の行レベル backlinks。missing target にも効く |
@@ -124,13 +124,13 @@ v1 scope 外:
 
 Markdown mirror facts:
 
-- `grasp import --markdown <folder>` は再帰的に `.md` を読み、hidden path component 配下の file は除外する。
+- `grasp import --markdown <folder>` は再帰的に `.md` を読み、hidden path component 配下の file は除外する。`--markdown-exclude-dir <name>` を繰り返すと、その directory basename 配下の file も除外する（例: `raw/`）。
 - page title は frontmatter `title` があればそれ、なければ first H1、さらに無ければ file stem（`foo.md` → `foo`）。同一 normalized title は import 時に error にする。
 - page id は frontmatter `id` があればそれ、なければ relative path の SHA-1 先頭 24 hex から作る。line id は Cosense import と同じく `<page-id>:<line-index>`。
 - frontmatter `aliases` と file stem は title resolve 候補になる。import 時に `[[alias]]` は canonical page title へ解決して edge 化し、store metadata の alias map により `read <alias>` / `backlinks <alias>` / `link-stats <alias>` も canonical page を読む。
 - frontmatter `tags` は page から tag target への outgoing edge として materialize する。`#tag` 付きの同じ frontmatter line で重複する場合は line 単位で重複 edge を避ける。
 - Markdown mirror は `index.md` / `forest-index.md` / `maps/` / `views/` / frontmatter `role: navigation` を navigation artifact、`log.md` / `log/*.md` / frontmatter `type: log-entry` を log artifact と分類し、これらの outgoing edges を既定 content graph から除外する。本文 lines は store に残るので `search` は hit する。
-- Markdown mirror の再 import は manifest を metadata に保存して差分判定する。manifest version は `2`。manifest は relative path ごとの content hash / mtime_ns / page id / title / aliases / graph_role を持つ。content-only 変更では changed file の page / lines / outgoing edges だけを差し替え、unresolved targets と project counts を再計算する。frontmatter title / first H1 / id / aliases / graph role / file set が変わった時は alias 解決や graph inclusion が他 file の edges に影響するため full rebuild に戻す。
+- Markdown mirror の再 import は manifest を metadata に保存して差分判定する。manifest version は `3`。manifest は exclude dirs と、relative path ごとの content hash / mtime_ns / page id / title / aliases / graph_role を持つ。content-only 変更では changed file の page / lines / outgoing edges だけを差し替え、unresolved targets と project counts を再計算する。frontmatter title / first H1 / id / aliases / graph role / exclude dirs / file set が変わった時は alias 解決や graph inclusion が他 file の edges に影響するため full rebuild に戻す。
 - Markdown line text は原文のまま保存する。frontmatter も本文行として残す。
 - `[[Page]]`, `[[Page|alias]]`, `[[Page#Heading]]`, `[[folder/Page.md]]`, `![[Embed]]`, `#tag` を internal edge として materialize する。heading / alias は target resolution からは落とし、path suffix は file stem に畳む。
 - inline backtick 内と fenced code block 内の `[[...]]` は edge にしない。この repo の `wiki/` ではバックティックのプレーン名を親 llm-wiki 参照として扱い、grasp 内 edge にしない方針と整合する。

@@ -42,14 +42,20 @@ class MarkdownMirror:
     source_folder: Path
 
     @classmethod
-    def from_folder(cls, folder: str | Path) -> "MarkdownMirror":
+    def from_folder(
+        cls,
+        folder: str | Path,
+        *,
+        exclude_dirs: tuple[str, ...] = (),
+    ) -> "MarkdownMirror":
         root = Path(folder)
         if not root.exists():
             raise ValueError(f"Markdown folder does not exist: {root}")
         if not root.is_dir():
             raise ValueError(f"Markdown source must be a folder: {root}")
 
-        markdown_files = list(iter_markdown_files(root))
+        normalized_exclude_dirs = normalize_exclude_dirs(exclude_dirs)
+        markdown_files = list(iter_markdown_files(root, exclude_dirs=normalized_exclude_dirs))
         if not markdown_files:
             raise ValueError(f"Markdown folder has no .md files: {root}")
 
@@ -164,18 +170,32 @@ class MarkdownMirror:
                 if normalize_title(title) != alias_norm
             },
             records=tuple(records),
-            file_manifest=markdown_file_manifest(records),
+            file_manifest=markdown_file_manifest(records, exclude_dirs=normalized_exclude_dirs),
             project_name=root.name,
             display_name=root.name,
             source_folder=root,
         )
 
 
-def iter_markdown_files(root: Path) -> list[Path]:
+def normalize_exclude_dirs(exclude_dirs: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    normalized: set[str] = set()
+    for raw_part in exclude_dirs:
+        part = raw_part.strip()
+        if not part:
+            continue
+        if part in {".", ".."} or "/" in part or "\\" in part:
+            raise ValueError(f"Markdown exclude dir must be a directory basename, not a path: {raw_part}")
+        normalized.add(part)
+    return tuple(sorted(normalized))
+
+
+def iter_markdown_files(root: Path, *, exclude_dirs: tuple[str, ...] = ()) -> list[Path]:
+    excluded = set(exclude_dirs)
     return [
         path
         for path in sorted(root.rglob("*.md"))
         if not any(part.startswith(".") for part in path.relative_to(root).parts)
+        and not any(part in excluded for part in path.relative_to(root).parts[:-1])
     ]
 
 
@@ -224,9 +244,10 @@ def parse_markdown_h1_title(line: str) -> str | None:
     return title or None
 
 
-def markdown_file_manifest(records: list[MarkdownPageRecord]) -> dict[str, Any]:
+def markdown_file_manifest(records: list[MarkdownPageRecord], *, exclude_dirs: tuple[str, ...] = ()) -> dict[str, Any]:
     return {
-        "version": 2,
+        "version": 3,
+        "exclude_dirs": list(exclude_dirs),
         "files": {
             record.relative_path.as_posix(): {
                 "page_id": record.page.id,

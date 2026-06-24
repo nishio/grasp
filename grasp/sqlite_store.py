@@ -275,10 +275,11 @@ def import_markdown_folder_to_sqlite(
     store_path: str | Path,
     *,
     project_name: str | None = None,
+    exclude_dirs: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     folder_path = Path(folder_path)
     store_path = Path(store_path)
-    source = MarkdownMirror.from_folder(folder_path)
+    source = MarkdownMirror.from_folder(folder_path, exclude_dirs=exclude_dirs)
     project = normalize_project_name(project_name or source.project_name or folder_path.name)
     if not project:
         raise ValueError(f"could not determine project name for Markdown folder: {folder_path}")
@@ -748,7 +749,9 @@ def _markdown_manifest_identity(manifest: dict[str, Any]) -> dict[str, Any]:
     files = manifest.get("files")
     if not isinstance(files, dict):
         return {}
-    identity: dict[str, Any] = {}
+    identity: dict[str, Any] = {
+        "__exclude_dirs__": sorted(str(item) for item in manifest.get("exclude_dirs") or []),
+    }
     for relative_path, item in files.items():
         if not isinstance(item, dict):
             continue

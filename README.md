@@ -104,11 +104,12 @@ Markdown フォルダを read-only mirror として index する場合:
 
 ```bash
 grasp import --markdown ~/Notes --project notes
+grasp import --markdown ~/Notes --project notes --markdown-exclude-dir raw
 grasp --project notes read "<ファイル名から .md を除いた title>"
 ```
 
 frontmatter `title` があれば page title に使い、無ければ first H1、さらに無ければ file stem を使います。`aliases` と file stem は link 解決候補になります。既存ファイルへは書き戻しません。
-再 import 時は manifest を見て、本文だけ変わったファイルを page 単位で差分更新します。frontmatter `title` / first H1 / `id` / `aliases` や file set が変わった時は、安全のため project 全体を再構築します。
+`--markdown-exclude-dir raw` のように directory basename を指定すると、重い raw/source directory を再帰 import から外せます。再 import 時は manifest を見て、本文だけ変わったファイルを page 単位で差分更新します。frontmatter `title` / first H1 / `id` / `aliases` / graph role / exclude dirs や file set が変わった時は、安全のため project 全体を再構築します。
 
 ### 3. AI に聞く
 

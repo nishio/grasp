@@ -1060,6 +1060,58 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(read_result["backlink_count_total"], 1)
         self.assertEqual(read_result["unresolved_targets"][0]["title"], "Missing")
 
+    def test_import_markdown_folder_excludes_named_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "raw").mkdir()
+            (root / "raw" / "Raw.md").write_text("# Raw\nraw-only links to [[A]]\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--markdown-exclude-dir",
+                    "raw",
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            search_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "search",
+                    "raw-only",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        import_result = json.loads(import_completed.stdout)
+        search_result = json.loads(search_completed.stdout)
+        self.assertEqual(import_result["pages"], 1)
+        self.assertEqual(search_result["hits"], [])
+
     def test_cross_project_refs_writes_acquire_seed_files(self):
         fixture = {
             "name": "nishio",
