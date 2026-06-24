@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-24 14:57] file back | gather KJ法 dogfood の co-link ranking caveat
+- `grasp gather KJ法 --budget 1500 --json` を `1.5.13` 系実装後の nishio store で dogfood した観測を [[kj-link-hub-audit-2026-06-24]] に追記。huge-hub banner、151 exact links / 144 pages、681 literal pages、519 bare pages、page status counts が出た。
+- 重要な caveat: `mentions` summary は all literal lines 基準なので body-only audit の 490 bare pages とは別指標。default summary は 519 bare pages。
+- `co-links` の上位は `KJ法 渾沌をして語らしめる` / `KJ法勉強会@ロフトワーク` など query-containing bibliographic / session / title pages が先に出た。raw fidelity としては正しいが、narrower use-slice handle を見たい時には broad query-containing title の分類・filter・weighting が必要。[[grasp-backlog]] に残課題として追記。
+
 ## [2026-06-24 12:56] implementation | mentions に unlinked filter を追加
 - `mentions --unlinked` を追加。既定 bare-only は維持し、`--unlinked` では page に query-containing link target が無い `unlinked-page` の bare mention 行だけを返す。
 - summary は従来通り全 literal hit の total / bare / linked occurrence と page status counts を保持し、`mentions[]` と `returned_lines` だけを filter 後の値にする。

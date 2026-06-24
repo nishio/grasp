@@ -6,6 +6,7 @@ sources:
   - session query 2026-06-24: "KJ法" link hub audit
   - grasp CLI: `stats`, `sync`, `link-stats`, `backlinks`, `related`
   - SQLite scan of `lines` / `edges` with `parse_cosense_links`
+  - grasp 1.5.13 dogfood: `gather KJ法 --budget 1500 --json`
 ---
 
 # KJ法 link hub audit 2026-06-24
@@ -138,6 +139,18 @@ Tool-level success criterion:
 
 The practical success condition is: opening `[KJ法]` backlinks should no longer require reading the whole hub. The first view should expose a handful of use clusters and let the agent read only the relevant slice.
 
+## Post-implementation dogfood
+
+2026-06-24 14:57 observation from `python3 -m grasp --project nishio gather KJ法 --budget 1500 --json` after `1.5.13`:
+
+- `gather` correctly emitted the huge-hub banner.
+- `link_stats` matched the audit: 151 exact links from 144 pages.
+- `mention_summary` counted all literal lines, not body-only lines: 681 pages / 2,333 lines / 2,765 occurrences total; 519 bare pages / 1,866 bare lines / 2,246 bare occurrences; 519 linked occurrences. This aligns with the "any literal" audit rows. The body-only 490-page figure remains a separate filtered diagnostic, not the default `mentions` summary.
+- page status counts for bare mentions were: `exact-link-page` 92 pages / 699 bare occurrences, `query-link-page` 80 pages / 630 bare occurrences, `unlinked-page` 347 pages / 917 bare occurrences.
+- Top `co-links` were `KJ法 渾沌をして語らしめる`, `KJ法勉強会@ロフトワーク`, `考える花火`, `「面白い」のKJ法`, `AIにKJ法を教える`.
+
+Implication: same-line `co-links` is a useful raw slice primitive, but simple count ranking does not only surface narrow practice handles. Query-containing bibliographic / session / title pages can rank above narrower handles like `考える花火` or `グループ編成`. This is acceptable for raw fidelity, but a future slice view should distinguish broad query-containing page titles from use-slice handles.
+
 ## Implications
 
 - `KJ法` is a counterexample to the earlier "100+ link hubs are rare case" dismissal. It is rare but load-bearing enough to deserve first-class retrieval handling.
@@ -152,5 +165,6 @@ Residual implications:
 
 ## Open Questions
 
+- How should `co-links` rank or classify broad query-containing titles versus narrow use-slice handles?
 - Should co-link slice counts eventually support same-page or windowed context in addition to the implemented same-line default?
 - What is the right output contract for AI clustering: raw rows only, or a compact "candidate clusters" section explicitly labeled as heuristic?
