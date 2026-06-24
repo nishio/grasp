@@ -48,6 +48,7 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
+| `1.5.23` | schema `5` | 2026-06-24 | schema `5` compatible | `acquire` が acquisition criteria fingerprint / candidate updated range / page manifest を store metadata に保存し、同じ criteria の再実行時は hosted metadata の `updated` が変わらないページを local store から再利用する。`remote_fetched` / `reused` / `same_criteria_as_previous` を返す。store schema は不変 |
 | `1.5.22` | schema `5` | 2026-06-24 | schema `5` compatible | `cross-project-acquire` の取得後 summary に `reciprocal_refs` と `top_internal_links` を追加。取得した `<project>:semantic` slice 内で source project へ戻る `[/source/...]` refs と、partial corpus 内の上位 internal link targets を bounded に返す。store schema は不変 |
 | `1.5.21` | schema `5` | 2026-06-24 | schema `5` compatible | `cross-project-acquire` を追加。`cross-project-refs --semantic-only` の seed titles から複数 target project を `<project>:semantic` namespace に一括 partial acquire し、project ごとの fetched / failed / diagnostic / page sample を bounded summary として返す。`--dry-run` で plan のみ確認できる。store schema は不変 |
 | `1.5.20` | schema `5` | 2026-06-24 | schema `5` compatible | `acquire` fetch failure diagnostics を追加。`failed_pages[].error_class` と top-level `diagnostic` を返し、全 candidate fetch 失敗時は `diagnostic.type=all_failed` / `next_actions[]` で空 partial corpus の誤読を防ぐ。`cosense` symlink はあるが `env node` が失敗する case は `command-env` に分類する。store schema は不変 |
@@ -80,6 +81,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.5.22`
+- Current public compatibility version: `1.5.23`
 - Current internal `SCHEMA_VERSION`: `5`
-- Current package metadata should match `1.5.22`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.5.23`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

@@ -51,7 +51,7 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.5.22`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.5.23`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -102,7 +102,8 @@ v1 scope 外:
 - `grasp acquire <project-url>` は `@helpfeel/cosense-cli` の `cosense` binary を使い、管理者 JSON export なしに hosted project の読めるページを local project namespace に seed する。
 - acquisition modes: `--search <query>` は `cosense searchFullText` の page results、`--filter <name>` / `--full-list` は `cosense listPages` pagination、`--from-page <title-or-url> --depth N` は `cosense readPage` と本文 links の bounded crawl、`--seed-file` は title/URL list を読む。
 - `acquire` は対象 project namespace を append せず置き換える。`--project` 省略時は既存 full export project を誤って潰さないよう `<remote-project>:acquire` を default local namespace にする。同じ hosted project の複数 slice は `--project project:slice` のように別 namespace へ分ける。
-- `stats.acquisition` と text `## Acquisition` は mode / coverage / project_url / seed / depth / limit / fetched / failed を返す。partial corpus の `backlinks` / `related` / `unresolved` は取得済み subset 内の結果であり、hosted project 全体の事実ではない。
+- `stats.acquisition` と text `## Acquisition` は mode / coverage / project_url / seed / depth / limit / fetched / failed に加え、`criteria_fingerprint` / `candidate_window`（updated range）/ `remote_fetched` / `reused` を返す。partial corpus の `backlinks` / `related` / `unresolved` は取得済み subset 内の結果であり、hosted project 全体の事実ではない。
+- `acquire` は acquisition criteria と page manifest を metadata に保存する。同じ criteria で再実行した時、候補 metadata の hosted `updated` と前回 manifest / local page の `updated` が一致するページは local store から再利用し、不要な `readPage` を避ける。`searchFullText` / `seed-file` など updated metadata が無い候補は stale を避けるため再取得する。
 - `acquire` は candidate page fetch が失敗しても partial acquisition report として exit 0 で返す。fetch failures は `failed_pages[].error_class`（`command-not-found`, `command-env`, `permission`, `page-not-found`, `command-failed`, `invalid-json`, `invalid-page`, `unknown`）に分類し、`fetched=0 && failed>0` では `diagnostic.type=all_failed` / `severity=warning` / `next_actions[]` を返す。これは空 corpus を成功と誤読しないための agent-facing diagnostic。
 - `cross-project-refs --semantic-only` は既存 local project 内の `[/project/page]` refs を external project acquisition の seed bibliography として読む前処理。`.icon` / project-root / self-project refs を target 単位で分類して除ける。`--seed-dir` を使うと target project ごとの seed file と `acquire --seed-file` command bundle まで生成する。
 - `cross-project-acquire` は上記 seed bibliography から target project を順に取得する executing counterpart。seed discovery は local store 内 refs から済ませるため、各 target project では `readPage` fetch のみ行う。`--local-suffix` default は `semantic` で、full export namespace を避ける。source project の選択状態は実行後に戻す。取得後 summary は acquired namespace 内の `reciprocal_refs`（source project への `[/source/... ]` refs）と `top_internal_links`（partial corpus 内の上位 internal link targets）を同梱する。

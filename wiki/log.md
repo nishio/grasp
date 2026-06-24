@@ -1,5 +1,13 @@
 # Log
 
+## [2026-06-24 21:58] implementation | acquire の取得条件・日時範囲記録と未更新ページ reuse を追加
+- `grasp acquire` が acquisition criteria fingerprint / candidate updated range / page manifest を store metadata に保存するようにした。同じ criteria で再実行した時、hosted metadata の `updated` と前回 manifest / local page が一致するページは `readPage` せず local store から再利用する。
+- JSON/text に `remote_fetched` / `reused` / `same_criteria_as_previous` を追加し、`stats` の Acquisition 節でも criteria fingerprint と updated range を確認できるようにした。updated metadata が無い search/seed 由来候補は stale 回避のため従来通り読む。
+- 検証: `python3 -m unittest tests/test_cosense_cli.py` OK。
+
+## [2026-06-24 21:58] lint | wiki lint clean
+- `python3 scripts/lint_wiki.py` を実行。broken wikilink / 未登録 / frontmatter 不備はいずれも 0。
+
 ## [2026-06-24 21:49] implementation | cross-project-acquire の取得後 summary を拡張
 - `cross-project-acquire` の successful project row に `reciprocal_refs` と `top_internal_links` を追加。取得した `<project>:semantic` slice 内で source project へ戻る `[/source/...]` refs と、partial corpus 内の上位 internal link targets を bounded に返す。
 - `SQLiteStore.cross_project_refs_to()` と `SQLiteStore.top_internal_links()` を追加。どちらも既存 lines/edges を読む summary primitive で、store schema は v5 のまま。

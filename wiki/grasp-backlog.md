@@ -316,6 +316,7 @@ surface 名は未決。重要なのは、raw dump ではなく **bounded candida
 - `cross-project-refs --seed-dir <folder>`: returned project ごとに semantic target title の seed file を書き、`grasp --project <project>:semantic acquire <url> --seed-file <file> --limit N` の runnable command を `acquire_recipe` として返す。`--seed-limit` で project ごとの seed title 数を制御する。
 - `acquire` diagnostics: fetch failures に `failed_pages[].error_class` を付け、全 candidate fetch 失敗時は `diagnostic.type=all_failed` / `severity=warning` / `next_actions[]` を返す。`cosense` は見つかるが shebang の `env node` が失敗するケースは `command-env` に分類する。
 - `cross-project-acquire`: `cross-project-refs --semantic-only` の seed titles から複数 target project を `<project>:semantic` namespace に順次 partial acquire し、project ごとの bounded summary を返す。`--dry-run` で plan のみ確認できる。取得後 summary には `reciprocal_refs` と `top_internal_links` を同梱する。
+- `acquire` reuse: acquisition criteria fingerprint / candidate updated range / page manifest を metadata に保存し、同じ criteria の再実行時に hosted metadata の `updated` が一致するページは local store から再利用する。JSON/text は `remote_fetched` / `reused` / `same_criteria_as_previous` を返す。updated metadata が無い seed は stale 回避のため従来通り読む。
 
 残課題:
 
@@ -335,7 +336,7 @@ surface 名は未決。重要なのは、raw dump ではなく **bounded candida
 
 設計上の注意:
 
-- これは full mirror とは限らないため、store metadata に acquisition mode / seed query / start pages / depth / limit / acquired_at / failed pages を残す。
+- これは full mirror とは限らないため、store metadata に acquisition mode / seed query / start pages / depth / limit / acquired_at / failed pages を残す。実装済み: criteria fingerprint / candidate updated range / page manifest も保存する。
 - 部分取得 corpus 上の `backlinks` / `related` / `unresolved` は「取得済み subset 内」の結果であり、project 全体の事実として表示してはいけない。
 - 同じ hosted project の複数 slice を同じ project namespace に混ぜると coverage の意味が曖昧になる。`--project` override で `project:slice` 相当の namespace に分けるか、coverage metadata を project 単位で合成する方針が必要。
 - 権限は「その user / token が通常読める page だけ」。admin export の代替であって、非公開データを越権取得する経路ではない。
