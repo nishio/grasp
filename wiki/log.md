@@ -1,6 +1,16 @@
 # Log
 
-## [2026-06-24 23:41] file back | takker 試用の非自明な結論を分析して既存ページへ追補
+## [2026-06-24 23:56] file back | 開発弧の非対称を「行動に移した」と概念へ追補 + 並行 main commit の運用 gotcha
+- この session の未捕捉知見を file back。
+- [[development-arc-retrieval-ahead-of-authoring]] に `## Updates` 追補: §3 の非対称（retrieval≫authoring）は観察で終わらず同じ弧の中で着手判断に変わった（write 層に alpha 着手 [[write-layer-alpha-and-replay-test]]）。nishio の問い「ローカルキャッシュの改良ばかりで書き込みが進まない／今後どうなるか」が持続メカニズムをあぶり出した＝retrieval は tight dogfood loop（hub 観察→同日 ship）を持つが write は各 session に重い open question しか出さないので後回しは構造的（default で retrieval が勝つ）、崩すには意図的決定が要る。決定は §3 Open Q（authoring で dogfood 駆動が効かないリスク）に replay test（authoring 専用 loop）＋cadence A（big-bang 回避）で直接答える。
+- AGENTS.md 運用方針に gotcha 追記: 並行 session が同じ main を同時 commit すると `git add` 後に index がクリアされ HEAD が動く（実例: 本 session の versioning commit が一度空振り）。共有 main への commit は確定した自分のファイルだけ単一コマンドで atomic に add+commit し着地を検証、他 session の hunk は staging に混ぜない。
+
+
+## [2026-06-24 23:46] file back | cross-project を first-class edge に / whole-store retrieval / 赤リンク統合（v6 決定）
+- cross-project-refs を「v5 互換・parse-on-read」で足す方針を nishio が却下（「互換性を捨ててどうあるのが理想か。grasp はまだ SSoT が外にある検索 index に過ぎず破壊を恐れる必要はない」）。互換性を捨てた理想形を v6 decision 化。
+- 新規 [[whole-store-graph-and-cross-project-edges]]（decisions/）: ①store=再生成可能 projection ゆえ schema 自由→v6 bump ②discover-broad-filter-post-hoc（pre-filter せず label 付きで surface、絞りは post-hoc、性能は bound で対処し hide しない）③`[/P/T]` を import 時に first-class edge へ materialize ④retrieval は whole-store default・`--project` は絞り込み・結果は project ラベル付き（merge せず labeling で誤読回避）⑤node 状態=page 単位の materialized/referenced-only、project=namespace、acquire=materialize ⑥read 多義は全候補返す ⑦**同名 bare 赤リンクを normalize title で project 横断統合**（nishio 判断、自信は低いが Cosense にない概念ハブ value を採る、tentative）。
+- [[multi-project-store]] の2 clause（「cross link 作らない」「retrieval は selected project 内だけ」）を supersede。先行 tentative Update（villagepump 由来、赤リンク統合提案）は ⑦で収束、resolved page 分離 vs labeling は v6 が labeling を採用。
+- backlog に v6 実装 spec 節、index に decision 行。lint: 孤立0/broken0/未登録0。実装は [[history]] の `x` bump（再 import 要）。残る境界 Q は decision の Open Questions。
 - 「takker の経験から何が言えるか」の分析を distill して既存ページに追補（新規ページなし）。
 - [[takker-opencode-villagepump-test-2026-06-24]] 含意を強い順に再構成: ①grasp はモデル水準を下げる（構造化出力を CLI が作り agent は薄い recipe→安いモデルで完走、[[delivery-cli-plus-skill]] 境界の正しさ）②意図した retrieval loop が外部 agent で自然発生（AI consumer option が理由を知らない agent に選ばれた）③scale 余裕は read のみ証明・path/gather 未証明 ④takker が向けたのは Co- corpus＝read には問題ないが write/identity の単一所有前提（[[write-layer-alpha-and-replay-test]]）と将来衝突する伏線 ⑤インサイダーは「offline cosense-cli」= Scrapbox/persona1 枠に入れる→persona2 framing 未検証。
 - [[positioning-two-personas]] `## Updates` 追記: インサイダーは Scrapbox 枠 / モデル水準を下げる（persona2 GTM 追い風）/ 公開 dogfooding flywheel は高利回りだが persona1 止まり（PR #2 がその実例、別チャネルが要る）。

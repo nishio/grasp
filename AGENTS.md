@@ -59,4 +59,5 @@ Claude Code では `/ship-next`（`.claude/commands/ship-next.md`）で、差分
 - **実装事実 first だが over-spec しない**。Codex が実装して初めて分かる制約は file back で戻す（親 llm-wiki `書いてから整理する` の実装版）。
 - 作業前の primary worktree が既に多数変更済みなら、既存差分と混ぜないために別 `git worktree` を切って作業する。
 - 作業用 worktree での作業後は、取りこぼしがないよう main へ merge / fast-forward してから撤収する。撤収前に作業用 worktree 側の `git status --short` を clean にし、必要なら `git diff` で差分の残りを確認してから `git worktree remove` する。main 側の未コミット変更はユーザ作業として扱い、勝手に clean しない。
+- 並行 session が同じ `main` を同時にコミットしていると、`git add` 後に index がクリアされ HEAD が動くことがある（実例: file back の commit が空振りした）。共有 main への file back / commit は **確定した自分のファイルだけを単一コマンドで `git add <paths> && git commit`** と atomic に行い、直後に `git log` / `git status` で着地を検証する。他 session の未コミット hunk（自分が書いていない page）は staging に混ぜない。`git diff HEAD -- <path>` で各ファイルが自分の変更だけか確認してから add する。
 - ソースは参考、無批判採用しない。スキーマも実験で改善する。
