@@ -23,12 +23,11 @@ sources:
 
 現状の strict parser は unresolved target noise を減らすため保守的。短い英数字 title などを落としていないか未監査。
 
-### metadata なし string line の import 対応（PR #2, 未 merge）
+### metadata なし string line の import 対応（PR #2, merged）
 
-2026-06-24: 外部 user（takker, [[takker-opencode-villagepump-test-2026-06-24]]）が `villagepump.json` を import した時、一部 line が `{text, created, updated, userId}` の dict でなく **plain string**（line metadata なし形式）で、importer が落ちた。`grasp/cosense.py` が `line_data.get("text", ...)` と dict 前提で line を読むため。takker 側の agent が local 修正し `https://github.com/nishio/grasp/pull/2`（takker99, branch `fix/string-lines-cosense-import`）として提出。**2026-06-24 時点 OPEN（未 merge）**。
+2026-06-24: 外部 user（takker, [[takker-opencode-villagepump-test-2026-06-24]]）が `villagepump.json` を import した時、一部 line が `{text, created, updated, userId}` の dict でなく **plain string**（line metadata なし形式）で、importer が落ちた。`grasp/cosense.py` が `line_data.get("text", ...)` と dict 前提で line を読むため。takker 側の agent が local 修正し `https://github.com/nishio/grasp/pull/2`（takker99, branch `fix/string-lines-cosense-import`）として提出した。
 
-- 対応: PR を review し、string line を `{text: <str>}` 相当に正規化するか line shape をより広く許容する。
-- merge 後は [[grasp-v1-implemented]] の import / parser facts に「metadata なし line 形式を許容」を反映する。
+- 2026-06-24 23:29 対応済み: PR #2 を review/merge。string line は `{text: <str>, created: None, updated: None, userId: None}` 相当に正規化して import し、リンク抽出対象にもする。回帰テストは `tests/test_cosense.py`。current facts は [[grasp-v1-implemented]]、version は `1.5.24`。
 - 一般化: Cosense export の line shape は admin metadata-ON 以外でも来る。非 nishio export で parser 前提が崩れる例なので、他の入力 variant（page metadata 欠落等）も dogfood 候補。
 
 ## CLI and agent UX

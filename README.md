@@ -62,7 +62,7 @@ ln -s "$PWD/skills/grasp" ~/.claude/skills/grasp
 
 ### 1. 自分の Scrapbox / Cosense プロジェクトを JSON エクスポートする
 
-プロジェクトの **Settings → Page Data → Export Pages** から JSON をダウンロードします。**ページのメタデータを含める設定を ON** にしてください（更新日時・閲覧数を使ったランキングに効きます）。`your-project.json` のようなファイルが手に入ります。
+プロジェクトの **Settings → Page Data → Export Pages** から JSON をダウンロードします。**ページのメタデータを含める設定は ON 推奨**です（更新日時・閲覧数を使ったランキングに効きます）。古い export などで行が metadata なしの plain string になっていても import できますが、その行の作成日時・更新日時・userId は空になります。`your-project.json` のようなファイルが手に入ります。
 
 ### 2. グラフストアに取り込む
 
