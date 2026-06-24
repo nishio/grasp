@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 16:27] implementation | co-links に slice/raw rank と target_relation を追加
+- `co-links` に `--rank slice|raw` を追加。既定 `slice` は target title 自体が query を含む `query-containing-title` を後ろへ回し、独立した `slice-handle` を先に出す。`raw` は従来の line/page count order。
+- 各 co-link item に `target_relation` / `target_relation_rank` を追加し、`gather` は `co_link_rank_mode: slice` を明示する。
+- store schema は v5 のまま、public compatibility version は `1.5.17`。current facts は [[grasp-v1-implemented]]、KJ法 dogfood の残課題は [[grasp-backlog]] と [[kj-link-hub-audit-2026-06-24]] に整理した。
+- 検証: `python3 -m unittest discover -s tests` OK（43 tests）、`python3 scripts/lint_wiki.py` OK、skill validator OK、`git diff --check` OK。
+
 ## [2026-06-24 16:08] file back | Cosense / デライト / howm を grasp と照らした3ツール合成論
 - nishio 依頼で Cosense・デライト・howm の UX を列挙し grasp と照合した対話を file back。原理ページ [[cosense-delite-howm-synthesis]] を新規作成。
 - 核: grasp は Scrapbox 一本の clone でなく、3ツールから**別々の核を1軸ずつ**抜いた合成。Cosense=グラフモデル / デライト=identity-without-name（知番）/ howm=「ページ＝投影」と come-from。3ツールの弱点は全部「本来別々の仕事を1つの仕掛けに束ねた」に帰着し、grasp の一貫した手は層分離で束ねを解く（Cosense は `[X]` に4仕事、デライトは意味を独自語彙に、howm は retrieval を人間の Emacs 操作に）。捨てたもの: 多人数協調編集 / 独自語彙 / 時間駆動リマインダ。
