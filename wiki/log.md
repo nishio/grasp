@@ -1,5 +1,12 @@
 # Log
 
+## [2026-06-24 16:08] file back | Cosense / デライト / howm を grasp と照らした3ツール合成論
+- nishio 依頼で Cosense・デライト・howm の UX を列挙し grasp と照合した対話を file back。原理ページ [[cosense-delite-howm-synthesis]] を新規作成。
+- 核: grasp は Scrapbox 一本の clone でなく、3ツールから**別々の核を1軸ずつ**抜いた合成。Cosense=グラフモデル / デライト=identity-without-name（知番）/ howm=「ページ＝投影」と come-from。3ツールの弱点は全部「本来別々の仕事を1つの仕掛けに束ねた」に帰着し、grasp の一貫した手は層分離で束ねを解く（Cosense は `[X]` に4仕事、デライトは意味を独自語彙に、howm は retrieval を人間の Emacs 操作に）。捨てたもの: 多人数協調編集 / 独自語彙 / 時間駆動リマインダ。
+- backlog 反映（nishio 指摘）: デライトの**引き入れ**（多重所属）は「前景/後景」の向き付き包含が乗った **typed link**（親 llm-wiki `型付きリンク` の構造型）。"Local write and identity layer" に `### typed / directional link` 節を追加。felt-sense / come-from の2型に直交する「型を持たせるか」軸、向き×無向グラフの両立、著者宣言 vs AI 自動推定を論点に。
+- 用語方針（nishio feedback）: ページは coding-agent 向け source of truth なので、内部 shorthand（"Co-" / "design A/B"）を裸で使わず、本ページでは「多人数リアルタイム協調編集」「Scrapbox に欠けている層を足したあるべき姿」と明示し、[[why-not-scrapbox-clone]] への pointer に留めた。
+- 統合: concepts/ 新ページ + grasp-backlog.md 1節追記 + index.md concepts に1行 + come-from-declared-gather.md 関連に被リンク1本（新ページの孤立回避）。
+
 ## [2026-06-24 16:03] implementation | gather omitted rows と come-from 候補 score を追加
 - `mentions` summary に `come_from_candidate` を追加。bare occurrence/page spread、unlinked-page、query shape から score / thresholds / signals / rationale を返す初期 heuristic。多義語や AI 作ページ判定は確定しない。
 - `gather` に `returned_counts` / `total_counts` / `omitted_counts` / `row_count_basis` を追加。counts は mentions=bare mention lines、co_links=ranked co-link targets、backlinks=incoming link rows の row 単位で、token omitted count ではない。
