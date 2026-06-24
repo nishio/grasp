@@ -18,6 +18,7 @@ Codex が実装し、本 wiki が実装済み事実・backlog・設計判断・g
 | [language-and-distribution](decisions/language-and-distribution.md) | 実装言語と配布チャネルは別軸。言語論点は実測で溶ける（仕事は全部 SQLite、warm store で起動 ~30ms・read ~83ms）。当面 Python+pipx、native(Go/Rust)→npm は「Python 不要 agent 環境」trigger 待ち。SQLite store 契約が段階移行を de-risk |
 | [positioning-two-personas](decisions/positioning-two-personas.md) | audience は2層。driver=persona1（JP Cosense ヘビーユーザ＝nishio dogfooding）／upside-risk=persona2（世界の Markdown 束ユーザ）。substrate 共有・value prop と on-ramp は別。persona2 は addition（Markdown adapter＋英語 docs＋一般化 pitch）で狙い設計は曲げない。GTM=HN/Reddit、lede は「Markdown 束でなく local graph store」 |
 | [markdown-obsidian-indexed-mirror](decisions/markdown-obsidian-indexed-mirror.md) | persona2 向け Markdown / Obsidian folder 対応は read-only indexed mirror。Skill ではなく adapter/indexer が検索・リンク graph を materialize し、Skill は薄い利用層。LLM Wiki の index/navigation/log は通常 edge でなく current projection / event stream として扱う |
+| [write-layer-alpha-and-replay-test](decisions/write-layer-alpha-and-replay-test.md) | ★ write/identity 層着手の3決定。①当面 write は alpha testing（信用して大事なものを預ける人は自己責任、read=v1 stable と write=alpha を別 SLA、原典は書き換えず local store に対して write）②テスト方法＝このリポジトリ自身の過去 wiki 編集（git history）を grasp の write/rename で再現でき rename で `[[..]]` 参照が壊れないかを ground truth に検証 ③実装順序＝最高リスク先行（nishio 指示）: stable identity + re-import diff → rename → write → transclude/come-from。作業は `feat/write-identity-alpha` worktree |
 
 ## concepts/
 
