@@ -665,3 +665,9 @@
 - 核となる読み: **ScrapBubble = grasp の read グラフ模型を消費者だけ替えて実装した双子**（ScrapBubble=人間ブラウザ hover GUI / grasp=AI CLI）。bubble=人間版の近傍同梱。grasp の whole-store cross-project（v6）/ read=近傍同梱（[[ai-consumer-cost-and-trust]] 軸1）/ [[incremental-sync]] cache reuse / identity-without-name を**別経路で裏付ける先行例**。
 - 3つの sharpening: ① `followRename` = grasp が data model で直す name=identity 欠陥を fetch 時 workaround で当てた downstream 証拠（[[why-not-scrapbox-clone]] に Update）。② `whiteList` 透過は Co-（他者 project 読み）と非 Co-（自分 public+private 統合）を束ね、grasp が継ぐ cross-project は後者だけ → cross-project は Co- 無しでも価値（[[whole-store-graph-and-cross-project-edges]] に Update、本決定が使う `[/takker/ScrapBubble]` の出元）。③ daiiz の「リンク貼って満足／育てる vs preview」deferral は come-from・第3消費者軸に接続。
 - index.md に entities/ 1行追加。why-not-scrapbox-clone と whole-store-graph に各1 Update 追記。
+
+## [2026-06-25 00:40] file back | 森全体を grasp の次 dogfood corpus にする設計対話を backlog へ
+- 出典: [[scrapbubble]] ingest から派生した nishio との設計対話（2026-06-25）。前提整理は本セッションの ScrapBubble entity と whole-store 決定の Update（cross-project の Co-/非 Co- 2層分解）。
+- [[grasp-backlog]] の「grasp 自身の wiki を最初の dogfood corpus にする」に 2026-06-25 subsection を追加: corpus を grasp 1 wiki → **wiki森全体（40+ 単一所有者 wiki）**へ拡張。動機＝森は親 llm-wiki `wiki_search.py` の grep 横断止まり＝節点アクセス (a-1)、「N wiki を跨いで参照されるが本文が無い概念」＝俯瞰グラフ (a-2) は出せない。grasp の whole-store cross-project + Markdown mirror が (a-2) を供給。森は全部 nishio 所有＝Co- を削ぐ grasp の cross-project（非 Co- 横断）の理想 corpus。
+- 核心: **森用の特別 edge policy は不要**（nishio「import 時バラバラ→query で徐々に有機結合」）。cross-wiki プレーン名参照は import 時に裸の赤 node のまま、[[whole-store-graph-and-cross-project-edges]] point 8 の弱い接続（normalize-title 一致）が query 時に繋ぐ。「束の束」は query 時結合を待つ正常な初期状態（親 llm-wiki `書いてから整理する` の森スケール版）、誤接続は weak 層に封じ込み。
+- 論点: 40+ wiki の namespace import オーケストレーション / navigation・log artifact 森規模除外 / raw/ 除外（llm-wiki-about-nishio md 24,968 件）/ weak 接続の cross-wiki spread ranking。森メタ側は親 llm-wiki `wiki-forest-utilization-design-20260610` に file back。
