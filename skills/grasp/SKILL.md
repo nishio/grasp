@@ -85,9 +85,9 @@ description: >-
 → `grasp path <A> <B> --max-depth 4`。pages と page なし target をどちらも node として扱い、materialized internal links を無向 edge として短い経路を返す。経路の edge には根拠 line が付くので、bridge が意味的に妥当かを確認する。密な hub では展開が大きくなるため、まず `--max-depth 4 --limit 1` で見る。端点は見つかったが経路が無い時も `recovery_hints.path` に次に試す depth、related、backlinks、link-stats が入るので、単なる不在として扱わない。
 
 ### 巨大 hub / 裸言及を扱う
-→ `grasp gather <query>` を最初に見る。link stats、裸言及 summary、co-link slice、representative mentions、backlinks、次に実行する recipe が bounded に返る。`--budget` は厳密 token packing ではなく row limit selector なので、足りなければ個別 verb で広げる。
+→ `grasp gather <query>` を最初に見る。link stats、裸言及 summary、co-link slice、representative mentions、backlinks、次に実行する recipe が bounded に返る。`returned_counts` / `total_counts` / `omitted_counts` は row 単位（mentions=bare mention lines、co_links=targets、backlinks=link rows）なので、足りなければ個別 verb で広げる。`--budget` は厳密 token packing ではなく row limit selector。
 
-- 裸言及の監査: `grasp mentions <query>`。既定は parsed internal-link span 外の bare occurrence がある行だけ返す。各行は `exact-link-page` / `query-link-page` / `unlinked-page` に分類される。page に query 系 link handle が無い行だけ見たい時は `--unlinked`、全 occurrence が link 内の行も見たい時は `--include-linked`。
+- 裸言及の監査: `grasp mentions <query>`。既定は parsed internal-link span 外の bare occurrence がある行だけ返す。各行は `exact-link-page` / `query-link-page` / `unlinked-page` に分類され、summary に `come_from_candidate`（初期 heuristic score / signals / rationale）が入る。page に query 系 link handle が無い行だけ見たい時は `--unlinked`、全 occurrence が link 内の行も見たい時は `--include-linked`。
 - slice handle 探索: `grasp co-links <query>`。query を含む行で同時に出る internal links を rank する。巨大 hub を読む時は、hub 全体を広げる前に co-link slice を見て、AI 側で必要な slice に絞る。
 - 重要: `mentions` の裸言及は「全部リンク化すべき漏れ」ではない。bulk link 化は hub を悪化させることがある。come-from 昇格候補や、用途別 handle への分岐を考えるための観測値として扱う。
 
@@ -127,9 +127,9 @@ description: >-
 | `backlinks <title>` | 行レベル逆リンク（page なし target も） |
 | `related <title>` | 2-hop ページ / page なし target の source pages |
 | `path <A> <B>` | pages / page なし target 間の短いリンク経路（no-path 時も recovery hints） |
-| `mentions <query>` | literal query の裸言及を link span 外 occurrence として数え、page-level link status で分類。`--unlinked` で no-link-handle page に絞る |
+| `mentions <query>` | literal query の裸言及を link span 外 occurrence として数え、page-level link status と come-from 昇格候補 score を返す。`--unlinked` で no-link-handle page に絞る |
 | `co-links <query>` | query を含む行で同時に出る internal links を rank し、hub の slice handle を返す |
-| `gather <query>` | link stats・裸言及 summary・co-link slices・backlinks・next recipes の bounded bundle |
+| `gather <query>` | link stats・裸言及 summary・co-link slices・backlinks・next recipes の bounded bundle。row 単位の returned / total / omitted counts 付き |
 | `link-stats <title>` | incoming link count と 0/1/N |
 | `unresolved` | 未解決 target の rank view（TODO ではない） |
 | `peek <title>` | 本文行のみ。`--line-offset N --line-limit M` でページング |

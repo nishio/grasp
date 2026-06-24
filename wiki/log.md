@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 16:03] implementation | gather omitted rows と come-from 候補 score を追加
+- `mentions` summary に `come_from_candidate` を追加。bare occurrence/page spread、unlinked-page、query shape から score / thresholds / signals / rationale を返す初期 heuristic。多義語や AI 作ページ判定は確定しない。
+- `gather` に `returned_counts` / `total_counts` / `omitted_counts` / `row_count_basis` を追加。counts は mentions=bare mention lines、co_links=ranked co-link targets、backlinks=incoming link rows の row 単位で、token omitted count ではない。
+- store schema は v5 のまま、public compatibility version は `1.5.16`。current facts は [[grasp-v1-implemented]]、残課題は [[grasp-backlog]] に整理した。
+- 検証: `python3 -m unittest discover -s tests` OK（43 tests）、`python3 scripts/lint_wiki.py` OK、skill validator OK、`git diff --check` OK。
+
 ## [2026-06-24 14:57] file back | gather KJ法 dogfood の co-link ranking caveat
 - `grasp gather KJ法 --budget 1500 --json` を `1.5.13` 系実装後の nishio store で dogfood した観測を [[kj-link-hub-audit-2026-06-24]] に追記。huge-hub banner、151 exact links / 144 pages、681 literal pages、519 bare pages、page status counts が出た。
 - 重要な caveat: `mentions` summary は all literal lines 基準なので body-only audit の 490 bare pages とは別指標。default summary は 519 bare pages。

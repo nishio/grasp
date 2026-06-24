@@ -1716,6 +1716,12 @@ class SQLiteStore:
             }
             for classification in ("exact-link-page", "query-link-page", "unlinked-page")
         }
+        come_from_candidate = _score_come_from_candidate(
+            query,
+            bare_occurrences=bare_occurrences,
+            bare_pages=len(bare_page_ids),
+            page_status_counts=page_status_counts,
+        )
         return {
             "query": query,
             "mode": "unlinked" if unlinked_only else "all" if include_linked else "bare",
@@ -1730,6 +1736,7 @@ class SQLiteStore:
                 "linked_occurrences": linked_occurrences,
                 "returned_lines": len(returned_hits),
                 "page_status_counts": page_status_counts,
+                "come_from_candidate": come_from_candidate,
             },
             "mentions": returned_hits,
         }
@@ -1967,6 +1974,28 @@ class SQLiteStore:
         ).fetchall()
         return [self._edge_from_row(row) for row in rows]
 
+    def _co_link_total_count(self, query: str, *, include_self: bool = False) -> int:
+        project = self._require_project()
+        norm_query = normalize_title(query)
+        target_filter = "" if include_self else "AND e.target_norm != ?"
+        params: list[Any] = [project, f"%{_escape_like(query)}%"]
+        if not include_self:
+            params.append(norm_query)
+        row = self.connection.execute(
+            f"""
+            WITH query_edges AS (
+              SELECT DISTINCT e.target_norm
+              FROM lines line
+              JOIN edges e ON e.project = line.project AND e.line_id = line.line_id
+              WHERE line.project = ? AND line.text LIKE ? ESCAPE '\\'
+              {target_filter}
+            )
+            SELECT COUNT(*) AS count FROM query_edges
+            """,
+            params,
+        ).fetchone()
+        return int(row["count"] if row is not None else 0)
+
     def gather(
         self,
         query: str,
@@ -1993,6 +2022,20 @@ class SQLiteStore:
             for edge in self.backlinks(query, limit=backlink_limit)
         ]
         mention_summary = mention_result["summary"]
+        returned_counts = {
+            "mentions": len(mention_result["mentions"]),
+            "co_links": len(co_links),
+            "backlinks": len(backlinks),
+        }
+        total_counts = {
+            "mentions": mention_summary["bare_lines"],
+            "co_links": self._co_link_total_count(query),
+            "backlinks": link_stats["link_count"],
+        }
+        omitted_counts = {
+            key: max(0, total_counts[key] - returned_counts[key])
+            for key in total_counts
+        }
         huge_hub = (
             link_stats["link_count"] >= 100
             or mention_summary["bare_pages"] >= 100
@@ -2030,12 +2073,23 @@ class SQLiteStore:
         return {
             "query": query,
             "budget": budget,
-            "budget_note": "budget is an approximate selector for bounded rows; it is not exact token packing",
+            "budget_note": (
+                "budget is an approximate selector for bounded rows; "
+                "returned_counts/omitted_counts are row counts, not token counts"
+            ),
             "limits": {
                 "backlinks": backlink_limit,
                 "mentions": mention_limit,
                 "co_links": co_link_limit,
             },
+            "row_count_basis": {
+                "mentions": "bare mention lines",
+                "co_links": "ranked co-link targets",
+                "backlinks": "incoming link rows",
+            },
+            "returned_counts": returned_counts,
+            "total_counts": total_counts,
+            "omitted_counts": omitted_counts,
             "banner": banner,
             "link_stats": link_stats,
             "mention_summary": mention_summary,
@@ -3425,6 +3479,94 @@ def _gather_default_limit(budget: int) -> int:
     if budget <= 8000:
         return 20
     return 30
+
+
+def _score_come_from_candidate(
+    query: str,
+    *,
+    bare_occurrences: int,
+    bare_pages: int,
+    page_status_counts: dict[str, dict[str, int]],
+) -> dict[str, Any]:
+    normalized = normalize_title(query)
+    compact = "".join(normalized.split())
+    compact_length = len(compact)
+    has_non_ascii = any(ord(char) > 127 for char in query)
+    has_ascii_alnum = any(char.isascii() and char.isalnum() for char in query)
+    has_ascii_upper = any("A" <= char <= "Z" for char in query)
+    has_digit = any(char.isdigit() for char in query)
+    has_mixed_script = has_non_ascii and has_ascii_alnum
+
+    frequency_score = min(35, bare_occurrences)
+    spread_score = min(25, bare_pages * 3)
+    unlinked_pages = page_status_counts.get("unlinked-page", {}).get("pages", 0)
+    unlinked_bare_occurrences = page_status_counts.get("unlinked-page", {}).get("bare_occurrences", 0)
+    unlinked_score = min(20, unlinked_pages * 5)
+    if has_mixed_script:
+        uncommon_score = 25
+    elif has_non_ascii and compact_length >= 3:
+        uncommon_score = 20
+    elif has_ascii_upper and compact_length >= 2:
+        uncommon_score = 15
+    elif has_digit and compact_length >= 2:
+        uncommon_score = 12
+    elif compact_length >= 8:
+        uncommon_score = 10
+    elif has_non_ascii and compact_length >= 2:
+        uncommon_score = 8
+    else:
+        uncommon_score = 0
+
+    score = frequency_score + spread_score + unlinked_score + uncommon_score
+    thresholds = {
+        "score": 30,
+        "bare_occurrences": 3,
+        "bare_pages": 2,
+        "uncommon_score": 10,
+    }
+    is_candidate = (
+        score >= thresholds["score"]
+        and bare_occurrences >= thresholds["bare_occurrences"]
+        and bare_pages >= thresholds["bare_pages"]
+        and uncommon_score >= thresholds["uncommon_score"]
+    )
+
+    rationale: list[str] = []
+    if bare_occurrences >= thresholds["bare_occurrences"] and bare_pages >= thresholds["bare_pages"]:
+        rationale.append("bare mentions recur across multiple pages")
+    else:
+        rationale.append("bare mention volume is still low")
+    if uncommon_score >= thresholds["uncommon_score"]:
+        rationale.append("query shape looks uncommon enough for come-from review")
+    else:
+        rationale.append("query shape looks too common without more evidence")
+    if unlinked_pages:
+        rationale.append("some bare mentions occur on pages without a query-containing link handle")
+    rationale.append("heuristic only; review ambiguity before declaring come-from")
+
+    return {
+        "score": score,
+        "is_candidate": is_candidate,
+        "thresholds": thresholds,
+        "signals": {
+            "bare_occurrences": bare_occurrences,
+            "bare_pages": bare_pages,
+            "unlinked_pages": unlinked_pages,
+            "unlinked_bare_occurrences": unlinked_bare_occurrences,
+            "exact_link_pages": page_status_counts.get("exact-link-page", {}).get("pages", 0),
+            "query_link_pages": page_status_counts.get("query-link-page", {}).get("pages", 0),
+            "query_length": compact_length,
+            "has_non_ascii": has_non_ascii,
+            "has_ascii_upper": has_ascii_upper,
+            "has_digit": has_digit,
+            "has_mixed_script": has_mixed_script,
+            "frequency_score": frequency_score,
+            "spread_score": spread_score,
+            "unlinked_score": unlinked_score,
+            "uncommon_score": uncommon_score,
+        },
+        "rationale": rationale,
+    }
 
 
 def _nonempty_recovery_hints(recovery_hints: dict[str, Any]) -> dict[str, Any] | None:

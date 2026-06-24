@@ -123,9 +123,9 @@ grasp read "<ページタイトル>"
 | --- | --- |
 | `read <title>` | 本文＋逆リンク＋related＋未解決を**近傍同梱**で返す（`--related-snippets` で related/source ページ冒頭や `--related-snippet-mode edge` の根拠行を同梱、`--around-line <line-id>` で行周辺だけ読む） |
 | `search <query>` | 本文行を検索。既定は空白も含めて入力文字列そのものの line substring。`--mode boolean` で AND/OR/NOT、`--scope line|page` で行単位/ページ単位を切替。`--context N` で各 hit の前後 N 行を同梱。0件時は NFKC/長音ゆれの normalized fallback を試す |
-| `mentions <query>` | literal query の裸言及を、link span 外の occurrence として数える。page already has exact link / query-containing link / no link handle で分類し、`--unlinked` で no link handle の page だけに絞る |
+| `mentions <query>` | literal query の裸言及を、link span 外の occurrence として数える。page already has exact link / query-containing link / no link handle で分類し、come-from 昇格候補 score を返す。`--unlinked` で no link handle の page だけに絞る |
 | `co-links <query>` | query を含む行で同時に出る internal links を rank し、巨大 hub の slice handle を見つける |
-| `gather <query>` | link stats・裸言及 summary・co-link slices・backlinks・次の recipe を bounded bundle として返す。`--budget` は近似 row limit |
+| `gather <query>` | link stats・裸言及 summary・co-link slices・backlinks・次の recipe を bounded bundle として返す。returned / total / omitted は row 単位で明示。`--budget` は近似 row limit |
 | `suggest <partial>` | タイトルの部分一致補完 |
 | `backlinks <title>` | 行レベルの逆リンク（本文の無いターゲットにも効く） |
 | `related <title>` | 既存ページなら 2-hop ページ、本文の無いターゲットならそれを参照する source ページ |
