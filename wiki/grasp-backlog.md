@@ -28,7 +28,7 @@ sources:
 2026-06-24: 外部 user（takker, [[takker-opencode-villagepump-test-2026-06-24]]）が `villagepump.json` を import した時、一部 line が `{text, created, updated, userId}` の dict でなく **plain string**（line metadata なし形式）で、importer が落ちた。`grasp/cosense.py` が `line_data.get("text", ...)` と dict 前提で line を読むため。takker 側の agent が local 修正し `https://github.com/nishio/grasp/pull/2`（takker99, branch `fix/string-lines-cosense-import`）として提出した。
 
 - 2026-06-24 23:29 対応済み: PR #2 を review/merge。string line は `{text: <str>, created: None, updated: None, userId: None}` 相当に正規化して import し、リンク抽出対象にもする。回帰テストは `tests/test_cosense.py`。current facts は [[grasp-v1-implemented]]、version は `1.5.24`。
-- 一般化: Cosense export の line shape は admin metadata-ON 以外でも来る。非 nishio export で parser 前提が崩れる例なので、他の入力 variant（page metadata 欠落等）も dogfood 候補。
+- 一般化（原理）: **nishio の admin metadata-ON export は in-the-wild の代表ではない**。非 nishio export ごとに parser 前提が崩れうる（string line・page metadata 欠落・export version 差）。∴ 外部 export は事実上 fuzz test で、import 堅牢性は一回の修正でなく **恒常コスト＝ persona2（[[positioning-two-personas]]）を狙う代償**（相手のデータを支配できない）。方針: tolerant import 姿勢＋実 export variant を test fixture 化（takker の villagepump string-line ケースが最初の fixture, [[takker-opencode-villagepump-test-2026-06-24]]）。
 
 ## CLI and agent UX
 
