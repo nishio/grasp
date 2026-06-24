@@ -199,6 +199,7 @@ line_tombstones(project, id, page_id, deleted_at, last_text?)
 - `mentions` は現状 literal query。完全なかな/カナ・全半角正規化 index、word boundary、多義語 disambiguation は未実装。
 - 2026-06-24 12:56: `mentions --unlinked` は実装済み。既定 bare-only は維持し、`--unlinked` では page に query-containing link target が無い bare mention 行だけを返す。
 - page-level 3分類は `exact-link-page` / `query-link-page` / `unlinked-page` まで。AI 作 default 裸、意図的 non-link、come-from 昇格候補（uncommon × 頻度 × 一意）の scoring は未実装。
+- `co-links` は現状 same-line target を line/page count で素直に rank する。`KJ法` dogfood では `KJ法 渾沌をして語らしめる` / `KJ法勉強会@ロフトワーク` のような query-containing bibliographic / session / title page が `考える花火` などの narrower use-slice handle より上に出た。raw fidelity としては正しいが、将来は broad query-containing title と use-slice handle を分類・filter・weighting できる surface が必要。
 - `gather --budget` は厳密 token packing / omitted token count ではない。row limit と omitted counts の精密化は未実装。
 - AI clustering handoff: CLI は固定 cluster label を確定しないが、AI が `表札` / `ツール` / `AI応用` / `講義資料` などへ仮分類できるだけの bounded rows と sample provenance を返す、という方針は継続。
 

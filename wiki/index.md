@@ -40,7 +40,7 @@ _他に: read＝近傍同梱 / 行リンク / 未解決 link target / identity-w
 | [persona1-user-test-2026-06-23](entities/persona1-user-test-2026-06-23.md) | persona1（JP Cosense ヘビーユーザ=nishio dogfooding）視点の CLI ユーザテスト。read=近傍同梱の価値確認と、表記ゆれ空振り・global option 位置・長大ページ出力・store default docs drift の発見 |
 | [persona2-user-test-2026-06-23](entities/persona2-user-test-2026-06-23.md) | persona2（世界の LLM Wiki / Markdown 束ユーザ）視点の fresh onboarding テスト。現状は Markdown folder import が無く、英語 README / friendly error も無いため active acquisition はまだ早い |
 | [ai-consumer-feedback-2026-06-23](entities/ai-consumer-feedback-2026-06-23.md) | 設計上の主たるユーザ＝CLI 越しに読む AI（Claude Opus 4.8）が v1 を実走したレビュー。validated（read=近傍同梱・related rank・miss recovery）＋ Tier 1-4 findings（recall が最優先）と routing。ingest 時に backlinks ランク済み / read --json の page-id 既済を確認 |
-| [kj-link-hub-audit-2026-06-24](entities/kj-link-hub-audit-2026-06-24.md) | `KJ法` が exact `[KJ法]` 144 pages に対し literal mention 681 pages / body bare mention 490 pages に広がる hub だと実測。全部リンク化せず、root link・用途別 subtopic link・co-link slice・AI cluster handoff に分け、巨大入口を分岐点に変える判断 |
+| [kj-link-hub-audit-2026-06-24](entities/kj-link-hub-audit-2026-06-24.md) | `KJ法` が exact `[KJ法]` 144 pages に対し literal mention 681 pages / body bare mention 490 pages に広がる hub だと実測。全部リンク化せず、root link・用途別 subtopic link・co-link slice・AI cluster handoff に分け、巨大入口を分岐点に変える判断。1.5.13 dogfood では `co-links` が broad query-containing title を上位に出す caveat も記録 |
 
 ## メタ
 
