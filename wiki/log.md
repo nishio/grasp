@@ -683,3 +683,8 @@
 - H1 title が変わると manifest の title / alias map が変わるので、既存の safe full rebuild path に乗る。SQLite table shape は変えないため schema は `5` のまま、public compatibility version は `1.5.25`。既存 Markdown store はそのまま読めるが、H1 title を反映するには `grasp import --markdown <folder>` の再実行が必要。
 - file back: [[grasp-v1-implemented]] の Markdown facts を更新し、[[grasp-backlog]] から first H1 title resolution を削除。[[markdown-obsidian-indexed-mirror]] の Open Question から title resolution 問いを閉じ、[history](history.md) に `1.5.25` を追加。README も title resolution 説明を更新。
 - 検証: bundled Python 3.12.13 で `python3 -m unittest tests.test_markdown` / `python3 -m unittest discover -s tests` / `python3 scripts/lint_wiki.py` / `git diff --check` OK。system `/usr/bin/python3` は 3.9.6 で package の `>=3.10` 要件を満たさず、既存 union type で失敗する。
+
+## [2026-06-25 02:17] correction | `#1` noise は log 除外でなく edge annotation 問題
+- nishio 指摘: grasp wiki dogfood で見えた `log.md` が graph を汚す問題と、`PR #2` / `Open Q #4` のような `#1` 系が hashtag edge になる問題は別。前者は page/file の artifact handling、後者は link-shaped expression が意味ある概念リンクかの annotation 問題。
+- 方針修正: Scrapbox 互換では `#1` は link として成立するので parser で消さない。人間は必要なら `` `#1` `` のように escape してきた。grasp 側は edge を保持したまま、system / LLM / human が「表現としてはリンクだが意味リンクではない」と annotation し、`unresolved` / `related` / `path` ranking で弱く扱う。
+- file back: [[grasp-backlog]] に link-shaped but non-semantic edge annotation 節を追加。[[markdown-obsidian-indexed-mirror]] に correction を追記し、log/navigation artifact handling と edge annotation を混同しないよう明記。
