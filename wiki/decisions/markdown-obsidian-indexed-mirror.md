@@ -187,6 +187,12 @@ grasp における実装含意:
 - `search` が log artifact に hit した場合、text / JSON ともに「log entry は current fact ではない」ことと後続 event の有無を示す。
 - current projection を生成する場合、event log をそのまま根拠にせず、fold 後の state と provenance links を別々に保持する。
 
+### 2026-06-25 correction: `#1` noise is edge annotation, not log handling
+
+grasp wiki dogfood で `log.md` が graph を汚すことと、`PR #2` / `Open Q #4` のような `#1` 系が hashtag edge になることを同一視しかけたが、これは別問題。log / navigation artifact handling は **page/file の役割**の問題で、`#1` は **link-shaped expression が意味のある概念リンクか**の問題。
+
+Scrapbox 互換では `#1` は link として成立する。したがって parser が捨てるのではなく、edge を保持した上で system / LLM / human が「意味リンクではない」「issue number / ordinal reference」などの annotation を付け、retrieval ranking や unresolved concept hub から弱める方針が正しい。これは [[grasp-backlog]] の link-shaped but non-semantic edge annotation に積む。
+
 ## Open Questions
 
 - CLI 名: 初期実装は `import --markdown <folder>`。将来 persona2 向けに `index-md` alias を足すか。

@@ -20,6 +20,17 @@ sources:
 - **parser false-negative 監査**: strict parser は unresolved target noise を減らすため保守的。短い英数字 title などを link から落としていないか未監査。
 - **外部 export の堅牢性は恒常コスト**: nishio の admin metadata-ON export は in-the-wild の代表ではない（string line・page metadata 欠落・export version 差）。非 nishio export ごとに parser 前提が崩れうる＝実質 fuzz test。方針は tolerant import ＋実 export variant の test fixture 化で、一回の修正では閉じない。これは persona2（[[positioning-two-personas]]）を狙う代償。最初の fixture は takker の villagepump string-line ケース（[[takker-opencode-villagepump-test-2026-06-24]]、PR #2 で対応済み）。
 
+### link-shaped but non-semantic edge annotation
+
+`#1` / `#2` が hashtag link になることは、`log.md` artifact handling とは別問題。Scrapbox 互換では `#1` は link-shaped expression であり、人間側も必要なら `` `#1` `` のように escape してきた。grasp は parser で勝手に捨てるより、edge を保持した上で「表現としてはリンクだが、意味のある概念リンクではない」と annotation できる層を持つべき。
+
+未実装:
+
+- edge annotation schema（候補: `semantic_role`, `graph_scope`, `confidence`, `annotator=system|llm|human`, `reason`）。`link_kind` / typed link / `connection_strength` とは直交する軸。
+- system heuristic annotation: `PR #2`, `Open Question #4`, version/changelog の `#1` などは `issue-number` / `ordinal-reference` として rank down し、unresolved concept hub から外す。ただし raw edge は消さない。
+- LLM annotation workflow: grasp 自身は候補 edge + source line +近傍を出し、LLM が「意味リンクではない」判断を返して store に annotation する。判断は reversible / provenance 付きにする。
+- retrieval policy: `unresolved` / `related` / `path` / backlink ranking は既定で non-semantic edge を弱く扱い、必要なら `--include-non-semantic` で見る。
+
 ## CLI and agent UX
 
 `read --around-line` / `search --context` / `peek --line-offset` の bounded navigation primitive は実装済み。残るのは Skill/subagent 運用で不足が見えた時に bounded primitive を足すこと。**LLM 要約は CLI でなく agent 層の責務**（CLI に summarizer を持たせない、[[delivery-cli-plus-skill]]）。
