@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import quote
 
 from .cosense import (
+    CrossProjectLink,
     CosenseStore,
     Edge,
     Line,
@@ -23,6 +24,7 @@ from .cosense import (
     is_internal_cosense_link,
     normalize_title,
     parse_cosense_hash_tag,
+    parse_cosense_cross_project_links,
     parse_cosense_links,
 )
 from .markdown import MarkdownMirror, MarkdownPageRecord, markdown_wikilink_target
@@ -879,6 +881,10 @@ class SQLiteStore:
 
     def project_acquisition_metadata(self, project: str | None = None) -> dict[str, Any] | None:
         project = self._require_project(project)
+        return self.project_acquisition_metadata_by_name(project)
+
+    def project_acquisition_metadata_by_name(self, project: str) -> dict[str, Any] | None:
+        project = normalize_project_name(project)
         raw = self.metadata().get(f"project.{project}.acquisition")
         if raw is None:
             return None
@@ -1014,6 +1020,51 @@ class SQLiteStore:
             _write_metadata(self.connection, metadata)
 
         self.project = project
+
+    def cosense_page_dict_by_norm(self, project: str, norm_title: str) -> dict[str, Any] | None:
+        project = normalize_project_name(project)
+        row = self.connection.execute(
+            """
+            SELECT *
+            FROM pages
+            WHERE project = ? AND norm_title = ?
+            ORDER BY rowid
+            LIMIT 1
+            """,
+            (project, norm_title),
+        ).fetchone()
+        if row is None:
+            return None
+
+        line_rows = self.connection.execute(
+            """
+            SELECT *
+            FROM lines
+            WHERE project = ? AND page_id = ?
+            ORDER BY line_index
+            """,
+            (project, row["id"]),
+        ).fetchall()
+        lines = []
+        for line in line_rows:
+            user_id = line["user_id"]
+            lines.append(
+                {
+                    "text": line["text"],
+                    "created": line["created"],
+                    "updated": line["updated"],
+                    "user": {"id": user_id} if user_id is not None else {},
+                }
+            )
+        return {
+            "id": row["id"],
+            "title": row["title"],
+            "persistent": True,
+            "created": row["created"],
+            "updated": row["updated"],
+            "views": row["views"],
+            "lines": lines,
+        }
 
     def page_updated(self, page_id: str) -> int | None:
         project = self._require_project()
@@ -1607,6 +1658,262 @@ class SQLiteStore:
             (project, like, prefix, limit),
         ).fetchall()
         return [self._page_from_row(row).to_summary() for row in rows]
+
+    def cross_project_refs(
+        self,
+        limit: int = 50,
+        *,
+        sample_limit: int = 3,
+        seed_limit: int = 20,
+        include_self: bool = False,
+        exclude_icons: bool = False,
+        semantic_only: bool = False,
+    ) -> dict[str, Any]:
+        project = self._require_project()
+        limit = max(0, limit)
+        sample_limit = max(0, sample_limit)
+        seed_limit = max(0, seed_limit)
+        source_project_names = _source_project_names(project)
+        rows = self.connection.execute(
+            """
+            SELECT
+              page.id AS source_page_id,
+              page.title AS source_title,
+              page.views AS source_views,
+              page.updated AS source_updated,
+              line.line_id,
+              line.line_index,
+              line.text AS line_text
+            FROM lines line
+            JOIN pages page ON page.project = line.project AND page.id = line.page_id
+            WHERE line.project = ? AND line.text LIKE '%[/%'
+            ORDER BY page.views DESC, COALESCE(page.updated, 0) DESC, page.title, line.line_index
+            """,
+            (project,),
+        ).fetchall()
+
+        refs_by_project: dict[str, list[dict[str, Any]]] = {}
+        total_class_counts: Counter[str] = Counter()
+        filtered_class_counts: Counter[str] = Counter()
+        all_target_projects: set[str] = set()
+        filtered_target_projects: set[str] = set()
+        total_refs = 0
+        filtered_refs = 0
+        for row in rows:
+            for link in parse_cosense_cross_project_links(row["line_text"]):
+                total_refs += 1
+                target_project_norm = normalize_title(link.project)
+                target_class = (
+                    "self-project"
+                    if target_project_norm in source_project_names
+                    else link.target_class
+                )
+                total_class_counts[target_class] += 1
+                all_target_projects.add(link.project)
+
+                if target_class == "self-project" and not include_self:
+                    continue
+                if target_class == "icon" and exclude_icons:
+                    continue
+                if semantic_only and target_class != "semantic":
+                    continue
+
+                filtered_refs += 1
+                filtered_class_counts[target_class] += 1
+                filtered_target_projects.add(link.project)
+                refs_by_project.setdefault(link.project, []).append(
+                    _cross_project_ref_from_row(row, link, target_class=target_class)
+                )
+
+        projects = [
+            _cross_project_project_entry(
+                target_project,
+                refs,
+                sample_limit=sample_limit,
+                seed_limit=seed_limit,
+            )
+            for target_project, refs in refs_by_project.items()
+        ]
+        projects.sort(
+            key=lambda item: (
+                -item["mention_count"],
+                -item["source_page_count"],
+                -item["unique_target_count"],
+                -item["total_source_views"],
+                item["project"].casefold(),
+            )
+        )
+        returned_projects = projects[:limit]
+        return {
+            "project": project,
+            "filters": {
+                "include_self": include_self,
+                "exclude_icons": exclude_icons,
+                "semantic_only": semantic_only,
+            },
+            "limit": limit,
+            "sample_limit": sample_limit,
+            "seed_limit": seed_limit,
+            "summary": {
+                "total_refs": total_refs,
+                "total_projects": len(all_target_projects),
+                "filtered_refs": filtered_refs,
+                "filtered_projects": len(filtered_target_projects),
+                "returned_projects": len(returned_projects),
+                "target_class_counts": _count_map(total_class_counts),
+                "filtered_target_class_counts": _count_map(filtered_class_counts),
+            },
+            "projects": returned_projects,
+        }
+
+    def cross_project_refs_to(
+        self,
+        target_project: str,
+        *,
+        limit: int = 5,
+        sample_limit: int = 2,
+    ) -> dict[str, Any]:
+        project = self._require_project()
+        limit = max(0, limit)
+        sample_limit = max(0, sample_limit)
+        target_project_names = _source_project_names(target_project)
+        rows = self.connection.execute(
+            """
+            SELECT
+              page.id AS source_page_id,
+              page.title AS source_title,
+              page.views AS source_views,
+              page.updated AS source_updated,
+              line.line_id,
+              line.line_index,
+              line.text AS line_text
+            FROM lines line
+            JOIN pages page ON page.project = line.project AND page.id = line.page_id
+            WHERE line.project = ? AND line.text LIKE '%[/%'
+            ORDER BY page.views DESC, COALESCE(page.updated, 0) DESC, page.title, line.line_index
+            """,
+            (project,),
+        ).fetchall()
+
+        refs: list[dict[str, Any]] = []
+        class_counts: Counter[str] = Counter()
+        for row in rows:
+            for link in parse_cosense_cross_project_links(row["line_text"]):
+                if normalize_title(link.project) not in target_project_names:
+                    continue
+                class_counts[link.target_class] += 1
+                refs.append(_cross_project_ref_from_row(row, link, target_class=link.target_class))
+
+        target_counts: Counter[tuple[str, str]] = Counter(
+            (ref["target_title"], ref["target_class"])
+            for ref in refs
+        )
+        source_page_ids = {ref["source_page_id"] for ref in refs}
+        top_targets = [
+            {
+                "title": title,
+                "target_class": target_class,
+                "mention_count": mention_count,
+            }
+            for (title, target_class), mention_count in target_counts.most_common(limit)
+        ]
+        return {
+            "project": project,
+            "target_project": target_project,
+            "mention_count": len(refs),
+            "source_page_count": len(source_page_ids),
+            "unique_target_count": len(target_counts),
+            "target_class_counts": _count_map(class_counts),
+            "top_targets": top_targets,
+            "examples": refs[:sample_limit],
+        }
+
+    def top_internal_links(self, limit: int = 10, *, sample_limit: int = 2) -> list[dict[str, Any]]:
+        project = self._require_project()
+        limit = max(0, limit)
+        sample_limit = max(0, sample_limit)
+        if limit == 0:
+            return []
+        rows = self.connection.execute(
+            """
+            WITH edge_stats AS (
+              SELECT
+                e.target_norm,
+                COUNT(*) AS link_count,
+                COUNT(DISTINCT e.line_id) AS line_count,
+                COUNT(DISTINCT e.source_page_id) AS source_page_count,
+                MAX(COALESCE(source.updated, 0)) AS latest_source_updated
+              FROM edges e
+              JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
+              WHERE e.project = ?
+              GROUP BY e.target_norm
+            ),
+            source_stats AS (
+              SELECT target_norm, SUM(views) AS total_source_views
+              FROM (
+                SELECT DISTINCT e.target_norm, e.source_page_id, source.views
+                FROM edges e
+                JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
+                WHERE e.project = ?
+              )
+              GROUP BY target_norm
+            ),
+            title_choice AS (
+              SELECT target_norm, target_title
+              FROM (
+                SELECT
+                  target_norm,
+                  target_title,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY target_norm
+                    ORDER BY COUNT(*) DESC, target_title
+                  ) AS rn
+                FROM edges
+                WHERE project = ?
+                GROUP BY target_norm, target_title
+              )
+              WHERE rn = 1
+            )
+            SELECT
+              edge_stats.target_norm,
+              title_choice.target_title,
+              edge_stats.link_count,
+              edge_stats.line_count,
+              edge_stats.source_page_count,
+              COALESCE(source_stats.total_source_views, 0) AS total_source_views,
+              edge_stats.latest_source_updated,
+              target.id IS NOT NULL AS target_page_exists
+            FROM edge_stats
+            JOIN source_stats ON source_stats.target_norm = edge_stats.target_norm
+            JOIN title_choice ON title_choice.target_norm = edge_stats.target_norm
+            LEFT JOIN pages target ON target.project = ? AND target.norm_title = edge_stats.target_norm
+            ORDER BY
+              edge_stats.link_count DESC,
+              edge_stats.source_page_count DESC,
+              total_source_views DESC,
+              edge_stats.latest_source_updated DESC,
+              title_choice.target_title
+            LIMIT ?
+            """,
+            (project, project, project, project, limit),
+        ).fetchall()
+        return [
+            {
+                "title": row["target_title"],
+                "normalized_title": row["target_norm"],
+                "target_page_exists": bool(row["target_page_exists"]),
+                "link_count": row["link_count"],
+                "line_count": row["line_count"],
+                "source_page_count": row["source_page_count"],
+                "total_source_views": row["total_source_views"],
+                "latest_source_updated": row["latest_source_updated"],
+                "examples": [
+                    edge.to_dict()
+                    for edge in self.backlinks_by_norm_query(row["target_norm"], limit=sample_limit)
+                ],
+            }
+            for row in rows
+        ]
 
     def mentions(
         self,
@@ -3593,6 +3900,120 @@ def _score_come_from_candidate(
             "uncommon_score": uncommon_score,
         },
         "rationale": rationale,
+    }
+
+
+def _source_project_names(project: str) -> set[str]:
+    names = {normalize_title(project)}
+    base, separator, _rest = project.partition(":")
+    if separator and base:
+        names.add(normalize_title(base))
+    return {name for name in names if name}
+
+
+def _cross_project_ref_from_row(
+    row: sqlite3.Row,
+    link: CrossProjectLink,
+    *,
+    target_class: str,
+) -> dict[str, Any]:
+    return {
+        "target_project": link.project,
+        "target_title": link.title,
+        "target_raw": link.raw,
+        "target_class": target_class,
+        "source_page_id": row["source_page_id"],
+        "source_title": row["source_title"],
+        "source_views": row["source_views"],
+        "source_updated": row["source_updated"],
+        "line_id": row["line_id"],
+        "line_index": row["line_index"],
+        "line_text": row["line_text"],
+    }
+
+
+def _cross_project_project_entry(
+    target_project: str,
+    refs: list[dict[str, Any]],
+    *,
+    sample_limit: int,
+    seed_limit: int,
+) -> dict[str, Any]:
+    target_counts: Counter[tuple[str, str]] = Counter(
+        (ref["target_title"], ref["target_class"])
+        for ref in refs
+    )
+    source_page_ids = {ref["source_page_id"] for ref in refs}
+    source_views_by_page = {
+        ref["source_page_id"]: int(ref["source_views"] or 0)
+        for ref in refs
+    }
+    class_counts = Counter(ref["target_class"] for ref in refs)
+    top_targets = [
+        {
+            "title": title,
+            "target_class": target_class,
+            "mention_count": mention_count,
+        }
+        for (title, target_class), mention_count in target_counts.most_common(10)
+    ]
+    seed_candidates = _cross_project_seed_candidates(refs)
+    returned_seed_candidates = seed_candidates[:seed_limit]
+    return {
+        "project": target_project,
+        "mention_count": len(refs),
+        "unique_target_count": len(target_counts),
+        "source_page_count": len(source_page_ids),
+        "total_source_views": sum(source_views_by_page.values()),
+        "target_class_counts": _count_map(class_counts),
+        "top_targets": top_targets,
+        "seed_title_count": len(seed_candidates),
+        "seed_title_limit": seed_limit,
+        "omitted_seed_title_count": max(0, len(seed_candidates) - len(returned_seed_candidates)),
+        "seed_titles": [item["title"] for item in returned_seed_candidates],
+        "seed_candidates": returned_seed_candidates,
+        "examples": refs[:sample_limit],
+    }
+
+
+def _cross_project_seed_candidates(refs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    refs_by_title: dict[str, list[dict[str, Any]]] = {}
+    for ref in refs:
+        if ref["target_class"] != "semantic" or not ref["target_title"]:
+            continue
+        refs_by_title.setdefault(ref["target_title"], []).append(ref)
+
+    candidates: list[dict[str, Any]] = []
+    for title, title_refs in refs_by_title.items():
+        source_page_ids = {ref["source_page_id"] for ref in title_refs}
+        source_views_by_page = {
+            ref["source_page_id"]: int(ref["source_views"] or 0)
+            for ref in title_refs
+        }
+        candidates.append(
+            {
+                "title": title,
+                "mention_count": len(title_refs),
+                "source_page_count": len(source_page_ids),
+                "total_source_views": sum(source_views_by_page.values()),
+                "examples": title_refs[:2],
+            }
+        )
+    candidates.sort(
+        key=lambda item: (
+            -item["mention_count"],
+            -item["source_page_count"],
+            -item["total_source_views"],
+            item["title"].casefold(),
+        )
+    )
+    return candidates
+
+
+def _count_map(counter: Counter[str]) -> dict[str, int]:
+    return {
+        key: counter.get(key, 0)
+        for key in ("semantic", "icon", "project-root", "self-project")
     }
 
 

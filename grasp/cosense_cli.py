@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import subprocess
+import time
 from typing import Any, Protocol
 from urllib.parse import quote, unquote, urlparse
 
@@ -27,6 +29,25 @@ class CosenseClient(Protocol):
 
     def search_full_text(self, project_url: str, query: str) -> dict[str, Any]:
         ...
+
+
+@dataclass
+class CosenseCliError(RuntimeError):
+    command: list[str]
+    error_class: str
+    message: str
+    returncode: int | None = None
+    stderr: str = ""
+    stdout: str = ""
+
+    def __str__(self) -> str:
+        details = self.message
+        stderr_line = first_nonempty_line(self.stderr)
+        if stderr_line and stderr_line not in details:
+            details = f"{details}: {stderr_line}"
+        if self.returncode is not None:
+            return f"{self.error_class} (exit {self.returncode}): {details}"
+        return f"{self.error_class}: {details}"
 
 
 @dataclass
@@ -64,8 +85,38 @@ class CosenseCliClient:
         return self._run_json([self.command, "searchFullText", project_url, query])
 
     def _run_json(self, command: list[str]) -> dict[str, Any]:
-        completed = subprocess.run(command, check=True, text=True, capture_output=True)
-        return json.loads(completed.stdout)
+        try:
+            completed = subprocess.run(command, check=True, text=True, capture_output=True)
+        except FileNotFoundError as error:
+            raise CosenseCliError(
+                command=command,
+                error_class="command-not-found",
+                message=f"command not found: {command[0]}",
+            ) from error
+        except subprocess.CalledProcessError as error:
+            error_class = classify_cosense_cli_failure(
+                returncode=error.returncode,
+                stderr=error.stderr or "",
+                stdout=error.stdout or "",
+            )
+            raise CosenseCliError(
+                command=command,
+                error_class=error_class,
+                message=f"cosense CLI command failed: {' '.join(command)}",
+                returncode=error.returncode,
+                stderr=error.stderr or "",
+                stdout=error.stdout or "",
+            ) from error
+        try:
+            return json.loads(completed.stdout)
+        except json.JSONDecodeError as error:
+            raise CosenseCliError(
+                command=command,
+                error_class="invalid-json",
+                message="cosense CLI returned non-JSON output",
+                stdout=completed.stdout,
+                stderr=completed.stderr,
+            ) from error
 
 
 def sync_from_cosense(
@@ -183,11 +234,24 @@ def acquire_from_cosense(
     if batch_size <= 0:
         raise ValueError("--batch-size must be > 0")
 
+    criteria = acquisition_criteria(
+        project_url=project_url,
+        searches=searches,
+        from_pages=from_pages,
+        seed_titles=seed_titles,
+        filter_name=filter_name,
+        full_list=full_list,
+        depth=depth,
+        limit=limit,
+        batch_size=batch_size,
+        sort=sort,
+    )
+    criteria_fingerprint = acquisition_criteria_fingerprint(criteria)
     modes: list[str] = []
     project_name = project
     remote_project_name: str | None = None
     remote_count: int | None = None
-    candidate_values: list[str] = []
+    candidate_entries: list[dict[str, Any]] = []
     search_results: list[dict[str, Any]] = []
     list_results: list[dict[str, Any]] = []
 
@@ -205,7 +269,7 @@ def acquire_from_cosense(
         for page in result.get("pages") or []:
             title = page.get("title")
             if title:
-                candidate_values.append(str(title))
+                candidate_entries.append(candidate_entry(str(title), source="search", metadata=page))
 
     if full_list:
         modes.append("full-list")
@@ -218,8 +282,15 @@ def acquire_from_cosense(
             batch_size=batch_size,
             filter_name=None,
         )
-        candidate_values.extend(pages)
-        list_results.append({"mode": "full-list", "count": remote_count, "returned": len(pages)})
+        candidate_entries.extend(pages)
+        list_results.append(
+            {
+                "mode": "full-list",
+                "count": remote_count,
+                "returned": len(pages),
+                "window": candidate_window(pages, sort=sort),
+            }
+        )
 
     if filter_name:
         modes.append("filter")
@@ -232,26 +303,45 @@ def acquire_from_cosense(
             batch_size=batch_size,
             filter_name=filter_name,
         )
-        candidate_values.extend(pages)
-        list_results.append({"mode": "filter", "filter": filter_name, "count": filter_count, "returned": len(pages)})
+        candidate_entries.extend(pages)
+        list_results.append(
+            {
+                "mode": "filter",
+                "filter": filter_name,
+                "count": filter_count,
+                "returned": len(pages),
+                "window": candidate_window(pages, sort=sort),
+            }
+        )
 
     if seed_titles:
         modes.append("seed-file")
-        candidate_values.extend(seed_titles)
+        candidate_entries.extend(candidate_entry(title, source="seed-file") for title in seed_titles)
 
     fetched_pages: list[dict[str, Any]] = []
     fetched_norms: set[str] = set()
     skipped_nonpersistent: list[dict[str, Any]] = []
     failed_pages: list[dict[str, Any]] = []
+    reused_pages: list[dict[str, Any]] = []
 
-    _fetch_candidate_values(
+    remote_project_name = remote_project_name or project_name_from_url(project_url)
+    project_name = project_name or f"{remote_project_name}:acquire"
+    previous_acquisition = store.project_acquisition_metadata_by_name(project_name)
+    same_criteria = previous_acquisition is not None and previous_acquisition.get("criteria_fingerprint") == criteria_fingerprint
+
+    _fetch_candidate_entries(
         client,
+        store,
         project_url,
-        candidate_values,
+        candidate_entries,
+        project_name=project_name,
+        previous_acquisition=previous_acquisition,
+        same_criteria=same_criteria,
         fetched_pages=fetched_pages,
         fetched_norms=fetched_norms,
         skipped_nonpersistent=skipped_nonpersistent,
         failed_pages=failed_pages,
+        reused_pages=reused_pages,
         limit=limit,
     )
 
@@ -269,19 +359,39 @@ def acquire_from_cosense(
             failed_pages=failed_pages,
         )
 
-    remote_project_name = remote_project_name or project_name_from_url(project_url)
-    project_name = project_name or f"{remote_project_name}:acquire"
     display_name = remote_project_name if project is not None else project_name
     source_export = f"cosense:{project_url}"
     coverage = "full-list" if full_list and remote_count is not None and len(fetched_pages) >= remote_count else "partial"
+    candidate_count = len(
+        dict.fromkeys(
+            normalize_title(str(value))
+            for value in [
+                *(entry.get("title") or entry.get("value") for entry in candidate_entries),
+                *from_pages,
+            ]
+        )
+    )
+    remote_fetched = max(0, len(fetched_pages) - len(reused_pages))
+    window = candidate_window(candidate_entries, sort=sort)
+    diagnostic = acquire_diagnostic(
+        candidate_count=candidate_count,
+        fetched_count=len(fetched_pages),
+        failed_pages=failed_pages,
+        skipped_nonpersistent=skipped_nonpersistent,
+    )
     acquisition_metadata = {
         "mode": "+".join(dict.fromkeys(modes)),
         "coverage": coverage,
+        "acquired_at": int(time.time()),
         "project_url": project_url,
         "remote_project": remote_project_name,
+        "criteria": criteria,
+        "criteria_fingerprint": criteria_fingerprint,
+        "same_criteria_as_previous": same_criteria,
         "searches": searches,
         "from_pages": from_pages,
         "seed_count": len(seed_titles),
+        "seed_fingerprint": sequence_fingerprint(seed_titles),
         "filter": filter_name,
         "full_list": full_list,
         "depth": depth,
@@ -289,9 +399,16 @@ def acquire_from_cosense(
         "batch_size": batch_size,
         "sort": sort,
         "remote_count": remote_count,
+        "candidate_count": candidate_count,
+        "candidate_window": window,
         "fetched": len(fetched_pages),
+        "remote_fetched": remote_fetched,
+        "reused": len(reused_pages),
         "skipped_nonpersistent": len(skipped_nonpersistent),
         "failed": len(failed_pages),
+        "diagnostic_type": diagnostic.get("type") if diagnostic else None,
+        "error_classes": diagnostic.get("error_classes") if diagnostic else {},
+        "page_manifest": acquisition_page_manifest(fetched_pages),
     }
     store.replace_project_with_cosense_pages(
         project_name,
@@ -310,15 +427,25 @@ def acquire_from_cosense(
         "depth": depth,
         "search_results": search_results,
         "list_results": list_results,
+        "criteria_fingerprint": criteria_fingerprint,
+        "candidate_window": window,
         "fetched": len(fetched_pages),
-        "updated": len(fetched_pages),
+        "updated": remote_fetched,
+        "remote_fetched": remote_fetched,
+        "reused": len(reused_pages),
+        "same_criteria_as_previous": same_criteria,
         "skipped_nonpersistent": skipped_nonpersistent,
         "failed_pages": failed_pages,
+        "diagnostic": diagnostic,
         "pages": [
             {
                 "id": page.get("id"),
                 "title": page.get("title"),
                 "updated": page.get("updated"),
+                "reused": normalize_title(str(page.get("title", ""))) in {
+                    str(item.get("normalized_title"))
+                    for item in reused_pages
+                },
             }
             for page in fetched_pages
         ],
@@ -335,12 +462,12 @@ def _list_page_candidates(
     limit: int,
     batch_size: int,
     filter_name: str | None,
-) -> tuple[list[str], str | None, int | None]:
-    titles: list[str] = []
+) -> tuple[list[dict[str, Any]], str | None, int | None]:
+    candidates: list[dict[str, Any]] = []
     remote_count: int | None = None
     skip = 0
-    while len(titles) < limit:
-        current_limit = min(batch_size, limit - len(titles))
+    while len(candidates) < limit:
+        current_limit = min(batch_size, limit - len(candidates))
         result = client.list_pages(
             project_url,
             sort=sort,
@@ -357,32 +484,60 @@ def _list_page_candidates(
         for page in pages:
             title = page.get("title")
             if title:
-                titles.append(str(title))
-                if len(titles) >= limit:
+                candidates.append(candidate_entry(str(title), source="listPages", metadata=page))
+                if len(candidates) >= limit:
                     break
         skip += len(pages)
-    return titles, project_name, remote_count
+    return candidates, project_name, remote_count
 
 
-def _fetch_candidate_values(
+def _fetch_candidate_entries(
     client: CosenseClient,
+    store: SQLiteStore,
     project_url: str,
-    values: list[str],
+    entries: list[dict[str, Any]],
     *,
+    project_name: str,
+    previous_acquisition: dict[str, Any] | None,
+    same_criteria: bool,
     fetched_pages: list[dict[str, Any]],
     fetched_norms: set[str],
     skipped_nonpersistent: list[dict[str, Any]],
     failed_pages: list[dict[str, Any]],
+    reused_pages: list[dict[str, Any]],
     limit: int,
 ) -> None:
     queued: set[str] = set()
-    for value in values:
+    for entry in entries:
         if len(fetched_pages) >= limit:
             break
+        value = str(entry.get("value") or entry.get("title") or "")
         queue_key = normalize_title(value)
         if queue_key in queued:
             continue
         queued.add(queue_key)
+        reusable_page = reusable_candidate_page(
+            store,
+            project_name,
+            entry,
+            previous_acquisition=previous_acquisition,
+            same_criteria=same_criteria,
+        )
+        if reusable_page is not None:
+            norm = normalize_title(str(reusable_page.get("title", "")))
+            if norm in fetched_norms:
+                continue
+            fetched_norms.add(norm)
+            fetched_pages.append(reusable_page)
+            reused_pages.append(
+                {
+                    "id": reusable_page.get("id"),
+                    "title": reusable_page.get("title"),
+                    "normalized_title": norm,
+                    "updated": reusable_page.get("updated"),
+                }
+            )
+            continue
         _fetch_one_page(
             client,
             project_url,
@@ -392,6 +547,263 @@ def _fetch_candidate_values(
             skipped_nonpersistent=skipped_nonpersistent,
             failed_pages=failed_pages,
         )
+
+
+def acquisition_criteria(
+    *,
+    project_url: str,
+    searches: list[str],
+    from_pages: list[str],
+    seed_titles: list[str],
+    filter_name: str | None,
+    full_list: bool,
+    depth: int,
+    limit: int,
+    batch_size: int,
+    sort: str,
+) -> dict[str, Any]:
+    return {
+        "project_url": canonical_project_url(project_url),
+        "searches": list(searches),
+        "from_pages": list(from_pages),
+        "seed_titles": list(seed_titles),
+        "filter": filter_name,
+        "full_list": full_list,
+        "depth": depth,
+        "limit": limit,
+        "batch_size": batch_size,
+        "sort": sort,
+    }
+
+
+def acquisition_criteria_fingerprint(criteria: dict[str, Any]) -> str:
+    return stable_json_fingerprint(criteria)
+
+
+def sequence_fingerprint(values: list[str]) -> str:
+    return stable_json_fingerprint(list(values))
+
+
+def stable_json_fingerprint(value: Any) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def canonical_project_url(project_url: str) -> str:
+    return project_url.rstrip("/") + "/"
+
+
+def candidate_entry(value: str, *, source: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    metadata = metadata or {}
+    title = str(metadata.get("title") or value)
+    updated = metadata.get("updated")
+    return {
+        "value": str(value),
+        "source": source,
+        "id": metadata.get("id"),
+        "title": title,
+        "normalized_title": normalize_title(title),
+        "updated": updated,
+        "updated_epoch": parse_cosense_time(updated),
+        "pin": metadata.get("pin"),
+    }
+
+
+def candidate_window(entries: list[dict[str, Any]], *, sort: str) -> dict[str, Any]:
+    source_counts: dict[str, int] = {}
+    updated_entries = []
+    for entry in entries:
+        source = str(entry.get("source") or "unknown")
+        source_counts[source] = source_counts.get(source, 0) + 1
+        updated_epoch = entry.get("updated_epoch")
+        if updated_epoch is not None:
+            updated_entries.append(entry)
+
+    updated_range: dict[str, Any] | None = None
+    if updated_entries:
+        newest = max(updated_entries, key=lambda entry: int(entry["updated_epoch"]))
+        oldest = min(updated_entries, key=lambda entry: int(entry["updated_epoch"]))
+        updated_range = {
+            "newest_epoch": newest.get("updated_epoch"),
+            "newest": newest.get("updated"),
+            "newest_title": newest.get("title"),
+            "oldest_epoch": oldest.get("updated_epoch"),
+            "oldest": oldest.get("updated"),
+            "oldest_title": oldest.get("title"),
+        }
+
+    return {
+        "sort": sort,
+        "candidate_count": len(entries),
+        "candidates_with_updated": len(updated_entries),
+        "source_counts": source_counts,
+        "updated_range": updated_range,
+    }
+
+
+def reusable_candidate_page(
+    store: SQLiteStore,
+    project_name: str,
+    entry: dict[str, Any],
+    *,
+    previous_acquisition: dict[str, Any] | None,
+    same_criteria: bool,
+) -> dict[str, Any] | None:
+    if not same_criteria or previous_acquisition is None:
+        return None
+    updated_epoch = entry.get("updated_epoch")
+    if updated_epoch is None:
+        return None
+    norm_title = str(entry.get("normalized_title") or normalize_title(str(entry.get("title") or entry.get("value") or "")))
+    page_manifest = previous_acquisition.get("page_manifest")
+    if not isinstance(page_manifest, dict):
+        return None
+    previous_page = page_manifest.get(norm_title)
+    if not isinstance(previous_page, dict):
+        return None
+    if _int_or_none(previous_page.get("updated")) != int(updated_epoch):
+        return None
+    stored_page = store.cosense_page_dict_by_norm(project_name, norm_title)
+    if stored_page is None:
+        return None
+    if parse_cosense_time(stored_page.get("updated")) != int(updated_epoch):
+        return None
+    return stored_page
+
+
+def acquisition_page_manifest(pages: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    manifest: dict[str, dict[str, Any]] = {}
+    for page in pages:
+        title = page.get("title")
+        if not title:
+            continue
+        norm_title = normalize_title(str(title))
+        manifest[norm_title] = {
+            "id": page.get("id"),
+            "title": title,
+            "updated": parse_cosense_time(page.get("updated")),
+        }
+    return manifest
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def failed_page_entry(value: str, page_url: str, error: Exception) -> dict[str, Any]:
+    if isinstance(error, CosenseCliError):
+        entry: dict[str, Any] = {
+            "title_or_url": value,
+            "url": page_url,
+            "error": str(error),
+            "error_class": error.error_class,
+        }
+        if error.returncode is not None:
+            entry["returncode"] = error.returncode
+        stderr_line = first_nonempty_line(error.stderr)
+        if stderr_line:
+            entry["stderr"] = stderr_line
+        return entry
+    return {
+        "title_or_url": value,
+        "url": page_url,
+        "error": str(error),
+        "error_class": classify_exception(error),
+    }
+
+
+def acquire_diagnostic(
+    *,
+    candidate_count: int,
+    fetched_count: int,
+    failed_pages: list[dict[str, Any]],
+    skipped_nonpersistent: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not failed_pages and not skipped_nonpersistent:
+        return None
+
+    error_classes = count_error_classes(failed_pages)
+    if candidate_count > 0 and fetched_count == 0 and failed_pages:
+        diagnostic_type = "all_failed"
+        severity = "warning"
+        message = "all candidate pages failed to fetch; acquired corpus is empty"
+    elif candidate_count > 0 and fetched_count == 0 and skipped_nonpersistent:
+        diagnostic_type = "no_persistent_pages"
+        severity = "warning"
+        message = "all fetched candidates were nonpersistent; acquired corpus is empty"
+    elif skipped_nonpersistent and not failed_pages:
+        diagnostic_type = "partial_nonpersistent"
+        severity = "warning"
+        message = "some candidate pages were nonpersistent and skipped"
+    else:
+        diagnostic_type = "partial_failures"
+        severity = "warning"
+        message = "some candidate pages failed to fetch"
+
+    return {
+        "type": diagnostic_type,
+        "severity": severity,
+        "message": message,
+        "candidate_count": candidate_count,
+        "fetched": fetched_count,
+        "failed": len(failed_pages),
+        "skipped_nonpersistent": len(skipped_nonpersistent),
+        "error_classes": error_classes,
+        "next_actions": acquire_next_actions(error_classes),
+    }
+
+
+def count_error_classes(failed_pages: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for page in failed_pages:
+        error_class = str(page.get("error_class") or "unknown")
+        counts[error_class] = counts.get(error_class, 0) + 1
+    return counts
+
+
+def acquire_next_actions(error_classes: dict[str, int]) -> list[str]:
+    actions: list[str] = []
+    if "command-not-found" in error_classes:
+        actions.append("Install @helpfeel/cosense-cli or pass --cosense-command pointing to a working cosense wrapper.")
+    if "command-env" in error_classes:
+        actions.append("Ensure node is on PATH for the cosense CLI; a symlinked cosense binary can still fail if env cannot find node.")
+    if "permission" in error_classes:
+        actions.append("Check that the cosense CLI is logged in and that the hosted project/pages are readable.")
+    if "page-not-found" in error_classes:
+        actions.append("Check seed titles/URLs; some referenced pages may be moved, deleted, or inaccessible.")
+    if not actions and error_classes:
+        actions.append("Inspect failed_pages[].error and retry with a smaller seed file or known readable page.")
+    return actions
+
+
+def classify_exception(error: Exception) -> str:
+    if isinstance(error, FileNotFoundError):
+        return "command-not-found"
+    return "unknown"
+
+
+def classify_cosense_cli_failure(*, returncode: int, stderr: str, stdout: str) -> str:
+    text = f"{stderr}\n{stdout}".casefold()
+    if returncode == 127 or "env: node" in text or "node: no such file" in text or "node: command not found" in text:
+        return "command-env"
+    if "forbidden" in text or "unauthorized" in text or "permission" in text or "login" in text or "not logged in" in text:
+        return "permission"
+    if "not found" in text or "404" in text:
+        return "page-not-found"
+    return "command-failed"
+
+
+def first_nonempty_line(value: str) -> str:
+    for line in value.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return ""
 
 
 def _crawl_from_pages(
@@ -443,12 +855,19 @@ def _fetch_one_page(
     try:
         page = client.read_page(page_url)
     except Exception as error:  # cosense CLI/network failures should not abort the whole slice.
-        failed_pages.append({"title_or_url": value, "url": page_url, "error": str(error)})
+        failed_pages.append(failed_page_entry(value, page_url, error))
         return None
 
     title = page.get("title")
     if not title:
-        failed_pages.append({"title_or_url": value, "url": page_url, "error": "readPage result has no title"})
+        failed_pages.append(
+            {
+                "title_or_url": value,
+                "url": page_url,
+                "error": "readPage result has no title",
+                "error_class": "invalid-page",
+            }
+        )
         return None
     if not page.get("persistent", True):
         skipped_nonpersistent.append({"title": title, "url": page_url})

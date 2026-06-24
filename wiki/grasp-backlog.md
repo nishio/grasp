@@ -304,12 +304,24 @@ surface 名は未決。重要なのは、raw dump ではなく **bounded candida
 2026-06-24 dogfood: `/nishio` の `[/` cross-project refs から semantic refs 上位 project を `--seed-file` acquire した（[[cross-project-reference-acquire-2026-06-24]]）。観測:
 
 - raw `[/` refs は `.icon` と project-root refs が多く、semantic seed 生成前に target class 分類が必要。
-- 現行 `grasp search` は line text retrieval なので、`--mode boolean` の `NOT .icon` は line-level workaround に過ぎない。同じ行の semantic link まで落とし、root refs は残り、複数 link target の個別分類はできない。cross-project refs には parsed link target query / extraction surface が必要。
-- `cosense` binary への絶対パスを `--cosense-command` に渡しても、shebang が `#!/usr/bin/env node` なので PATH に対応する `node` が無いと exit 127 になる。docs / diagnostics は "cosense exists" だけでなく "node is resolvable" も見るべき。
-- `acquire` は全 candidate が `failed_pages` に落ちても exit 0 で partial acquisition result を返す。機械処理には一貫しているが、agent-facing には `fetched=0 && failed>0` を強く警告する field / text が必要。
-- `failed_pages.error` は non-zero exit status だけで、permission / nonpersistent / not found / command-env failure の区別が薄い。compact error class を持たせたい。
+- dogfood 時点の `grasp search` は line text retrieval なので、`--mode boolean` の `NOT .icon` は line-level workaround に過ぎなかった。同じ行の semantic link まで落とし、root refs は残り、複数 link target の個別分類はできない。この gap は `cross-project-refs` の target-aware extraction として実装した。
+- `cosense` binary への絶対パスを `--cosense-command` に渡しても、shebang が `#!/usr/bin/env node` なので PATH に対応する `node` が無いと exit 127 になる。この fetch-stage case は `acquire` diagnostics の `command-env` として実装済み。残るのは search/list seed discovery phase で同じ環境診断を返すこと。
+- `acquire` は全 candidate が `failed_pages` に落ちても exit 0 で partial acquisition result を返す。機械処理には一貫しているため、fetch-stage は `diagnostic.type=all_failed` / `failed_pages[].error_class` で警告する実装にした。残る問いは、この exit 0 方針を維持するか。
 
 2026-06-24 dogfood: public `https://scrapbox.io/villagepump/` の日記ページから `[nishio.icon]` 付き段落を抽出する use case で、実行環境に `cosense` binary がなく `grasp acquire` を使えなかった。Scrapbox public API 自体は `curl https://scrapbox.io/api/pages/villagepump?...` と `curl https://scrapbox.io/api/pages/villagepump/<title>` で読めたため、read-only public project には `cosense-cli` 依存なしの direct API fallback があると agent 実験の摩擦が下がる。副観測: `search/query?q=[nishio.icon]` は 100 件固定で `skip` が効かず、網羅抽出には `pages?sort=title` で date title を列挙して各 page を読む必要があった。
+
+2026-06-24 追加実装済み:
+
+- `cross-project-refs`: 保存済み行テキストから Cosense shorthand `[/project/page]` を parsed link target として抽出し、semantic / icon / project-root / self-project に分類して project 別に rank する。`--semantic-only` は `.icon` / project-root / self-project を除いて external semantic page refs だけを返す。これは `search "[/"` の line-level workaround ではなく、seed bibliography の前処理 surface。
+- `cross-project-refs --seed-dir <folder>`: returned project ごとに semantic target title の seed file を書き、`grasp --project <project>:semantic acquire <url> --seed-file <file> --limit N` の runnable command を `acquire_recipe` として返す。`--seed-limit` で project ごとの seed title 数を制御する。
+- `acquire` diagnostics: fetch failures に `failed_pages[].error_class` を付け、全 candidate fetch 失敗時は `diagnostic.type=all_failed` / `severity=warning` / `next_actions[]` を返す。`cosense` は見つかるが shebang の `env node` が失敗するケースは `command-env` に分類する。
+- `cross-project-acquire`: `cross-project-refs --semantic-only` の seed titles から複数 target project を `<project>:semantic` namespace に順次 partial acquire し、project ごとの bounded summary を返す。`--dry-run` で plan のみ確認できる。取得後 summary には `reciprocal_refs` と `top_internal_links` を同梱する。
+
+残課題:
+
+- `cross-project-acquire` の実データ dogfood、project ranking / target ranking の weighting 調整、取得後 summary の signal 改善（reciprocal refs / top internal links の ranking、cluster handoff など）。
+- `cosense` / `node` 環境診断の seed discovery phase（`searchFullText` / `listPages`）への拡張。fetch phase は実装済み。
+- direct public API fallback。
 
 候補:
 
@@ -319,7 +331,7 @@ surface 名は未決。重要なのは、raw dump ではなく **bounded candida
 - **link crawl seed**: 指定 page / title / URL から `readPage` し、本文の internal links / `projectLinks` を parse して BFS で辿る。`--depth`, `--limit`, `--include-cross-project`, `--same-project-only` のような境界が必要。孤立 page や seed から到達不能な page は拾えない。
 - **manual seed list**: URL/title のリストを渡して `readPage` する。Slack や会話ログから抽出した page list、または user が明示した重要 page 群の取り込みに向く。
 - **direct public API fallback**: `cosense` binary / Node が無い環境でも、public project は Scrapbox API で page list / page body を読める。公式 CLI の挙動差を吸収する adapter として実装するなら、auth が必要な project では従来通り `cosense-cli` に戻す。
-- **parsed cross-project refs seed**: local store の parsed edges / line text から `[/project/page]` refs を抽出し、target class（semantic/icon/root）・source page spread・example lines を返す。`search "[/"` + external script ではなく、seed-file generation まで行う cross-project acquisition preflight。
+- **parsed cross-project refs seed**: `cross-project-refs` の抽出・分類、seed-file generation、acquire command bundle、複数 project の一括 acquire orchestration は実装済み。残るのは実データ dogfood と取得後 summary の richer report 化。
 
 設計上の注意:
 
@@ -335,13 +347,14 @@ surface 候補:
 - `grasp acquire <project-url> --filter <name> [--limit N]`（初期実装済み）
 - `grasp acquire <project-url> --from-page <title-or-url> --depth N --limit N`（初期実装済み）
 - `grasp acquire <project-url> --seed-file pages.txt`（初期実装済み）
-- `grasp cross-project-refs [--exclude-icons] [--json]` または `grasp links --cross-project --classify-targets`（未実装案）
+- `grasp cross-project-refs [--semantic-only] [--exclude-icons] [--seed-dir <folder>] [--json]`（抽出・分類・seed file / acquire command 生成は実装済み）
+- `grasp cross-project-acquire [--limit N] [--seed-limit N] [--dry-run] [--json]`（semantic refs から複数 project を `<project>:semantic` へ取得する orchestration は実装済み）
 
 Open Questions:
 
 - `listPages` は非 admin readable project で全ページを pageinate できるか。
 - `searchFullText` は `[nishio.icon]` や `[/nishio/` を literal に扱うか。検索上限を超えた場合の pagination / continuation はあるか。
-- parsed link extraction を `search` の option に足すべきか、`links` / `cross-project-refs` の別 verb にするべきか。`search` に足すと text retrieval と link-target query の責務が混ざる。
+- parsed link extraction を `search` ではなく `cross-project-refs` の別 verb とした。seed-file / acquire command 生成と実 acquire orchestration、reciprocal refs / top internal links summary は接続済み。残る問いは、取得後の richer summary（cluster handoff / representative theme bundle）を CLI がどこまで担うか。
 - direct public API fallback を入れる場合、Scrapbox API と cosense-cli の metadata / auth / rate limit / search semantics の差をどこまで surface に出すか。
 - `readPage` の hosted line id を採用するか。現行方針は export/sync と同じく grasp 側で `page.id:line-index` を維持。
 - partial corpus で `sync` する時、seed predicate 外の recently updated page を取り込むべきか、acquisition mode ごとの sync 動詞に分けるべきか。

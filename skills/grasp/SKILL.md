@@ -116,6 +116,18 @@ description: >-
 - URL/title リスト: `grasp --project <project:seed> acquire <url> --seed-file pages.txt`
 
 `acquire` は対象 project namespace を置き換える（append しない）。既存 full export を誤って潰さないよう、`--project` 省略時の local namespace は `<remote-project>:acquire` になる。partial corpus の `backlinks` / `related` / `unresolved` は「取得済み subset 内」の結果であり、hosted project 全体の事実として答えない。`grasp stats` の Acquisition 節で coverage を確認する。
+取得候補が全て失敗しても partial acquisition report として exit 0 で返ることがある。`diagnostic.type=all_failed`、`failed_pages[].error_class`、`diagnostic.next_actions` を見て、`cosense` binary / `node` PATH / login / seed title を切り分ける。
+
+既存 store 内の `[/project/page]` refs を外部 project acquisition の seed bibliography として使う時は `grasp cross-project-refs` を先に見る。これは `search "[/"` ではなく parsed link target extraction なので、`.icon` / project root / self-project / semantic page ref を target 単位で分けられる。
+
+```bash
+grasp --project <source-project> cross-project-refs --semantic-only --limit 20
+grasp --project <source-project> cross-project-refs --semantic-only --limit 20 --seed-dir /tmp/grasp-seeds
+grasp --project <source-project> cross-project-acquire --limit 5 --seed-limit 10 --dry-run
+```
+
+`--semantic-only` は `.icon`、project root、自 projectへの refs を除き、外部 project の page refs だけを rank する。`--seed-dir` を付けると target project ごとに seed file を書き、対応する `grasp --project <project>:semantic acquire ... --seed-file ...` command も返す。raw な混在を見たい時は `--exclude-icons` や `--include-self` を使い分ける。
+実取得まで行う時は `cross-project-acquire` を使う。これは `cross-project-refs --semantic-only` の seed titles を使って target project を `<project>:semantic` namespace に順に partial acquire し、各 project の fetched / failed / diagnostic / reciprocal refs / top internal links を bounded summary として返す。store を更新するので、まず `--dry-run` で計画を確認する。
 
 ## verb 一覧（snapshot — 詳細は各 `grasp <cmd> --help`）
 
@@ -129,6 +141,8 @@ description: >-
 | `path <A> <B>` | pages / page なし target 間の短いリンク経路（no-path 時も recovery hints） |
 | `mentions <query>` | literal query の裸言及を link span 外 occurrence として数え、page-level link status と come-from 昇格候補 score を返す。`--unlinked` で no-link-handle page に絞る |
 | `co-links <query>` | query を含む行で同時に出る internal links を rank し、hub の slice handle を返す。`target_relation` と `--rank slice|raw` あり |
+| `cross-project-refs` | Cosense shorthand `[/project/page]` を target-aware に抽出し、semantic / `.icon` / project root / self-project に分類して project 別に rank。`--seed-dir` で acquire seed files / commands を生成 |
+| `cross-project-acquire` | `cross-project-refs --semantic-only` の seed titles から複数 hosted project を `<project>:semantic` に一括 partial acquire。`--dry-run` あり。実行後は reciprocal refs / top internal links も返す |
 | `gather <query>` | link stats・裸言及 summary・co-link slices・backlinks・next recipes の bounded bundle。row 単位の returned / total / omitted counts 付き |
 | `link-stats <title>` | incoming link count と 0/1/N |
 | `unresolved` | 未解決 target の rank view（TODO ではない） |

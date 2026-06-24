@@ -48,6 +48,11 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
+| `1.5.22` | schema `5` | 2026-06-24 | schema `5` compatible | `cross-project-acquire` の取得後 summary に `reciprocal_refs` と `top_internal_links` を追加。取得した `<project>:semantic` slice 内で source project へ戻る `[/source/...]` refs と、partial corpus 内の上位 internal link targets を bounded に返す。store schema は不変 |
+| `1.5.21` | schema `5` | 2026-06-24 | schema `5` compatible | `cross-project-acquire` を追加。`cross-project-refs --semantic-only` の seed titles から複数 target project を `<project>:semantic` namespace に一括 partial acquire し、project ごとの fetched / failed / diagnostic / page sample を bounded summary として返す。`--dry-run` で plan のみ確認できる。store schema は不変 |
+| `1.5.20` | schema `5` | 2026-06-24 | schema `5` compatible | `acquire` fetch failure diagnostics を追加。`failed_pages[].error_class` と top-level `diagnostic` を返し、全 candidate fetch 失敗時は `diagnostic.type=all_failed` / `next_actions[]` で空 partial corpus の誤読を防ぐ。`cosense` symlink はあるが `env node` が失敗する case は `command-env` に分類する。store schema は不変 |
+| `1.5.19` | schema `5` | 2026-06-24 | schema `5` compatible | `cross-project-refs` に seed preflight を追加。各 target project に semantic `seed_titles` / `seed_candidates` / `acquire_recipe` を返し、`--seed-dir` 指定時は project 別 seed file と runnable `acquire --seed-file` command を生成する。store schema は不変 |
+| `1.5.18` | schema `5` | 2026-06-24 | schema `5` compatible | `cross-project-refs` を追加。保存済み行テキストから Cosense shorthand `[/project/page]` を parsed link target として抽出し、semantic / icon / project-root / self-project に分類して project 別に rank する。`search "[/"` の line-level workaround ではなく target-aware extraction として、cross-project acquisition seed 生成の前処理に使う。store schema と materialized internal edges は不変 |
 | `1.5.17` | schema `5` | 2026-06-24 | schema `5` compatible | `co-links` に `--rank slice|raw` と `target_relation` を追加。既定 `slice` は query-containing target title を後ろへ回して narrower slice handle を先に出し、`raw` は従来の count order を保持する。`gather` は slice ranking を明示する。store schema は不変 |
 | `1.5.16` | schema `5` | 2026-06-24 | schema `5` compatible | `mentions` summary に come-from 昇格候補の初期 heuristic scoring を追加し、`gather` に returned / total / omitted row counts と count basis を追加。`gather --budget` は引き続き厳密 token packing ではない。store schema は不変 |
 | `1.5.15` | schema `5` | 2026-06-24 | schema `5` compatible | `mentions --unlinked` を追加。bare mention のうち、page に query-containing link target が無い `unlinked-page` だけを返す明示 surface。summary は全 literal hit の監査値を維持し、returned lines のみ絞る。store schema は不変 |
@@ -75,6 +80,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.5.17`
+- Current public compatibility version: `1.5.22`
 - Current internal `SCHEMA_VERSION`: `5`
-- Current package metadata should match `1.5.17`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.5.22`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

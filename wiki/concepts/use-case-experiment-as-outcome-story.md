@@ -75,6 +75,8 @@ sources:
 
 一方で、one-off script / `.icon` filtering / `cosense` PATH wrapper / all-failed acquisition warning は surface gap。したがってこの実験の product implication は「cross-project refs discovery → semantic seed generation → acquire → bounded summary」を標準 workflow に寄せること。
 
+2026-06-24 follow-up: `cross-project-refs --semantic-only --seed-dir` により、parsed cross-project refs discovery、`.icon` / root / self 分類、semantic seed-file generation、acquire command bundle までは first-class surface になった。`acquire` fetch-stage diagnostics により `cosense` / `node` command-env と all-failed warning も返るようになった。さらに `cross-project-acquire` により、semantic seed titles から複数 project を `<project>:semantic` namespace へ一括 partial acquire し、project ごとの fetched / failed / diagnostic / page sample / reciprocal refs / top internal links を bounded summary として返せる。残る gap は、seed discovery phase の環境診断と、取得後 signal の cluster / narrative handoff。
+
 2026-06-24 process observation: the `.icon` issue also clarified a boundary of `search`. `grasp search` answers "which lines contain this text / boolean expression?", not "which parsed links on this line have this target class?". `NOT .icon` is sometimes useful as a quick line-level approximation, but it is not a semantic/icon/root classifier. For use-case experiments, this distinction matters: if the outcome depends on parsed links, the report should say so and avoid presenting clever text search as the real surface.
 
 ## Open Questions

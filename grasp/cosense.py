@@ -90,6 +90,91 @@ def parse_cosense_links(text: str) -> list[str]:
     return links
 
 
+@dataclass(frozen=True)
+class CrossProjectLink:
+    raw: str
+    project: str
+    title: str
+    target_class: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "raw": self.raw,
+            "project": self.project,
+            "title": self.title,
+            "target_class": self.target_class,
+        }
+
+
+def parse_cosense_cross_project_links(text: str) -> list[CrossProjectLink]:
+    """Extract Cosense shorthand links such as [/project/Page].
+
+    These are not internal graph edges for the current project, but they are
+    useful as hosted acquisition seeds. Keep this parser separate from
+    parse_cosense_links so existing materialized graph semantics do not change.
+    """
+    links: list[CrossProjectLink] = []
+    index = 0
+    while index < len(text):
+        if text[index] != "[":
+            index += 1
+            continue
+
+        start = index
+        if start + 1 < len(text) and text[start + 1] == "[":
+            close = text.find("]]", start + 2)
+            index = len(text) if close == -1 else close + 2
+            continue
+
+        close = text.find("]", start + 1)
+        if close == -1:
+            break
+
+        if is_inside_inline_code(text, start) or is_ascii_index_syntax(text, start):
+            index = close + 1
+            continue
+
+        content = text[start + 1 : close].strip()
+        link = parse_cosense_cross_project_link_token(content)
+        if link is not None:
+            links.append(link)
+        index = close + 1
+
+    return links
+
+
+def parse_cosense_cross_project_link_token(content: str) -> CrossProjectLink | None:
+    token = content.strip()
+    if len(token) < 2 or not token.startswith("/"):
+        return None
+    if token[1].isspace():
+        return None
+    if "[" in token or "]" in token:
+        return None
+
+    rest = token[1:]
+    project, separator, title = rest.partition("/")
+    project = project.strip()
+    if not project:
+        return None
+    title = title.strip() if separator else ""
+    return CrossProjectLink(
+        raw=token,
+        project=project,
+        title=title,
+        target_class=classify_cross_project_target(title),
+    )
+
+
+def classify_cross_project_target(title: str) -> str:
+    if not title:
+        return "project-root"
+    lower = title.casefold()
+    if lower.endswith(".icon") or lower.endswith(".img"):
+        return "icon"
+    return "semantic"
+
+
 def parse_cosense_hash_tag(text: str, start: int) -> tuple[str, int] | None:
     if is_inside_inline_code(text, start):
         return None

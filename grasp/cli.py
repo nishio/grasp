@@ -420,6 +420,79 @@ def build_parser() -> argparse.ArgumentParser:
     co_links_parser.add_argument("--include-self", action="store_true", help="Include links whose target exactly matches the query.")
     co_links_parser.add_argument("--rank", choices=["slice", "raw"], default="slice", help="Ranking mode: slice demotes query-containing target titles; raw keeps count order.")
 
+    cross_project_refs_parser = add_command_parser(
+        subparsers,
+        "cross-project-refs",
+        help="Rank parsed Cosense cross-project slash links.",
+        description=(
+            "Extract target-aware Cosense shorthand links like [/project/Page] from stored line text, "
+            "classify semantic/icon/project-root/self-project targets, and rank target projects. "
+            "This is parsed link extraction, not line text search."
+        ),
+        returns="project, filters, limit, sample_limit, seed_limit, summary, acquire_plan, projects[]",
+        examples=[
+            "grasp cross-project-refs --limit 20",
+            "grasp cross-project-refs --semantic-only --limit 12",
+            "grasp cross-project-refs --semantic-only --seed-dir /tmp/grasp-seeds --limit 12",
+            "grasp cross-project-refs --exclude-icons --sample-limit 5",
+            "grasp --json cross-project-refs --semantic-only --limit 10",
+        ],
+        notes=[
+            "projects[] items include project, mention_count, unique_target_count, source_page_count, total_source_views, target_class_counts, seed_titles[], top_targets[], and examples[].",
+            "Default output excludes refs back to the selected source project; use --include-self to keep them.",
+            "--semantic-only keeps only non-self, non-icon, non-root page refs for acquisition seed analysis.",
+            "--seed-dir writes one seed file per returned project and adds runnable acquire commands.",
+        ],
+    )
+    cross_project_refs_parser.add_argument("--limit", type=int, default=50, help="Maximum target projects to return.")
+    cross_project_refs_parser.add_argument("--sample-limit", type=int, default=3, help="Maximum example lines per target project.")
+    cross_project_refs_parser.add_argument("--seed-limit", type=int, default=20, help="Maximum semantic target titles to include per project for seed files/recipes.")
+    cross_project_refs_parser.add_argument("--seed-dir", type=Path, default=None, help="Write one acquire seed file per returned project into this folder.")
+    cross_project_refs_parser.add_argument("--project-url-base", default="https://scrapbox.io/", help="Base URL used in generated acquire commands.")
+    cross_project_refs_parser.add_argument("--acquire-limit", type=int, default=None, help="Limit value used in generated acquire commands; defaults to --seed-limit.")
+    cross_project_refs_parser.add_argument("--include-self", action="store_true", help="Include slash refs back to the selected source project.")
+    cross_project_refs_parser.add_argument("--exclude-icons", action="store_true", help="Exclude .icon/.img target refs from returned project ranking.")
+    cross_project_refs_parser.add_argument("--semantic-only", action="store_true", help="Return only semantic cross-project page refs, excluding icons, project roots, and self-project refs.")
+
+    cross_project_acquire_parser = add_command_parser(
+        subparsers,
+        "cross-project-acquire",
+        help="Acquire semantic slices from projects referenced by slash links.",
+        description=(
+            "Use parsed cross-project refs from the selected source project as seed titles, then "
+            "acquire each target project into an explicit local namespace such as <project>:semantic. "
+            "This mutates the local store unless --dry-run is used."
+        ),
+        returns=(
+            "source_project, dry_run, limits, project_url_base, local_suffix, refs_summary, "
+            "summary, projects[]"
+        ),
+        examples=[
+            "grasp --project nishio cross-project-acquire --limit 5 --seed-limit 10",
+            "grasp --project nishio cross-project-acquire --limit 12 --seed-limit 20 --acquire-limit 20",
+            "grasp --project nishio cross-project-acquire --limit 5 --dry-run --json",
+        ],
+        notes=[
+            "This is the executing counterpart to cross-project-refs --semantic-only.",
+            "Each target project is acquired from its semantic seed_titles only; searchFullText/listPages are not used.",
+            "The local namespace defaults to <target-project>:semantic so full export namespaces are not overwritten.",
+            "Returned project rows are bounded summaries, not full acquire payloads.",
+            "Successful project rows include reciprocal_refs back to the source project and top_internal_links from the acquired slice.",
+        ],
+    )
+    cross_project_acquire_parser.add_argument("--limit", type=int, default=5, help="Maximum target projects to acquire.")
+    cross_project_acquire_parser.add_argument("--sample-limit", type=int, default=2, help="Maximum source example lines per target project.")
+    cross_project_acquire_parser.add_argument("--seed-limit", type=int, default=20, help="Maximum semantic target titles to use per target project.")
+    cross_project_acquire_parser.add_argument("--acquire-limit", type=int, default=None, help="Maximum persistent pages to fetch per target project; defaults to --seed-limit.")
+    cross_project_acquire_parser.add_argument("--page-sample-limit", type=int, default=5, help="Maximum acquired page titles to include per project summary.")
+    cross_project_acquire_parser.add_argument("--failed-sample-limit", type=int, default=3, help="Maximum failed page entries to include per project summary.")
+    cross_project_acquire_parser.add_argument("--top-links-limit", type=int, default=5, help="Maximum top internal link targets to include from each acquired slice.")
+    cross_project_acquire_parser.add_argument("--summary-sample-limit", type=int, default=2, help="Maximum reciprocal/internal-link example lines per acquired slice.")
+    cross_project_acquire_parser.add_argument("--project-url-base", default="https://scrapbox.io/", help="Base URL used to fetch target projects.")
+    cross_project_acquire_parser.add_argument("--local-suffix", default="semantic", help="Local namespace suffix; target project X becomes X:<suffix>.")
+    cross_project_acquire_parser.add_argument("--cosense-command", default="cosense", help="cosense CLI binary.")
+    cross_project_acquire_parser.add_argument("--dry-run", action="store_true", help="Return the acquire plan without fetching or mutating the store.")
+
     gather_parser = add_command_parser(
         subparsers,
         "gather",
@@ -533,7 +606,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "project_url, project, modes[], coverage, limit, depth, search_results[], "
-            "list_results[], fetched, updated, skipped_nonpersistent[], failed_pages[], pages[], stats"
+            "list_results[], criteria_fingerprint, candidate_window, fetched, updated, remote_fetched, "
+            "reused, same_criteria_as_previous, skipped_nonpersistent[], failed_pages[], diagnostic|null, pages[], stats"
         ),
         examples=[
             "grasp --project nishio:search acquire https://scrapbox.io/nishio/ --search '[nishio.icon]' --limit 50",
@@ -545,6 +619,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Requires @helpfeel/cosense-cli's `cosense` binary in PATH and a working login.",
             "The acquired project namespace is replaced, not appended, so slice coverage stays explicit.",
             "If --project is omitted, the local namespace defaults to <remote-project>:acquire to avoid overwriting a full export.",
+            "For the same acquisition criteria, pages with unchanged hosted updated timestamps are reused from the local store instead of read again.",
             "For partial corpora, backlinks/related/unresolved describe only acquired pages.",
         ],
     )
@@ -854,6 +929,38 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             "include_self": args.include_self,
             "rank_mode": args.rank,
         }
+    if args.command == "cross-project-refs":
+        result = store.cross_project_refs(
+            limit=args.limit,
+            sample_limit=args.sample_limit,
+            seed_limit=args.seed_limit,
+            include_self=args.include_self,
+            exclude_icons=args.exclude_icons,
+            semantic_only=args.semantic_only,
+        )
+        add_cross_project_acquire_recipes(
+            result,
+            seed_dir=args.seed_dir,
+            project_url_base=args.project_url_base,
+            acquire_limit=args.acquire_limit if args.acquire_limit is not None else args.seed_limit,
+        )
+        return result
+    if args.command == "cross-project-acquire":
+        return run_cross_project_acquire(
+            store,
+            client=CosenseCliClient(args.cosense_command),
+            limit=args.limit,
+            sample_limit=args.sample_limit,
+            seed_limit=args.seed_limit,
+            acquire_limit=args.acquire_limit if args.acquire_limit is not None else args.seed_limit,
+            page_sample_limit=args.page_sample_limit,
+            failed_sample_limit=args.failed_sample_limit,
+            top_links_limit=args.top_links_limit,
+            summary_sample_limit=args.summary_sample_limit,
+            project_url_base=args.project_url_base,
+            local_suffix=args.local_suffix,
+            dry_run=args.dry_run,
+        )
     if args.command == "gather":
         return store.gather(
             args.query,
@@ -920,6 +1027,313 @@ def read_seed_file(path: Path) -> list[str]:
             continue
         titles.append(line)
     return titles
+
+
+def add_cross_project_acquire_recipes(
+    result: dict[str, Any],
+    *,
+    seed_dir: Path | None,
+    project_url_base: str,
+    acquire_limit: int,
+) -> None:
+    acquire_limit = max(0, acquire_limit)
+    seed_files_written = 0
+    if seed_dir is not None:
+        if seed_dir.exists() and not seed_dir.is_dir():
+            raise ValueError(f"--seed-dir must be a folder, not a file: {seed_dir}")
+        seed_dir.mkdir(parents=True, exist_ok=True)
+
+    for item in result.get("projects", []):
+        seed_titles = item.get("seed_titles") or []
+        if not seed_titles:
+            item["acquire_recipe"] = None
+            continue
+
+        target_project = item["project"]
+        project_url = cross_project_url(project_url_base, target_project)
+        local_project = f"{target_project}:semantic"
+        seed_file: Path | None = None
+        seed_file_for_command = "<seed-file>"
+        if seed_dir is not None:
+            seed_file = seed_dir / f"{safe_seed_filename(target_project)}.txt"
+            seed_file.write_text("\n".join(seed_titles) + "\n", encoding="utf-8")
+            seed_file_for_command = str(seed_file)
+            seed_files_written += 1
+
+        item["acquire_recipe"] = {
+            "project_url": project_url,
+            "local_project": local_project,
+            "seed_file": str(seed_file) if seed_file is not None else None,
+            "seed_file_written": seed_file is not None,
+            "command": [
+                "grasp",
+                "--project",
+                local_project,
+                "acquire",
+                project_url,
+                "--seed-file",
+                seed_file_for_command,
+                "--limit",
+                str(acquire_limit),
+            ],
+        }
+
+    result["acquire_plan"] = {
+        "project_url_base": project_url_base,
+        "acquire_limit": acquire_limit,
+        "seed_dir": str(seed_dir) if seed_dir is not None else None,
+        "seed_files_written": seed_files_written,
+    }
+
+
+def cross_project_url(project_url_base: str, target_project: str) -> str:
+    return project_url_base.rstrip("/") + "/" + target_project.strip("/") + "/"
+
+
+def safe_seed_filename(value: str) -> str:
+    safe = "".join(
+        char if char.isalnum() or char in "._-" else "_"
+        for char in value.strip()
+    ).strip("._")
+    return safe or "project"
+
+
+def run_cross_project_acquire(
+    store: SQLiteStore,
+    *,
+    client: CosenseCliClient,
+    limit: int,
+    sample_limit: int,
+    seed_limit: int,
+    acquire_limit: int,
+    page_sample_limit: int,
+    failed_sample_limit: int,
+    top_links_limit: int,
+    summary_sample_limit: int,
+    project_url_base: str,
+    local_suffix: str,
+    dry_run: bool,
+) -> dict[str, Any]:
+    limit = max(0, limit)
+    sample_limit = max(0, sample_limit)
+    seed_limit = max(0, seed_limit)
+    if acquire_limit <= 0:
+        raise ValueError("--acquire-limit must be > 0")
+    page_sample_limit = max(0, page_sample_limit)
+    failed_sample_limit = max(0, failed_sample_limit)
+    top_links_limit = max(0, top_links_limit)
+    summary_sample_limit = max(0, summary_sample_limit)
+    suffix = normalize_local_suffix(local_suffix)
+
+    refs = store.cross_project_refs(
+        limit=limit,
+        sample_limit=sample_limit,
+        seed_limit=seed_limit,
+        semantic_only=True,
+    )
+    source_project = refs["project"]
+    projects: list[dict[str, Any]] = []
+    for ref_project in refs.get("projects", []):
+        if ref_project.get("seed_titles"):
+            projects.append(
+                cross_project_acquire_plan_item(
+                    ref_project,
+                    project_url_base=project_url_base,
+                    local_suffix=suffix,
+                    acquire_limit=acquire_limit,
+                )
+            )
+
+    summary = {
+        "planned_projects": len(projects),
+        "attempted_projects": 0,
+        "succeeded_projects": 0,
+        "empty_projects": 0,
+        "error_projects": 0,
+        "fetched_pages": 0,
+        "failed_pages": 0,
+        "skipped_nonpersistent": 0,
+        "diagnostic_counts": {},
+    }
+
+    try:
+        if not dry_run:
+            for item in projects:
+                summary["attempted_projects"] += 1
+                try:
+                    acquisition = acquire_from_cosense(
+                        store,
+                        item["project_url"],
+                        client=client,
+                        project=item["local_project"],
+                        seed_titles=item["seed_titles"],
+                        limit=acquire_limit,
+                    )
+                except Exception as error:  # Keep the batch bounded even if one project fails before page fetch reporting.
+                    item.update(cross_project_acquire_error_summary(error))
+                    summary["error_projects"] += 1
+                    bump_count(summary["diagnostic_counts"], "orchestration_error")
+                    continue
+
+                item.update(
+                    cross_project_acquire_result_summary(
+                        acquisition,
+                        store=store,
+                        source_project=source_project,
+                        page_sample_limit=page_sample_limit,
+                        failed_sample_limit=failed_sample_limit,
+                        top_links_limit=top_links_limit,
+                        summary_sample_limit=summary_sample_limit,
+                    )
+                )
+                fetched = int(item["fetched"])
+                failed = int(item["failed"])
+                skipped = int(item["skipped_nonpersistent"])
+                summary["fetched_pages"] += fetched
+                summary["failed_pages"] += failed
+                summary["skipped_nonpersistent"] += skipped
+                diagnostic_type = item.get("diagnostic_type")
+                if diagnostic_type:
+                    bump_count(summary["diagnostic_counts"], diagnostic_type)
+                if fetched > 0:
+                    summary["succeeded_projects"] += 1
+                elif item["status"] == "empty":
+                    summary["empty_projects"] += 1
+                elif item["status"] == "error":
+                    summary["error_projects"] += 1
+    finally:
+        store.project = source_project
+    return {
+        "source_project": source_project,
+        "dry_run": dry_run,
+        "limits": {
+            "projects": limit,
+            "source_examples": sample_limit,
+            "seed_titles": seed_limit,
+            "acquire_pages": acquire_limit,
+            "page_sample": page_sample_limit,
+            "failed_sample": failed_sample_limit,
+            "top_links": top_links_limit,
+            "summary_sample": summary_sample_limit,
+        },
+        "project_url_base": project_url_base,
+        "local_suffix": suffix,
+        "refs_summary": refs["summary"],
+        "summary": summary,
+        "projects": projects,
+    }
+
+
+def normalize_local_suffix(value: str) -> str:
+    suffix = value.strip().strip(":")
+    if not suffix:
+        raise ValueError("--local-suffix must not be empty")
+    return suffix
+
+
+def cross_project_acquire_plan_item(
+    ref_project: dict[str, Any],
+    *,
+    project_url_base: str,
+    local_suffix: str,
+    acquire_limit: int,
+) -> dict[str, Any]:
+    target_project = ref_project["project"]
+    project_url = cross_project_url(project_url_base, target_project)
+    local_project = f"{target_project}:{local_suffix}"
+    seed_titles = list(ref_project.get("seed_titles") or [])
+    return {
+        "project": target_project,
+        "project_url": project_url,
+        "local_project": local_project,
+        "status": "planned",
+        "mention_count": ref_project["mention_count"],
+        "unique_target_count": ref_project["unique_target_count"],
+        "source_page_count": ref_project["source_page_count"],
+        "seed_title_count": ref_project["seed_title_count"],
+        "seed_title_limit": ref_project["seed_title_limit"],
+        "omitted_seed_title_count": ref_project["omitted_seed_title_count"],
+        "seed_titles": seed_titles,
+        "top_targets": ref_project.get("top_targets", [])[:5],
+        "examples": ref_project.get("examples", []),
+        "command": [
+            "grasp",
+            "--project",
+            local_project,
+            "acquire",
+            project_url,
+            "--seed-file",
+            "<seed-file>",
+            "--limit",
+            str(acquire_limit),
+        ],
+    }
+
+
+def cross_project_acquire_result_summary(
+    acquisition: dict[str, Any],
+    *,
+    store: SQLiteStore,
+    source_project: str,
+    page_sample_limit: int,
+    failed_sample_limit: int,
+    top_links_limit: int,
+    summary_sample_limit: int,
+) -> dict[str, Any]:
+    fetched = int(acquisition.get("fetched", 0))
+    failed_pages = acquisition.get("failed_pages") or []
+    skipped_nonpersistent = acquisition.get("skipped_nonpersistent") or []
+    diagnostic = acquisition.get("diagnostic")
+    status = "acquired" if fetched > 0 else "empty"
+    return {
+        "status": status,
+        "coverage": acquisition.get("coverage"),
+        "fetched": fetched,
+        "updated": int(acquisition.get("updated", 0)),
+        "failed": len(failed_pages),
+        "skipped_nonpersistent": len(skipped_nonpersistent),
+        "diagnostic": diagnostic,
+        "diagnostic_type": diagnostic.get("type") if diagnostic else None,
+        "page_sample": (acquisition.get("pages") or [])[:page_sample_limit],
+        "failed_page_sample": failed_pages[:failed_sample_limit],
+        "skipped_nonpersistent_sample": skipped_nonpersistent[:failed_sample_limit],
+        "reciprocal_refs": store.cross_project_refs_to(
+            source_project,
+            limit=top_links_limit,
+            sample_limit=summary_sample_limit,
+        ),
+        "top_internal_links": store.top_internal_links(
+            limit=top_links_limit,
+            sample_limit=summary_sample_limit,
+        ),
+    }
+
+
+def cross_project_acquire_error_summary(error: Exception) -> dict[str, Any]:
+    return {
+        "status": "error",
+        "coverage": "none",
+        "fetched": 0,
+        "updated": 0,
+        "failed": 0,
+        "skipped_nonpersistent": 0,
+        "diagnostic": {
+            "type": "orchestration_error",
+            "severity": "error",
+            "message": str(error),
+            "next_actions": ["Inspect the project entry, cosense command, and local store state; retry the failed project alone with grasp acquire."],
+        },
+        "diagnostic_type": "orchestration_error",
+        "page_sample": [],
+        "failed_page_sample": [],
+        "skipped_nonpersistent_sample": [],
+        "reciprocal_refs": None,
+        "top_internal_links": [],
+    }
+
+
+def bump_count(counts: dict[str, int], key: str) -> None:
+    counts[key] = counts.get(key, 0) + 1
 
 
 class LineIdAliases:
@@ -996,6 +1410,10 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_mentions(result, aliases=aliases)
     if command == "co-links":
         return format_co_links(result, aliases=aliases)
+    if command == "cross-project-refs":
+        return format_cross_project_refs(result, aliases=aliases)
+    if command == "cross-project-acquire":
+        return format_cross_project_acquire(result, aliases=aliases)
     if command == "gather":
         return format_gather(result, aliases=aliases)
     if command in {"export-ai", "export-for-ai"}:
@@ -1041,12 +1459,24 @@ def format_stats(result: dict[str, Any]) -> str:
     acquisition = result.get("acquisition")
     acquisition_section = ""
     if acquisition:
+        window = acquisition.get("candidate_window") or {}
+        updated_range = window.get("updated_range") or {}
+        range_line = ""
+        if updated_range:
+            range_line = (
+                "candidate_updated_range: "
+                f"{updated_range.get('newest')} .. {updated_range.get('oldest')}\n"
+            )
         acquisition_section = (
             "\n## Acquisition\n"
             f"mode: {acquisition.get('mode')}\n"
             f"coverage: {acquisition.get('coverage')}\n"
             f"project_url: {acquisition.get('project_url')}\n"
+            f"criteria_fingerprint: {acquisition.get('criteria_fingerprint')}\n"
             f"fetched: {acquisition.get('fetched')}\n"
+            f"remote_fetched: {acquisition.get('remote_fetched')}\n"
+            f"reused: {acquisition.get('reused')}\n"
+            f"{range_line}"
             "note: backlinks/related/unresolved are within the acquired corpus.\n"
         )
     return (
@@ -1550,6 +1980,157 @@ def format_co_link_items(co_links: list[dict[str, Any]], aliases: LineIdAliases 
     return "".join(parts)
 
 
+def format_cross_project_refs(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
+    summary = result["summary"]
+    filters = result["filters"]
+    parts = [
+        f"# Cross-project refs: {result['project']}\n",
+        f"filters: include_self={filters['include_self']}, exclude_icons={filters['exclude_icons']}, semantic_only={filters['semantic_only']}\n",
+        (
+            f"refs: {summary['filtered_refs']}/{summary['total_refs']} returned after filters; "
+            f"projects: {summary['filtered_projects']} filtered, {summary['returned_projects']} returned\n"
+        ),
+        "target_class_counts: " + format_count_map(summary["target_class_counts"]) + "\n",
+        "filtered_target_class_counts: " + format_count_map(summary["filtered_target_class_counts"]) + "\n",
+    ]
+    acquire_plan = result.get("acquire_plan")
+    if acquire_plan:
+        seed_dir = acquire_plan.get("seed_dir") or "(not writing files)"
+        parts.append(
+            f"acquire_plan: limit {acquire_plan.get('acquire_limit')}, "
+            f"seed_dir {seed_dir}, files_written {acquire_plan.get('seed_files_written', 0)}\n"
+        )
+    projects = result.get("projects") or []
+    if not projects:
+        parts.append("(none)\n")
+        return "".join(parts)
+
+    parts.append("\n## Projects\n")
+    for item in projects:
+        parts.append(
+            f"- {item['project']} (refs {item['mention_count']}, targets {item['unique_target_count']}, "
+            f"source_pages {item['source_page_count']}, views {item['total_source_views']}; "
+            f"classes {format_count_map(item['target_class_counts'])})\n"
+        )
+        top_targets = item.get("top_targets") or []
+        if top_targets:
+            formatted_targets = []
+            for target in top_targets[:5]:
+                title = target["title"] or "(project root)"
+                formatted_targets.append(f"{title} [{target['target_class']}] x{target['mention_count']}")
+            parts.append("  top_targets: " + "; ".join(formatted_targets) + "\n")
+        seed_titles = item.get("seed_titles") or []
+        if seed_titles:
+            omitted = item.get("omitted_seed_title_count", 0)
+            seed_note = f" (+{omitted} omitted)" if omitted else ""
+            parts.append("  seed_titles: " + "; ".join(seed_titles[:5]) + seed_note + "\n")
+        recipe = item.get("acquire_recipe")
+        if recipe:
+            label = "acquire" if recipe.get("seed_file_written") else "acquire_template"
+            command = " ".join(shlex.quote(str(part)) for part in recipe["command"])
+            parts.append(f"  {label}: {command}\n")
+        for example in (item.get("examples") or [])[:2]:
+            target_title = example["target_title"] or "(project root)"
+            parts.append(
+                f"  - {example['source_title']} {aliases.format_line_id(example['line_id'])} "
+                f"-> /{example['target_project']}/{target_title} [{example['target_class']}]: "
+                f"{example['line_text']}\n"
+            )
+    return with_alias_legend("".join(parts), aliases)
+
+
+def format_count_map(counts: dict[str, int]) -> str:
+    return ", ".join(
+        f"{key} {counts.get(key, 0)}"
+        for key in ("semantic", "icon", "project-root", "self-project")
+    )
+
+
+def format_cross_project_acquire(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
+    summary = result["summary"]
+    parts = [
+        f"# Cross-project acquire: {result['source_project']}\n",
+        f"dry_run: {result['dry_run']}\n",
+        (
+            "projects: "
+            f"planned {summary['planned_projects']}, attempted {summary['attempted_projects']}, "
+            f"succeeded {summary['succeeded_projects']}, empty {summary['empty_projects']}, "
+            f"errors {summary['error_projects']}\n"
+        ),
+        (
+            "pages: "
+            f"fetched {summary['fetched_pages']}, failed {summary['failed_pages']}, "
+            f"skipped_nonpersistent {summary['skipped_nonpersistent']}\n"
+        ),
+    ]
+    diagnostic_counts = summary.get("diagnostic_counts") or {}
+    if diagnostic_counts:
+        parts.append("diagnostics: " + ", ".join(f"{key}={value}" for key, value in sorted(diagnostic_counts.items())) + "\n")
+    projects = result.get("projects") or []
+    if not projects:
+        parts.append("(none)\n")
+        return "".join(parts)
+
+    parts.append("\n## Projects\n")
+    for item in projects:
+        parts.append(
+            f"- {item['project']} -> {item['local_project']} "
+            f"({item['status']}; seeds {len(item.get('seed_titles') or [])}/{item['seed_title_count']}, "
+            f"refs {item['mention_count']}, source_pages {item['source_page_count']})\n"
+        )
+        if result["dry_run"]:
+            command = " ".join(shlex.quote(str(part)) for part in item["command"])
+            parts.append(f"  acquire_template: {command}\n")
+        else:
+            parts.append(
+                f"  fetched {item.get('fetched', 0)}, failed {item.get('failed', 0)}, "
+                f"skipped_nonpersistent {item.get('skipped_nonpersistent', 0)}\n"
+            )
+            diagnostic = item.get("diagnostic")
+            if diagnostic:
+                parts.append(f"  diagnostic: {diagnostic.get('severity')}: {diagnostic.get('type')} - {diagnostic.get('message')}\n")
+            page_sample = item.get("page_sample") or []
+            if page_sample:
+                parts.append("  pages: " + "; ".join(page["title"] for page in page_sample) + "\n")
+            reciprocal_refs = item.get("reciprocal_refs") or {}
+            if reciprocal_refs.get("mention_count"):
+                top_targets = reciprocal_refs.get("top_targets") or []
+                target_note = ""
+                if top_targets:
+                    target_note = " (" + "; ".join(
+                        f"{target['title'] or '(project root)'} [{target['target_class']}] x{target['mention_count']}"
+                        for target in top_targets[:3]
+                    ) + ")"
+                parts.append(
+                    f"  reciprocal_refs_to_source: {reciprocal_refs['mention_count']} "
+                    f"from {reciprocal_refs['source_page_count']} pages{target_note}\n"
+                )
+            top_internal_links = item.get("top_internal_links") or []
+            if top_internal_links:
+                formatted_links = []
+                for link in top_internal_links[:5]:
+                    exists_note = "" if link.get("target_page_exists") else "?"
+                    formatted_links.append(f"{link['title']}{exists_note} x{link['link_count']}")
+                parts.append("  top_internal_links: " + "; ".join(formatted_links) + "\n")
+            failed_sample = item.get("failed_page_sample") or []
+            if failed_sample:
+                formatted = []
+                for page in failed_sample:
+                    label = page.get("title_or_url") or page.get("url")
+                    error_class = page.get("error_class") or "unknown"
+                    formatted.append(f"{label} [{error_class}]")
+                parts.append("  failed: " + "; ".join(formatted) + "\n")
+        for example in (item.get("examples") or [])[:1]:
+            target_title = example["target_title"] or "(project root)"
+            parts.append(
+                f"  - seed source: {example['source_title']} {aliases.format_line_id(example['line_id'])} "
+                f"-> /{example['target_project']}/{target_title}: {example['line_text']}\n"
+            )
+    return with_alias_legend("".join(parts), aliases)
+
+
 def format_gather(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
     aliases = aliases or LineIdAliases(enabled=False)
     parts = [
@@ -1639,19 +2220,46 @@ def format_sync(result: dict[str, Any]) -> str:
 
 
 def format_acquire(result: dict[str, Any]) -> str:
+    window = result.get("candidate_window") or {}
+    updated_range = window.get("updated_range") or {}
     parts = [
         f"project: {result['project']}\n",
         f"project_url: {result['project_url']}\n",
         f"modes: {', '.join(result['modes'])}\n",
         f"coverage: {result['coverage']}\n",
+        f"criteria_fingerprint: {result['criteria_fingerprint']}\n",
+        f"same_criteria_as_previous: {result['same_criteria_as_previous']}\n",
         f"fetched: {result['fetched']}\n",
         f"updated: {result['updated']}\n",
+        f"remote_fetched: {result['remote_fetched']}\n",
+        f"reused: {result['reused']}\n",
         "note: backlinks/related/unresolved now describe only the acquired corpus for this project namespace.\n",
     ]
+    if updated_range:
+        parts.append(
+            "candidate_updated_range: "
+            f"{updated_range.get('newest')} .. {updated_range.get('oldest')}\n"
+        )
+    diagnostic = result.get("diagnostic")
+    if diagnostic:
+        parts.append(
+            "\n## Diagnostic\n"
+            f"{diagnostic['severity']}: {diagnostic['type']} - {diagnostic['message']}\n"
+            f"failed: {diagnostic['failed']} / candidates: {diagnostic['candidate_count']}\n"
+        )
+        error_classes = diagnostic.get("error_classes") or {}
+        if error_classes:
+            parts.append("error_classes: " + ", ".join(f"{key}={value}" for key, value in sorted(error_classes.items())) + "\n")
+        next_actions = diagnostic.get("next_actions") or []
+        if next_actions:
+            parts.append("next_actions:\n")
+            for action in next_actions:
+                parts.append(f"- {action}\n")
     if result["pages"]:
         parts.append("\n## Acquired Pages\n")
         for page in result["pages"][:20]:
-            parts.append(f"- {page['title']} ({page['updated']})\n")
+            suffix = " reused" if page.get("reused") else ""
+            parts.append(f"- {page['title']} ({page['updated']}){suffix}\n")
         if len(result["pages"]) > 20:
             parts.append(f"... {len(result['pages']) - 20} more\n")
     if result["skipped_nonpersistent"]:
