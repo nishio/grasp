@@ -190,14 +190,14 @@ line_tombstones(project, id, page_id, deleted_at, last_text?)
 
 2026-06-24 12:32 初期実装済み:
 
-- `mentions <query>`: literal query の出現を探し、parsed internal-link span 外の bare mention を既定で返す。summary は total / bare / linked occurrence、bare line/page、`exact-link-page` / `query-link-page` / `unlinked-page` count を返す。目的は bulk link 化ではなく link gap / intentional non-link / come-from 候補の監査。
+- `mentions <query>`: literal query の出現を探し、parsed internal-link span 外の bare mention を既定で返す。summary は total / bare / linked occurrence、bare line/page、`exact-link-page` / `query-link-page` / `unlinked-page` count を返す。`--unlinked` で page に query-containing link target が無い `unlinked-page` だけを返す。目的は bulk link 化ではなく link gap / intentional non-link / come-from 候補の監査。
 - `co-links <query>`: query を含む行で同時に出る internal links を target ごとに rank し、line_count / source_page_count / examples を返す。巨大 hub の slice handle を AI が読む材料にする。
 - `gather <query>`: link stats + bare mention summary + representative mentions + co-link slices + backlinks + next recipes を bounded bundle として返す。`--budget` は row limit selector であり厳密 token packing ではない。huge hub では bulk-linking を避ける banner を返す。
 
 残課題:
 
 - `mentions` は現状 literal query。完全なかな/カナ・全半角正規化 index、word boundary、多義語 disambiguation は未実装。
-- `mentions --unlinked` という alias/surface は無い。既定が bare-only で、`--include-linked` が opt-in。
+- 2026-06-24 12:56: `mentions --unlinked` は実装済み。既定 bare-only は維持し、`--unlinked` では page に query-containing link target が無い bare mention 行だけを返す。
 - page-level 3分類は `exact-link-page` / `query-link-page` / `unlinked-page` まで。AI 作 default 裸、意図的 non-link、come-from 昇格候補（uncommon × 頻度 × 一意）の scoring は未実装。
 - `gather --budget` は厳密 token packing / omitted token count ではない。row limit と omitted counts の精密化は未実装。
 - AI clustering handoff: CLI は固定 cluster label を確定しないが、AI が `表札` / `ツール` / `AI応用` / `講義資料` などへ仮分類できるだけの bounded rows と sample provenance を返す、という方針は継続。

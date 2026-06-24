@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 12:56] implementation | mentions に unlinked filter を追加
+- `mentions --unlinked` を追加。既定 bare-only は維持し、`--unlinked` では page に query-containing link target が無い `unlinked-page` の bare mention 行だけを返す。
+- summary は従来通り全 literal hit の total / bare / linked occurrence と page status counts を保持し、`mentions[]` と `returned_lines` だけを filter 後の値にする。
+- store schema は v5 のまま、public compatibility version は `1.5.15`。current facts は [[grasp-v1-implemented]]、backlog の `mentions --unlinked` surface gap は実装済みに移した。
+- 検証: `python3 -m unittest discover -s tests` OK（43 tests）、`python3 scripts/lint_wiki.py` OK、skill validator OK。
+
 ## [2026-06-24 12:52] implementation | related snippet に edge mode を追加
 - `read --related-snippets --related-snippet-mode edge` を追加。従来の先頭行 snippet（`lead`）は既定のまま維持し、`edge` では related/source item を導いたリンク行を中心に `snippet_lines[]` を返す。
 - JSON では `snippet_mode` と `snippet_window` を返す。text 出力では edge mode の根拠 line-id と target を `snippet: edge ...` として表示する。

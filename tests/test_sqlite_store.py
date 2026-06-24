@@ -452,6 +452,12 @@ class SQLiteStoreTests(unittest.TestCase):
                 all_mentions = store.mentions("KJ法", limit=10, include_linked=True)
                 self.assertEqual([hit["source_title"] for hit in all_mentions["mentions"]], ["Root", "Slice", "LinkedOnly", "QueryLink"])
 
+                unlinked_mentions = store.mentions("KJ法", limit=10, unlinked_only=True)
+                self.assertEqual(unlinked_mentions["mode"], "unlinked")
+                self.assertEqual(unlinked_mentions["summary"]["bare_occurrences"], 3)
+                self.assertEqual(unlinked_mentions["summary"]["returned_lines"], 1)
+                self.assertEqual([hit["source_title"] for hit in unlinked_mentions["mentions"]], ["Slice"])
+
                 co_links = store.co_links("KJ法", limit=10, sample_limit=1)
                 self.assertEqual([item["title"] for item in co_links], ["表札づくり", "グループ編成", "KJ法応用"])
                 self.assertEqual(co_links[0]["line_count"], 1)
