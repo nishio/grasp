@@ -49,9 +49,23 @@ sources:
 - authoring（write/identity）に着手すると read-only の単純さ（store は import で再構築可能、誤りは re-import で消える）が失われる。書いた state の権威・undo・原典との関係をどう設計するか。
 - 単一 dogfooder（nishio）前提で設計が「正直」なのは、その dogfooding が代表的な間だけ。外部 persona2 ユーザが付く前に authoring を作ると、retrieval で効いた dogfood 駆動が authoring では効かないリスク。
 
+## Updates
+
+### 2026-06-24: 非対称は同じ弧の中で行動に移された — write 層に alpha 着手
+
+§3 が観察した「retrieval≫authoring」は観察で終わらず、**同じ開発弧の中で着手判断に変わった**。nishio が write/identity 層を **alpha** として開始（[[write-layer-alpha-and-replay-test]]）、versioning は read line=`1` / authoring line=`2` に分岐（[[history]]）。
+
+この着手を促した問い（nishio:「ローカルキャッシュの改良ばかりで書き込みが全く進まない、今後どうなるのか」）が、§3 が記述しなかった **持続メカニズム**をあぶり出した:
+
+- retrieval は **tight dogfood loop**（hub 観察→同日 ship、[[kj-link-hub-audit-2026-06-24]]→`mentions`/`gather`）を持つ。write は各 session に **難しい open question しか差し出さない**（read-only の安全網が外れる・identity が未知）。
+- ∴ 毎 session、retrieval は明確な次の一歩を、write は重い設計判断を出す → **write の後回しは偶然でなく構造的**（放置すれば retrieval が default で勝ち続ける）。崩すには「retrieval をもう一段磨くより write を一個刺す」という **意図的な決定**が要る。それがこの弧の alpha 決定＋最高リスク先行＋replay test。
+
+決定は §3 Open Question（「authoring では dogfood 駆動が効かないリスク」）に直接答える形になっている: **authoring 専用の dogfood loop を用意**（このリポジトリ自身の過去 wiki 編集を grasp で再現する replay test、[[write-layer-alpha-and-replay-test]] 決定2）し、**big-bang を避ける**（cadence A: 最高リスクスライスが通った時点で merge、長寿命ブランチで tight loop を失わない）。retrieval を成功させた loop を authoring へ移植する試み。
+
 ## 関連
 
 - [[history]] — 1.0.0→1.5.23 の store-compat ledger（本ページ §1・§2 の一次データ）
+- [[write-layer-alpha-and-replay-test]] — §3 の非対称を行動に移した着手判断（alpha / replay test / 最高リスク先行 / versioning）
 - [[grasp-backlog]] — 未着手の authoring/write/identity（本ページ §3 の「次の山」の中身）
 - [[cosense-delite-howm-synthesis]] — 「層分離で束ねを解く」を製品組成として述べた版。本ページは開発弧として述べる
 - [[come-from-declared-gather]] — authoring 側の未実装機構（come-from declare/render）
