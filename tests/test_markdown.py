@@ -2,7 +2,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from grasp.markdown import MarkdownMirror, parse_frontmatter, parse_markdown_links
+from grasp.markdown import (
+    MarkdownMirror,
+    first_markdown_h1_title,
+    parse_frontmatter,
+    parse_markdown_links,
+)
 from grasp.sqlite_store import SQLiteStore, import_markdown_folder_to_sqlite
 
 
@@ -59,6 +64,25 @@ class MarkdownParsingTests(unittest.TestCase):
         self.assertEqual(metadata.aliases, ["Old Page", "Legacy Page"])
         self.assertEqual(metadata.tags, [("graph", 6), ("wiki", 6)])
 
+    def test_first_markdown_h1_title_skips_frontmatter_and_code_fences(self):
+        self.assertEqual(
+            first_markdown_h1_title(
+                [
+                    "---",
+                    "title: Frontmatter Wins Elsewhere",
+                    "---",
+                    "```",
+                    "# Not A Title",
+                    "```",
+                    "## Section",
+                    "# First H1 #",
+                ]
+            ),
+            "First H1",
+        )
+        self.assertEqual(first_markdown_h1_title(["# C#"]), "C#")
+        self.assertEqual(first_markdown_h1_title(["# C# #"]), "C#")
+
 
 class MarkdownImportTests(unittest.TestCase):
     def test_import_markdown_folder_materializes_graph_without_cross_wiki_backticks(self):
@@ -101,6 +125,72 @@ class MarkdownImportTests(unittest.TestCase):
                 self.assertEqual(store.link_stats("ParentWiki")["link_count"], 0)
             finally:
                 store.close()
+
+    def test_first_h1_is_title_when_frontmatter_title_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "alpha-file.md").write_text(
+                "# Alpha Title\nbody\n",
+                encoding="utf-8",
+            )
+            (root / "Source.md").write_text(
+                "links to [[Alpha Title]] and [[alpha-file]]\n",
+                encoding="utf-8",
+            )
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            stats = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            self.assertEqual(stats["pages"], 2)
+            self.assertEqual(stats["edges"], 2)
+            self.assertEqual(stats["unresolved_targets"], 0)
+
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                read = store.read("alpha-file", backlink_limit=10, related_limit=10, unresolved_limit=10)
+                self.assertEqual(read["page"]["title"], "Alpha Title")
+                self.assertEqual(read["backlink_count_total"], 2)
+                self.assertEqual(store.link_stats("Alpha Title")["page_exists"], True)
+                self.assertEqual(store.link_stats("alpha-file")["title"], "Alpha Title")
+            finally:
+                store.close()
+
+    def test_frontmatter_title_takes_precedence_over_first_h1(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "A.md").write_text(
+                "\n".join(
+                    [
+                        "---",
+                        "title: Frontmatter Title",
+                        "---",
+                        "# First H1",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            mirror = MarkdownMirror.from_folder(root)
+
+        self.assertEqual(mirror.pages[0].title, "Frontmatter Title")
+        self.assertEqual(mirror.title_aliases["a"], "Frontmatter Title")
+
+    def test_reimport_h1_title_change_triggers_full_rebuild(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text("# Old Title\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            page_a.write_text("# New Title\n", encoding="utf-8")
+            result = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            self.assertEqual(result["markdown_import"]["mode"], "full")
+            self.assertIn(
+                result["markdown_import"]["full_rebuild_reason"],
+                {"alias_map_changed", "identity_changed"},
+            )
 
     def test_duplicate_file_stem_titles_are_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:

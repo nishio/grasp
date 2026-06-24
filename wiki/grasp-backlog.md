@@ -26,10 +26,9 @@ sources:
 
 ## Markdown / Obsidian indexed mirror
 
-最小 read-only mirror（`import --markdown <folder>`、frontmatter title/id/aliases/tags、content-only 差分 index）は実装済み。決定は [[markdown-obsidian-indexed-mirror]]。未実装:
+最小 read-only mirror（`import --markdown <folder>`、frontmatter title/id/aliases/tags、first H1 title resolution、content-only 差分 index）は実装済み。決定は [[markdown-obsidian-indexed-mirror]]。未実装:
 
 - surface 命名: `index-md` / `import-md` / `import --format markdown <folder>` を足すか（現状は `import --markdown <folder>`）。
-- first H1 title resolution。
 - Obsidian block refs / heading anchors の line-id 対応。
 - duplicate title / alias collision の高度な解決（現状は import error）。
 - alias / title / id / file set 変更時の細かい差分 index（現状は安全側で full rebuild）。

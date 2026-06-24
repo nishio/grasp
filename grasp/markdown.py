@@ -62,8 +62,9 @@ class MarkdownMirror:
             text_lines = raw_bytes.decode("utf-8").splitlines()
             metadata = parse_frontmatter(text_lines)
             file_title = markdown_title(path)
+            h1_title = first_markdown_h1_title(text_lines)
             page_id = metadata.page_id or markdown_page_id(relative_path)
-            title = metadata.title or file_title
+            title = metadata.title or h1_title or file_title
             norm_title = normalize_title(title)
             updated = int(stat.st_mtime)
             lines = tuple(
@@ -180,6 +181,42 @@ def markdown_page_id(relative_path: Path) -> str:
 
 def markdown_title(path: Path) -> str:
     return path.stem
+
+
+def first_markdown_h1_title(lines: list[str]) -> str | None:
+    in_frontmatter = bool(lines and lines[0].strip() == "---")
+    in_code_fence = False
+    for line in lines[1:] if in_frontmatter else lines:
+        stripped = line.strip()
+        if in_frontmatter:
+            if stripped in {"---", "..."}:
+                in_frontmatter = False
+            continue
+        if is_code_fence(line.lstrip()):
+            in_code_fence = not in_code_fence
+            continue
+        if in_code_fence:
+            continue
+        if title := parse_markdown_h1_title(line):
+            return title
+    return None
+
+
+def parse_markdown_h1_title(line: str) -> str | None:
+    stripped = line.lstrip()
+    leading_spaces = len(line) - len(stripped)
+    if leading_spaces > 3 or not stripped.startswith("#"):
+        return None
+    if stripped.startswith("##"):
+        return None
+    if len(stripped) == 1 or not stripped[1].isspace():
+        return None
+    title = stripped[1:].strip()
+    if title.endswith("#"):
+        without_closing = title.rstrip("#")
+        if not without_closing or without_closing[-1].isspace():
+            title = without_closing.rstrip()
+    return title or None
 
 
 def markdown_file_manifest(records: list[MarkdownPageRecord]) -> dict[str, Any]:

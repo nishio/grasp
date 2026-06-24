@@ -110,7 +110,7 @@ grasp related "Some Note"
 
 実装済み policy:
 
-- frontmatter `title` があれば page title にし、無ければ file stem を title にする。
+- frontmatter `title` があれば page title にし、無ければ first H1、さらに無ければ file stem を title にする（2026-06-25 に first H1 fallback を追加）。
 - frontmatter `id` があれば page id にし、無ければ relative path hash を page id にする。
 - frontmatter `aliases` と file stem を title resolve 候補にし、`[[alias]]` を canonical title へ解決する。
 - frontmatter `tags` を page から tag target への edge にする。
@@ -119,7 +119,7 @@ grasp related "Some Note"
 - manifest を metadata に保存し、content-only 変更なら changed file の page / lines / outgoing edges だけを差し替える。title / id / aliases / file set が変わった時は安全に full rebuild する。
 - 既存 Markdown folder へは書き戻さない。
 
-未実装のまま残すもの: first H1 title resolution、block refs、alias-aware なより細かい差分 rebuild、duplicate/alias collision の高度な解決。これらは [[grasp-backlog]] の継続項目。
+未実装のまま残すもの: block refs、alias-aware なより細かい差分 rebuild、duplicate/alias collision の高度な解決。これらは [[grasp-backlog]] の継続項目。
 
 ## Update: LLM Wiki index / navigation boundary
 
@@ -190,7 +190,6 @@ grasp における実装含意:
 ## Open Questions
 
 - CLI 名: 初期実装は `import --markdown <folder>`。将来 persona2 向けに `index-md` alias を足すか。
-- title resolution: 初期実装は frontmatter title → file stem。first H1 を使うか。
 - duplicate title / alias collision の扱い。
 - heading / block ref を line-id とどう対応させるか。
 - `#tag` と wikilink を同一 edge type にするか。
