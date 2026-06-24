@@ -57,4 +57,6 @@ Claude Code では `/ship-next`（`.claude/commands/ship-next.md`）で、差分
 ## 運用方針
 
 - **実装事実 first だが over-spec しない**。Codex が実装して初めて分かる制約は file back で戻す（親 llm-wiki `書いてから整理する` の実装版）。
+- 作業前の primary worktree が既に多数変更済みなら、既存差分と混ぜないために別 `git worktree` を切って作業する。
+- 作業用 worktree での作業後は、取りこぼしがないよう main へ merge / fast-forward してから撤収する。撤収前に作業用 worktree 側の `git status --short` を clean にし、必要なら `git diff` で差分の残りを確認してから `git worktree remove` する。main 側の未コミット変更はユーザ作業として扱い、勝手に clean しない。
 - ソースは参考、無批判採用しない。スキーマも実験で改善する。
