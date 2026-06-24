@@ -421,6 +421,18 @@ class SQLiteStoreTests(unittest.TestCase):
                         {"text": "KJ法 app [KJ法応用]", "created": 1, "updated": 2, "userId": "u"},
                     ],
                 },
+                {
+                    "title": "BroadQueryTitle",
+                    "id": "eeeeeeeeeeeeeeeeeeeeeeee",
+                    "created": 1,
+                    "updated": 5,
+                    "views": 50,
+                    "lines": [
+                        {"text": "BroadQueryTitle", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "KJ法 session [KJ法勉強会]", "created": 1, "updated": 2, "userId": "u"},
+                        {"text": "KJ法 notes [KJ法勉強会]", "created": 1, "updated": 3, "userId": "u"},
+                    ],
+                },
             ],
         }
 
@@ -434,15 +446,18 @@ class SQLiteStoreTests(unittest.TestCase):
             try:
                 mentions = store.mentions("KJ法", limit=10)
                 summary = mentions["summary"]
-                self.assertEqual(summary["total_lines"], 4)
-                self.assertEqual(summary["total_occurrences"], 6)
-                self.assertEqual(summary["bare_lines"], 3)
-                self.assertEqual(summary["bare_occurrences"], 3)
-                self.assertEqual(summary["linked_occurrences"], 3)
-                self.assertEqual([hit["source_title"] for hit in mentions["mentions"]], ["Root", "Slice", "QueryLink"])
+                self.assertEqual(summary["total_lines"], 6)
+                self.assertEqual(summary["total_occurrences"], 10)
+                self.assertEqual(summary["bare_lines"], 5)
+                self.assertEqual(summary["bare_occurrences"], 5)
+                self.assertEqual(summary["linked_occurrences"], 5)
+                self.assertEqual(
+                    [hit["source_title"] for hit in mentions["mentions"]],
+                    ["Root", "Slice", "QueryLink", "BroadQueryTitle", "BroadQueryTitle"],
+                )
                 self.assertEqual(
                     [hit["classification"] for hit in mentions["mentions"]],
-                    ["exact-link-page", "unlinked-page", "query-link-page"],
+                    ["exact-link-page", "unlinked-page", "query-link-page", "query-link-page", "query-link-page"],
                 )
                 self.assertEqual(
                     summary["page_status_counts"]["unlinked-page"],
@@ -454,22 +469,31 @@ class SQLiteStoreTests(unittest.TestCase):
                 self.assertEqual(candidate["signals"]["unlinked_pages"], 1)
 
                 all_mentions = store.mentions("KJ法", limit=10, include_linked=True)
-                self.assertEqual([hit["source_title"] for hit in all_mentions["mentions"]], ["Root", "Slice", "LinkedOnly", "QueryLink"])
+                self.assertEqual(
+                    [hit["source_title"] for hit in all_mentions["mentions"]],
+                    ["Root", "Slice", "LinkedOnly", "QueryLink", "BroadQueryTitle", "BroadQueryTitle"],
+                )
 
                 unlinked_mentions = store.mentions("KJ法", limit=10, unlinked_only=True)
                 self.assertEqual(unlinked_mentions["mode"], "unlinked")
-                self.assertEqual(unlinked_mentions["summary"]["bare_occurrences"], 3)
+                self.assertEqual(unlinked_mentions["summary"]["bare_occurrences"], 5)
                 self.assertEqual(unlinked_mentions["summary"]["returned_lines"], 1)
                 self.assertEqual([hit["source_title"] for hit in unlinked_mentions["mentions"]], ["Slice"])
 
                 co_links = store.co_links("KJ法", limit=10, sample_limit=1)
-                self.assertEqual([item["title"] for item in co_links], ["表札づくり", "グループ編成", "KJ法応用"])
+                self.assertEqual([item["title"] for item in co_links], ["表札づくり", "グループ編成", "KJ法勉強会", "KJ法応用"])
+                self.assertEqual(
+                    [item["target_relation"] for item in co_links],
+                    ["slice-handle", "slice-handle", "query-containing-title", "query-containing-title"],
+                )
                 self.assertEqual(co_links[0]["line_count"], 1)
                 self.assertEqual(co_links[0]["examples"][0]["source_title"], "Root")
+                raw_co_links = store.co_links("KJ法", limit=10, sample_limit=1, rank_mode="raw")
+                self.assertEqual([item["title"] for item in raw_co_links[:2]], ["KJ法勉強会", "表札づくり"])
 
                 gather = store.gather("KJ法", budget=1500, mention_limit=1, co_link_limit=1, backlink_limit=1)
                 self.assertEqual(gather["limits"]["mentions"], 1)
-                self.assertEqual(gather["mention_summary"]["bare_occurrences"], 3)
+                self.assertEqual(gather["mention_summary"]["bare_occurrences"], 5)
                 self.assertTrue(gather["mention_summary"]["come_from_candidate"]["is_candidate"])
                 self.assertEqual([item["title"] for item in gather["co_links"]], ["表札づくり"])
                 self.assertEqual(gather["backlinks"][0]["source_title"], "Root")
@@ -479,12 +503,13 @@ class SQLiteStoreTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     gather["total_counts"],
-                    {"mentions": 3, "co_links": 3, "backlinks": 2},
+                    {"mentions": 5, "co_links": 4, "backlinks": 2},
                 )
                 self.assertEqual(
                     gather["omitted_counts"],
-                    {"mentions": 2, "co_links": 2, "backlinks": 1},
+                    {"mentions": 4, "co_links": 3, "backlinks": 1},
                 )
+                self.assertEqual(gather["co_link_rank_mode"], "slice")
                 self.assertEqual(gather["row_count_basis"]["mentions"], "bare mention lines")
                 self.assertEqual(gather["recipes"][0]["command"][:2], ["grasp", "co-links"])
             finally:

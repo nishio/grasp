@@ -1846,9 +1846,12 @@ class SQLiteStore:
         *,
         sample_limit: int = 3,
         include_self: bool = False,
+        rank_mode: str = "slice",
     ) -> list[dict[str, Any]]:
         if not query:
             raise ValueError("co-links query is empty")
+        if rank_mode not in {"slice", "raw"}:
+            raise ValueError(f"unsupported co-links rank_mode: {rank_mode}")
 
         project = self._require_project()
         norm_query = normalize_title(query)
@@ -1856,10 +1859,30 @@ class SQLiteStore:
         params: list[Any] = [project, f"%{_escape_like(query)}%"]
         if not include_self:
             params.append(norm_query)
+        params.extend([norm_query, f"%{_escape_like(norm_query)}%"])
         if limit is not None and limit >= 0:
             params.append(limit)
 
         limit_clause = "" if limit is None or limit < 0 else "LIMIT ?"
+        order_clause = (
+            """
+              target_relation_rank ASC,
+              edge_stats.line_count DESC,
+              edge_stats.source_page_count DESC,
+              total_source_views DESC,
+              edge_stats.latest_source_updated DESC,
+              title_choice.target_title
+            """
+            if rank_mode == "slice"
+            else
+            """
+              edge_stats.line_count DESC,
+              edge_stats.source_page_count DESC,
+              total_source_views DESC,
+              edge_stats.latest_source_updated DESC,
+              title_choice.target_title
+            """
+        )
         rows = self.connection.execute(
             f"""
             WITH query_edges AS (
@@ -1916,16 +1939,17 @@ class SQLiteStore:
               edge_stats.line_count,
               edge_stats.source_page_count,
               COALESCE(source_stats.total_source_views, 0) AS total_source_views,
-              edge_stats.latest_source_updated
+              edge_stats.latest_source_updated,
+              CASE
+                WHEN edge_stats.target_norm = ? THEN 2
+                WHEN edge_stats.target_norm LIKE ? ESCAPE '\\' THEN 1
+                ELSE 0
+              END AS target_relation_rank
             FROM edge_stats
             JOIN source_stats ON source_stats.target_norm = edge_stats.target_norm
             JOIN title_choice ON title_choice.target_norm = edge_stats.target_norm
             ORDER BY
-              edge_stats.line_count DESC,
-              edge_stats.source_page_count DESC,
-              total_source_views DESC,
-              edge_stats.latest_source_updated DESC,
-              title_choice.target_title
+            {order_clause}
             {limit_clause}
             """,
             params,
@@ -1939,6 +1963,8 @@ class SQLiteStore:
                 "source_page_count": row["source_page_count"],
                 "total_source_views": row["total_source_views"],
                 "latest_source_updated": row["latest_source_updated"],
+                "target_relation": _co_link_target_relation(row["target_relation_rank"]),
+                "target_relation_rank": row["target_relation_rank"],
                 "examples": [
                     edge.to_dict()
                     for edge in self._co_link_examples(query, row["target_norm"], limit=sample_limit)
@@ -2082,6 +2108,7 @@ class SQLiteStore:
                 "mentions": mention_limit,
                 "co_links": co_link_limit,
             },
+            "co_link_rank_mode": "slice",
             "row_count_basis": {
                 "mentions": "bare mention lines",
                 "co_links": "ranked co-link targets",
@@ -3567,6 +3594,14 @@ def _score_come_from_candidate(
         },
         "rationale": rationale,
     }
+
+
+def _co_link_target_relation(target_relation_rank: int) -> str:
+    if target_relation_rank == 2:
+        return "self"
+    if target_relation_rank == 1:
+        return "query-containing-title"
+    return "slice-handle"
 
 
 def _nonempty_recovery_hints(recovery_hints: dict[str, Any]) -> dict[str, Any] | None:

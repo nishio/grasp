@@ -211,13 +211,14 @@ line_tombstones(project, id, page_id, deleted_at, last_text?)
 
 - `mentions` summary に `come_from_candidate` を追加。bare occurrence/page spread、unlinked-page、query shape の uncommon signal から初期 heuristic score / threshold / signals / rationale を返す。これは候補 surface であり、多義語や AI 作ページ判定を確定しない。
 - `gather` に `returned_counts` / `total_counts` / `omitted_counts` と `row_count_basis` を追加。counts は mentions=bare mention lines、co_links=ranked co-link targets、backlinks=incoming link rows の row 単位で、token omitted count ではない。
+- `co-links` に `target_relation` と `--rank slice|raw` を追加。既定 `slice` は query-containing target title を後ろへ回し、narrower `slice-handle` を先に出す。`raw` は従来の count order。
 
 残課題:
 
 - `mentions` は現状 literal query。完全なかな/カナ・全半角正規化 index、word boundary、多義語 disambiguation は未実装。
 - 2026-06-24 12:56: `mentions --unlinked` は実装済み。既定 bare-only は維持し、`--unlinked` では page に query-containing link target が無い bare mention 行だけを返す。
 - page-level 3分類は `exact-link-page` / `query-link-page` / `unlinked-page` まで。come-from 昇格候補の初期 heuristic scoring は実装済みだが、AI 作 default 裸 / 意図的 non-link / link gap の高次分類、実データでの閾値調整、多義語の一意性判定は未実装。
-- `co-links` は現状 same-line target を line/page count で素直に rank する。`KJ法` dogfood では `KJ法 渾沌をして語らしめる` / `KJ法勉強会@ロフトワーク` のような query-containing bibliographic / session / title page が `考える花火` などの narrower use-slice handle より上に出た。raw fidelity としては正しいが、将来は broad query-containing title と use-slice handle を分類・filter・weighting できる surface が必要。
+- `co-links` の broad query-containing title と use-slice handle の初期分類 / rank surface は実装済み。残るのは query-containing でも有用な narrow page（例: `AIにKJ法を教える`）と bibliographic/session title の finer classification、weighting 調整、実データ dogfood。
 - `gather --budget` は厳密 token packing / omitted token count ではない。row 単位 omitted counts は実装済みだが、token budget 内への packing、omitted token estimate、代表サンプル選択の精密化は未実装。
 - AI clustering handoff: CLI は固定 cluster label を確定しないが、AI が `表札` / `ツール` / `AI応用` / `講義資料` などへ仮分類できるだけの bounded rows と sample provenance を返す、という方針は継続。
 

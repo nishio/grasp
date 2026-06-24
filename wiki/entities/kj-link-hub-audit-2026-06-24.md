@@ -149,6 +149,7 @@ The practical success condition is: opening `[KJ法]` backlinks should no longer
 - page status counts for bare mentions were: `exact-link-page` 92 pages / 699 bare occurrences, `query-link-page` 80 pages / 630 bare occurrences, `unlinked-page` 347 pages / 917 bare occurrences.
 - Top `co-links` were `KJ法 渾沌をして語らしめる`, `KJ法勉強会@ロフトワーク`, `考える花火`, `「面白い」のKJ法`, `AIにKJ法を教える`.
 - 2026-06-24 16:03 implementation follow-up: `mentions` now returns an initial `come_from_candidate` score/signals/rationale, and `gather` now returns row-basis returned/total/omitted counts. The counts are row omissions, not token packing.
+- 2026-06-24 follow-up: `co-links` now returns `target_relation` and defaults to `--rank slice`, which demotes query-containing target titles behind independent slice handles. `--rank raw` preserves the old count order when raw fidelity is needed.
 
 Implication: same-line `co-links` is a useful raw slice primitive, but simple count ranking does not only surface narrow practice handles. Query-containing bibliographic / session / title pages can rank above narrower handles like `考える花火` or `グループ編成`. This is acceptable for raw fidelity, but a future slice view should distinguish broad query-containing page titles from use-slice handles.
 
@@ -166,6 +167,6 @@ Residual implications:
 
 ## Open Questions
 
-- How should `co-links` rank or classify broad query-containing titles versus narrow use-slice handles?
+- How should `co-links` further distinguish query-containing-but-useful narrow pages from bibliographic/session title pages after the initial `target_relation` split?
 - Should co-link slice counts eventually support same-page or windowed context in addition to the implemented same-line default?
 - What is the right output contract for AI clustering: raw rows only, or a compact "candidate clusters" section explicitly labeled as heuristic?

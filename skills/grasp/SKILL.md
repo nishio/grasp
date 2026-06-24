@@ -88,7 +88,7 @@ description: >-
 → `grasp gather <query>` を最初に見る。link stats、裸言及 summary、co-link slice、representative mentions、backlinks、次に実行する recipe が bounded に返る。`returned_counts` / `total_counts` / `omitted_counts` は row 単位（mentions=bare mention lines、co_links=targets、backlinks=link rows）なので、足りなければ個別 verb で広げる。`--budget` は厳密 token packing ではなく row limit selector。
 
 - 裸言及の監査: `grasp mentions <query>`。既定は parsed internal-link span 外の bare occurrence がある行だけ返す。各行は `exact-link-page` / `query-link-page` / `unlinked-page` に分類され、summary に `come_from_candidate`（初期 heuristic score / signals / rationale）が入る。page に query 系 link handle が無い行だけ見たい時は `--unlinked`、全 occurrence が link 内の行も見たい時は `--include-linked`。
-- slice handle 探索: `grasp co-links <query>`。query を含む行で同時に出る internal links を rank する。巨大 hub を読む時は、hub 全体を広げる前に co-link slice を見て、AI 側で必要な slice に絞る。
+- slice handle 探索: `grasp co-links <query>`。query を含む行で同時に出る internal links を rank する。既定 `--rank slice` は target title 自体が query を含むものを `query-containing-title` として後ろへ回し、narrower handle を先に出す。raw count order が必要なら `--rank raw`。
 - 重要: `mentions` の裸言及は「全部リンク化すべき漏れ」ではない。bulk link 化は hub を悪化させることがある。come-from 昇格候補や、用途別 handle への分岐を考えるための観測値として扱う。
 
 ### 被リンクの濃さだけ知りたい / その概念が既出か
@@ -128,7 +128,7 @@ description: >-
 | `related <title>` | 2-hop ページ / page なし target の source pages |
 | `path <A> <B>` | pages / page なし target 間の短いリンク経路（no-path 時も recovery hints） |
 | `mentions <query>` | literal query の裸言及を link span 外 occurrence として数え、page-level link status と come-from 昇格候補 score を返す。`--unlinked` で no-link-handle page に絞る |
-| `co-links <query>` | query を含む行で同時に出る internal links を rank し、hub の slice handle を返す |
+| `co-links <query>` | query を含む行で同時に出る internal links を rank し、hub の slice handle を返す。`target_relation` と `--rank slice|raw` あり |
 | `gather <query>` | link stats・裸言及 summary・co-link slices・backlinks・next recipes の bounded bundle。row 単位の returned / total / omitted counts 付き |
 | `link-stats <title>` | incoming link count と 0/1/N |
 | `unresolved` | 未解決 target の rank view（TODO ではない） |

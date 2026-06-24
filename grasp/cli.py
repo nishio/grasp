@@ -401,14 +401,16 @@ def build_parser() -> argparse.ArgumentParser:
             "For lines containing a literal query, rank the other internal links on those lines. "
             "This surfaces narrower slice handles for broad hubs."
         ),
-        returns="query, co_links[], count_returned",
+        returns="query, rank_mode, include_self, co_links[], count_returned",
         examples=[
             "grasp co-links KJ法 --limit 20",
+            "grasp co-links KJ法 --rank raw --limit 20",
             "grasp co-links KJ法 --sample-limit 2 --limit 10",
             "grasp --json co-links KJ法 --limit 5",
         ],
         notes=[
-            "co_links[] items include title, normalized_title, link_count, line_count, source_page_count, total_source_views, latest_source_updated, and examples[].",
+            "co_links[] items include title, normalized_title, target_relation, link_count, line_count, source_page_count, total_source_views, latest_source_updated, and examples[].",
+            "Default --rank slice demotes query-containing target titles so narrower handles surface first; --rank raw preserves count order.",
             "The exact query target is excluded by default; use --include-self to include it.",
         ],
     )
@@ -416,6 +418,7 @@ def build_parser() -> argparse.ArgumentParser:
     co_links_parser.add_argument("--limit", type=int, default=50, help="Maximum co-link targets to return.")
     co_links_parser.add_argument("--sample-limit", type=int, default=3, help="Maximum example lines per co-link target.")
     co_links_parser.add_argument("--include-self", action="store_true", help="Include links whose target exactly matches the query.")
+    co_links_parser.add_argument("--rank", choices=["slice", "raw"], default="slice", help="Ranking mode: slice demotes query-containing target titles; raw keeps count order.")
 
     gather_parser = add_command_parser(
         subparsers,
@@ -426,7 +429,7 @@ def build_parser() -> argparse.ArgumentParser:
             "and backlinks into one small bundle. This is an initial thin gather surface, not "
             "exact token packing."
         ),
-        returns="query, budget, limits, banner|null, link_stats, mention_summary, mentions[], co_links[], backlinks[], recipes[]",
+        returns="query, budget, limits, co_link_rank_mode, returned_counts, total_counts, omitted_counts, banner|null, link_stats, mention_summary, mentions[], co_links[], backlinks[], recipes[]",
         examples=[
             "grasp gather KJ法",
             "grasp gather KJ法 --budget 8000",
@@ -842,12 +845,14 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             limit=args.limit,
             sample_limit=args.sample_limit,
             include_self=args.include_self,
+            rank_mode=args.rank,
         )
         return {
             "query": args.query,
             "co_links": co_links,
             "count_returned": len(co_links),
             "include_self": args.include_self,
+            "rank_mode": args.rank,
         }
     if args.command == "gather":
         return store.gather(
@@ -1520,6 +1525,7 @@ def format_mention_items(mentions: list[dict[str, Any]], aliases: LineIdAliases 
 def format_co_links(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
     aliases = aliases or LineIdAliases(enabled=False)
     parts = [f"# Co-links: {result['query']}\n"]
+    parts.append(f"rank_mode: {result.get('rank_mode', 'slice')}\n")
     if result.get("include_self"):
         parts.append("include_self: true\n")
     co_links = result.get("co_links") or []
@@ -1536,7 +1542,8 @@ def format_co_link_items(co_links: list[dict[str, Any]], aliases: LineIdAliases 
     for item in co_links:
         parts.append(
             f"- {item['title']} (links {item['link_count']}, lines {item['line_count']}, "
-            f"pages {item['source_page_count']}, views {item['total_source_views']})\n"
+            f"pages {item['source_page_count']}, views {item['total_source_views']}, "
+            f"relation {item.get('target_relation', 'slice-handle')})\n"
         )
         for example in item.get("examples", [])[:2]:
             parts.append(f"  - {example['source_title']} {aliases.format_line_id(example['line_id'])}: {example['line_text']}\n")
@@ -1554,6 +1561,7 @@ def format_gather(result: dict[str, Any], aliases: LineIdAliases | None = None) 
         "limits: "
         f"mentions {limits.get('mentions')}, co_links {limits.get('co_links')}, backlinks {limits.get('backlinks')}\n"
     )
+    parts.append(f"co_link_rank_mode: {result.get('co_link_rank_mode', 'slice')}\n")
     returned_counts = result.get("returned_counts") or {}
     total_counts = result.get("total_counts") or {}
     omitted_counts = result.get("omitted_counts") or {}
