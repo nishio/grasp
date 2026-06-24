@@ -1,5 +1,14 @@
 # Log
 
+## [2026-06-24 23:21] ingest | Scrapbox `villagepump/grasp` の公開設計対話 + takker 外部試用ログを取り込み
+- 出典: https://scrapbox.io/villagepump/grasp （raw/grasp-villagepump-page_2026-06-24.txt に保存, gitignored）。既出と重複しない新規分のみ file back。
+- 新ページ [[takker-opencode-villagepump-test-2026-06-24]]（entities/）: **nishio 以外の第三者による初の実走**。takker が OpenCode + Deepseek v4 flash で bare 指示「このリポジトリを設定して」から self-setup → `villagepump.json`（43,742 pages / 1,454,430 lines / 413,605 edges / 171,316 unresolved ≈ nishio store の pages 1.7x・lines 2x）を import → グラフ理論 / リンク構造 / カテゴリ論争の多ターン retrieval を完走。確認3点: persona1 が nishio 固有でなく一般化 / cross-agent（OpenCode）・cross-model（Deepseek）portability / scale headroom。観測の主役は答えでなく `suggest→search(--context/--scope)→read(--related-snippets/--backlinks-limit)→related 辿り` のツール列＝read=近傍同梱 loop の実走証跡（nishio メタ観察「答えより LLM がどう使うかが重要」）。
+- [[grasp-backlog]] Parser fidelity に PR #2 を記録: villagepump export の一部 line が dict でなく plain string（metadata なし）で importer が落ちた。takker 側 agent が修正し https://github.com/nishio/grasp/pull/2 （takker99, `fix/string-lines-cosense-import`）として提出 → **2026-06-24 時点 OPEN（未 merge）**。review/merge 後 [[grasp-v1-implemented]] import facts に反映。
+- [[multi-project-store]] に `## Updates` 追記（tentative）: nishio 判断「異なる project の赤リンク（unresolved target）は接続する」。resolved page graph の namespace 分離（本 decision の核）は維持し、本文を持たない unresolved target に限って cross-project 接続を許す非対称。明示的に撤回ありの暫定方針。
+- [[grasp-v1-implemented]] delivery に license=MIT を追記（LICENSE / pyproject、2026-06-24 追加。inajob の「土台にするので明記してほしい」要望対応、persona2 GTM 前提）。
+- index.md entities/ に [[takker-opencode-villagepump-test-2026-06-24]] 1行追加。
+- 既出につき再記録しないもの: 複数 project 対応 / Markdown folder import / read=近傍同梱 / gather・mentions・co-links / 25,792 pages count / parser の `#tag`・数字 link edge 化（すべて [[grasp-v1-implemented]] / [[grasp-backlog]] に既載）。
+
 ## [2026-06-24 23:09] decision | write/identity 層に着手 — alpha testing 位置づけ・過去 wiki 編集 replay でテスト・最高リスク先行
 
 - nishio 指示2点: ①「当面書き込み機能は alpha testing と位置付ける。信用してここに大事なものを預ける人は自己責任。テスト方法はこのリポジトリの過去の wiki 編集を grasp で同様にやれるかとする」②「実装順序は最もリスクが高いものの検証を先にすべき」。これを言語化して Codex が読む context に固定した。

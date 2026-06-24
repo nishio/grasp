@@ -23,6 +23,14 @@ sources:
 
 現状の strict parser は unresolved target noise を減らすため保守的。短い英数字 title などを落としていないか未監査。
 
+### metadata なし string line の import 対応（PR #2, 未 merge）
+
+2026-06-24: 外部 user（takker, [[takker-opencode-villagepump-test-2026-06-24]]）が `villagepump.json` を import した時、一部 line が `{text, created, updated, userId}` の dict でなく **plain string**（line metadata なし形式）で、importer が落ちた。`grasp/cosense.py` が `line_data.get("text", ...)` と dict 前提で line を読むため。takker 側の agent が local 修正し `https://github.com/nishio/grasp/pull/2`（takker99, branch `fix/string-lines-cosense-import`）として提出。**2026-06-24 時点 OPEN（未 merge）**。
+
+- 対応: PR を review し、string line を `{text: <str>}` 相当に正規化するか line shape をより広く許容する。
+- merge 後は [[grasp-v1-implemented]] の import / parser facts に「metadata なし line 形式を許容」を反映する。
+- 一般化: Cosense export の line shape は admin metadata-ON 以外でも来る。非 nishio export で parser 前提が崩れる例なので、他の入力 variant（page metadata 欠落等）も dogfood 候補。
+
 ## CLI and agent UX
 
 2026-06-23 21:49: zero-hit recovery hints、`grasp read ... --json` 後置許容、help example drift、store missing diagnostics は実装済み。current facts は [[grasp-v1-implemented]]。
