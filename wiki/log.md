@@ -1,5 +1,32 @@
 # Log
 
+## [2026-06-24 18:47] file back | icon-history report 化の観察
+- `villagepump` `[nishio.icon]` raw 抽出を `nishio in villagepump: 公開共同日記から見る grasp 前史 30 scene` へ再構成した過程の学びを [[use-case-experiment-as-outcome-story]] に追記。
+- 核: 抽出と report composition は別工程。CLI は raw dump でなく、icon hit kind 分類、年/月 counts、theme counts、代表候補、hosted line id / snippet 付き provenance を返し、agent/report layer がユーザ言語で bounded narrative artifact を書くのがよい。
+- [[grasp-backlog]] に `use-case report composition（icon/person history）` を追加。仮 surface は `grasp report icon-history ...` だが、重要なのは command 名ではなく `slice acquisition -> hit classification -> representative candidate bundle -> agent-authored report` の標準 workflow。
+
+## [2026-06-24 18:46] file back | `search` は parsed link classifier ではない
+- `[/` cross-project 実験の follow-up として、現行 `grasp search` だけでは `.icon` refs を link target として除外できないことを記録。`search "[/ AND NOT .icon" --mode boolean --scope line` は line-level lexical workaround で、同じ行の semantic link まで落とし、root refs は残り、複数 target の分類もできない。
+- [[cross-project-reference-acquire-2026-06-24]] に、target-aware extraction が必要という process observation を追記。[[grasp-backlog]] には `cross-project-refs` / `links --cross-project --classify-targets` 相当の parsed link extraction surface を候補化。
+- 教訓: outcome が parsed links に依存する use-case では、text search を本命 surface として扱わず、検索→外部 script の gap を product gap として明示する。
+
+## [2026-06-24 18:19] file back | ユースケース実験は outcome story として記録する
+- nishio feedback「ユースケース実験はユーザがこういうことをしたらこうなります、という事例で、いい感じの結果になることが好ましい」を [[use-case-experiment-as-outcome-story]] に concept 化。
+- 核: use-case dogfood は gotcha / 未実装発見だけでなく、ユーザの自然な依頼から有用で再利用可能な結果が得られるかを評価する。file back では outcome story、friction/backlog、quality judgement を分けて残す。
+- `villagepump` 抽出は到達として成功だが、raw artifact 中心・broad `[nishio.icon]` literal 抽出のため outcome story としてはまだ弱い。author marker / mention / reaction icon list の分類、bounded summary、custom script 非依存の再現 surface が「いい感じ」にする次候補。
+- 追記: [[cross-project-reference-acquire-2026-06-24]] は outcome story としては強い。`/nishio` の `[/project/page]` refs を seed bibliography として使い、semantic refs 上位 project を acquire して AI/Cosense/Plurality/熟議/人物辞書の周辺 map を作れる。ただし one-off script / `cosense` PATH wrapper は product gap。
+
+## [2026-06-24 17:36] file back | `villagepump` 日記ページ抽出 dogfood
+- public `https://scrapbox.io/villagepump/` の `YYYY/MM/DD` 日記ページ（2020-10-09..2026-06-24）2,079 pages から `[nishio.icon]` を含む block を抽出。結果は raw artifact として 1,481 hit pages / 6,488 paragraphs / 19,134 lines、failed 0。
+- `grasp acquire` は `cosense` binary が PATH に無く使えなかった。一方 Scrapbox public API は `pages?sort=title` と page body API で読めた。`search/query?q=[nishio.icon]` は 100 件固定で `skip` が効かなかったため、網羅抽出は title list -> date filter -> page body fetch が必要。
+- [[grasp-backlog]] の hosted acquisition 節へ、`cosense-cli` 依存なしの direct public API fallback を候補として追記。
+
+## [2026-06-24 17:31] file back | `/nishio` cross-project refs acquire dogfood
+- `/nishio` snapshot の `[/` shorthand を抽出し、other-project refs 4,141 mentions / 183 projects、`.icon` と root refs を除く semantic refs 2,222 mentions / 142 projects と実測した。
+- semantic refs 上位 12 project から最大 20 page ずつ seed 取得し、task-local `/tmp/grasp-cross-project.sqlite` に 8 project / 140 pages を partial acquire。主クラスタは AI x Cosense / Plurality・熟議 / Cosense 設計哲学 / public project operation / MITOU 人物辞書。
+- gotcha: raw `[/` は `.icon` refs が大きく混ざるため seed 生成前に semantic/icon/root 分類が必要。`cosense` symlink は存在しても PATH に `node` が無いと shebang で exit 127 になる。`grasp acquire` は全 seed failed でも exit 0 で partial result を返すため、agent-facing warning が欲しい。
+- 記録: [[cross-project-reference-acquire-2026-06-24]]。残課題は [[grasp-backlog]] の hosted acquisition 節へ追記。
+
 ## [2026-06-24 16:27] implementation | co-links に slice/raw rank と target_relation を追加
 - `co-links` に `--rank slice|raw` を追加。既定 `slice` は target title 自体が query を含む `query-containing-title` を後ろへ回し、独立した `slice-handle` を先に出す。`raw` は従来の line/page count order。
 - 各 co-link item に `target_relation` / `target_relation_rank` を追加し、`gather` は `co_link_rank_mode: slice` を明示する。

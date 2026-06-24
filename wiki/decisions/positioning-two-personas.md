@@ -72,3 +72,7 @@ persona2 向けに振りすぎると「Obsidian-but-for-LLMs / CLI 付き graph 
 ### 2026-06-23: Markdown / Obsidian folder 対応は indexed mirror として切る
 
 [[markdown-obsidian-indexed-mirror]] を追加。persona2 の on-ramp は「Skill が grep を速くする」ではなく、既存 Markdown / Obsidian folder を `grasp` の read-only indexed mirror にし、Skill はそれを使わせる薄い層にする。pitch は "faster grep" ではなく **indexed graph reader for Markdown / Obsidian notes, optimized for LLM agents**。価値は速度より、`read` が本文 + 逆リンク行 + related + unresolved targets を一体で返すこと。
+
+### 2026-06-24: dogfooding は outcome story として評価する
+
+[[use-case-experiment-as-outcome-story]] を追加。persona1 dogfooding は設計 driver だが、単に gotcha や未実装を見つけるだけでは弱い。ユースケース実験は「ユーザがこう依頼したら、こういう有用な結果が得られる」という outcome story として記録し、結果が読む・判断する・次に使う単位にまとまっていて「いい感じ」かを評価対象にする。

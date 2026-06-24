@@ -26,6 +26,7 @@ Codex が実装し、本 wiki が実装済み事実・backlog・設計判断・g
 | [ai-consumer-cost-and-trust](concepts/ai-consumer-cost-and-trust.md) | grasp の設計上の主たるユーザ＝CLI 越しにグラフを読む AI の cost-and-trust model。軸1 round-trip/token の経済（read=近傍同梱の why、gather/snippets/token economy backlog の ranking 原理）、軸2 negative-result contract（沈黙の偽陰性 = absence の hallucination、recall を vector より先に直す理由）。2026-06-24 Updates: 第3の消費者軸＝substrate を持たない公開人間読者（読者ケアは2軸モデルの外） |
 | [come-from-declared-gather](concepts/come-from-declared-gather.md) | リンクの4仕事（recall/attention/navigation/読者ケア）と、Cosense が全部を1リンクに束ねる→ hub 膨張（KJ法 144→490）の *why*＝per-occurrence 局所判断×双方向の大域帰結ミスマッチ。howm の come-from（用語1宣言→全出現 gather）が判断と帰結を用語-大域で揃える。grasp 3層: read=既存 `mentions`（nishio 2022 howm 仮想出現一覧）/ declare・render=未実装。write/identity は come-from（用語キー）と felt-sense link（行キー）を別 object に。今後の `mentions` は (a)意図的/(b)gap/(c)AI default 裸 を分け come-from 昇格候補を出す。第3消費者＝公開人間読者 |
 | [cosense-delite-howm-synthesis](concepts/cosense-delite-howm-synthesis.md) | grasp は Scrapbox 一本の clone でなく Cosense / デライト / howm から1軸ずつ抜いた合成。Cosense=グラフモデル（自動双方向・2-hop・赤リンク・行リンク・フラット）/ デライト=identity-without-name（知番）/ howm=「ページ＝投影」と come-from。3ツールの弱点は全部「別々の仕事を1つの仕掛けに束ねた」に帰着し、grasp の一貫した手は層分離で束ねを解く（Cosense は `[X]` に4仕事、デライトは意味を独自語彙に、howm は retrieval を人間の Emacs 操作に）。各ツールから1つずつ捨てる: 多人数協調編集 / 独自語彙 / 時間駆動リマインダ。デライトの引き入れ＝リンクに前景後景型が乗った typed link → [[grasp-backlog]] |
+| [use-case-experiment-as-outcome-story](concepts/use-case-experiment-as-outcome-story.md) | ユースケース実験は「ユーザがこう依頼したら、こういう有用な結果が得られる」という outcome story として記録する。gotcha 発見だけでなく、結果が読む・判断する・次に使う単位にまとまっていて「いい感じ」かを評価対象にする |
 
 _他に: read＝近傍同梱 / 行リンク / 未解決 link target / identity-without-name が実装・設計をまたいで育ったら切り出す。_
 
@@ -42,6 +43,7 @@ _他に: read＝近傍同梱 / 行リンク / 未解決 link target / identity-w
 | [persona2-user-test-2026-06-23](entities/persona2-user-test-2026-06-23.md) | persona2（世界の LLM Wiki / Markdown 束ユーザ）視点の fresh onboarding テスト。現状は Markdown folder import が無く、英語 README / friendly error も無いため active acquisition はまだ早い |
 | [ai-consumer-feedback-2026-06-23](entities/ai-consumer-feedback-2026-06-23.md) | 設計上の主たるユーザ＝CLI 越しに読む AI（Claude Opus 4.8）が v1 を実走したレビュー。validated（read=近傍同梱・related rank・miss recovery）＋ Tier 1-4 findings（recall が最優先）と routing。ingest 時に backlinks ランク済み / read --json の page-id 既済を確認 |
 | [kj-link-hub-audit-2026-06-24](entities/kj-link-hub-audit-2026-06-24.md) | `KJ法` が exact `[KJ法]` 144 pages に対し literal mention 681 pages / body bare mention 490 pages に広がる hub だと実測。全部リンク化せず、root link・用途別 subtopic link・co-link slice・AI cluster handoff に分け、巨大入口を分岐点に変える判断。1.5.13 dogfood では `co-links` が broad query-containing title を上位に出す caveat も記録 |
+| [cross-project-reference-acquire-2026-06-24](entities/cross-project-reference-acquire-2026-06-24.md) | `/nishio` の `[/` cross-project shorthand から 183 project / 4,141 other-project refs を抽出し、semantic refs 上位 12 project を partial acquire した dogfood。`.icon` と root refs を分ける必要、`cosense` PATH gotcha、all-failed acquisition diagnostic の弱さ、AI/Cosense/Plurality/熟議クラスタを記録 |
 
 ## メタ
 
