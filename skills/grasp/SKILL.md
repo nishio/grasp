@@ -115,7 +115,8 @@ description: >-
 - 起点 page から link crawl: `grasp --project <project:crawl> acquire <url> --from-page <title-or-url> --depth N --limit N`
 - URL/title リスト: `grasp --project <project:seed> acquire <url> --seed-file pages.txt`
 
-`acquire` は対象 project namespace を置き換える（append しない）。既存 full export を誤って潰さないよう、`--project` 省略時の local namespace は `<remote-project>:acquire` になる。partial corpus の `backlinks` / `related` / `unresolved` は「取得済み subset 内」の結果であり、hosted project 全体の事実として答えない。`grasp stats` の Acquisition 節で coverage を確認する。
+`acquire` は対象 project namespace を置き換える（append しない）。既存 full export を誤って潰さないよう、`--project` 省略時の local namespace は `<remote-project>:acquire` になる。partial corpus の `backlinks` / `related` / `unresolved` は「取得済み subset 内」の結果であり、hosted project 全体の事実として答えない。`grasp stats` の Acquisition 節で coverage と前回 acquisition criteria / candidate updated range / `remote_fetched` / `reused` を確認する。
+同じ acquisition criteria で再実行すると、前回 page manifest と hosted metadata の `updated` が一致するページは local store から再利用し、不要な `readPage` を避ける。`searchFullText` や `seed-file` など hosted updated metadata が無い候補は stale を避けるため従来通り読む。
 取得候補が全て失敗しても partial acquisition report として exit 0 で返ることがある。`diagnostic.type=all_failed`、`failed_pages[].error_class`、`diagnostic.next_actions` を見て、`cosense` binary / `node` PATH / login / seed title を切り分ける。
 
 既存 store 内の `[/project/page]` refs を外部 project acquisition の seed bibliography として使う時は `grasp cross-project-refs` を先に見る。これは `search "[/"` ではなく parsed link target extraction なので、`.icon` / project root / self-project / semantic page ref を target 単位で分けられる。

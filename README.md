@@ -86,6 +86,7 @@ grasp --project project:crawl acquire https://scrapbox.io/project/ --from-page "
 ```
 
 `--project` を省略した場合、既存の full export project を誤って潰さないよう local namespace は `<remote-project>:acquire` になります。
+同じ acquisition criteria（project URL、seed 条件、sort、limit など）で再実行した場合、前回の `criteria_fingerprint` / candidate updated range / page manifest を store metadata に残しているため、hosted metadata の `updated` が変わっていないページは local store から再利用し、不要な `readPage` を避けます。`grasp stats` の Acquisition 節で前回条件と `remote_fetched` / `reused` を確認できます。
 取得候補が全て失敗しても partial acquisition の結果として exit 0 で返ることがあります。その場合は JSON/text の `diagnostic.type=all_failed` と `failed_pages[].error_class`（例: `command-env`, `command-not-found`, `permission`, `page-not-found`）を確認してください。
 
 既存 store 内の `[/other-project/page]` 参照を seed bibliography として使う時は、`search "[/"` ではなく target-aware な抽出を使います。
