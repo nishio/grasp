@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-24 22:40] file back | 「MD 全読み vs grep vs grasp search」速度比較を実測 → 速度は非論点・token が論点
+- nishio の問い「大規模 MD を読むのと grep の速度比較」を本番コーパス（store project `nishio`, 25,798 pages）で実測。全行を flat MD（53.2MB ≈ 14M token, `/tmp/nishio_flat.md`）に dump し、cat / `grep -n` / `python3 -m grasp search` を `/usr/bin/time` で計測。
+- 結論が反転: ①ディスク wall-clock は3手法とも sub-second（cat 0.02s / grep 0.3s / grasp 0.25–0.75s）で**論点でない**。効くのは context に入る token 量で、MD 全読みは ~14M token = 1M window の14倍で**そもそも入らない**。②grep vs grasp は速度でなく出力規律の差（grep 無制限: `民主主義` 1 クエリ 498KB≈125K token / grasp bounded 7–14KB）。③∴ grasp の対 grep 優位は「速さ」では立証できず「同等 wall-clock で bounded・ranked・structured」が立つ。
+- 新ページ [[read-vs-grep-benchmark-2026-06-24]]（entities/, 日付つき実測 dogfood ジャンル）。[[ai-consumer-cost-and-trust]] に `## Updates` で軸1（round-trip/token 経済）の実測裏付けとして反映。index.md entities/ に1行追加。caveat: token は bytes/4 概算（日本語は実際もっと多く「全読み不可」は強まる向き）/ grasp は cold start 込み（[[language-and-distribution]] warm 値参照）。
+
 ## [2026-06-24 22:10] file back | 開発弧の自己観察を concept 化（retrieval 厚く authoring 未着手）
 - 親 llm-wiki での「最近の grasp 開発を観察して考察」session の成果を grasp 側へ file back。新ページ [[development-arc-retrieval-ahead-of-authoring]]（concepts/）。
 - 主張3点: ①2日 87 commits の速度は「層を分けて束ねを解く」単一原理の再適用ゆえ（[[why-not-scrapbox-clone]]/[[come-from-declared-gather]]/[[cosense-delite-howm-synthesis]]/[[delivery-cli-plus-skill]] が同じ手）。②[[history]] の x/y store-compat 規律は本番 dogfooding の帰結（parser 変更=「意味が違う」になる）。③retrieval は厚いが差別化核の authoring（id-link write / come-from declare・render）は全部 [[grasp-backlog]] 未着手＝次の山。
