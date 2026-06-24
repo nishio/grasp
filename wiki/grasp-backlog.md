@@ -178,9 +178,7 @@ line_tombstones(project, id, page_id, deleted_at, last_text?)
 
 2026-06-23 23:42: `read --related-snippets` / `--related-snippet-lines N` は実装済み。default は先頭 5 行＝Cosense parity。existing page の related 2-hop と missing target の source pages の両方で、JSON は related/source item に `snippet_lines` / `snippet_truncated` を足し、text は related item 直下に行を表示する。current facts は [[grasp-v1-implemented]]。
 
-未実装:
-
-- 該当行モード（related/source ページの先頭ではなく、query に関係する backlink/source line 周辺を同梱）。
+2026-06-24 12:52: 該当行モード `--related-snippet-mode edge` は実装済み。related/source page の先頭ではなく、related/source item を導いたリンク行を中心に `snippet_lines` / `snippet_window` を返す。既定 mode は従来通り `lead`。
 
 ### high-level retrieval verb `gather`（設計テンションあり）
 

@@ -210,7 +210,28 @@ class SQLiteStoreTests(unittest.TestCase):
                     [line["text"] for line in read_with_snippets["related"][0]["snippet_lines"]],
                     ["C"],
                 )
+                self.assertEqual(read_with_snippets["related"][0]["snippet_mode"], "lead")
                 self.assertTrue(read_with_snippets["related"][0]["snippet_truncated"])
+
+                read_with_edge_snippets = store.read(
+                    "A",
+                    backlink_limit=10,
+                    related_limit=10,
+                    unresolved_limit=10,
+                    related_snippets=True,
+                    related_snippet_lines=1,
+                    related_snippet_mode="edge",
+                )
+                self.assertEqual(read_with_edge_snippets["related"][0]["title"], "C")
+                self.assertEqual(
+                    [line["text"] for line in read_with_edge_snippets["related"][0]["snippet_lines"]],
+                    ["also links to [B] and [Missing]"],
+                )
+                self.assertEqual(read_with_edge_snippets["related"][0]["snippet_mode"], "edge")
+                self.assertEqual(
+                    read_with_edge_snippets["related"][0]["snippet_window"]["context_line_id"],
+                    "cccccccccccccccccccccccc:1",
+                )
 
                 missing_read = store.read("Missing", backlink_limit=10, related_limit=10, unresolved_limit=10)
                 self.assertIsNone(missing_read["page"])
@@ -231,6 +252,21 @@ class SQLiteStoreTests(unittest.TestCase):
                     ["A"],
                 )
                 self.assertTrue(missing_read_with_snippets["related"][0]["snippet_truncated"])
+
+                missing_read_with_edge_snippets = store.read(
+                    "Missing",
+                    backlink_limit=10,
+                    related_limit=10,
+                    unresolved_limit=10,
+                    related_snippets=True,
+                    related_snippet_lines=1,
+                    related_snippet_mode="edge",
+                )
+                self.assertEqual(
+                    [line["text"] for line in missing_read_with_edge_snippets["related"][0]["snippet_lines"]],
+                    ["links to [B] and [Missing]"],
+                )
+                self.assertEqual(missing_read_with_edge_snippets["related"][0]["snippet_mode"], "edge")
 
                 export_1hop = store.export_ai("A", depth=1, direct_limit=10)
                 self.assertTrue(export_1hop["page_exists"])

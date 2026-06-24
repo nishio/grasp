@@ -2419,13 +2419,14 @@ class SQLiteStore:
         unresolved_limit: int = 20,
         related_snippets: bool = False,
         related_snippet_lines: int = 5,
+        related_snippet_mode: str = "lead",
     ) -> dict[str, Any]:
         page = self.resolve_page(title)
         backlinks = self.backlinks(title, backlink_limit)
         link_stats = self.link_stats(title)
         related = self.related(title if page is None else page.title, related_limit)
         if related_snippets:
-            related = self._with_page_snippets(related, related_snippet_lines)
+            related = self._with_page_snippets(related, related_snippet_lines, mode=related_snippet_mode)
 
         if page is None:
             recovery_hints = link_stats.get("recovery_hints")
@@ -2471,6 +2472,7 @@ class SQLiteStore:
         unresolved_limit: int = 20,
         related_snippets: bool = False,
         related_snippet_lines: int = 5,
+        related_snippet_mode: str = "lead",
     ) -> dict[str, Any]:
         if line_context < 0:
             raise ValueError("--line-context must be >= 0")
@@ -2499,7 +2501,7 @@ class SQLiteStore:
         link_stats = self.link_stats(page.title)
         related = self.related(page.title, related_limit)
         if related_snippets:
-            related = self._with_page_snippets(related, related_snippet_lines)
+            related = self._with_page_snippets(related, related_snippet_lines, mode=related_snippet_mode)
 
         return {
             "query": title or page.title,
@@ -2520,7 +2522,12 @@ class SQLiteStore:
         self,
         related: list[dict[str, Any]],
         line_limit: int,
+        *,
+        mode: str = "lead",
     ) -> list[dict[str, Any]]:
+        if mode not in {"lead", "edge"}:
+            raise ValueError(f"unsupported related snippet mode: {mode}")
+
         limit = max(0, line_limit)
         items: list[dict[str, Any]] = []
         for item in related:
@@ -2529,12 +2536,95 @@ class SQLiteStore:
             if page is None:
                 item_with_snippet["snippet_lines"] = []
                 item_with_snippet["snippet_truncated"] = False
+                item_with_snippet["snippet_mode"] = mode
+                item_with_snippet["snippet_window"] = None
             else:
-                lines, truncated = self.page_lines(page, limit)
+                if mode == "edge":
+                    lines, truncated, window = self._related_edge_snippet(page, item, limit)
+                    item_with_snippet["snippet_mode"] = window["mode"]
+                    item_with_snippet["snippet_window"] = window
+                else:
+                    lines, truncated = self.page_lines(page, limit)
+                    item_with_snippet["snippet_mode"] = "lead"
+                    item_with_snippet["snippet_window"] = {
+                        "mode": "lead",
+                        "start_index": 0,
+                        "end_index": lines[-1].index if lines else None,
+                        "context_line_id": None,
+                        "truncated_before": False,
+                        "truncated_after": truncated,
+                    }
                 item_with_snippet["snippet_lines"] = [line.to_dict() for line in lines]
                 item_with_snippet["snippet_truncated"] = truncated
             items.append(item_with_snippet)
         return items
+
+    def _related_edge_snippet(
+        self,
+        page: Page,
+        item: dict[str, Any],
+        limit: int,
+    ) -> tuple[list[Line], bool, dict[str, Any]]:
+        edge = self._related_snippet_edge(item)
+        if edge is None or limit == 0:
+            lines, truncated = self.page_lines(page, limit)
+            return lines, truncated, {
+                "mode": "lead-fallback" if edge is None else "edge",
+                "start_index": 0,
+                "end_index": lines[-1].index if lines else None,
+                "context_line_id": None if edge is None else edge.line_id,
+                "truncated_before": False,
+                "truncated_after": truncated,
+            }
+
+        start_index = max(0, edge.line_index - (limit // 2))
+        if page.line_count > limit:
+            start_index = min(start_index, page.line_count - limit)
+        lines, truncated_after = self.page_lines(page, limit, offset=start_index)
+        truncated_before = start_index > 0
+        return lines, truncated_before or truncated_after, {
+            "mode": "edge",
+            "start_index": start_index,
+            "end_index": lines[-1].index if lines else None,
+            "context_line_id": edge.line_id,
+            "center_index": edge.line_index,
+            "target_title": edge.target_title,
+            "target_norm": edge.target_norm,
+            "truncated_before": truncated_before,
+            "truncated_after": truncated_after,
+        }
+
+    def _related_snippet_edge(self, item: dict[str, Any]) -> Edge | None:
+        via = item.get("via") or []
+        if not via:
+            return None
+        project = self._require_project()
+        target_norms = [normalize_title(title) for title in via if normalize_title(title)]
+        if not target_norms:
+            return None
+        placeholders = ",".join("?" for _ in target_norms)
+        rows = self.connection.execute(
+            f"""
+            SELECT
+              e.source_page_id,
+              source.title AS source_title,
+              source.views AS source_views,
+              source.updated AS source_updated,
+              e.line_id,
+              line.line_index,
+              line.text AS line_text,
+              e.target_title,
+              e.target_norm
+            FROM edges e
+            JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
+            JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
+            WHERE e.project = ? AND e.source_page_id = ? AND e.target_norm IN ({placeholders})
+            ORDER BY line.line_index, e.id
+            LIMIT 1
+            """,
+            [project, item["id"], *target_norms],
+        ).fetchall()
+        return self._edge_from_row(rows[0]) if rows else None
 
     def export_ai(
         self,

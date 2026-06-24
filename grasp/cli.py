@@ -171,13 +171,14 @@ def build_parser() -> argparse.ArgumentParser:
             "line_window|null, backlink_count_returned, backlink_count_total, related, "
             "unresolved_targets, recovery_hints|null; with --around-line, lines[] is the bounded "
             "window around that line; with --related-snippets, related[] items also include "
-            "snippet_lines[] and snippet_truncated"
+            "snippet_lines[], snippet_truncated, and snippet_mode"
         ),
         examples=[
             "grasp read 盲点カード",
             "grasp read 盲点カード --line-limit 20 --backlinks-limit 5 --related-limit 5 --unresolved-limit 5",
             "grasp read --around-line 5928725cba093700118fa5b2:12 --line-context 4",
             "grasp read 盲点カード --related-snippets --related-snippet-lines 5",
+            "grasp read 盲点カード --related-snippets --related-snippet-mode edge",
             "grasp --json read 民主主義 --backlinks-limit 3 --related-limit 5",
         ],
         notes=[
@@ -185,6 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
             "unresolved_targets[] is populated only for existing pages.",
             "--around-line accepts a full line_id from JSON or --full-ids text output. Local aliases like P1:12 are per-output only.",
             "--related-snippets includes the first N lines of each related/source page, matching the Cosense related-pane reading pattern.",
+            "--related-snippet-mode edge centers snippets on the link line that explains each related/source item.",
         ],
     )
     read_parser.add_argument("title", nargs="?", help="Page title or missing linked target to open. Optional when --around-line is set.")
@@ -196,6 +198,7 @@ def build_parser() -> argparse.ArgumentParser:
     read_parser.add_argument("--unresolved-limit", type=int, default=20, help="Maximum page-local unresolved targets to return.")
     read_parser.add_argument("--related-snippets", action="store_true", help="Include leading page lines for each related/source page.")
     read_parser.add_argument("--related-snippet-lines", type=int, default=5, help="Number of leading lines per related/source page when --related-snippets is set.")
+    read_parser.add_argument("--related-snippet-mode", choices=["lead", "edge"], default="lead", help="How to choose related/source snippets.")
 
     backlinks_parser = add_command_parser(
         subparsers,
@@ -734,6 +737,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
                 unresolved_limit=args.unresolved_limit,
                 related_snippets=args.related_snippets,
                 related_snippet_lines=args.related_snippet_lines,
+                related_snippet_mode=args.related_snippet_mode,
             )
         if args.title is None:
             raise ValueError("read requires a title or --around-line <line-id>")
@@ -745,6 +749,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             unresolved_limit=args.unresolved_limit,
             related_snippets=args.related_snippets,
             related_snippet_lines=args.related_snippet_lines,
+            related_snippet_mode=args.related_snippet_mode,
         )
     if args.command == "backlinks":
         edges = store.backlinks(args.title, limit=args.limit, offset=args.offset)
@@ -1184,6 +1189,14 @@ def format_related_items(related: list[dict[str, Any]], aliases: LineIdAliases |
         else:
             parts.append(f"- {item['title']} (score {item['score']}, views {item['views']}; via {via})\n")
         if "snippet_lines" in item:
+            window = item.get("snippet_window")
+            if window and window.get("mode") == "edge":
+                parts.append(
+                    f"  snippet: edge {aliases.format_line_id(window['context_line_id'])} "
+                    f"-> {window.get('target_title', '')}\n"
+                )
+            elif item.get("snippet_mode") == "lead-fallback":
+                parts.append("  snippet: lead-fallback\n")
             for line in item["snippet_lines"]:
                 parts.append(f"  {aliases.format_line_id(line['line_id'])}  {line['text']}\n")
             if item.get("snippet_truncated"):
