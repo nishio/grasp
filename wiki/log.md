@@ -7,7 +7,7 @@
 - backlog 反映: (1) `gather` 節に hub 膨張の why（レベルミスマッチ）と come-from declare/render 候補、`mentions --unlinked` の3分類化（(a)意図的 / (b)gap / (c)**AI 作 default 裸**＝`🌀KJ法` 266occ は AI 作）＋ come-from 昇格候補（uncommon×頻度×一意）。(2) "Local write and identity layer" に **リンク2型を別 first-class object に**（felt-sense=行キー / come-from=用語キー）要件。安全域＝必要域（uncommon≈一意）。
 - decision 反映: [[ai-consumer-cost-and-trust]] に `## Updates` で第3消費者軸（substrate を持たない公開人間読者。読者ケアは AI 2軸モデルの外。公開面を frozen にすると届かない。come-from-at-render が軽量機構。grasp scope 判断点は nishio）。
 - 親 llm-wiki 側の対応ページ: `come-fromリンクは1宣言で全出現を親切にする` / `grasp最適設計はlinkからrecallを剥がす-20260624` / `KJ法リンクハブはリンク密度でなく用法分解で扱う-20260624`。
-- 統合: concepts/ 新ページ + grasp-backlog.md 2節追記 + ai-consumer-cost-and-trust.md Updates + index.md concepts に1行。
+- 統合: concepts/ 新ページ + grasp-backlog.md 2節追記 + ai-consumer-cost-and-trust.md Updates + index.md concepts に1行 + kj-link-hub-audit へ相互リンク（"wrong direction" の why を come-from へ前方参照、監査ページの outgoing 0 を解消）。
 
 ## [2026-06-24 02:38] file back | peek に line offset を追加
 - `peek --line-offset N` を追加し、`--line-limit M` と組み合わせて本文行だけをページングできるようにした。既定 offset は 0。
