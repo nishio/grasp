@@ -146,6 +146,12 @@ grasp related "Some Note"
 
 2026-06-25 実装: Markdown mirror は path/frontmatter heuristic で navigation/log artifact を分類し、その outgoing edges を既定 content graph から除外する。本文 lines は store に残すので `search` は hit する。未実装は `--include-navigation` escape hatch、catalog/export-index、log entry split など。
 
+### 2026-06-25 dogfood: Markdown LLM Wiki content is usable as LLM context
+
+grasp 自身の `wiki/` を temp store に import して確認した結果、Markdown LLM Wiki に file back した内容は、再 import 後に Cosense export と同じ retrieval primitives で LLM context として使える。`search` は current facts / backlog / decisions / log を line_id + 周辺文脈つきで拾い、`read` は本文・行レベル backlinks・related・page-local unresolved を同梱する。`backlinks` / `related` / `path` も content pages を辿れる。
+
+重要な境界: `log.md` は検索対象には残るが、navigation/log artifact の outgoing edge 除外により、既定の graph 近傍を支配しない。したがって Markdown mirror の現時点の価値は「既存 Markdown wiki を壊さず、LLM が読むための read-only graph projection を作る」こととして成立している。未解決の差は hosted 最新性や write/rename/identity 層であり、Markdown mirror の read path ではない。
+
 ## Update: LLM Wiki log / event stream boundary
 
 2026-06-24 判断: **LLM Wiki の `log.md` は知識ページではなく append-only event stream / provenance record** として扱う。並行エージェントが1ファイルへ追記して衝突する問題は現実の運用上の理由だが、grasp 側の本筋は「巨大な `log.md` を ordinary page として読むか、entry を first-class record として materialize するか」。

@@ -708,3 +708,6 @@
 - `search "non-semantic" --context 2` は `Log` だけでなく [[grasp-backlog]] と [[markdown-obsidian-indexed-mirror]] の該当行を line_id + 周辺文脈つきで返した。`search "first H1"` は [[grasp-v1-implemented]] / [[grasp-backlog]] / decision / `Log` の実装履歴を拾い、Markdown に file back した current facts と履歴が CLI から再利用できることを確認。
 - `read "grasp backlog" --related-snippets --related-snippet-mode edge` は本文・行レベル backlinks・2-hop related・page-local unresolved を同梱し、`backlinks "grasp backlog"` / `related "grasp backlog"` は `Log` に支配されず content pages を返した。`search` では `Log` が残るが、artifact outgoing edge 除外により graph 近傍の汚染は抑えられている。
 - `unresolved` は `#2` / `#4` 系 target に system `semantic_annotation` を出し、`path "grasp backlog" "entity: grasp v1 implemented surface"` は根拠 line つき direct path を返した。現状の答え: **Markdown の LLM Wiki に書き込まれたものは、再 import 後、Cosense export と同じ `search` / `read` / `backlinks` / `related` / `path` primitives で LLM が使える**。未解決の差は hosted 最新性や write layer で、Markdown mirror 自体は read-only indexed graph として成立している。
+
+## [2026-06-25 02:54] file back | Markdown mirror dogfood の結論を current facts / decision へ昇格
+- 直前の dogfood 結論を [[markdown-obsidian-indexed-mirror]] と [[grasp-v1-implemented]] へ反映。log だけでなく、Markdown mirror の決定根拠と実装済み facts から「file back された Markdown LLM Wiki は再 import 後に LLM context として使える」と読めるようにした。

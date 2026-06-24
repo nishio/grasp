@@ -134,6 +134,7 @@ Markdown mirror facts:
 - Markdown line text は原文のまま保存する。frontmatter も本文行として残す。
 - `[[Page]]`, `[[Page|alias]]`, `[[Page#Heading]]`, `[[folder/Page.md]]`, `![[Embed]]`, `#tag` を internal edge として materialize する。heading / alias は target resolution からは落とし、path suffix は file stem に畳む。
 - inline backtick 内と fenced code block 内の `[[...]]` は edge にしない。この repo の `wiki/` ではバックティックのプレーン名を親 llm-wiki 参照として扱い、grasp 内 edge にしない方針と整合する。
+- Dogfood: grasp 自身の `wiki/` は Markdown mirror として import でき、file back された current facts / backlog / decisions / log を `search` / `read` / `backlinks` / `related` / `path` で再利用できる。`log.md` は search には出るが、artifact outgoing edge 除外により既定 graph 近傍を支配しない。
 
 parser が link から除外するもの:
 
