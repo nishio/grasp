@@ -20,6 +20,8 @@ from .cosense import (
     Edge,
     Line,
     Page,
+    edge_semantic_annotation,
+    edge_semantic_annotation_from_fields,
     is_ascii_index_syntax,
     is_internal_cosense_link,
     normalize_title,
@@ -1225,6 +1227,7 @@ class SQLiteStore:
 
     def unresolved_targets(self, limit: int | None = None) -> list[dict[str, Any]]:
         project = self._require_project()
+        fetch_limit = _expanded_unresolved_fetch_limit(limit)
         if limit is None or limit < 0:
             rows = self.connection.execute(
                 """
@@ -1242,31 +1245,45 @@ class SQLiteStore:
                 ORDER BY link_count DESC, source_page_count DESC, total_source_views DESC, latest_source_updated DESC, title
                 LIMIT ?
                 """,
-                (project, limit),
+                (project, fetch_limit),
             ).fetchall()
-        return self._unresolved_target_materialized_rows_to_dicts(rows)
+        items = self._unresolved_target_materialized_rows_to_dicts(rows)
+        items.sort(key=_unresolved_target_output_rank_key)
+        if limit is not None and limit >= 0:
+            return items[:limit]
+        return items
 
     def _unresolved_targets_dynamic(self, limit: int | None = None) -> list[dict[str, Any]]:
         project = self._require_project()
+        fetch_limit = _expanded_unresolved_fetch_limit(limit)
         params: list[Any] = [project]
         if limit is not None and limit >= 0:
-            params.append(limit)
+            params.append(fetch_limit)
         rows = self.connection.execute(
-            self._unresolved_target_stats_sql(limit),
+            self._unresolved_target_stats_sql(fetch_limit),
             params,
         ).fetchall()
-        return [self._unresolved_target_row_to_dict(row) for row in rows]
+        items = [self._unresolved_target_row_to_dict(row) for row in rows]
+        items.sort(key=_unresolved_target_output_rank_key)
+        if limit is not None and limit >= 0:
+            return items[:limit]
+        return items
 
     def unresolved_targets_from_page(self, page: Page, limit: int | None = None) -> list[dict[str, Any]]:
         project = self._require_project()
+        fetch_limit = _expanded_unresolved_fetch_limit(limit)
         params: list[Any] = [project, page.id]
         if limit is not None and limit >= 0:
-            params.append(limit)
+            params.append(fetch_limit)
         rows = self.connection.execute(
-            self._unresolved_target_stats_sql(limit, source_page_id=page.id),
+            self._unresolved_target_stats_sql(fetch_limit, source_page_id=page.id),
             params,
         ).fetchall()
-        return [self._unresolved_target_row_to_dict(row, source_page_id=page.id) for row in rows]
+        items = [self._unresolved_target_row_to_dict(row, source_page_id=page.id) for row in rows]
+        items.sort(key=_unresolved_target_output_rank_key)
+        if limit is not None and limit >= 0:
+            return items[:limit]
+        return items
 
     def related(self, title: str, limit: int | None = None) -> list[dict[str, Any]]:
         page = self.resolve_page(title)
@@ -1550,9 +1567,8 @@ class SQLiteStore:
             adjacency.setdefault(source_key, set()).add(target_key)
             adjacency.setdefault(target_key, set()).add(source_key)
             example_key = self._undirected_edge_key(source_key, target_key)
-            edge_examples.setdefault(
-                example_key,
-                {
+            if example_key not in edge_examples:
+                example = {
                     "stored_source_node": source_key,
                     "stored_target_node": target_key,
                     "source_page_id": row["source_page_id"],
@@ -1564,8 +1580,11 @@ class SQLiteStore:
                     "line_text": row["line_text"],
                     "target_title": row["target_title"],
                     "target_norm": row["target_norm"],
-                },
-            )
+                }
+                annotation = edge_semantic_annotation_from_fields(row["target_title"], row["line_text"])
+                if annotation is not None:
+                    example["semantic_annotation"] = annotation
+                edge_examples[example_key] = example
         return {"nodes": nodes, "adjacency": adjacency, "edge_examples": edge_examples}
 
     def _format_path(
@@ -3278,7 +3297,7 @@ class SQLiteStore:
     def _unresolved_target_row_to_dict(self, row: sqlite3.Row, source_page_id: str | None = None) -> dict[str, Any]:
         norm = row["target_norm"]
         examples = self._unresolved_target_examples(norm, source_page_id=source_page_id)
-        return {
+        item = {
             "title": row["target_title"],
             "normalized_title": norm,
             "link_count": row["link_count"],
@@ -3287,22 +3306,25 @@ class SQLiteStore:
             "latest_source_updated": row["latest_source_updated"],
             "examples": [edge.to_dict() for edge in examples],
         }
+        return _annotate_unresolved_target_item(item, examples)
 
     def _unresolved_target_materialized_rows_to_dicts(self, rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
         target_norms = [row["target_norm"] for row in rows]
         examples_by_norm = self._unresolved_target_materialized_examples(target_norms)
-        return [
-            {
+        items = []
+        for row in rows:
+            examples = examples_by_norm.get(row["target_norm"], [])
+            item = {
                 "title": row["title"],
                 "normalized_title": row["target_norm"],
                 "link_count": row["link_count"],
                 "source_page_count": row["source_page_count"],
                 "total_source_views": row["total_source_views"],
                 "latest_source_updated": row["latest_source_updated"],
-                "examples": [edge.to_dict() for edge in examples_by_norm.get(row["target_norm"], [])],
+                "examples": [edge.to_dict() for edge in examples],
             }
-            for row in rows
-        ]
+            items.append(_annotate_unresolved_target_item(item, examples))
+        return items
 
     def _unresolved_target_materialized_examples(self, target_norms: list[str]) -> dict[str, list[Edge]]:
         if not target_norms:
@@ -4248,6 +4270,41 @@ def link_multiplicity(link_count: int) -> str:
     if link_count == 1:
         return "single"
     return "multi"
+
+
+def _expanded_unresolved_fetch_limit(limit: int | None) -> int | None:
+    if limit is None or limit < 0:
+        return None
+    if limit == 0:
+        return 0
+    return max(limit * 10, limit + 20)
+
+
+def _annotate_unresolved_target_item(item: dict[str, Any], examples: list[Edge]) -> dict[str, Any]:
+    if not examples:
+        return item
+
+    annotations = [edge_semantic_annotation(edge) for edge in examples]
+    if any(annotation is None for annotation in annotations):
+        return item
+
+    annotation = dict(annotations[0] or {})
+    annotation["reason"] = "all sampled unresolved edge examples are system-classified as non-semantic"
+    item["semantic_annotation"] = annotation
+    return item
+
+
+def _unresolved_target_output_rank_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    annotation = item.get("semantic_annotation") or {}
+    is_non_semantic = annotation.get("graph_scope") == "non-semantic"
+    return (
+        is_non_semantic,
+        -int(item.get("link_count") or 0),
+        -int(item.get("source_page_count") or 0),
+        -int(item.get("total_source_views") or 0),
+        -int(item.get("latest_source_updated") or 0),
+        str(item.get("title") or "").casefold(),
+    )
 
 
 def rebuild_unresolved_targets(connection: sqlite3.Connection, project: str) -> None:

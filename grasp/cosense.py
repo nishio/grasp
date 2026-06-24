@@ -12,6 +12,10 @@ WHITESPACE_RE = re.compile(r"\s+")
 HASH_TAG_STOP_CHARS = set(" \t\r\n[]{}()<>'\"`#")
 HASH_TAG_TRAILING_CHARS = ".,;:!?)]}>" "\u3001\u3002\uff1f\uff01\uff09\u300d\u300f\u3011"
 HASH_TAG_PREFIX_BOUNDARY_CHARS = set(" \t\r\n([{<>'\"`")
+NUMERIC_PREFIX_RE = re.compile(r"^\s*(\d+)")
+ISSUE_NUMBER_HASH_RE = re.compile(
+    r"(?i)(?:\b(?:PR|issue|pull request)\s*|open\s+q(?:uestion)?s?\s*)#(?P<number>\d+)"
+)
 
 
 def normalize_title(title: str) -> str:
@@ -290,7 +294,7 @@ class Edge:
     target_norm: str
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "source_page_id": self.source_page_id,
             "source_title": self.source_title,
             "source_views": self.source_views,
@@ -300,6 +304,32 @@ class Edge:
             "line_text": self.line_text,
             "target_title": self.target_title,
         }
+        annotation = edge_semantic_annotation(self)
+        if annotation is not None:
+            result["semantic_annotation"] = annotation
+        return result
+
+
+def edge_semantic_annotation(edge: Edge) -> dict[str, Any] | None:
+    return edge_semantic_annotation_from_fields(edge.target_title, edge.line_text)
+
+
+def edge_semantic_annotation_from_fields(target_title: str, line_text: str) -> dict[str, Any] | None:
+    numeric_match = NUMERIC_PREFIX_RE.match(target_title)
+    if numeric_match is None:
+        return None
+
+    target_number = numeric_match.group(1)
+    for marker_match in ISSUE_NUMBER_HASH_RE.finditer(line_text):
+        if marker_match.group("number") == target_number:
+            return {
+                "semantic_role": "issue-number",
+                "graph_scope": "non-semantic",
+                "confidence": 0.9,
+                "annotator": "system",
+                "reason": "numeric hashtag appears with an issue/PR/Open Question marker",
+            }
+    return None
 
 
 class CosenseStore:
