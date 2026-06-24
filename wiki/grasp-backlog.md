@@ -190,18 +190,25 @@ line_tombstones(project, id, page_id, deleted_at, last_text?)
 
 2026-06-24 追加判断: 改善の成功条件は「`[KJ法]` backlinks が増える」ことではなく、`KJ法` が **root link + 用途別 slice handle** に分岐すること。`[KJ法]` は KJ法そのもの・原理・全体像に残し、通常言及は `表札づくり` / `グループ編成` / `考える花火` / `Kozaneba` / `探検ネット` / `AIにKJ法を教える` などの narrower handle へ逃がす。agent が `[KJ法]` hub 全体を読まず、最初に 5-10 個の use cluster / slice を見て必要な slice だけ読める状態を success とする。
 
-未実装候補:
+2026-06-24 12:32 初期実装済み:
 
-- `mentions <query>` or `search --mentions --link-gap`: literal mentions outside parsed internal-link spansを、page already has exact link / no exact link / no query-containing link target で分けて返す。目的は bulk link 化ではなく、link gap と意図的 non-link を見分けること。
-- `co-links <query>` or `backlinks --co-links`: query を含む行で同時に出る internal links を rank し、巨大 hub の slice handle を出す。`KJ法` では `考える花火` / `こざね法` / `グループ編成` / `探検ネット` / `付箋` / `川喜田 二郎` / `発想法` / `表札*` が自然な絞り込み軸だった。
-- `gather` は huge hub を token budget 内で扱う時、ranked backlink lines + representative co-link slices + bare mention samples + omitted counts を返す。例: `gather KJ法` は huge hub banner、exact link count、body bare mention count、top slices、unlinked mention candidates、次に実行すべき `co-links` / `mentions --unlinked` recipes を返す。
-- AI clustering handoff: CLI は固定 cluster label を確定しないが、AI が `表札` / `ツール` / `AI応用` / `講義資料` などへ仮分類できるだけの bounded rows と sample provenance を返す。
+- `mentions <query>`: literal query の出現を探し、parsed internal-link span 外の bare mention を既定で返す。summary は total / bare / linked occurrence、bare line/page、`exact-link-page` / `query-link-page` / `unlinked-page` count を返す。目的は bulk link 化ではなく link gap / intentional non-link / come-from 候補の監査。
+- `co-links <query>`: query を含む行で同時に出る internal links を target ごとに rank し、line_count / source_page_count / examples を返す。巨大 hub の slice handle を AI が読む材料にする。
+- `gather <query>`: link stats + bare mention summary + representative mentions + co-link slices + backlinks + next recipes を bounded bundle として返す。`--budget` は row limit selector であり厳密 token packing ではない。huge hub では bulk-linking を避ける banner を返す。
+
+残課題:
+
+- `mentions` は現状 literal query。完全なかな/カナ・全半角正規化 index、word boundary、多義語 disambiguation は未実装。
+- `mentions --unlinked` という alias/surface は無い。既定が bare-only で、`--include-linked` が opt-in。
+- page-level 3分類は `exact-link-page` / `query-link-page` / `unlinked-page` まで。AI 作 default 裸、意図的 non-link、come-from 昇格候補（uncommon × 頻度 × 一意）の scoring は未実装。
+- `gather --budget` は厳密 token packing / omitted token count ではない。row limit と omitted counts の精密化は未実装。
+- AI clustering handoff: CLI は固定 cluster label を確定しないが、AI が `表札` / `ツール` / `AI応用` / `講義資料` などへ仮分類できるだけの bounded rows と sample provenance を返す、という方針は継続。
 
 2026-06-24（come-from / link overloading、親 llm-wiki 設計対話、原理は [[come-from-declared-gather]]）:
 
 巨大 hub が膨れる *why* を言語化できた。[[kj-link-hub-audit-2026-06-24]] の exact 144 → bare 490 は「リンク漏れ」ではなく**判断レベルと帰結レベルのミスマッチ**: Cosense のリンクは per-occurrence の局所判断だが双方向で大域帰結（hub）を創発する。誰も「KJ法 を 490-backlink hub にしよう」と決めていないのに、各ページの親切な `[KJ法]` の副作用として hub が出来る。∴ 対処は「もっとリンク」でも「リンクを消す」でもなく、**判断を帰結と同じ用語-大域レベルに上げる**こと（= come-from）。`gather` の banner / rationale にこの一文を入れると「リンク化を増やす方向が誤り」を原理で言える。
 
-- `mentions --unlinked` の3分類化: 現状の「link gap か 意図的 non-link か」に第3の源 **(c) AI 作ページの default 裸**を足す。KJ法 audit トップの bare page `🌀KJ法`（266 occ）は AI 作で (c)。書き手が AI 化するほど (c) が支配的になり、裸言及は著者意図と無関係に増える。出力は「埋めるべき gap」だけでなく **come-from 昇格候補（uncommon × 頻度 × 一意）** を別枠で scoring 付きで返す。目的は bulk link 化でなく「1宣言で畳めるもの」の surface。
+- `mentions` の3分類化: 現状の「link gap か 意図的 non-link か」に第3の源 **(c) AI 作ページの default 裸**を足す。KJ法 audit トップの bare page `🌀KJ法`（266 occ）は AI 作で (c)。書き手が AI 化するほど (c) が支配的になり、裸言及は著者意図と無関係に増える。出力は「埋めるべき gap」だけでなく **come-from 昇格候補（uncommon × 頻度 × 一意）** を別枠で scoring 付きで返す。目的は bulk link 化でなく「1宣言で畳めるもの」の surface。
 - **come-from declare 層**（新規）: 用語を come-from term として標す per-term standing rule。`mentions <query>` の ad-hoc query を declarative に固定したもの。store 表現は専用テーブル or 宛先ページ frontmatter `come_from: [...]`（後者は Markdown mirror と親和）。
 - **come-from render 層**（新規）: Markdown mirror / 公開 view を materialize する時、come-from term の裸出現を自動リンク化。store（裸）と view（リンク済み）の分離を保つ（[[markdown-obsidian-indexed-mirror]] の projection 方針に乗る）。authoring（裸＋宣言）と rendered（自動リンク）の分離が、著者を over-link させずに読者ケアを届ける機構。
 - 安全域＝必要域: come-from は文字列マッチで gather するので多義語は過剰収集するが、読者ケアが要る uncommon 語 ≈ 一意なので安全。昇格候補抽出は「uncommon さ × 頻度 × 一意性」で機械化できる。read 側（仮想出現一覧）は nishio 2022 の howm 考察そのもので grasp `mentions` が既に体現している。

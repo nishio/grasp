@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-24 12:32] implementation | mentions / co-links / gather 初期 surface を追加
+- `mentions <query>` を追加。literal query の occurrence を parsed internal-link span 内/外に分け、既定では bare mention 行だけ返す。summary は total / bare / linked occurrence、bare line/page、page status counts を返し、各行を `exact-link-page` / `query-link-page` / `unlinked-page` に分類する。`--include-linked` と `--context N` あり。
+- `co-links <query>` を追加。query を含む行で同時に出る internal links を target ごとに rank し、link_count / line_count / source_page_count / examples を返す。exact query target は既定で除外し、`--include-self` で含められる。
+- `gather <query>` 初期版を追加。link stats、bare mention summary、representative mentions、co-link slices、backlinks、次に実行する recipe を bounded bundle として返す。`--budget` は厳密 token packing ではなく row limit selector。huge hub では bulk-linking を避ける banner を返す。
+- store schema は v5 のまま、public compatibility version は `1.5.13`。current facts は [[grasp-v1-implemented]]、残課題（正規化 index、AI default 裸 / come-from 昇格 scoring、厳密 token packing）は [[grasp-backlog]] に残した。
+
 ## [2026-06-24 03:55] file back | come-from（宣言された用語単位の gather）を設計に取り込み
 - 親 llm-wiki の 2026-06-24 設計対話（link overloading → grasp-最適）から grasp に効く部分を取り込んだ。背景厚めの原理ページ [[come-from-declared-gather]] を新規作成。
 - 核の言語化: リンクには4仕事（recall / attention / navigation / **読者ケア**）があり、Cosense は substrate が他チャネルを持たないため全部を1つの `[X]` に束ねる。これが [[kj-link-hub-audit-2026-06-24]] の exact 144 → bare 490 の根。原因は **per-occurrence 局所判断 × 双方向 → hub という大域帰結のレベルミスマッチ**（誰も hub を作ろうと決めていない、親切な個別 `[KJ法]` の副作用で創発）。

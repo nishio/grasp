@@ -334,6 +334,102 @@ class SQLiteStoreTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_mentions_co_links_and_gather_surface_hub_slices(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "Root",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 40,
+                    "views": 100,
+                    "lines": [
+                        {"text": "Root", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "KJ法 root [KJ法] with [表札づくり]", "created": 1, "updated": 2, "userId": "u"},
+                    ],
+                },
+                {
+                    "title": "Slice",
+                    "id": "bbbbbbbbbbbbbbbbbbbbbbbb",
+                    "created": 1,
+                    "updated": 30,
+                    "views": 80,
+                    "lines": [
+                        {"text": "Slice", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "KJ法 slice [グループ編成]", "created": 1, "updated": 2, "userId": "u"},
+                    ],
+                },
+                {
+                    "title": "LinkedOnly",
+                    "id": "cccccccccccccccccccccccc",
+                    "created": 1,
+                    "updated": 20,
+                    "views": 70,
+                    "lines": [
+                        {"text": "LinkedOnly", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "only [KJ法]", "created": 1, "updated": 2, "userId": "u"},
+                    ],
+                },
+                {
+                    "title": "QueryLink",
+                    "id": "dddddddddddddddddddddddd",
+                    "created": 1,
+                    "updated": 10,
+                    "views": 60,
+                    "lines": [
+                        {"text": "QueryLink", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "KJ法 app [KJ法応用]", "created": 1, "updated": 2, "userId": "u"},
+                    ],
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture, ensure_ascii=False), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+
+            store = SQLiteStore(store_path)
+            try:
+                mentions = store.mentions("KJ法", limit=10)
+                summary = mentions["summary"]
+                self.assertEqual(summary["total_lines"], 4)
+                self.assertEqual(summary["total_occurrences"], 6)
+                self.assertEqual(summary["bare_lines"], 3)
+                self.assertEqual(summary["bare_occurrences"], 3)
+                self.assertEqual(summary["linked_occurrences"], 3)
+                self.assertEqual([hit["source_title"] for hit in mentions["mentions"]], ["Root", "Slice", "QueryLink"])
+                self.assertEqual(
+                    [hit["classification"] for hit in mentions["mentions"]],
+                    ["exact-link-page", "unlinked-page", "query-link-page"],
+                )
+                self.assertEqual(
+                    summary["page_status_counts"]["unlinked-page"],
+                    {"lines": 1, "pages": 1, "bare_occurrences": 1},
+                )
+
+                all_mentions = store.mentions("KJ法", limit=10, include_linked=True)
+                self.assertEqual([hit["source_title"] for hit in all_mentions["mentions"]], ["Root", "Slice", "LinkedOnly", "QueryLink"])
+
+                co_links = store.co_links("KJ法", limit=10, sample_limit=1)
+                self.assertEqual([item["title"] for item in co_links], ["表札づくり", "グループ編成", "KJ法応用"])
+                self.assertEqual(co_links[0]["line_count"], 1)
+                self.assertEqual(co_links[0]["examples"][0]["source_title"], "Root")
+
+                gather = store.gather("KJ法", budget=1500)
+                self.assertEqual(gather["limits"]["mentions"], 5)
+                self.assertEqual(gather["mention_summary"]["bare_occurrences"], 3)
+                self.assertEqual([item["title"] for item in gather["co_links"]], ["表札づくり", "グループ編成", "KJ法応用"])
+                self.assertEqual(gather["backlinks"][0]["source_title"], "Root")
+                self.assertEqual(gather["recipes"][0]["command"][:2], ["grasp", "co-links"])
+            finally:
+                store.close()
+
     def test_search_boolean_mode_supports_line_and_page_scope(self):
         fixture = {
             "name": "fixture",
