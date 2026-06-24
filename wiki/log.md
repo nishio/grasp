@@ -671,3 +671,9 @@
 - [[grasp-backlog]] の「grasp 自身の wiki を最初の dogfood corpus にする」に 2026-06-25 subsection を追加: corpus を grasp 1 wiki → **wiki森全体（40+ 単一所有者 wiki）**へ拡張。動機＝森は親 llm-wiki `wiki_search.py` の grep 横断止まり＝節点アクセス (a-1)、「N wiki を跨いで参照されるが本文が無い概念」＝俯瞰グラフ (a-2) は出せない。grasp の whole-store cross-project + Markdown mirror が (a-2) を供給。森は全部 nishio 所有＝Co- を削ぐ grasp の cross-project（非 Co- 横断）の理想 corpus。
 - 核心: **森用の特別 edge policy は不要**（nishio「import 時バラバラ→query で徐々に有機結合」）。cross-wiki プレーン名参照は import 時に裸の赤 node のまま、[[whole-store-graph-and-cross-project-edges]] point 8 の弱い接続（normalize-title 一致）が query 時に繋ぐ。「束の束」は query 時結合を待つ正常な初期状態（親 llm-wiki `書いてから整理する` の森スケール版）、誤接続は weak 層に封じ込み。
 - 論点: 40+ wiki の namespace import オーケストレーション / navigation・log artifact 森規模除外 / raw/ 除外（llm-wiki-about-nishio md 24,968 件）/ weak 接続の cross-wiki spread ranking。森メタ側は親 llm-wiki `wiki-forest-utilization-design-20260610` に file back。
+
+## [2026-06-25 02:00] 整理 | grasp-backlog を「未実装項目だけ」に再構成（412→251行）
+- 動機: 次の開発前に backlog を整理。旧 backlog は実装済みの作業ログ（read --around-line / search --context / mentions / co-links / gather / path / acquire 系など）と却下の経緯を本文に抱えて 412 行に膨らみ、未実装項目が埋もれていた。
+- 方針（分業 + ページルールに沿う）: 実装済み narration は [[grasp-v1-implemented]]（current facts の SSoT）と本 [[log]]（*いつ* やったかの時系列）に既に二重記録されているので backlog からは消す。事実は失われない（v1-implemented に全 surface が載っていることを突き合わせ確認）。却下案（`--cluster` / `--strip-decoration`）は経緯を畳んで各節末「却下（再提案しない）」の理由つき1行ガードに。設計根拠は `decisions/` / `concepts/` 側にあり backlog はリンクのみ。
+- 残したもの: 未実装項目（parser 監査 / Markdown mirror 残 / 森 dogfood 拡張 / navigation・log artifact handling / write・identity 層 / typed link / stable line identity / search recall 残 / gather・mentions・co-links 残課題 / use-case report / come-from declare・render / path・backlinks ranking / sync freshness / cross-project v6 / acquisition 残 / packaging）と、それらに効く settled な設計制約 + 出典リンク。
+- 検証: `python3 scripts/lint_wiki.py`（broken link / orphan 増なし）/ `python3 -m unittest discover -s tests`。コード変更なし、wiki のみ。
