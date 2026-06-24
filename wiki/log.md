@@ -695,3 +695,10 @@
 - dogfood: temp store で `wiki/` を import し、`PR #2` / `PR #1` / `Open Q #4` 由来 target に annotation が付くことを確認。`[[..]]` 由来の `..` は別の link-shaped non-semantic 表現として未対応。
 - file back: [[grasp-v1-implemented]] に current facts、[history](history.md) に `1.5.26`、[[grasp-backlog]] に残課題を反映。
 - 検証: bundled Python 3.12.13 で `python3 -m unittest discover -s tests` / `python3 scripts/lint_wiki.py` / `git diff --check` OK。
+
+## [2026-06-25 02:44] implementation | Markdown navigation/log artifact の outgoing edges を content graph から除外
+- `grasp import --markdown` が `index.md` / `forest-index.md` / `maps/` / `views/` / frontmatter `role: navigation` を navigation、`log.md` / `log/*.md` / frontmatter `type: log-entry` を log artifact と分類し、これらの outgoing edges を既定 content graph から除外するようにした。本文 lines は store に残るため `search` は従来通り hit する。
+- Markdown manifest version を `2` に更新し、`graph_role` を manifest identity に含めた。既存 Markdown project は次回 re-import で safe full rebuild される。SQLite schema は v5 のまま、public compatibility version は `1.5.27`。
+- dogfood: temp store で `wiki/` を import し、32 pages / 3831 lines / 365 edges / unresolved 5。前回の同条件 580 edges から log/index outgoing edges が落ち、`read grasp backlog` の backlinks から `Log` が消えた。一方で `search "first H1"` は `Log` に hit し、検索対象として残ることを確認。
+- file back: [[grasp-v1-implemented]] / [history](history.md) / [[grasp-backlog]] / [[markdown-obsidian-indexed-mirror]] を更新。
+- 検証: bundled Python 3.12.13 で `python3 -m unittest discover -s tests` / `python3 scripts/lint_wiki.py` / `git diff --check` OK。

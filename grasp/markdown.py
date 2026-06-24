@@ -15,6 +15,7 @@ class MarkdownMetadata:
     page_id: str | None
     aliases: list[str]
     tags: list[tuple[str, int]]
+    graph_role: str
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class MarkdownPageRecord:
     page: Page
     aliases: list[str]
     tags: list[tuple[str, int]]
+    graph_role: str
     source_hash: str
     mtime_ns: int
 
@@ -92,6 +94,7 @@ class MarkdownMirror:
                     page=page,
                     aliases=[alias for alias in aliases if normalize_title(alias) != norm_title],
                     tags=metadata.tags,
+                    graph_role=markdown_graph_role(relative_path, metadata),
                     source_hash=source_hash,
                     mtime_ns=stat.st_mtime_ns,
                 )
@@ -128,6 +131,8 @@ class MarkdownMirror:
         edges: list[Edge] = []
         line_target_norms: dict[str, set[str]] = defaultdict(set)
         for record in records:
+            if record.graph_role != "content":
+                continue
             page = record.page
             in_code_fence = False
             for line in page.lines:
@@ -221,13 +226,14 @@ def parse_markdown_h1_title(line: str) -> str | None:
 
 def markdown_file_manifest(records: list[MarkdownPageRecord]) -> dict[str, Any]:
     return {
-        "version": 1,
+        "version": 2,
         "files": {
             record.relative_path.as_posix(): {
                 "page_id": record.page.id,
                 "title": record.page.title,
                 "norm_title": record.page.norm_title,
                 "aliases": record.aliases,
+                "graph_role": record.graph_role,
                 "hash": record.source_hash,
                 "mtime_ns": record.mtime_ns,
             }
@@ -238,7 +244,7 @@ def markdown_file_manifest(records: list[MarkdownPageRecord]) -> dict[str, Any]:
 
 def parse_frontmatter(lines: list[str]) -> MarkdownMetadata:
     if not lines or lines[0].strip() != "---":
-        return MarkdownMetadata(title=None, page_id=None, aliases=[], tags=[])
+        return MarkdownMetadata(title=None, page_id=None, aliases=[], tags=[], graph_role="content")
 
     end = None
     for index in range(1, len(lines)):
@@ -246,7 +252,7 @@ def parse_frontmatter(lines: list[str]) -> MarkdownMetadata:
             end = index
             break
     if end is None:
-        return MarkdownMetadata(title=None, page_id=None, aliases=[], tags=[])
+        return MarkdownMetadata(title=None, page_id=None, aliases=[], tags=[], graph_role="content")
 
     values: dict[str, list[tuple[str, int]]] = defaultdict(list)
     current_key: str | None = None
@@ -272,6 +278,7 @@ def parse_frontmatter(lines: list[str]) -> MarkdownMetadata:
 
     title = first_frontmatter_value(values, "title")
     page_id = first_frontmatter_value(values, "id")
+    graph_role = frontmatter_graph_role(values)
     aliases = [value for value, _ in values.get("aliases", [])]
     aliases.extend(value for value, _ in values.get("alias", []))
     tags = [
@@ -284,6 +291,7 @@ def parse_frontmatter(lines: list[str]) -> MarkdownMetadata:
         page_id=page_id,
         aliases=list(dict.fromkeys(alias for alias in aliases if alias)),
         tags=list(dict.fromkeys((tag, line_index) for tag, line_index in tags if tag)),
+        graph_role=graph_role,
     )
 
 
@@ -318,6 +326,35 @@ def normalize_frontmatter_key(key: str) -> str:
 def first_frontmatter_value(values: dict[str, list[tuple[str, int]]], key: str) -> str | None:
     key_values = values.get(key) or []
     return key_values[0][0] if key_values else None
+
+
+def frontmatter_graph_role(values: dict[str, list[tuple[str, int]]]) -> str:
+    candidates = []
+    for key in ("graph_role", "role", "layer"):
+        candidates.extend(value for value, _ in values.get(key, []))
+    candidates.extend(value for value, _ in values.get("type", []) if value == "log-entry")
+    for value in candidates:
+        normalized = normalize_frontmatter_key(value)
+        if normalized in {"navigation", "index", "catalog", "map", "view"}:
+            return "navigation"
+        if normalized in {"log", "event_stream", "event-stream", "log_entry", "log-entry"}:
+            return "log"
+    return "content"
+
+
+def markdown_graph_role(relative_path: Path, metadata: MarkdownMetadata) -> str:
+    if metadata.graph_role != "content":
+        return metadata.graph_role
+
+    parts = tuple(part.casefold() for part in relative_path.parts)
+    name = parts[-1] if parts else ""
+    if name in {"index.md", "forest-index.md"}:
+        return "navigation"
+    if name == "log.md" or "log" in parts[:-1]:
+        return "log"
+    if any(part in {"maps", "views"} for part in parts[:-1]):
+        return "navigation"
+    return "content"
 
 
 def normalize_frontmatter_tag(value: str) -> str:
