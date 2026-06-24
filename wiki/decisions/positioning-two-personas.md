@@ -76,3 +76,11 @@ persona2 向けに振りすぎると「Obsidian-but-for-LLMs / CLI 付き graph 
 ### 2026-06-24: dogfooding は outcome story として評価する
 
 [[use-case-experiment-as-outcome-story]] を追加。persona1 dogfooding は設計 driver だが、単に gotcha や未実装を見つけるだけでは弱い。ユースケース実験は「ユーザがこう依頼したら、こういう有用な結果が得られる」という outcome story として記録し、結果が読む・判断する・次に使う単位にまとまっていて「いい感じ」かを評価対象にする。
+
+### 2026-06-24: 初の第三者試用 — インサイダーは Scrapbox 枠に入れる / モデル水準を下げる / flywheel は persona1 止まり
+
+[[takker-opencode-villagepump-test-2026-06-24]]（nishio 以外の初実走, OpenCode + Deepseek v4 flash, villagepump 1.45M 行）から、この decision に効く3点:
+
+- **persona1 は一般化する第一証拠、だが persona2 framing は依然未検証。** takker は JP・Cosense native・cosense-cli インサイダーで教科書的 persona1。彼が反射的に grasp を「offline 版 cosense-cli」と呼んだ＝放っておくと**インサイダーは Scrapbox 系譜の枠に入れる**。本 decision の GTM は逆に Scrapbox を lineage に後置し Markdown 束 framing を lede にする方針なので整合はするが、**upside-risk の persona2（Markdown 束・非 Scrapbox・非日本語）framing は実在の persona2 にまだ一度も当たっていない**。下 Open Q3 の「.md 束より良い」実演は依然 nishio の想定に留まる。
+- **grasp はモデル水準を下げる（persona2 GTM の追い風）。** 安いモデルで完走したのは、構造化出力を CLI が作り agent は薄い recipe を回すだけだから（[[takker-opencode-villagepump-test-2026-06-24]] / [[delivery-cli-plus-skill]]）。「手持ちの・安い coding agent でも動く」は persona2 獲得の messaging になり、Claude 前提でない portability を裏付ける。
+- **公開 dogfooding flywheel は高利回りだが persona1 止まり。** 公開 Scrapbox に書く→エコシステム隣接者が自分の agent/corpus で試す→実バグを踏む→PR まで来る（PR #2 merged）、という自己 dogfooding では出せない検証がタダで来た。HN/Reddit GTM はこれを意図的に回す価値があるが、現状この経路が届くのは persona1 型の人。persona2 を当てるには別チャネル（Markdown/Obsidian コミュニティ）が要る。
