@@ -44,6 +44,7 @@ v1 scope 外:
 
 - Python package `grasp`。`python3 -m grasp ...` と console script `grasp` の両方で起動する。
 - Python 3.10+、runtime dependencies は無し（stdlib `sqlite3`）。
+- license = MIT（`LICENSE` / `pyproject.toml`、2026-06-24 追加）。inajob の「土台にするのでライセンス明記してほしい」要望に対応したもので、persona2 GTM（HN/Reddit, [[positioning-two-personas]]）でも前提になる。
 - `README.md` は「主たるユーザは人間 CLI operator ではなく AI agent」という前提に更新済み。
 - `skills/grasp/SKILL.md` が「いつ使うか」を持ち、CLI mechanics は `grasp <cmd> --help` に寄せる。
 - `--store` / `--project` は root option として command 前に置く。`--json` / `--full-ids` は agent が末尾へ置くミスを回復するため、command 後にも hidden alias として受ける。

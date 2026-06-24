@@ -30,3 +30,24 @@ sources:
 - `1 store = 1 export snapshot` ではなく、`1 store = many project snapshots` になった。
 - project 間リンクや cross-project related は作らない。必要になったら explicit な cross-project query として別設計にする。
 - schema v3 以前の store は project namespace を持たないため、次回 import 時に v4 store として作り直す。
+
+## Updates
+
+### 2026-06-24（tentative）: 異なる project の赤リンク（unresolved target）は接続する
+
+nishio 設計判断（Scrapbox `villagepump/grasp`, 出典 raw/grasp-villagepump-page_2026-06-24.txt）:
+
+> 複数のプロジェクトを入れた時に1つの SQLite に全部入る／**異なるプロジェクトの赤リンクは接続する**。間違った〜と言って撤回する可能性はあります。
+
+前者は本 decision で既決。後者は本文の「project 間リンクや cross-project related は作らない」を **unresolved target に限って緩める** 新方針で、明示的に tentative（撤回あり）。
+
+精密化（この Update が変える範囲）:
+
+- 変えない: **resolved page graph の namespace 分離**。`read` / `backlinks` / `related` が別 project の page 本文・authorship を混ぜない、という本 decision の核は維持（混ぜると AI が誤読する、が依然成立。[[cross-project-reference-acquire-2026-06-24]] の「namespace を分けたまま explicit acquisition で近傍を観る」も同じ立場）。
+- 変える対象: **page 実体のない赤リンク（unresolved target）**。project A の `[X]` と project B の `[X]` は、どちらも本文を持たない概念ハブで、同一概念を指しうる。これを project 横断で同一 node として束ねると「自分の全 project を通じて、誰も本文を書いていないが皆が指している X」が見える。
+
+未実装 / 論点:
+
+- 現 schema は `unresolved_targets` を project 列で namespace 化している（[[grasp-v1-implemented]] store facts）。cross-project 接続は normalize した target title を project 横断 key にする必要がある。同名 unresolved の semantic 衝突（別 project で同綴り別概念）は resolved page と同じく誤接続リスクがあり、赤リンクなら安全と言い切れるかは未検証。
+- 接続を import 時に materialize するか、cross-project query 時に都度束ねるか（[[cross-project-reference-acquire-2026-06-24]] / `cross-project-refs` は後者寄り＝materialize せず都度抽出の方針）。
+- tentative なので、実装着手前に「resolved は分離 / unresolved は接続」の非対称が AI 読解で本当に有用かを dogfood で確かめる。
