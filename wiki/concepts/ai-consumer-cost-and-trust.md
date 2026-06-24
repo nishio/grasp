@@ -56,3 +56,10 @@ grasp の `read` / `link-stats` の zero-hit、`search` の空結果、`related`
 この消費者は **grasp を実行できない**（substrate を持たない）。AI 消費者の「round-trip / negative-contract」とは別の失敗モードを持つ —— リンクの4番目の仕事「読者ケア」（一般的でない語の説明へ辿らせる親切）が、公開面が frozen 静的エクスポートだと届かない。これは backlog が index/log で警戒する「frozen view」問題を**本文 hub と公開人間読者**へ拡張したもの。
 
 grasp scope の判断点（nishio）: 「substrate-backed な公開 view を出す」を grasp が担うか publish に委譲か。少なくとも come-from-at-render（[[come-from-declared-gather]] §4 render 層）が、著者を over-link させずにこの消費者を served にする軽量機構。本 2軸モデルは AI 消費者に閉じているが、**読者ケア軸はその外にある**ことを明記しておく。
+
+### 2026-06-24: 軸1 の実測裏付け — コスト軸は wall-clock でなく token
+
+本番コーパス（25,798 pages / flat MD 53.2MB ≈ 14M token）で「MD 全読み vs grep vs grasp search」を実測（[[read-vs-grep-benchmark-2026-06-24]]）。軸1 の主張「round-trip が実費 / 中間出力が context を食う」が数字で裏付いた:
+
+- **ディスク wall-clock は3手法とも sub-second**（cat 0.02s / grep 0.3s / grasp 0.25–0.75s）→ 速度は論点でない。効くのは context に入る token 量。MD 全読みは ~14M token で 1M window の14倍、**そもそも入らない**。
+- **grep は出力が無制限**（`民主主義` 1 クエリで 498KB≈125K token の生ログ）、**grasp search は bounded**（7–14KB）。∴ grasp の対 grep 優位は「速さ」ではなく「**同等 wall-clock で bounded・ranked・structured を返す**」点 = read=近傍同梱 / `gather --budget` / related-snippets の token-economy 動機の実証。
