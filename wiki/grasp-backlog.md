@@ -315,10 +315,11 @@ surface 名は未決。重要なのは、raw dump ではなく **bounded candida
 - **whole-store default retrieval**: `_require_project` の「複数 project で error」を削除。`search` / `read` / `backlinks` / `related` / `path` / `unresolved` / `mentions` / `co-links` / `gather` は default で全 project から、`--project` で絞る。結果は project ラベル付き。`import` / `sync` / `acquire` は project-targeted のまま。
 - **read 多義の disambiguation**: 同名 page が複数 namespace にある時、error せず全候補を project ラベル + summary で返し `--project` / page-id で絞らせる。
 - **node 状態 = page 単位の materialized / referenced-only**: project は namespace。「未取得 project」は categorical でなく coverage（materialized page 数）の派生量。acquire = referenced-only node の materialize。`unresolved`(whole-store) が「参照済みだが未取得の知識圏」を link_count 順で出し、acquire の seed bibliography になる（[[cross-project-reference-acquire-2026-06-24]] dogfood の手作業を primitive 化）。
+- **同名 bare 赤リンクの cross-project 統合（nishio 2026-06-24 決定、tentative・撤回あり）**: 別 project の同名 bare 赤リンク `[X]`（どの namespace でも materialized でない）を normalize title の project 非依存 key で **1ノードに束ねる**。materialized page は (project, id) で namespaced のまま、統合するのは赤 node だけ。「全 project を通じて誰も本文を書いていないが皆が指す概念ハブ」= project ごとに別 Scrapbox の Cosense が出せない value。`unresolved_targets` は per-source provenance を残しつつ graph node を norm でまとめ、cross-project spread で rank する。誤接続（同綴り別概念）は受容し provenance で後判別。詳細・境界 Q は [[whole-store-graph-and-cross-project-edges]] point 7。
 - **出力契約**: discover-broad-filter-post-hoc。relevance で pre-filter せず target_project / link_kind / scope ラベル付きで surface、絞りは post-hoc flag、出力量は rank + omitted-count で bound、性能は bound で対処し hide しない。現 `cross_project_refs` の `--semantic-only` / `--exclude-icons` / `--include-self` は「pre-filter」から「surface 済み集合への post-hoc filter」に位置づけ直す。
 - **history**: store format / materialized index semantics が変わるため [[history]] の `x` を進める（再 import 要）。
 
-未決（decision の Open Questions）: referenced-only namespace の coverage rollup surface 形 / slash-in-title 確定規則の実データ検証 / dense graph での whole-store related/path bound / **同名 bare 赤リンクの cross-project 統合**（[[multi-project-store]] tentative Update との diverge、nishio 判断待ち）。
+未決（decision の Open Questions）: referenced-only namespace の coverage rollup surface 形 / slash-in-title 確定規則の実データ検証 / dense graph での whole-store related/path bound / 赤リンク統合の境界（同綴り別概念の誤接続頻度の dogfood・赤-materialized 解決境界・explicit `[/P/T]` との node identity 整合）。
 
 ## Hosted Cosense acquisition without admin export
 
