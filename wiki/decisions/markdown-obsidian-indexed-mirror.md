@@ -139,12 +139,12 @@ grasp related "Some Note"
 
 実装含意:
 
-- Markdown import は `wiki/index.md`, `wiki/index.txt`, `wiki/log.md`, `forest-index.md`, `maps/`, `views/` などを navigation artifact と分類できる必要がある。
+- Markdown import は `index.md`, `forest-index.md`, `maps/`, `views/` などを navigation artifact、`log.md` / `log/*.md` を log artifact と分類できる必要がある。
 - navigation artifact は search には入れてよいが、既定では outgoing edges を `related` / `path` / backlink ranking の content graph から除外する。必要なら明示 flag（例: `--include-navigation`）で見る。
 - `grasp catalog` または `grasp export-index` 的な generated view は frontmatter `summary` を source-of-truth にする。index 行の手維持を source-of-truth にしない。
 - 複数 wiki は [[multi-project-store]] の通り project namespace を分ける。wiki森横断 registry は外側から複数 project を指す layer であり、別 wiki の同名ページを暗黙 merge しない。
 
-現状との差分: 2026-06-24 の最小 Markdown mirror は全 `.md` を同列に扱う。したがってこの navigation boundary は **未実装 policy** であり、[[grasp-backlog]] に実装候補として残す。
+2026-06-25 実装: Markdown mirror は path/frontmatter heuristic で navigation/log artifact を分類し、その outgoing edges を既定 content graph から除外する。本文 lines は store に残すので `search` は hit する。未実装は `--include-navigation` escape hatch、catalog/export-index、log entry split など。
 
 ## Update: LLM Wiki log / event stream boundary
 
@@ -200,6 +200,5 @@ Scrapbox 互換では `#1` は link として成立する。したがって pars
 - heading / block ref を line-id とどう対応させるか。
 - `#tag` と wikilink を同一 edge type にするか。
 - search index は FTS5 trigram hybrid にするか、まず correctness 優先で `LIKE` にするか（[[fts5-trigram-search]]）。
-- navigation artifact の分類は path heuristic（`index.md`, `log.md` 等）で足りるか、frontmatter `role: navigation` / `layer: navigation` を要求するか。
 - log artifact の entry split は wiki ごとの header convention にどこまで対応するか。最低限は LLM Wiki / grasp wiki の `## [timestamp] op | summary`。
 - log entry の `subjects` 抽出をどこまで自動化するか。明示 frontmatter / touched page list が無い既存 `log.md` では body 中の wikilink と file path から推定するしかない。

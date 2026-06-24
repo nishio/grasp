@@ -5,6 +5,7 @@ from pathlib import Path
 from grasp.markdown import (
     MarkdownMirror,
     first_markdown_h1_title,
+    markdown_graph_role,
     parse_frontmatter,
     parse_markdown_links,
 )
@@ -63,6 +64,19 @@ class MarkdownParsingTests(unittest.TestCase):
         self.assertEqual(metadata.title, "Canonical Page")
         self.assertEqual(metadata.aliases, ["Old Page", "Legacy Page"])
         self.assertEqual(metadata.tags, [("graph", 6), ("wiki", 6)])
+        self.assertEqual(metadata.graph_role, "content")
+
+    def test_markdown_graph_role_uses_path_and_frontmatter_hints(self):
+        self.assertEqual(markdown_graph_role(Path("index.md"), parse_frontmatter([])), "navigation")
+        self.assertEqual(markdown_graph_role(Path("log.md"), parse_frontmatter([])), "log")
+        self.assertEqual(markdown_graph_role(Path("maps") / "A.md", parse_frontmatter([])), "navigation")
+        self.assertEqual(
+            markdown_graph_role(
+                Path("A.md"),
+                parse_frontmatter(["---", "role: navigation", "---", "# A"]),
+            ),
+            "navigation",
+        )
 
     def test_first_markdown_h1_title_skips_frontmatter_and_code_fences(self):
         self.assertEqual(
@@ -123,6 +137,31 @@ class MarkdownImportTests(unittest.TestCase):
                 unresolved_titles = {item["title"] for item in read["unresolved_targets"]}
                 self.assertEqual(unresolved_titles, {"Missing", "topic"})
                 self.assertEqual(store.link_stats("ParentWiki")["link_count"], 0)
+            finally:
+                store.close()
+
+    def test_navigation_and_log_artifacts_are_searchable_but_not_content_edges(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "index.md").write_text("# Index\n[[A]]\n", encoding="utf-8")
+            (root / "log.md").write_text("## [2026-06-25 00:00] event | touched [[A]]\n", encoding="utf-8")
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "Source.md").write_text("links to [[A]]\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            stats = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            self.assertEqual(stats["pages"], 4)
+            self.assertEqual(stats["edges"], 1)
+            self.assertEqual(stats["unresolved_targets"], 0)
+
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                read = store.read("A", backlink_limit=10, related_limit=10, unresolved_limit=10)
+                self.assertEqual(read["backlink_count_total"], 1)
+                self.assertEqual(read["backlinks"][0]["source_title"], "Source")
+                hits = store.search("touched", limit=5)
+                self.assertEqual([hit["source_title"] for hit in hits], ["log"])
             finally:
                 store.close()
 

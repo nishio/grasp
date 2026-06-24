@@ -757,6 +757,7 @@ def _markdown_manifest_identity(manifest: dict[str, Any]) -> dict[str, Any]:
             "title": item.get("title"),
             "norm_title": item.get("norm_title"),
             "aliases": item.get("aliases") or [],
+            "graph_role": item.get("graph_role") or "content",
         }
     return identity
 
