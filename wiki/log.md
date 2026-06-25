@@ -835,3 +835,9 @@
 - fast-path plan には、Phase 0-3 は append-only authoring alpha であり identity-without-name の差別化 claim は rename slice 以降、という注記を足した。
 - schema は v7 のまま。public compatibility version は `1.7.8`。
 - 検証: `python3 -m unittest discover -s tests`（76 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 00:31] implementation+file back | journal event JSONL contract を固定
+- `grasp.journal` module を追加。journal schema v1、event types `page_create` / `page_update` / `section_append` / `page_rename` / `log_append` / `projection_export`、canonical JSONL encode、append、read validation を固定した。
+- これは [[llm-wiki-infra-fast-path-plan]] Phase 0 の前処理。まだ `adopt-markdown` / replay / write CLI / projection export は未実装。
+- schema は v7 のまま。public compatibility version は `1.7.9`。
+- 検証: `python3 -m unittest discover -s tests`（80 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
