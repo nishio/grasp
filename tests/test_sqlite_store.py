@@ -345,6 +345,61 @@ class SQLiteStoreTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_suggest_fuzzy_finds_long_sentence_titles(self):
+        long_title = "再会は書字のタダの副産物で委譲が奪った-20260613"
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": long_title,
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 10,
+                    "views": 10,
+                    "lines": [{"text": long_title, "created": 1, "updated": 1, "userId": "u"}],
+                },
+                {
+                    "title": "書字の練習",
+                    "id": "bbbbbbbbbbbbbbbbbbbbbbbb",
+                    "created": 1,
+                    "updated": 2,
+                    "views": 100,
+                    "lines": [{"text": "書字の練習", "created": 1, "updated": 1, "userId": "u"}],
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture, ensure_ascii=False), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+
+            store = SQLiteStore(store_path)
+            try:
+                suggestions = store.suggest("書字 副産物", limit=5)
+                self.assertEqual(suggestions[0]["title"], long_title)
+                self.assertEqual(suggestions[0]["match_mode"], "terms")
+                self.assertEqual(suggestions[0]["matched_terms"], ["書字", "副産物"])
+
+                compact = store.suggest("再会書字委譲", limit=5)
+                self.assertEqual(compact[0]["title"], long_title)
+                self.assertEqual(compact[0]["match_mode"], "subsequence")
+
+                strict = store.suggest("書字 副産物", limit=5, mode="substring")
+                self.assertEqual(strict, [])
+
+                missing_read = store.read("再会 副産物", backlink_limit=0, related_limit=0, unresolved_limit=0)
+                hint_titles = [
+                    item["title"]
+                    for item in missing_read["recovery_hints"]["suggest"]["suggestions"]
+                ]
+                self.assertIn(long_title, hint_titles)
+            finally:
+                store.close()
+
     def test_imports_multiple_projects_into_one_store_without_mixing_graphs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             export_path = Path(tmpdir) / "export.json"

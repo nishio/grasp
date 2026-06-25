@@ -151,7 +151,7 @@ grasp read "<ページタイトル>"
 | `cross-project-refs` | Cosense shorthand `[/project/page]` を parsed link target として抽出し、semantic / `.icon` / project root / self-project に分類して project 別に rank。`--semantic-only` で acquisition seed 向けに絞り、`--seed-dir` で project 別 seed file と acquire command を生成 |
 | `cross-project-acquire` | `cross-project-refs --semantic-only` の seed titles を使い、複数 target project を `<project>:semantic` namespace に一括 partial acquire。`--dry-run` で計画だけ返せ、実行後は reciprocal refs / top internal links も返す |
 | `gather <query>` | link stats・裸言及 summary・co-link slices・backlinks・次の recipe を bounded bundle として返す。returned / total / omitted は row 単位で明示。`--budget` は近似 row limit |
-| `suggest <partial>` | タイトルの部分一致補完 |
+| `suggest <partial>` | タイトル候補を fuzzy / 部分一致で補完。既定 fuzzy は長文タイトルに対し、空白区切り断片や詰めた文字順序でも候補を返す。厳密部分一致は `--mode substring` |
 | `backlinks <title>` | 行レベルの逆リンク（本文の無いターゲットにも効く） |
 | `related <title>` | 既存ページなら 2-hop ページ、本文の無いターゲットならそれを参照する source ページ。曖昧 handle は handle source pages と候補 page ごとの related を分けて返す |
 | `path <A> <B>` | 2つのページ / 未解決ターゲットがリンクグラフ上でどう繋がるかを短い経路で見る。経路なしでも related / backlinks などの recovery hints を返す |

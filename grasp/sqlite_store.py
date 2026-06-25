@@ -2600,8 +2600,16 @@ class SQLiteStore:
         first, second = sorted((source_key, target_key))
         return first, second
 
-    def suggest(self, partial: str, limit: int = 20) -> list[dict[str, Any]]:
+    def suggest(self, partial: str, limit: int = 20, mode: str = "fuzzy") -> list[dict[str, Any]]:
         project = self._require_project()
+        limit = max(0, limit)
+        if mode not in {"substring", "fuzzy"}:
+            raise ValueError("suggest mode must be one of: substring, fuzzy")
+        if mode == "fuzzy":
+            return self._suggest_fuzzy(project, partial, limit)
+        return self._suggest_substring(project, partial, limit)
+
+    def _suggest_substring(self, project: str, partial: str, limit: int) -> list[dict[str, Any]]:
         norm_partial = normalize_title(partial)
         like = f"%{_escape_like(norm_partial)}%"
         prefix = f"{_escape_like(norm_partial)}%"
@@ -2617,7 +2625,45 @@ class SQLiteStore:
             """,
             (project, like, prefix, limit),
         ).fetchall()
-        return [self._page_from_row(row).to_summary() for row in rows]
+        return [self._suggestion_from_row(row, norm_partial) for row in rows]
+
+    def _suggest_fuzzy(self, project: str, query: str, limit: int) -> list[dict[str, Any]]:
+        norm_query = normalize_title(query)
+        if not norm_query or limit == 0:
+            return []
+        rows = self.connection.execute(
+            """
+            SELECT * FROM pages
+            WHERE project = ?
+            """,
+            (project,),
+        ).fetchall()
+        suggestions = []
+        for row in rows:
+            match = _title_suggestion_match(norm_query, row["norm_title"])
+            if match is None:
+                continue
+            summary = self._page_from_row(row).to_summary()
+            summary.update(match)
+            suggestions.append(summary)
+        suggestions.sort(
+            key=lambda item: (
+                -int(item["match_score"]),
+                -int(item["views"]),
+                str(item["title"]).casefold(),
+            )
+        )
+        return suggestions[:limit]
+
+    def _suggestion_from_row(self, row: sqlite3.Row, norm_query: str) -> dict[str, Any]:
+        summary = self._page_from_row(row).to_summary()
+        match = _title_suggestion_match(norm_query, row["norm_title"]) or {
+            "match_mode": "substring",
+            "match_score": 0,
+            "matched_terms": [],
+        }
+        summary.update(match)
+        return summary
 
     def cross_project_refs(
         self,
@@ -5106,6 +5152,89 @@ def _search_terms(query: str) -> list[str]:
 def _loose_search_terms(query: str) -> list[str]:
     terms = [term for term in loose_search_key(query).split(" ") if term]
     return list(dict.fromkeys(terms))
+
+
+def _title_suggestion_match(query_norm: str, title_norm: str) -> dict[str, Any] | None:
+    if not query_norm:
+        return None
+    if query_norm == title_norm:
+        return {
+            "match_mode": "exact",
+            "match_score": 100_000 + len(query_norm),
+            "matched_terms": [query_norm],
+        }
+    if title_norm.startswith(query_norm):
+        return {
+            "match_mode": "prefix",
+            "match_score": 90_000 + len(query_norm) * 10,
+            "matched_terms": [query_norm],
+        }
+    if query_norm in title_norm:
+        return {
+            "match_mode": "substring",
+            "match_score": 80_000 + len(query_norm) * 10 - title_norm.find(query_norm),
+            "matched_terms": [query_norm],
+        }
+
+    terms = _search_terms(query_norm)
+    if len(terms) > 1:
+        term_matches = []
+        for term in terms:
+            match = _title_term_match(term, title_norm)
+            if match is None:
+                return None
+            term_matches.append(match)
+        score = 70_000 + sum(int(match["score"]) for match in term_matches)
+        return {
+            "match_mode": "terms",
+            "match_score": score,
+            "matched_terms": terms,
+        }
+
+    match = _title_term_match(query_norm, title_norm)
+    if match is None or match["mode"] == "substring":
+        return None
+    return {
+        "match_mode": match["mode"],
+        "match_score": 60_000 + int(match["score"]),
+        "matched_terms": [query_norm],
+    }
+
+
+def _title_term_match(term: str, title_norm: str) -> dict[str, Any] | None:
+    if not term:
+        return None
+    if term in title_norm:
+        return {
+            "mode": "substring",
+            "score": 2_000 + len(term) * 20 - title_norm.find(term),
+        }
+    score = _fuzzy_subsequence_score(term, title_norm)
+    if score is None:
+        return None
+    return {
+        "mode": "subsequence",
+        "score": score,
+    }
+
+
+def _fuzzy_subsequence_score(pattern: str, text: str) -> int | None:
+    if len(pattern) < 2 or len(text) < len(pattern):
+        return None
+    positions = []
+    start = 0
+    for char in pattern:
+        found = text.find(char, start)
+        if found < 0:
+            return None
+        positions.append(found)
+        start = found + 1
+    span = positions[-1] - positions[0] + 1
+    gaps = span - len(pattern)
+    if gaps > max(8, len(pattern) * 3):
+        return None
+    leading_gap = positions[0]
+    return max(1, 1_500 + len(pattern) * 20 - gaps * 30 - leading_gap)
 
 
 def _sql_loose_search_terms(query: str) -> list[str]:

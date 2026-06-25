@@ -454,17 +454,27 @@ def build_parser() -> argparse.ArgumentParser:
     suggest_parser = add_command_parser(
         subparsers,
         "suggest",
-        help="Suggest page titles by partial text.",
-        description="Search normalized page titles by substring and rank prefix matches first.",
-        returns="query, suggestions[]",
+        help="Suggest page titles by fuzzy or partial text.",
+        description=(
+            "Search normalized page titles. The default fuzzy mode keeps exact/substring matches first, "
+            "then also matches separated terms and compact character-subsequence queries for long sentence titles."
+        ),
+        returns="query, mode, suggestions[]",
         examples=[
             "grasp suggest 盲点 --limit 10",
+            "grasp suggest '書字 副産物' --limit 10",
+            "grasp suggest '再会書字委譲' --limit 10",
             "grasp --json suggest scrap --limit 5",
         ],
-        notes=["suggestions[] items are page summaries: id, title, created, updated, views, line_count."],
+        notes=[
+            "suggestions[] items are page summaries plus match_mode, match_score, and matched_terms.",
+            "--mode substring restores strict normalized substring matching.",
+            "Fuzzy mode is lexical and asearch-style; semantic embedding search is a later retrieval layer.",
+        ],
     )
     suggest_parser.add_argument("partial", help="Partial page title text.")
     suggest_parser.add_argument("--limit", type=int, default=20, help="Maximum title suggestions to return.")
+    suggest_parser.add_argument("--mode", choices=["fuzzy", "substring"], default="fuzzy", help="Title suggestion mode.")
 
     search_parser = add_command_parser(
         subparsers,
@@ -1072,7 +1082,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
     if args.command == "suggest":
         return {
             "query": args.partial,
-            "suggestions": store.suggest(args.partial, limit=args.limit),
+            "mode": args.mode,
+            "suggestions": store.suggest(args.partial, limit=args.limit, mode=args.mode),
         }
     if args.command == "search":
         hits = store.search(
@@ -1592,7 +1603,7 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
     if command == "peek":
         return format_peek(result, aliases=aliases)
     if command == "suggest":
-        return format_suggest(result["query"], result["suggestions"])
+        return format_suggest(result["query"], result["suggestions"], mode=result.get("mode"))
     if command == "search":
         return format_search(
             result["query"],
@@ -2316,13 +2327,18 @@ def format_peek(result: dict[str, Any], aliases: LineIdAliases | None = None) ->
     return with_alias_legend("".join(parts), aliases)
 
 
-def format_suggest(query: str, suggestions: list[dict[str, Any]]) -> str:
+def format_suggest(query: str, suggestions: list[dict[str, Any]], *, mode: str | None = None) -> str:
     parts = [f"# Suggestions: {query}\n"]
+    if mode:
+        parts.append(f"mode: {mode}\n")
     if not suggestions:
         parts.append("(none)\n")
     else:
         for page in suggestions:
-            parts.append(f"- {page['title']} (views {page['views']}, lines {page['line_count']})\n")
+            match = ""
+            if page.get("match_mode"):
+                match = f", match={page['match_mode']}, score={page.get('match_score', 0)}"
+            parts.append(f"- {page['title']} (views {page['views']}, lines {page['line_count']}{match})\n")
     return "".join(parts)
 
 

@@ -60,6 +60,7 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
+| `1.7.7` | schema `7` | 2026-06-26 | schema `7` compatible | `suggest` の既定を asearch-style lexical fuzzy title suggestion に拡張。exact / prefix / substring を優先しつつ、長文タイトルに対する空白区切り断片一致と文字順序近似を返す。`--mode substring` で従来の厳密部分一致に戻せる。schema は不変 |
 | `1.7.6` | schema `7` | 2026-06-26 | schema `7` compatible | `cross-project-spreads` command を追加。normalized handle を project spread で rank し、seed title なしに weak cross-project signal を発見できる。`structural-name` / `numeric-only` / `artifact-only` は消さずに rank band で下げる。schema は不変 |
 | `1.7.5` | schema `7` | 2026-06-25 | schema `7` compatible | `cross-project-spread <title>` command を追加。normalized title が selected/all projects で materialized page handle / ambiguous handle / unresolved target / incoming link としてどれだけ広がるかを `weak-normalized-title` signal として返す。page identity は project-scoped のまま merge しない。schema は不変 |
 | `1.7.4` | schema `7` | 2026-06-25 | schema `7` compatible | `related <ambiguous handle>` の contract を追加。primary `related[]` は ambiguous handle 自体への source pages、`candidate_related[]` は候補 page ごとの existing-page related を返す。曖昧リンクを候補 page へ自動割当しない。schema は不変 |
@@ -107,6 +108,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.7.6`
+- Current public compatibility version: `1.7.7`
 - Current internal `SCHEMA_VERSION`: `7`
-- Current package metadata should match `1.7.6`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.7.7`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

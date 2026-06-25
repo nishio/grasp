@@ -52,7 +52,7 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.7.6`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.7.7`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -83,7 +83,7 @@ v1 scope 外:
 | `path <A> <B>` | pages ∪ unresolved targets を node、materialized internal links を無向 edge として shortest path を返す。`--max-depth` default 4、`--limit` default 3。edge には根拠 line を同梱する。端点が resolve できるが経路が無い時は `recovery_hints.path` に reason / next_max_depth / related / backlinks / link-stats を返す |
 | `link-stats <title>` | incoming link count / source page count / none-single-multi を返す。visible handle が複数 page identity に束縛される時は `ambiguity.type=handle_ambiguity` を返し、zero-hit recovery hints へ誤分類しない。zero-hit 時は `recovery_hints` も返す |
 | `peek <title>` | page lines のみ。`--line-offset N --line-limit M` で本文行だけをページングし、JSON は `line_offset`, `lines_truncated_before`, `lines_truncated_after` を返す |
-| `suggest <partial>` | title 部分一致候補 |
+| `suggest <partial>` | title 候補。既定 `--mode fuzzy` は exact / prefix / substring を優先しつつ、長文タイトルに対する空白区切り断片一致と文字順序近似を返す。各 suggestion は `match_mode` / `match_score` / `matched_terms` を持つ。`--mode substring` で従来の厳密 normalized substring に戻せる |
 | `search <query>` | 既定は空白も含む literal line substring search。`--mode boolean` で AND/OR/NOT、括弧、quoted phrase、隣接 term の implicit AND を扱う。`--scope line` は行単位、`--scope page` はページ単位で式を評価する。`--context N` で各 hit に前後 N 行の `context_lines[]` と `context_window` を同梱し、text 出力でも hit 直下に bounded context を表示する。literal 0件時は NFKC query 正規化＋長音除去の normalized fallback を試し、text は `[normalized]`、JSON は `match_mode: "normalized"` を返す。空結果時は `recovery_hints` も返す |
 | `mentions <query>` | literal query の出現を行単位で探し、parsed internal-link span 外の **bare mention** を既定で返す。summary は全 literal hit の total/bare/linked occurrence 数、bare line/page 数、page status counts、come-from 昇格候補の初期 heuristic scoring を返す。各行は `exact-link-page` / `query-link-page` / `unlinked-page` に分類し、`--unlinked` で page に query-containing link target が無い行だけ返す。`--include-linked` で全 occurrence が link span 内の行も返す。`--context N` で周辺行同梱 |
 | `co-links <query>` | literal query を含む行で同時に出る internal links を target ごとに rank する。exact query target は既定で除外し、`--include-self` で含める。既定 `--rank slice` は `target_relation=query-containing-title` を後ろへ回し、narrower `slice-handle` を先に出す。`--rank raw` は従来の count order。各 item は target_relation / link_count / line_count / source_page_count / total_source_views / examples を返す |
@@ -161,6 +161,7 @@ parser が link から除外するもの:
 - `mentions` / `co-links` / `gather` は既存 `lines` / `edges` / `pages` から都度計算する schema-compatible retrieval primitive。query literal の `LIKE` hit 行を起点にするため、巨大・一般語 query では `search` 同様に scan cost を払う。`gather --budget` は厳密 token budget ではなく bounded row limit selector。omitted counts も token ではなく row 単位。
 - `cross-project-refs` / `cross-project-acquire` は `lines.text LIKE '%[/%'` で候補行を絞ってから Cosense shorthand link を Python parser で分類する schema-compatible extraction/orchestration primitive。通常 internal link graph には cross-project refs を materialize しない。`cross_project_refs_to` / `top_internal_links` も既存 lines/edges から都度読む summary primitive で、store schema は変えない。
 - `cross-project-spread` / `cross-project-spreads` は既存 `page_handles` / `edges.target_handle_norm` / `unresolved_targets` から normalized title の project spread を都度計算する schema-compatible weak signal surface。first-class cross-project edge ではなく、page identity は project-scoped のまま保持する。`cross-project-spreads` は seed title が無い時の discovery surface で、wiki structural names や numeric-only handles は rank band で下げる。
+- `suggest` fuzzy mode は既存 `pages.norm_title` を Python 側で scan する schema-compatible title retrieval primitive。長文 title の exact recall を優先するための lexical layer であり、semantic embedding search は未実装。
 - `path` は実験的 command で、現状は command ごとに pages ∪ unresolved targets の一時 adjacency を構築する。nishio store の dogfood（66092 nodes / 115075 undirected edges）では `path KJ法 弱い紐帯 --max-depth 4 --limit 1` が約2-5s。hot read path ではなく graph reasoning primitive として扱う。
 - 初回 import は 1 回だけ数秒から十数秒程度。
 
