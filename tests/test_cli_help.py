@@ -194,10 +194,14 @@ class CliHelpTests(unittest.TestCase):
                 capture_output=True,
             )
             export_path.unlink()
-            with sqlite3.connect(store_path) as connection:
+            connection = sqlite3.connect(store_path)
+            try:
                 connection.execute(
                     "UPDATE metadata SET value = '3' WHERE key = 'schema_version'"
                 )
+                connection.commit()
+            finally:
+                connection.close()
 
             completed = subprocess.run(
                 [
