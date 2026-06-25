@@ -41,7 +41,7 @@ sources:
 
 - surface 命名: `index-md` / `import-md` / `import --format markdown <folder>` を足すか（現状は `import --markdown <folder>`）。
 - Obsidian block refs / heading anchors の line-id 対応。
-- duplicate title / alias collision の高度な解決。方針は [[markdown-identity-name-collision-policy]]。2026-06-25 の wiki森全件 import dogfood（[[wiki-forest-markdown-import-dogfood-2026-06-25]]）では、registry 42 entries 中 37 entries は temp store に import 成功し、失敗 5 entries はすべて duplicate title / alias collision だった。structured diagnostics は実装済み。次は `drafts/` / `source/` artifact 除外で不要 collision を減らし、その後 schema v6 の `page_handles` / ambiguous query result へ進む。
+- duplicate title / alias collision の高度な解決。方針は [[markdown-identity-name-collision-policy]]。2026-06-25 の wiki森全件 import dogfood（[[wiki-forest-markdown-import-dogfood-2026-06-25]]）では、registry 42 entries 中 37 entries は temp store に import 成功し、失敗 5 entries はすべて duplicate title / alias collision だった。structured diagnostics は実装済み。次は raw / draft / generated artifact reduction と `source/` digest の role classification を分ける。`source/` は raw を読んで作った source-backed digest なので default exclude しない。その後 schema v6 の `page_handles` / ambiguous query result へ進む。
 - alias / title / id / file set 変更時の細かい差分 index（現状は安全側で full rebuild）。
 
 ### dogfood corpus を wiki森全体へ広げる

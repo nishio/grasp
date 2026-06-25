@@ -157,7 +157,7 @@ grasp 自身の `wiki/` を temp store に import して確認した結果、Mar
 
 `wikis.yaml` registry の全 entries を temp store に `import --markdown <path>/wiki --project <name> --markdown-exclude-dir raw` で投入した。private 内容は読まず、件数と失敗型だけを観測。42 entries 中 37 entries が import 成功し、aggregate は 37 projects / 2458 pages / 213k lines / 22.5k edges / 1412 unresolved。全体の import wall time は約 22 秒。
 
-失敗 5 entries は missing folder や raw directory の重さではなく、すべて duplicate title / alias collision。類型は draft variants の同一 H1、複数 directory の `_overview` / `README` / `index` file stem alias、source/session file と canonical page の alias 衝突。したがって森スケールの次 blocker は performance ではなく collision policy。read-only mirror は duplicate を即 import error にするだけでなく、path-qualified alias、draft/source artifact 除外、collision report のいずれかを持つ必要がある。
+失敗 5 entries は missing folder や raw directory の重さではなく、すべて duplicate title / alias collision。類型は draft variants の同一 H1、複数 directory の `_overview` / `README` / `index` file stem alias、source digest / session file と canonical page の alias 衝突。したがって森スケールの次 blocker は performance ではなく collision policy。read-only mirror は duplicate を即 import error にするだけでなく、handle ambiguity を表現する必要がある。`source/` は raw 由来の digest / source-backed synthesis なので default exclude ではなく、保持した上で source role / evidence layer として扱う。
 
 ## Update: LLM Wiki log / event stream boundary
 
