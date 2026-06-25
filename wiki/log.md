@@ -811,3 +811,8 @@
 - dogfood: total normalized handles 6,131、`min_projects=2` で 211 handles。rank band 調整後の上位 concept-like は `nishio` / `ブロードリスニング` / `Plurality` / `Kozaneba` などになった。
 - schema は v7 のまま。public compatibility version は `1.7.6`。
 - 検証: `python3 -m unittest discover -s tests`（74 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 00:10] file back | LLM Wiki migration target = native authority + Markdown projection
+- nishio と合意: LLM Wiki のインフラを Markdown の束から grasp へ移す時、Markdown は出力し続けるが authority ではなく generated projection にする。人間や Codex が直接 Markdown を編集するのではなく、`grasp write` が native store を更新し、そこから Markdown を再生成する。
+- 新 decision [[native-authority-markdown-projection]] を追加。native store（＋ durable journal）を source of truth、Markdown を review / backup / publish / interoperability 用 projection とする。direct Markdown edit は cutover 前の source import か emergency path に限定する方向。
+- [[write-layer-alpha-and-replay-test]] に cutover 後の原典関係を追記。[[persistence-custom-format]] には「Markdown を保存形式にしない」は「Markdown を捨てる」ではなく projection へ降ろすことだと追記。[[grasp-backlog]] には `export-markdown` / status-diff-revert / durable journal policy を write 層の未実装項目として追加。
