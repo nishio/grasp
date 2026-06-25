@@ -40,7 +40,7 @@ description: >-
   grasp --store /tmp/grasp-wiki.sqlite --project grasp-wiki read grasp-v1-implemented
   ```
 
-  最小 Markdown mirror は frontmatter `title` / `id` / `aliases` / `tags` を読み、title が無い場合は first H1、さらに無ければ file stem を title にする。`[[...]]` と `#tag` を grasp 内 edge にする。duplicate title / alias は import 全体を止めず、`read <handle>` の ambiguity 候補として返る。`backlinks <ambiguous handle>` は handle 自体への incoming lines を主に返し、候補 page ごとの確定 backlinks も分けて返す。`ambiguities` は store 全体または selected project の曖昧 handle を一覧する。duplicate frontmatter `id` は identity 衝突なので error。バックティックのプレーン名（親 llm-wiki への cross-wiki 参照）は edge にしない。既存 Markdown folder へは書き戻さない。重い raw/generated directory を避けたい時は `--markdown-exclude-dir raw` のように directory basename を指定する。再 import は content-only 変更なら差分更新し、title / id / aliases / graph role / exclude dirs / file set が変わった時は安全に full rebuild する。`index.md` / `log.md` など navigation/log artifact は本文検索対象に残しつつ、既定 content graph では outgoing edges を除外する。Obsidian block refs はまだ未実装。
+  最小 Markdown mirror は frontmatter `title` / `id` / `aliases` / `tags` を読み、title が無い場合は first H1、さらに無ければ file stem を title にする。`[[...]]` と `#tag` を grasp 内 edge にする。duplicate title / alias は import 全体を止めず、`read <handle>` の ambiguity 候補として返る。`backlinks <ambiguous handle>` は handle 自体への incoming lines を主に返し、候補 page ごとの確定 backlinks も分けて返す。`related <ambiguous handle>` は handle 自体への source pages と候補 page ごとの related を分けて返す。`ambiguities` は store 全体または selected project の曖昧 handle を一覧する。duplicate frontmatter `id` は identity 衝突なので error。バックティックのプレーン名（親 llm-wiki への cross-wiki 参照）は edge にしない。既存 Markdown folder へは書き戻さない。重い raw/generated directory を避けたい時は `--markdown-exclude-dir raw` のように directory basename を指定する。再 import は content-only 変更なら差分更新し、title / id / aliases / graph role / exclude dirs / file set が変わった時は安全に full rebuild する。`index.md` / `log.md` など navigation/log artifact は本文検索対象に残しつつ、既定 content graph では outgoing edges を除外する。Obsidian block refs はまだ未実装。
 - ユーザが `wikis.yaml` のような Markdown wiki registry 全体を読みたい場合は、task-local store へ `import-forest` で一括 index する。各 entry は project `<name>` として `<path>/<wiki-dir>` を import し、entry ごとの missing/failure/skipped diagnostics と forest-level `ambiguities` summary を返す:
 
   ```bash
@@ -143,7 +143,7 @@ grasp --project <source-project> cross-project-acquire --limit 5 --seed-limit 10
 | `search <query>` | 本文行を検索。既定は literal line substring、`--mode boolean` で AND/OR/NOT、`--scope line|page` で評価単位を切替、`--context N` で hit 周辺行を同梱 |
 | `suggest <partial>` | タイトル補完 |
 | `backlinks <title>` | 行レベル逆リンク（page なし target も） |
-| `related <title>` | 2-hop ページ / page なし target の source pages |
+| `related <title>` | 2-hop ページ / page なし target の source pages / ambiguous handle の source pages + candidate related |
 | `path <A> <B>` | pages / page なし target 間の短いリンク経路（no-path 時も recovery hints） |
 | `mentions <query>` | literal query の裸言及を link span 外 occurrence として数え、page-level link status と come-from 昇格候補 score を返す。`--unlinked` で no-link-handle page に絞る |
 | `co-links <query>` | query を含む行で同時に出る internal links を rank し、hub の slice handle を返す。`target_relation` と `--rank slice|raw` あり |

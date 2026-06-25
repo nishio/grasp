@@ -304,12 +304,13 @@ def build_parser() -> argparse.ArgumentParser:
     related_parser = add_command_parser(
         subparsers,
         "related",
-        help="List 2-hop pages, or source pages for a missing linked target.",
+        help="List 2-hop pages, source pages for a missing target, or source pages for an ambiguous handle.",
         description=(
             "For an existing page, return deterministic 2-hop related pages. "
-            "For a missing linked target, return source pages that link to it."
+            "For a missing linked target, return source pages that link to it. "
+            "For an ambiguous handle, return source pages that link to the handle and candidate page related sets."
         ),
-        returns="query, related[], recovery_hints|null",
+        returns="query, resolution_status, ambiguity|null, related[], candidate_related[], recovery_hints|null",
         examples=[
             "grasp related 盲点カード --limit 10",
             "grasp related 民主主義 --limit 5",
@@ -318,6 +319,7 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "Existing-page related[] items include score and via[].",
             "Missing-target related[] items include relation=backlink-source and score=link count from that page.",
+            "Ambiguous-handle related[] items are incoming source pages for the handle; candidate_related[] keeps each candidate page separate.",
             "If related[] is empty, recovery_hints gives title/search/unresolved suggestions.",
         ],
     )
@@ -961,12 +963,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
     if args.command == "ambiguities":
         return store.ambiguities(limit=args.limit, offset=args.offset, candidate_limit=args.candidate_limit)
     if args.command == "related":
-        related = store.related(args.title, limit=args.limit)
-        return {
-            "query": args.title,
-            "related": related,
-            "recovery_hints": None if related else store.recovery_hints(args.title, limit=3),
-        }
+        return store.related_report(args.title, limit=args.limit)
     if args.command == "path":
         return store.paths_between(
             args.source,
@@ -1511,7 +1508,7 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
     if command == "ambiguities":
         return format_ambiguities(result)
     if command == "related":
-        return format_related(result["query"], result["related"], result.get("recovery_hints"), aliases=aliases)
+        return format_related_result(result, aliases=aliases)
     if command == "path":
         return format_path(result, aliases=aliases)
     if command == "link-stats":
@@ -1853,6 +1850,46 @@ def format_edge_list(edges: list[dict[str, Any]], aliases: LineIdAliases | None 
     return "".join(parts)
 
 
+def format_related_result(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
+    if result.get("resolution_status") == "ambiguous":
+        return format_ambiguous_related(result, aliases=aliases)
+    return format_related(
+        result["query"],
+        result["related"],
+        result.get("recovery_hints"),
+        aliases=aliases,
+    )
+
+
+def format_ambiguous_related(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
+    query = result["query"]
+    ambiguity = result.get("ambiguity") or {}
+    parts = [
+        f"# Related source pages: {query}\n",
+        f"resolution: ambiguous ({ambiguity.get('candidate_count', 0)} candidates)\n",
+        "\n## Source pages linking to ambiguous handle\n",
+    ]
+    related = result.get("related") or []
+    if not related:
+        parts.append("(none)\n")
+    else:
+        parts.append(format_related_items(related, aliases=aliases))
+    parts.append("\n## Candidate pages\n")
+    for candidate_result in result.get("candidate_related", []):
+        candidate = candidate_result["candidate"]
+        suffix = f" path={candidate['path']}" if candidate.get("path") else ""
+        parts.append(
+            f"- {candidate['title']} id={candidate['page_id']}{suffix}; "
+            f"related={candidate_result['count_returned']}\n"
+        )
+        candidate_related = candidate_result.get("related", [])
+        if candidate_related:
+            parts.append(indent_lines(format_related_items(candidate_related, aliases=aliases), "  "))
+    return with_alias_legend("".join(parts), aliases)
+
+
 def format_related(
     query: str,
     related: list[dict[str, Any]],
@@ -1875,7 +1912,7 @@ def format_related_items(related: list[dict[str, Any]], aliases: LineIdAliases |
     parts: list[str] = []
     for item in related:
         via = ", ".join(item["via"])
-        if item.get("relation") == "backlink-source":
+        if item.get("relation") in {"backlink-source", "ambiguous-handle-source"}:
             parts.append(f"- {item['title']} (links {item['score']}, views {item['views']}; target {via})\n")
         else:
             parts.append(f"- {item['title']} (score {item['score']}, views {item['views']}; via {via})\n")
@@ -1895,8 +1932,15 @@ def format_related_items(related: list[dict[str, Any]], aliases: LineIdAliases |
     return "".join(parts)
 
 
+def indent_lines(text: str, prefix: str) -> str:
+    return "".join(f"{prefix}{line}" if line.strip() else line for line in text.splitlines(keepends=True))
+
+
 def is_source_page_related(related: list[dict[str, Any]]) -> bool:
-    return bool(related) and all(item.get("relation") == "backlink-source" for item in related)
+    return bool(related) and all(
+        item.get("relation") in {"backlink-source", "ambiguous-handle-source"}
+        for item in related
+    )
 
 
 def format_path(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:

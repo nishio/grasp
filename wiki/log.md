@@ -790,3 +790,10 @@
 - schema は v7 のまま。public compatibility version は `1.7.3`。
 - dogfood: `/Users/nishio/llm-wiki/wikis.yaml` を temp store に `--markdown-exclude-dir raw` で実行し、42 success / 0 failure / 0 missing / 0 skipped。aggregate は 42 projects / 3338 pages / 265,012 lines / 23,183 edges / 1,627 unresolved、ambiguous handles 8、wall time 6.025 秒。
 - 検証: `python3 -m unittest discover -s tests`（73 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-25 23:08] implementation+file back | `related <ambiguous handle>` の handle/candidate 分離
+- `related <ambiguous handle>` は `resolution_status=ambiguous` / `ambiguity` を返し、primary `related[]` には ambiguous handle 自体へ incoming している source pages を返すようにした。
+- 候補 page ごとの existing-page related は `candidate_related[]` に分けて返す。`backlinks` と同様、曖昧リンクを候補 page へ自動割当しない。
+- schema は v7 のまま。public compatibility version は `1.7.4`。
+- smoke: 小さい Markdown fixture で `related Shared --json` が `related=Source:ambiguous-handle-source`、`candidate_related=A:B,B:A` を返すことを確認。
+- 検証: `python3 -m unittest discover -s tests`（73 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。

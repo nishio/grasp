@@ -1833,10 +1833,56 @@ class SQLiteStore:
         return items
 
     def related(self, title: str, limit: int | None = None) -> list[dict[str, Any]]:
-        page = self.resolve_page(title)
+        candidates = self.page_handle_candidates(title)
+        if len(candidates) > 1:
+            return self._related_ambiguous_handle(title, limit)
+        if len(candidates) == 1:
+            page = self._page_by_id(candidates[0]["page_id"])
+        else:
+            page = None
         if page is None:
             return self._related_missing_target(title, limit)
+        return self._related_existing_page(page, limit)
 
+    def related_report(self, title: str, limit: int | None = None) -> dict[str, Any]:
+        candidates = self.page_handle_candidates(title)
+        related = self.related(title, limit=limit)
+        if len(candidates) > 1:
+            candidate_related = []
+            for candidate in candidates:
+                page = self._page_by_id(candidate["page_id"])
+                candidate_items = self._related_existing_page(page, limit) if page is not None else []
+                candidate_related.append(
+                    {
+                        "candidate": candidate,
+                        "related": candidate_items,
+                        "count_returned": len(candidate_items),
+                    }
+                )
+            return {
+                "query": title,
+                "resolution_status": "ambiguous",
+                "ambiguity": self._handle_ambiguity(title, candidates),
+                "related": related,
+                "count_returned": len(related),
+                "limit": limit,
+                "recovery_hints": None,
+                "candidate_related": candidate_related,
+            }
+
+        resolution_status = "resolved_unique" if candidates else "unresolved"
+        return {
+            "query": title,
+            "resolution_status": resolution_status,
+            "ambiguity": None,
+            "related": related,
+            "count_returned": len(related),
+            "limit": limit,
+            "recovery_hints": None if related else self.recovery_hints(title, limit=3),
+            "candidate_related": [],
+        }
+
+    def _related_existing_page(self, page: Page, limit: int | None = None) -> list[dict[str, Any]]:
         direct = self._neighbor_ids(page.id, page.norm_title)
         scores: Counter[str] = Counter()
         via: dict[str, list[str]] = {}
@@ -1863,6 +1909,36 @@ class SQLiteStore:
         if limit is not None and limit >= 0:
             return related_pages[:limit]
         return related_pages
+
+    def _related_ambiguous_handle(self, title: str, limit: int | None = None) -> list[dict[str, Any]]:
+        project = self._require_project()
+        norm = normalize_title(title)
+        query = """
+            SELECT
+              source.*,
+              COUNT(*) AS score,
+              MIN(e.target_handle) AS target_title
+            FROM edges e
+            JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
+            WHERE e.project = ? AND e.resolution_status = 'ambiguous' AND e.target_handle_norm = ?
+            GROUP BY source.id
+            ORDER BY score DESC, source.views DESC, COALESCE(source.updated, 0) DESC, source.title
+        """
+        params: list[Any] = [project, norm]
+        if limit is not None and limit >= 0:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        rows = self.connection.execute(query, params).fetchall()
+        return [
+            {
+                **self._page_from_row(row).to_summary(),
+                "score": int(row["score"]),
+                "relation": "ambiguous-handle-source",
+                "via": [row["target_title"]],
+            }
+            for row in rows
+        ]
 
     def _related_missing_target(self, title: str, limit: int | None = None) -> list[dict[str, Any]]:
         project = self._require_project()
