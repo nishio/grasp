@@ -161,6 +161,8 @@ grasp read "<ページタイトル>"
 | `export-ai <title>` | main + 1-hop / 2-hop ページ本文を 1 テキストへ展開（alias `export-for-ai`） |
 | `stats` | ストアの件数・更新日時などを確認 |
 | `import --cosense <json>` / `import --markdown <folder>` | Cosense JSON エクスポート、または read-only Markdown folder mirror を project namespace に取り込み・再構築 |
+| `adopt-markdown <folder>` | 既存 Markdown wiki を store に import し、page_create event を JSONL journal に記録する |
+| `export-markdown --output <folder> --check` | Markdown-backed project の stored lines を Markdown projection として比較する no-op gate。差分があれば exit 1 |
 | `import-forest <wikis.yaml>` | registry の複数 Markdown wiki を 1 store の複数 project namespace に一括 import。entry ごとの diagnostics と forest-level ambiguity summary を返す |
 | `acquire <project-url>` | 管理者 export なしで hosted Cosense から読めるページを partial corpus として取得（要 `cosense` CLI） |
 | `sync <project-url>` | hosted Cosense の最近更新ページを差分取り込み（保守用・要 `cosense` CLI install + 認証） |
