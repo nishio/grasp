@@ -30,6 +30,62 @@ class MarkdownPageRecord:
 
 
 @dataclass(frozen=True)
+class MarkdownCollisionEntry:
+    path: str
+    title: str
+    page_id: str
+    handle: str
+    source: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "path": self.path,
+            "title": self.title,
+            "page_id": self.page_id,
+            "handle": self.handle,
+            "source": self.source,
+        }
+
+
+@dataclass(frozen=True)
+class MarkdownCollision:
+    kind: str
+    key: str
+    entries: tuple[MarkdownCollisionEntry, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "key": self.key,
+            "paths": [entry.path for entry in self.entries],
+            "entries": [entry.to_dict() for entry in self.entries],
+        }
+
+
+class MarkdownCollisionError(ValueError):
+    def __init__(self, collisions: list[MarkdownCollision] | tuple[MarkdownCollision, ...]):
+        self.collisions = tuple(collisions)
+        super().__init__(format_markdown_collision_message(self.collisions))
+
+    def to_diagnostic(self) -> dict[str, Any]:
+        counts: dict[str, int] = defaultdict(int)
+        for collision in self.collisions:
+            counts[collision.kind] += 1
+        return {
+            "type": "markdown_collision",
+            "severity": "error",
+            "message": str(self),
+            "collision_counts": dict(sorted(counts.items())),
+            "collisions": [collision.to_dict() for collision in self.collisions],
+            "next_actions": [
+                "Inspect collisions[].entries[].path to identify the duplicate title, id, or alias source.",
+                "If a collision comes from generated or draft/source artifacts, retry with --markdown-exclude-dir <name>.",
+                "If the same visible name intentionally refers to multiple pages, keep page identity separate from display name before softening import.",
+            ],
+        }
+
+
+@dataclass(frozen=True)
 class MarkdownMirror:
     pages: list[Page]
     edges: list[Edge]
@@ -60,8 +116,6 @@ class MarkdownMirror:
             raise ValueError(f"Markdown folder has no .md files: {root}")
 
         records: list[MarkdownPageRecord] = []
-        title_buckets: dict[str, list[str]] = defaultdict(list)
-        id_buckets: dict[str, list[str]] = defaultdict(list)
         for path in markdown_files:
             relative_path = path.relative_to(root)
             stat = path.stat()
@@ -105,32 +159,12 @@ class MarkdownMirror:
                     mtime_ns=stat.st_mtime_ns,
                 )
             )
-            title_buckets[norm_title].append(relative_path.as_posix())
-            id_buckets[page_id].append(relative_path.as_posix())
 
-        title_collisions = {
-            norm: paths
-            for norm, paths in title_buckets.items()
-            if len(paths) > 1
-        }
-        if title_collisions:
-            details = "; ".join(
-                f"{norm}: {', '.join(paths)}"
-                for norm, paths in sorted(title_collisions.items())
-            )
-            raise ValueError(f"duplicate Markdown page titles: {details}")
-
-        id_collisions = {
-            page_id: paths
-            for page_id, paths in id_buckets.items()
-            if len(paths) > 1
-        }
-        if id_collisions:
-            details = "; ".join(
-                f"{page_id}: {', '.join(paths)}"
-                for page_id, paths in sorted(id_collisions.items())
-            )
-            raise ValueError(f"duplicate Markdown page ids: {details}")
+        collisions = markdown_title_collisions(records)
+        collisions.extend(markdown_id_collisions(records))
+        collisions.extend(markdown_alias_collisions(records))
+        if collisions:
+            raise MarkdownCollisionError(collisions)
 
         title_aliases = build_title_aliases(records)
         pages = [record.page for record in records]
@@ -378,6 +412,78 @@ def markdown_graph_role(relative_path: Path, metadata: MarkdownMetadata) -> str:
     return "content"
 
 
+def markdown_title_collisions(records: list[MarkdownPageRecord]) -> list[MarkdownCollision]:
+    buckets: dict[str, list[MarkdownCollisionEntry]] = defaultdict(list)
+    for record in records:
+        page = record.page
+        buckets[page.norm_title].append(markdown_collision_entry(record, handle=page.title, source="title"))
+    return [
+        MarkdownCollision(kind="title", key=norm_title, entries=tuple(entries))
+        for norm_title, entries in sorted(buckets.items())
+        if len(entries) > 1
+    ]
+
+
+def markdown_id_collisions(records: list[MarkdownPageRecord]) -> list[MarkdownCollision]:
+    buckets: dict[str, list[MarkdownCollisionEntry]] = defaultdict(list)
+    for record in records:
+        page = record.page
+        buckets[page.id].append(markdown_collision_entry(record, handle=page.id, source="id"))
+    return [
+        MarkdownCollision(kind="id", key=page_id, entries=tuple(entries))
+        for page_id, entries in sorted(buckets.items())
+        if len(entries) > 1
+    ]
+
+
+def markdown_alias_collisions(records: list[MarkdownPageRecord]) -> list[MarkdownCollision]:
+    buckets: dict[str, list[MarkdownCollisionEntry]] = defaultdict(list)
+    for record in records:
+        page = record.page
+        handles = [("title", page.title)]
+        handles.extend(("alias", alias) for alias in record.aliases)
+        for source, handle in handles:
+            norm = normalize_title(handle)
+            if not norm:
+                continue
+            buckets[norm].append(markdown_collision_entry(record, handle=handle, source=source))
+    collisions: list[MarkdownCollision] = []
+    for norm, entries in sorted(buckets.items()):
+        page_ids = {entry.page_id for entry in entries}
+        sources = {entry.source for entry in entries}
+        if len(page_ids) > 1 and "alias" in sources:
+            collisions.append(MarkdownCollision(kind="alias", key=norm, entries=tuple(entries)))
+    return collisions
+
+
+def markdown_collision_entry(record: MarkdownPageRecord, *, handle: str, source: str) -> MarkdownCollisionEntry:
+    page = record.page
+    return MarkdownCollisionEntry(
+        path=record.relative_path.as_posix(),
+        title=page.title,
+        page_id=page.id,
+        handle=handle,
+        source=source,
+    )
+
+
+def format_markdown_collision_message(collisions: tuple[MarkdownCollision, ...]) -> str:
+    kinds = {collision.kind for collision in collisions}
+    if kinds == {"title"}:
+        prefix = "duplicate Markdown page titles"
+    elif kinds == {"id"}:
+        prefix = "duplicate Markdown page ids"
+    elif kinds == {"alias"}:
+        prefix = "duplicate Markdown page aliases"
+    else:
+        prefix = "duplicate Markdown page metadata"
+    details = "; ".join(
+        f"{collision.kind} {collision.key}: {', '.join(entry.path for entry in collision.entries)}"
+        for collision in collisions
+    )
+    return f"{prefix}: {details}"
+
+
 def normalize_frontmatter_tag(value: str) -> str:
     tag = clean_frontmatter_scalar(value).strip()
     while tag.startswith("#"):
@@ -386,6 +492,9 @@ def normalize_frontmatter_tag(value: str) -> str:
 
 
 def build_title_aliases(records: list[MarkdownPageRecord]) -> dict[str, str]:
+    collisions = markdown_alias_collisions(records)
+    if collisions:
+        raise MarkdownCollisionError(collisions)
     owners: dict[str, tuple[str, str]] = {}
     for record in records:
         page = record.page

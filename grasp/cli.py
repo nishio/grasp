@@ -10,6 +10,7 @@ from textwrap import dedent
 from typing import Any
 
 from .cosense_cli import CosenseCliClient, acquire_from_cosense, sync_from_cosense
+from .markdown import MarkdownCollisionError
 from .sqlite_store import (
     SCHEMA_VERSION,
     SQLiteStore,
@@ -728,6 +729,11 @@ def main(argv: list[str] | None = None) -> int:
                     project_name=project,
                     exclude_dirs=tuple(args.markdown_exclude_dir),
                 )
+        except MarkdownCollisionError as error:
+            if args.json:
+                emit_error_result(error)
+                return 2
+            parser.error(str(error))
         except ValueError as error:
             parser.error(str(error))
         emit_result(args, result)
@@ -812,6 +818,19 @@ def emit_result(args: argparse.Namespace, result: Any) -> None:
     else:
         aliases = LineIdAliases(enabled=not args.full_ids)
         sys.stdout.write(format_result(args.command, result, aliases=aliases))
+
+
+def emit_error_result(error: MarkdownCollisionError) -> None:
+    json.dump(
+        {
+            "error": str(error),
+            "diagnostic": error.to_diagnostic(),
+        },
+        sys.stderr,
+        ensure_ascii=False,
+        indent=2,
+    )
+    sys.stderr.write("\n")
 
 
 def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:

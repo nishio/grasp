@@ -1112,6 +1112,41 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(import_result["pages"], 1)
         self.assertEqual(search_result["hits"], [])
 
+    def test_import_markdown_collision_json_error_is_structured(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "one").mkdir()
+            (root / "two").mkdir()
+            (root / "one" / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "two" / "A.md").write_text("# A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                text=True,
+                capture_output=True,
+            )
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertEqual(completed.stdout, "")
+        result = json.loads(completed.stderr)
+        self.assertEqual(result["diagnostic"]["type"], "markdown_collision")
+        self.assertEqual(result["diagnostic"]["collision_counts"], {"title": 1})
+        self.assertEqual(set(result["diagnostic"]["collisions"][0]["paths"]), {"one/A.md", "two/A.md"})
+
     def test_cross_project_refs_writes_acquire_seed_files(self):
         fixture = {
             "name": "nishio",

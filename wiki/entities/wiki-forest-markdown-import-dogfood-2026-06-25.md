@@ -36,27 +36,30 @@ sources:
 - 複数 directory に `_overview` / `README` / `index` など同一 file stem alias がある。
 - source/session file と canonical page が同じ alias を持つ。
 
-現在の Markdown mirror は collision を import error にする。これは単一 wiki の correctness では安全側だが、forest orchestration では 1 project の collision がその project 全体を落とす。全件 import には、collision を「失敗」ではなく「観測可能な診断 / 限定的な alias 無効化 / path-qualified fallback」に変える必要がある。
+現在の Markdown mirror は collision を import error にする。これは単一 wiki の correctness では安全側だが、forest orchestration では 1 project の collision がその project 全体を落とす。全件 import には、collision をまず「観測可能な診断」に変える必要がある。
+
+重要な設計制約: alias collision は単なる import UX ではなく、Scrapbox の name=identity 欠陥を `identity-without-name` で直す問題そのものに近い。path は一意性の根拠として diagnostic / fallback handle には使えるが、path-qualified string をそのまま page name にすると LLM / 人間の期待する `[[Title]]` とずれる。
 
 ## Plan
 
 次の実装順:
 
-1. **collision report を structured diagnostic にする。**
-   `MarkdownMirror.from_folder` の duplicate title / alias error を、機械可読な collision kind / normalized handle / paths / candidate title を持つ診断にする。CLI は text では短く、`--json` では full diagnostics を返す。
+1. **collision report を structured diagnostic にする。**（2026-06-25 実装）
+   `MarkdownMirror.from_folder` の duplicate title / alias / id error を、機械可読な collision kind / normalized handle / paths / candidate title を持つ診断にする。CLI は text では短く、`--json` では full diagnostics を返す。
 
-2. **alias collision は project import を止めず、衝突 alias だけ無効化する。**
-   Page title collision は同一 normalized title の page identity 衝突なのでまだ hard error。file stem / frontmatter alias collision は、canonical page title が一意なら alias map から衝突 alias を除外し、collision report に出す。これで `_overview` / `README` / `index` 型は import 可能になる。
+2. **alias collision policy を identity/name 分離として設計する。**
+   Page title collision は同一 normalized title の page identity 衝突なので hard error のまま。file stem / frontmatter alias collision も、単に「衝突 alias だけ無効化」するとリンク解決の意味を黙って変える。短期 workaround は path を diagnostic / fallback handle に持つことだが、path-qualified string を page name へ昇格しない。次は「page identity は path/id、name は display/link handle」という表現を import data model にどう載せるかを決める。
 
 3. **draft/source artifact 除外を追加する。**
    `--markdown-exclude-dir raw` と同じ basename 方式で、`drafts/` や `source/` を除外可能にするか、frontmatter / path heuristic で graph_role=`artifact` を導入する。draft variants の同一 H1 は title collision なので、alias 無効化だけでは解けない。
 
-4. **`import-forest` orchestration は collision policy 後に作る。**
-   37/42 は手動 loop で成立したので orchestration は価値がある。ただし先に collision policy を入れないと、orchestration command は「5 件失敗を集計するだけ」になる。順序は collision diagnostics → alias collision softening → forest import command。
+4. **`import-forest` orchestration は急がない。**
+   37/42 は手動 loop で成立したので orchestration は価値がある。ただし先に collision policy と artifact 除外を詰めないと、orchestration command は「既知の失敗を集計するだけ」になる。
 
 ## Open Questions
 
 - Page title collision の softening をどこまで許すか。同一 title は graph identity 衝突なので、安易に path-qualified title へ自動改名すると `[[Title]]` の期待とずれる。
+- alias collision softening を行うなら、どの条件で「意味のあるリンク解決」ではなく「曖昧 handle」として扱うか。path は一意だが、page name に混ぜると retrieval surface が汚れる。
 - `drafts/` / `source/` は既定除外にするか、明示 `--markdown-exclude-dir` に留めるか。wiki ごとの意味が違うため、既定除外は過剰かもしれない。
 - collision report を store metadata に保存するか、import command の一回限り出力に留めるか。forest dashboard / import-forest を作るなら保存した方がよい。
 

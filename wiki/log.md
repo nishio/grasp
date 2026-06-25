@@ -728,3 +728,8 @@
 - 新ページ [[wiki-forest-markdown-import-dogfood-2026-06-25]] を作成。log/backlog/decision に散っていた dogfood 結果を、Result / Analysis / Plan / Open Questions として coding agent が読める source of truth にした。
 - 新計画: collision diagnostics → alias collision softening → draft/source artifact 除外 → forest import orchestration。orchestration は 37/42 成功で価値ありだが、先に collision policy を入れないと失敗集計 command になる。
 - repo-local Codex plugin `/next` 用の未コミット差分（AGENTS / `.agents/plugins/marketplace.json` / `plugins/grasp-next/`）もユーザ指示により commit 対象にする。
+
+## [2026-06-25 13:31] implementation+file back | Markdown collision diagnostics と identity/name 計画修正
+- Markdown mirror の duplicate title / id / alias collision を `MarkdownCollisionError` と structured diagnostic にした。`grasp --json import --markdown ...` は collision kind / normalized key / paths / entries を stderr JSON に出す。
+- ユーザ指摘により、alias collision softening は単なる workaround ではなく `identity-without-name` の本体問題として扱う方針に修正。path は一意性の根拠として diagnostic / fallback handle に使えるが、path-qualified string を page name へ混ぜない。
+- 次は alias collision policy（identity=path/id、name=display/link handle の表現）と `drafts/` / `source/` artifact 除外を検討し、`import-forest` orchestration は急がない。
