@@ -717,3 +717,9 @@
 - Markdown manifest version を `3` に更新し、exclude dirs を manifest identity に含めた。exclude 条件を変えて同じ project を re-import した時は safe full rebuild する。SQLite schema は v5 のまま、public compatibility version は `1.5.28`。
 - file back: [[grasp-v1-implemented]] / [history](history.md) / [[grasp-backlog]] / [[markdown-obsidian-indexed-mirror]] / README / Skill を更新。
 - 検証: bundled Python 3.12.13 で `python3 -m unittest discover -s tests`（63 tests）/ `python3 scripts/lint_wiki.py` / `git diff --check` OK。temp store で `grasp --json --store <tmp> import --markdown wiki --project grasp-wiki --markdown-exclude-dir raw` も成功。
+
+## [2026-06-25 03:10] dogfood | wiki森全 entries の Markdown import を temp store で検証
+- `/Users/nishio/llm-wiki/wikis.yaml` の 42 entries を対象に、各 `<path>/wiki` を temp store へ `import --markdown --project <name> --markdown-exclude-dir raw` で投入。内容本文は読まず、件数・時間・失敗型だけ観測。
+- 結果: 37 entries 成功 / 5 entries 失敗 / missing folder 0。成功分 aggregate は 37 projects / 2458 pages / 213,309 lines / 22,550 edges / 1,412 unresolved。合計 import wall time は約 22.3 秒。`stats` は schema v5 / schema_ok true。
+- 失敗はすべて duplicate title / alias collision。典型は draft variants の同一 H1、複数 directory の `_overview` / `README` / `index` file stem alias、source/session file と canonical page の alias 衝突。次 blocker は raw 除外や performance でなく collision policy。
+- file back: [[grasp-backlog]] の duplicate title / alias collision と wiki森 import orchestration、[[markdown-obsidian-indexed-mirror]] の dogfood section に反映。
