@@ -5,6 +5,7 @@ sources:
   - /Users/nishio/llm-wiki/wikis.yaml
   - temp store dogfood `/tmp/grasp-forest-import.*`（private 内容は読まず、aggregate / failure type のみ観測）
   - [[markdown-obsidian-indexed-mirror]]
+  - [[markdown-identity-name-collision-policy]]
   - [[grasp-backlog]]
 ---
 
@@ -47,8 +48,8 @@ sources:
 1. **collision report を structured diagnostic にする。**（2026-06-25 実装）
    `MarkdownMirror.from_folder` の duplicate title / alias / id error を、機械可読な collision kind / normalized handle / paths / candidate title を持つ診断にする。CLI は text では短く、`--json` では full diagnostics を返す。
 
-2. **alias collision policy を identity/name 分離として設計する。**
-   Page title collision は同一 normalized title の page identity 衝突なので hard error のまま。file stem / frontmatter alias collision も、単に「衝突 alias だけ無効化」するとリンク解決の意味を黙って変える。短期 workaround は path を diagnostic / fallback handle に持つことだが、path-qualified string を page name へ昇格しない。次は「page identity は path/id、name は display/link handle」という表現を import data model にどう載せるかを決める。
+2. **alias collision policy を identity/name 分離として設計する。**（[[markdown-identity-name-collision-policy]]）
+   Page title / alias collision は同一 visible handle が複数 identity に束縛される問題。短期 workaround は path を diagnostic / fallback handle に持つことだが、path-qualified string を page name へ昇格しない。実装は artifact reduction の後、schema v6 の `page_handles` と ambiguous query result へ進める。
 
 3. **draft/source artifact 除外を追加する。**
    `--markdown-exclude-dir raw` と同じ basename 方式で、`drafts/` や `source/` を除外可能にするか、frontmatter / path heuristic で graph_role=`artifact` を導入する。draft variants の同一 H1 は title collision なので、alias 無効化だけでは解けない。
@@ -66,5 +67,6 @@ sources:
 ## Related
 
 - [[markdown-obsidian-indexed-mirror]]
+- [[markdown-identity-name-collision-policy]]
 - [[grasp-backlog]]
 - [[whole-store-graph-and-cross-project-edges]]

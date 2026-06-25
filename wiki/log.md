@@ -733,3 +733,8 @@
 - Markdown mirror の duplicate title / id / alias collision を `MarkdownCollisionError` と structured diagnostic にした。`grasp --json import --markdown ...` は collision kind / normalized key / paths / entries を stderr JSON に出す。
 - ユーザ指摘により、alias collision softening は単なる workaround ではなく `identity-without-name` の本体問題として扱う方針に修正。path は一意性の根拠として diagnostic / fallback handle に使えるが、path-qualified string を page name へ混ぜない。
 - 次は alias collision policy（identity=path/id、name=display/link handle の表現）と `drafts/` / `source/` artifact 除外を検討し、`import-forest` orchestration は急がない。
+
+## [2026-06-25 14:03] implementation+file back | ResourceWarning 修正と Markdown identity/name collision decision
+- `tests/test_cli_help.py` の raw `sqlite3.connect` を明示 close に修正。Python sqlite3 の connection context manager は commit/rollback 用であり close しないため、ResourceWarning の原因になっていた。
+- 新 decision [[markdown-identity-name-collision-policy]] を追加。duplicate title / alias は import UX ではなく、visible handle が複数 page identity に束縛される問題として扱う。path は source address / fallback selection key であり、page name へ混ぜない。
+- 次の実装順は artifact reduction（`drafts/` / `source/` 除外または `graph_role=artifact`）→ schema v6 `page_handles` → ambiguous query result。`import-forest` は引き続き急がない。
