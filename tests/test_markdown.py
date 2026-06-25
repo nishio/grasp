@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from grasp.cli import format_backlinks
 from grasp.markdown import (
     MarkdownCollisionError,
     MarkdownMirror,
@@ -393,12 +394,13 @@ class MarkdownImportTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / "Source.md").write_text("links to [[Shared]]\n", encoding="utf-8")
+            (root / "Direct.md").write_text("links to [[A]] and [[B]]\n", encoding="utf-8")
             store_path = Path(tmpdir) / "store.sqlite"
 
             stats = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
 
-            self.assertEqual(stats["pages"], 3)
-            self.assertEqual(stats["edges"], 1)
+            self.assertEqual(stats["pages"], 4)
+            self.assertEqual(stats["edges"], 3)
             self.assertEqual(stats["unresolved_targets"], 0)
 
             store = SQLiteStore(store_path, project="wiki")
@@ -415,6 +417,31 @@ class MarkdownImportTests(unittest.TestCase):
                 link_stats = store.link_stats("Shared")
                 self.assertEqual(link_stats["ambiguity"]["candidate_count"], 2)
                 self.assertIsNone(link_stats["recovery_hints"])
+                backlinks = store.backlinks("Shared", limit=10)
+                self.assertEqual([edge.source_title for edge in backlinks], ["Source"])
+                self.assertEqual(backlinks[0].resolution_status, "ambiguous")
+
+                report = store.backlinks_report("Shared", limit=10)
+                self.assertEqual(report["resolution_status"], "ambiguous")
+                self.assertEqual(report["handle_backlinks"]["count_total"], 1)
+                self.assertEqual(report["handle_backlinks"]["items"][0]["source_title"], "Source")
+                candidate_counts = {
+                    item["candidate"]["title"]: item["count_total"]
+                    for item in report["candidate_backlinks"]
+                }
+                self.assertEqual(candidate_counts, {"A": 1, "B": 1})
+                candidate_sources = {
+                    item["candidate"]["title"]: {
+                        edge["source_title"]
+                        for edge in item["resolved_backlinks"]
+                    }
+                    for item in report["candidate_backlinks"]
+                }
+                self.assertEqual(candidate_sources, {"A": {"Direct"}, "B": {"Direct"}})
+                text = format_backlinks(report)
+                self.assertIn("resolution: ambiguous (2 candidates)", text)
+                self.assertIn("## Incoming links to ambiguous handle", text)
+                self.assertIn("resolved_backlinks=1", text)
             finally:
                 store.close()
 
