@@ -1542,7 +1542,9 @@ class LineIdAliases:
         self.enabled = enabled
         self._page_to_alias: dict[str, str] = {}
 
-    def format_line_id(self, line_id: str) -> str:
+    def format_line_id(self, line_id: str | None) -> str:
+        if line_id is None:
+            return "(none)"
         if not self.enabled:
             return line_id
         page_id, separator, line_index = line_id.rpartition(":")

@@ -1885,8 +1885,12 @@ class SQLiteStore:
             """,
             (project, page.id, start_index, end_index),
         ).fetchall()
+        center_line_id = next(
+            (row["line_id"] for row in rows if row["line_index"] == center_index),
+            None,
+        )
         return [self._line_from_row(row) for row in rows], {
-            "around_line_id": f"{page.id}:{center_index}",
+            "around_line_id": center_line_id,
             "center_index": center_index,
             "start_index": start_index,
             "end_index": end_index,

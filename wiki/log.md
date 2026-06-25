@@ -828,3 +828,10 @@
 - nishio 指示: 今の backlog とは別に、最速で LLM Wiki のインフラとして grasp を使えるようにするための計画表を作る。
 - 新ページ [llm-wiki-infra-fast-path-plan](llm-wiki-infra-fast-path-plan.md) を追加。[[native-authority-markdown-projection]] を実運用へ落とすため、journal contract → adopt one wiki → export projection → minimal write → status/diff/revert → rename → file-back integration → one-wiki cutover → forest rollout の phase 表にした。
 - 最初の slice は Phase 0-3: journal schema、`adopt-markdown`、`export-markdown --check` no-op、`append-section` + `append-log`。rename は `2.0.0` 境界には必要だが、日常 file-back dogfood 開始の blocker にはしない。
+
+## [2026-06-26 00:26] implementation+file back | line window が stored line_id を返すように修正
+- `page_lines_around` が `around_line_id` を `page.id:line-index` で合成していたため、stable line identity の前段として stored `lines.line_id` を返すようにした。`read --around-line` と `search --context` の context window が opaque line id を保持できる。
+- これは stable line identity の完全実装ではない。Cosense / Markdown import はまだ line id を positional に mint する。journal replay / re-import diff で stable id を維持する作業は [[llm-wiki-infra-fast-path-plan]] Phase 1 以降。
+- fast-path plan には、Phase 0-3 は append-only authoring alpha であり identity-without-name の差別化 claim は rename slice 以降、という注記を足した。
+- schema は v7 のまま。public compatibility version は `1.7.8`。
+- 検証: `python3 -m unittest discover -s tests`（76 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
