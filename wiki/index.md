@@ -10,6 +10,7 @@ Codex が実装し、本 wiki が実装済み事実・backlog・設計判断・g
 | [history](history.md) | release / store compatibility history。v1 系は `1.x.y` とし、store format / materialized index semantics が変わる時は `x`、それ以外は `y` を進める |
 | [grasp-v1-implemented](entities/grasp-v1-implemented.md) | ★ v1 リリース時点で実装済みの CLI surface / data model / parser / delivery。旧 SPEC / v1-todo の完了済み側を分離した current facts |
 | [grasp-backlog](grasp-backlog.md) | ★ 旧 SPEC / v1-todo にあったが v1 時点で未実装の項目。parser fidelity・UX・Markdown adapter（navigation/log artifact handling 含む）・write/identity・search・sync・distribution |
+| [llm-wiki-infra-fast-path-plan](llm-wiki-infra-fast-path-plan.md) | ★ 既存 backlog とは別の実行計画表。最速で LLM Wiki の日常 file-back / draft / index 更新を grasp infrastructure で dogfood するため、native authority + Markdown projection への短い phase と done 条件を切る |
 | [why-not-scrapbox-clone](decisions/why-not-scrapbox-clone.md) | なぜこの形か。Scrapbox 忠実 clone でなく identity-without-name を足したあるべき姿を作る（内部呼称 design B） |
 | [persistence-custom-format](decisions/persistence-custom-format.md) | 保存形式は独自フォーマット（Markdown ではない＝逆リンク維持の発生源）。読込は import adapter の別責務。on-disk store = SQLite（or better） |
 | [incremental-sync](decisions/incremental-sync.md) | 最新化は export 反復でなく初回 seed＋cosense-cli で最近更新ページのみ差分 upsert。cosense-cli は比較対象から freshness 経路へ昇格（post-MVP） |

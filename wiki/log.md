@@ -823,3 +823,8 @@
 - smoke: wiki 森 temp store の `llm-wiki` project で `suggest '書字 副産物'` と `suggest '再会書字委譲'` が `再会は書字のタダの副産物で、委譲が奪った` を返した。
 - schema は v7 のまま。public compatibility version は `1.7.7`。
 - 検証: `python3 -m unittest discover -s tests`（75 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 00:17] planning | LLM Wiki infra fast-path plan を backlog と分離して追加
+- nishio 指示: 今の backlog とは別に、最速で LLM Wiki のインフラとして grasp を使えるようにするための計画表を作る。
+- 新ページ [llm-wiki-infra-fast-path-plan](llm-wiki-infra-fast-path-plan.md) を追加。[[native-authority-markdown-projection]] を実運用へ落とすため、journal contract → adopt one wiki → export projection → minimal write → status/diff/revert → rename → file-back integration → one-wiki cutover → forest rollout の phase 表にした。
+- 最初の slice は Phase 0-3: journal schema、`adopt-markdown`、`export-markdown --check` no-op、`append-section` + `append-log`。rename は `2.0.0` 境界には必要だが、日常 file-back dogfood 開始の blocker にはしない。
