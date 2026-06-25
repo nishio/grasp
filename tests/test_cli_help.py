@@ -224,6 +224,102 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(result["page"]["title"], "A")
         self.assertEqual([line["text"] for line in result["lines"]], ["A"])
 
+    def test_old_schema_markdown_store_recovers_all_projects_from_import_manifest(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root_a = Path(tmpdir) / "wiki-a"
+            root_a.mkdir()
+            (root_a / "A.md").write_text("# A\n", encoding="utf-8")
+            (root_a / "raw").mkdir()
+            (root_a / "raw" / "Raw.md").write_text("# Raw\n", encoding="utf-8")
+            root_b = Path(tmpdir) / "wiki-b"
+            root_b.mkdir()
+            (root_b / "B.md").write_text("# B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root_a),
+                    "--project",
+                    "wiki-a",
+                    "--markdown-exclude-dir",
+                    "raw",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root_b),
+                    "--project",
+                    "wiki-b",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                connection.execute("UPDATE metadata SET value = '5' WHERE key = 'schema_version'")
+                connection.commit()
+            finally:
+                connection.close()
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki-b",
+                    "read",
+                    "B",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            stats_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki-a",
+                    "stats",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        result = json.loads(completed.stdout)
+        stats = json.loads(stats_completed.stdout)
+        self.assertEqual(completed.stderr, "")
+        self.assertEqual(result["page"]["title"], "B")
+        self.assertEqual(stats["project_count"], 2)
+        self.assertEqual(stats["pages"], 1)
+
     def test_json_is_accepted_after_subcommand(self):
         fixture = {
             "name": "fixture",
@@ -1063,6 +1159,55 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(read_result["page"]["title"], "A")
         self.assertEqual(read_result["backlink_count_total"], 1)
         self.assertEqual(read_result["unresolved_targets"][0]["title"], "Missing")
+
+    def test_read_markdown_page_by_source_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "source").mkdir()
+            (root / "source" / "Digest.md").write_text("# Digest\nlinks to [[A]]\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "read",
+                    "--path",
+                    "source/Digest.md",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["page"]["title"], "Digest")
+        self.assertEqual(result["link_stats"]["page_exists"], True)
 
     def test_import_markdown_folder_excludes_named_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:

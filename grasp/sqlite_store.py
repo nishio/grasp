@@ -32,7 +32,7 @@ from .cosense import (
 from .markdown import MarkdownMirror, MarkdownPageRecord, markdown_wikilink_target
 
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 IMPORT_CACHE_MANIFEST_VERSION = 1
 PYTHON_LOOSE_SEARCH_MAX_LINES = 50_000
 
@@ -68,6 +68,19 @@ CREATE TABLE pages (
   line_count INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(project, id),
   FOREIGN KEY(project) REFERENCES projects(name) ON DELETE CASCADE
+);
+
+CREATE TABLE page_handles (
+  project TEXT NOT NULL,
+  handle_norm TEXT NOT NULL,
+  page_id TEXT NOT NULL,
+  handle TEXT NOT NULL,
+  handle_source TEXT NOT NULL,
+  source_path TEXT NOT NULL DEFAULT '',
+  graph_role TEXT NOT NULL DEFAULT 'content',
+  PRIMARY KEY(project, handle_norm, page_id, handle_source, handle),
+  FOREIGN KEY(project) REFERENCES projects(name) ON DELETE CASCADE,
+  FOREIGN KEY(project, page_id) REFERENCES pages(project, id) ON DELETE CASCADE
 );
 
 CREATE TABLE lines (
@@ -121,6 +134,8 @@ CREATE TABLE unresolved_target_examples (
 
 CREATE INDEX idx_pages_project_norm_title ON pages(project, norm_title);
 CREATE INDEX idx_pages_project_title ON pages(project, title);
+CREATE INDEX idx_page_handles_project_handle_norm ON page_handles(project, handle_norm);
+CREATE INDEX idx_page_handles_project_source_path ON page_handles(project, source_path);
 CREATE INDEX idx_lines_project_page_index ON lines(project, page_id, line_index);
 CREATE INDEX idx_edges_project_target_norm ON edges(project, target_norm);
 CREATE INDEX idx_edges_project_source_page ON edges(project, source_page_id);
@@ -195,6 +210,7 @@ def import_export_to_sqlite(
                     for page in source.pages
                 ),
             )
+            _insert_page_handles(connection, _page_handle_rows_for_pages(project, source.pages))
             connection.executemany(
                 """
                 INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
@@ -383,6 +399,7 @@ def import_markdown_folder_to_sqlite(
     finally:
         connection.close()
 
+    _cache_import_source(folder_path, store_path, project, source_type="markdown", exclude_dirs=exclude_dirs)
     store = SQLiteStore(store_path, project=project)
     try:
         stats = store.stats()
@@ -433,12 +450,18 @@ def recover_store_from_import_cache(store_path: str | Path) -> bool:
     if not sources:
         metadata = _read_metadata_if_possible(store_path)
         source_export = metadata.get("last_source_export") or metadata.get("source_export")
+        last_project = metadata.get("last_imported_project")
+        source_type = metadata.get(f"project.{last_project}.source_type") or metadata.get("last_source_type")
+        old_manifest = _json_metadata(metadata, f"project.{last_project}.markdown_manifest") if last_project else None
+        exclude_dirs = old_manifest.get("exclude_dirs") if old_manifest else ()
         if source_export and Path(source_export).exists():
             sources = [
                 {
-                    "project": metadata.get("last_imported_project"),
+                    "project": last_project,
                     "path": source_export,
                     "source_export": source_export,
+                    "source_type": source_type or "cosense",
+                    "exclude_dirs": exclude_dirs if isinstance(exclude_dirs, list) else (),
                 }
             ]
 
@@ -450,11 +473,19 @@ def recover_store_from_import_cache(store_path: str | Path) -> bool:
         if not source_path.exists():
             return False
     for source in sources:
-        import_export_to_sqlite(
-            source["path"],
-            store_path,
-            project_name=source.get("project") or None,
-        )
+        if source.get("source_type") == "markdown":
+            import_markdown_folder_to_sqlite(
+                source["path"],
+                store_path,
+                project_name=source.get("project") or None,
+                exclude_dirs=tuple(source.get("exclude_dirs") or ()),
+            )
+        else:
+            import_export_to_sqlite(
+                source["path"],
+                store_path,
+                project_name=source.get("project") or None,
+            )
     return _store_schema_version(store_path) == SCHEMA_VERSION
 
 
@@ -467,19 +498,29 @@ def import_cache_manifest_path(store_path: str | Path) -> Path:
     return import_cache_dir(store_path) / "manifest.json"
 
 
-def _cache_import_source(export_path: Path, store_path: Path, project: str) -> None:
+def _cache_import_source(
+    source_path: Path,
+    store_path: Path,
+    project: str,
+    *,
+    source_type: str = "cosense",
+    exclude_dirs: tuple[str, ...] = (),
+) -> None:
     cache_dir = import_cache_dir(store_path)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path = cache_dir / f"{quote(project, safe='') or '_default'}.cosense.json"
-    tmp_path = cache_path.with_name(f"{cache_path.name}.tmp")
+    if source_type == "cosense":
+        cache_path = cache_dir / f"{quote(project, safe='') or '_default'}.cosense.json"
+        tmp_path = cache_path.with_name(f"{cache_path.name}.tmp")
 
-    try:
-        same_file = export_path.resolve() == cache_path.resolve()
-    except FileNotFoundError:
-        same_file = False
-    if not same_file:
-        shutil.copyfile(export_path, tmp_path)
-        os.replace(tmp_path, cache_path)
+        try:
+            same_file = source_path.resolve() == cache_path.resolve()
+        except FileNotFoundError:
+            same_file = False
+        if not same_file:
+            shutil.copyfile(source_path, tmp_path)
+            os.replace(tmp_path, cache_path)
+    else:
+        cache_path = source_path
 
     manifest = _read_import_cache_manifest(store_path)
     projects = manifest.setdefault("projects", {})
@@ -487,7 +528,9 @@ def _cache_import_source(export_path: Path, store_path: Path, project: str) -> N
     projects[project] = {
         "project": project,
         "path": str(cache_path),
-        "source_export": str(export_path),
+        "source_export": str(source_path),
+        "source_type": source_type,
+        "exclude_dirs": list(exclude_dirs),
         "cached_at": now,
     }
     manifest["version"] = IMPORT_CACHE_MANIFEST_VERSION
@@ -512,6 +555,8 @@ def _cached_import_sources(store_path: Path) -> list[dict[str, Any]]:
                         "project": item.get("project") or project,
                         "path": path,
                         "source_export": item.get("source_export"),
+                        "source_type": item.get("source_type") or "cosense",
+                        "exclude_dirs": item.get("exclude_dirs") or (),
                     }
                 )
         if sources:
@@ -519,7 +564,7 @@ def _cached_import_sources(store_path: Path) -> list[dict[str, Any]]:
 
     cache_dir = import_cache_dir(store_path)
     return [
-        {"project": None, "path": str(path), "source_export": None}
+        {"project": None, "path": str(path), "source_export": None, "source_type": "cosense"}
         for path in sorted(cache_dir.glob("*.cosense.json"))
     ]
 
@@ -574,6 +619,7 @@ def _delete_project(connection: sqlite3.Connection, project: str) -> None:
     connection.execute("DELETE FROM unresolved_targets WHERE project = ?", (project,))
     connection.execute("DELETE FROM edges WHERE project = ?", (project,))
     connection.execute("DELETE FROM lines WHERE project = ?", (project,))
+    connection.execute("DELETE FROM page_handles WHERE project = ?", (project,))
     connection.execute("DELETE FROM pages WHERE project = ?", (project,))
     connection.execute("DELETE FROM projects WHERE name = ?", (project,))
 
@@ -584,6 +630,55 @@ def _project_exists(connection: sqlite3.Connection, project: str) -> bool:
         (project,),
     ).fetchone()
     return row is not None
+
+
+def _insert_page_handles(connection: sqlite3.Connection, rows: list[tuple[str, str, str, str, str, str, str]]) -> None:
+    connection.executemany(
+        """
+        INSERT OR IGNORE INTO page_handles (
+          project,
+          handle_norm,
+          page_id,
+          handle,
+          handle_source,
+          source_path,
+          graph_role
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+
+
+def _page_handle_rows_for_pages(project: str, pages: list[Page]) -> list[tuple[str, str, str, str, str, str, str]]:
+    rows: list[tuple[str, str, str, str, str, str, str]] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for page in pages:
+        key = (project, page.norm_title, page.id, "title", page.title)
+        if page.norm_title and key not in seen:
+            rows.append((project, page.norm_title, page.id, page.title, "title", "", "content"))
+            seen.add(key)
+    return rows
+
+
+def _page_handle_rows_for_markdown_records(
+    project: str,
+    records: list[MarkdownPageRecord],
+) -> list[tuple[str, str, str, str, str, str, str]]:
+    rows: list[tuple[str, str, str, str, str, str, str]] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for record in records:
+        page = record.page
+        source_path = record.relative_path.as_posix()
+        handles = [("title", page.title), *(("alias", alias) for alias in record.aliases)]
+        for handle_source, handle in handles:
+            handle_norm = normalize_title(handle)
+            key = (project, handle_norm, page.id, handle_source, handle)
+            if not handle_norm or key in seen:
+                continue
+            rows.append((project, handle_norm, page.id, handle, handle_source, source_path, record.graph_role))
+            seen.add(key)
+    return rows
 
 
 def _connection_metadata(connection: sqlite3.Connection) -> dict[str, str]:
@@ -637,15 +732,16 @@ def _insert_markdown_project(
             len(source.edges),
         ),
     )
-    _insert_markdown_pages(connection, project, source.pages, source.edges)
+    _insert_markdown_records(connection, project, list(source.records), source.edges)
 
 
-def _insert_markdown_pages(
+def _insert_markdown_records(
     connection: sqlite3.Connection,
     project: str,
-    pages: list[Page],
+    records: list[MarkdownPageRecord],
     edges: list[Edge],
 ) -> None:
+    pages = [record.page for record in records]
     connection.executemany(
         """
         INSERT INTO pages (project, id, title, norm_title, created, updated, views, line_count)
@@ -665,6 +761,7 @@ def _insert_markdown_pages(
             for page in pages
         ),
     )
+    _insert_page_handles(connection, _page_handle_rows_for_markdown_records(project, records))
     connection.executemany(
         """
         INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
@@ -713,7 +810,7 @@ def _replace_markdown_record(
         "DELETE FROM pages WHERE project = ? AND id = ?",
         (project, record.page.id),
     )
-    _insert_markdown_pages(connection, project, [record.page], edges)
+    _insert_markdown_records(connection, project, [record], edges)
 
 
 def _markdown_edges_by_page_id(edges: list[Edge]) -> dict[str, list[Edge]]:
@@ -923,6 +1020,74 @@ class SQLiteStore:
         if alias_title is None:
             return norm_title
         return normalize_title(alias_title)
+
+    def page_handle_candidates(self, handle: str, project: str | None = None) -> list[dict[str, Any]]:
+        project = self._require_project(project)
+        handle_norm = normalize_title(handle)
+        rows = self.connection.execute(
+            """
+            SELECT
+              h.handle,
+              h.handle_source,
+              h.source_path,
+              h.graph_role,
+              page.id AS page_id,
+              page.title,
+              page.norm_title,
+              page.views,
+              page.updated,
+              page.line_count
+            FROM page_handles h
+            JOIN pages page ON page.project = h.project AND page.id = h.page_id
+            WHERE h.project = ? AND h.handle_norm = ?
+            ORDER BY
+              CASE h.handle_source WHEN 'title' THEN 0 WHEN 'alias' THEN 1 ELSE 2 END,
+              CASE h.graph_role WHEN 'content' THEN 0 WHEN 'source' THEN 1 ELSE 2 END,
+              page.title,
+              h.source_path,
+              h.handle
+            """,
+            (project, handle_norm),
+        ).fetchall()
+        candidates: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            page_id = str(row["page_id"])
+            candidate = candidates.setdefault(
+                page_id,
+                {
+                    "page_id": page_id,
+                    "title": row["title"],
+                    "normalized_title": row["norm_title"],
+                    "views": row["views"],
+                    "updated": row["updated"],
+                    "line_count": row["line_count"],
+                    "path": row["source_path"] or None,
+                    "graph_role": row["graph_role"],
+                    "matched_handles": [],
+                },
+            )
+            if candidate["path"] is None and row["source_path"]:
+                candidate["path"] = row["source_path"]
+            if candidate["graph_role"] == "artifact" and row["graph_role"] != "artifact":
+                candidate["graph_role"] = row["graph_role"]
+            candidate["matched_handles"].append(
+                {
+                    "handle": row["handle"],
+                    "source": row["handle_source"],
+                    "path": row["source_path"] or None,
+                    "graph_role": row["graph_role"],
+                }
+            )
+        return list(candidates.values())
+
+    def _handle_ambiguity(self, handle: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "handle_ambiguity",
+            "handle": handle,
+            "handle_norm": normalize_title(handle),
+            "candidate_count": len(candidates),
+            "candidates": candidates,
+        }
 
     def _selected_project_or_none(self) -> str | None:
         if self.project:
@@ -2825,8 +2990,10 @@ class SQLiteStore:
 
     def read(
         self,
-        title: str,
+        title: str | None = None,
         *,
+        page_id: str | None = None,
+        source_path: str | None = None,
         line_limit: int | None = None,
         backlink_limit: int = 20,
         related_limit: int = 20,
@@ -2835,18 +3002,66 @@ class SQLiteStore:
         related_snippet_lines: int = 5,
         related_snippet_mode: str = "lead",
     ) -> dict[str, Any]:
-        page = self.resolve_page(title)
-        backlinks = self.backlinks(title, backlink_limit)
-        link_stats = self.link_stats(title)
-        related = self.related(title if page is None else page.title, related_limit)
+        if page_id and source_path:
+            raise ValueError("read accepts only one of --page-id or --path")
+
+        explicit_page = False
+        if page_id:
+            page = self._page_by_id(page_id)
+            if page is None:
+                raise ValueError(f"page id not found in selected project: {page_id}")
+            query = title or page.title
+            lookup_title = page.title
+            explicit_page = True
+        elif source_path:
+            page = self._page_by_source_path(source_path)
+            if page is None:
+                raise ValueError(f"Markdown source path not found in selected project: {source_path}")
+            query = title or source_path
+            lookup_title = page.title
+            explicit_page = True
+        else:
+            if title is None:
+                raise ValueError("read requires a title, --page-id, --path, or --around-line <line-id>")
+            query = title
+            candidates = self.page_handle_candidates(title)
+            if len(candidates) > 1:
+                return {
+                    "query": title,
+                    "page": None,
+                    "ambiguity": self._handle_ambiguity(title, candidates),
+                    "link_stats": None,
+                    "lines": [],
+                    "lines_truncated": False,
+                    "line_window": None,
+                    "backlinks": [],
+                    "backlink_count_returned": 0,
+                    "backlink_count_total": 0,
+                    "related": [],
+                    "unresolved_targets": [],
+                    "recovery_hints": None,
+                }
+            if len(candidates) == 1:
+                page = self._page_by_id(candidates[0]["page_id"])
+            else:
+                page = None
+            lookup_title = title
+
+        if page is not None and not explicit_page:
+            lookup_title = title or page.title
+
+        backlinks = self.backlinks(lookup_title, backlink_limit)
+        link_stats = self.link_stats(lookup_title)
+        related = self.related(lookup_title if page is None else page.title, related_limit)
         if related_snippets:
             related = self._with_page_snippets(related, related_snippet_lines, mode=related_snippet_mode)
 
         if page is None:
             recovery_hints = link_stats.get("recovery_hints")
             return {
-                "query": title,
+                "query": query,
                 "page": None,
+                "ambiguity": None,
                 "link_stats": link_stats,
                 "lines": [],
                 "lines_truncated": False,
@@ -2861,8 +3076,9 @@ class SQLiteStore:
 
         lines, lines_truncated = self.page_lines(page, line_limit)
         return {
-            "query": title,
+            "query": query,
             "page": page.to_summary(),
+            "ambiguity": None,
             "link_stats": link_stats,
             "lines": [line.to_dict() for line in lines],
             "lines_truncated": lines_truncated,
@@ -3440,6 +3656,21 @@ class SQLiteStore:
         ).fetchone()
         return self._page_from_row(row) if row is not None else None
 
+    def _page_by_source_path(self, source_path: str) -> Page | None:
+        project = self._require_project()
+        row = self.connection.execute(
+            """
+            SELECT page.*
+            FROM page_handles handle
+            JOIN pages page ON page.project = handle.project AND page.id = handle.page_id
+            WHERE handle.project = ? AND handle.source_path = ?
+            ORDER BY page.title
+            LIMIT 1
+            """,
+            (project, source_path),
+        ).fetchone()
+        return self._page_from_row(row) if row is not None else None
+
     def _line_and_page_by_id(self, line_id: str) -> tuple[Page, Line] | None:
         project = self._require_project()
         line_row = self.connection.execute(
@@ -3474,6 +3705,16 @@ class SQLiteStore:
                 len(lines),
             ),
         )
+        page_handle_row = (
+            project,
+            normalize_title(title),
+            page_id,
+            title,
+            "title",
+            "",
+            "content",
+        )
+        _insert_page_handles(self.connection, [page_handle_row])
 
         line_rows = []
         edge_rows = []

@@ -41,7 +41,8 @@ sources:
 
 - surface 命名: `index-md` / `import-md` / `import --format markdown <folder>` を足すか（現状は `import --markdown <folder>`）。
 - Obsidian block refs / heading anchors の line-id 対応。
-- duplicate title / alias collision の高度な解決。方針は [[markdown-identity-name-collision-policy]]。2026-06-25 の wiki森全件 import dogfood（[[wiki-forest-markdown-import-dogfood-2026-06-25]]）では、registry 42 entries 中 37 entries は temp store に import 成功し、失敗 5 entries はすべて duplicate title / alias collision だった。structured diagnostics / `source` role / `artifact` role は実装済み。`source/` は raw を読んで作った source-backed digest なので default exclude しない。残りは schema v6 の `page_handles` / ambiguous query result。なお `artifact` role は outgoing edges を除外するだけで duplicate title を許すわけではない。
+- duplicate title / alias collision の高度な解決。方針は [[markdown-identity-name-collision-policy]]。2026-06-25 の wiki森全件 import dogfood（[[wiki-forest-markdown-import-dogfood-2026-06-25]]）では、registry 42 entries 中 37 entries は temp store に import 成功し、失敗 5 entries はすべて duplicate title / alias collision だった。structured diagnostics / `source` role / `artifact` role / schema v6 `page_handles` / `read` の `handle_ambiguity` / `read --page-id` / `read --path` は実装済み。`source/` は raw を読んで作った source-backed digest なので default exclude しない。残りは Markdown import が duplicate title / alias を hard error にする制約を softening し、ambiguous handle を page materialization 全体の失敗にしないこと。なお `artifact` role は outgoing edges を除外するだけで duplicate title を許すわけではない。
+- ambiguous handle の edge resolution。現状の `backlinks` / `related` / `link-stats` / Markdown outgoing edge 解決は従来の normalized title / unique alias 前提を残す。次は `edges` 側に source handle と resolution status（unique / ambiguous / unresolved / non_semantic）を持たせ、ambiguous handle を unresolved hub と existing page のどちらにも誤分類しない。
 - alias / title / id / file set 変更時の細かい差分 index（現状は安全側で full rebuild）。
 
 ### dogfood corpus を wiki森全体へ広げる
