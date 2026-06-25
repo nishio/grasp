@@ -116,7 +116,7 @@ grasp related "Some Note"
 - frontmatter `tags` を page から tag target への edge にする。
 - `[[Page]]`, `[[Page|alias]]`, `[[Page#Heading]]`, `[[folder/Page.md]]`, `![[Embed]]`, `#tag` を edge にする。
 - inline backtick / fenced code block 内は edge にしない。
-- `--markdown-exclude-dir <name>` で directory basename を除外し、`raw/` など heavy source directory を mirror から外せる。
+- `--markdown-exclude-dir <name>` で directory basename を除外し、`raw/` など heavy raw/generated directory を mirror から外せる。
 - manifest を metadata に保存し、content-only 変更なら changed file の page / lines / outgoing edges だけを差し替える。title / id / aliases / graph role / exclude dirs / file set が変わった時は安全に full rebuild する。
 - 既存 Markdown folder へは書き戻さない。
 

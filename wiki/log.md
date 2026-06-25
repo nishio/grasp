@@ -743,3 +743,8 @@
 - nishio 指摘: LLM Wiki の `source/` は `raw/` を読んで作成した digest / source-backed synthesis なので、`raw/` と同列に除外すべきではない。
 - 修正方針: `raw/` は heavy original dump として除外候補、`drafts/` / generated temp は artifact reduction 候補。`source/` は保持し、必要なら `graph_role=source` / evidence layer / ranking policy で canonical synthesis と扱いを分ける。
 - [[wiki-forest-markdown-import-dogfood-2026-06-25]] / [[grasp-backlog]] / [[markdown-identity-name-collision-policy]] / [[markdown-obsidian-indexed-mirror]] の `draft/source artifact 除外` 表現を修正。
+
+## [2026-06-25 14:30] implementation+file back | Markdown source role と artifact role を実装
+- Markdown import が `source/` / `sources/` / frontmatter `role/type: source` を `graph_role=source` と分類するようにした。`source` role は raw digest / source-backed synthesis なので、content と同じく outgoing edges を materialize する。
+- `drafts/` / generated temp / frontmatter `role/type: artifact|draft|generated` は `graph_role=artifact` と分類し、search には残すが outgoing edges は除外する。これは duplicate title を許す実装ではなく、handle ambiguity は schema v6 `page_handles` の残件。
+- public compatibility version を `1.5.29` に更新。SQLite schema と Markdown manifest version は不変。

@@ -53,8 +53,8 @@ sources:
 2. **alias collision policy を identity/name 分離として設計する。**（[[markdown-identity-name-collision-policy]]）
    Page title / alias collision は同一 visible handle が複数 identity に束縛される問題。短期 workaround は path を diagnostic / fallback handle に持つことだが、path-qualified string を page name へ昇格しない。実装は artifact reduction の後、schema v6 の `page_handles` と ambiguous query result へ進める。
 
-3. **artifact reduction と source role classification を分ける。**
-   `raw/` は heavy original dump なので default 除外候補。`drafts/` は知識ページでない途中生成物なら除外または `graph_role=artifact` 候補。一方 `source/` は raw digest / source-backed synthesis なので default exclude しない。必要なら `graph_role=source` として保持し、content graph / ranking / provenance で扱いを分ける。
+3. **artifact reduction と source role classification を分ける。**（2026-06-25 最小実装）
+   `raw/` は heavy original dump なので `--markdown-exclude-dir raw` で除外可能。`source/` は raw digest / source-backed synthesis なので default exclude せず、`graph_role=source` として保持し content と同じく edge を materialize する。`drafts/` / generated temp は `graph_role=artifact` として search には残すが outgoing edges は除外する。ただし duplicate title を許すわけではなく、そこは schema v6 の `page_handles` / ambiguous query result が必要。
 
 4. **`import-forest` orchestration は急がない。**
    37/42 は手動 loop で成立したので orchestration は価値がある。ただし先に collision policy と artifact 除外を詰めないと、orchestration command は「既知の失敗を集計するだけ」になる。
@@ -63,7 +63,7 @@ sources:
 
 - Page title collision の softening をどこまで許すか。同一 title は graph identity 衝突なので、安易に path-qualified title へ自動改名すると `[[Title]]` の期待とずれる。
 - alias collision softening を行うなら、どの条件で「意味のあるリンク解決」ではなく「曖昧 handle」として扱うか。path は一意だが、page name に混ぜると retrieval surface が汚れる。
-- `drafts/` は既定除外にするか、明示 `--markdown-exclude-dir` に留めるか。wiki ごとの意味が違うため、既定除外は過剰かもしれない。
+- `artifact` role の duplicate title を import error のままにするか、search-only record として title ambiguity から外すか。
 - `source/` digest を content graph にどこまで混ぜるか。保持はするが、canonical synthesis と同列に ranking すると重複根拠が増える可能性がある。
 - collision report を store metadata に保存するか、import command の一回限り出力に留めるか。forest dashboard / import-forest を作るなら保存した方がよい。
 
