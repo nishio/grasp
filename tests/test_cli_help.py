@@ -9,6 +9,7 @@ from pathlib import Path
 
 COMMANDS = [
     "import",
+    "import-forest",
     "stats",
     "read",
     "backlinks",

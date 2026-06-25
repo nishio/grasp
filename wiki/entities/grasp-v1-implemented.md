@@ -52,7 +52,7 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.7.2`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.7.3`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -72,6 +72,7 @@ v1 scope 外:
 |---|---|
 | `import --cosense <json>` | Cosense JSON export を project namespace に構築・置換。他 project は保持。line は metadata dict と plain string の両方を許容する |
 | `import --markdown <folder>` | Markdown folder を read-only mirror として project namespace に構築・置換。他 project は保持。frontmatter `title` / first H1 / file stem で title を決め、frontmatter `id` / `aliases` / `tags` を読み、`[[wikilink]]` / `#tag` を edge にする。duplicate title / alias は import 全体を止めず ambiguous handle として materialize する。duplicate `id` は hard error。`--markdown-exclude-dir <name>` で heavy raw/generated directory を除外できる |
+| `import-forest <wikis.yaml>` | registry の top-level `wikis:` entries を読み、各 entry の `<path>/<wiki-dir>` を project `<name>` として Markdown import する。entry ごとの failure / missing / skipped は全体を止めず diagnostics に集約し、success/failure/missing/skipped counts、aggregate pages/lines/edges/unresolved、projects[]、post-import `ambiguities` summary を返す |
 | `stats` | store の schema / project list / metadata / count を表示。store missing 時は diagnostic と next actions を返す |
 | `read <title>` | existing page は本文 + backlinks + related + unresolved。missing linked target は link stats + backlinks + source pages。zero-hit 時は `recovery_hints` も返す。visible handle が複数 page identity に束縛される時は暗黙に片方を選ばず `ambiguity.type=handle_ambiguity` と候補 page_id / path / graph_role を返す。`read --page-id <id>` / `read --path <relative-path>` は identity を明示して読む。`--related-snippets` で related/source pages の snippet を同梱する。既定 `--related-snippet-mode lead` は先頭 N 行（default 5）、`edge` は related/source item を導いたリンク行を中心に `snippet_lines` / `snippet_window` を返す。`--around-line <line-id> --line-context N` で完全 line_id からページを解決し、中心行の前後 N 行だけを `lines[]` と `line_window` で返す |
 | `backlinks <title>` | `(source page, line-id, line text)` の行レベル backlinks。missing target にも効く。visible handle が複数 page identity に束縛される時は `resolution_status=ambiguous` と `ambiguity` を返し、`backlinks[]` / `handle_backlinks.items[]` は ambiguous handle 自体への incoming lines、`candidate_backlinks[]` は候補 page ごとの resolved backlinks を返す。曖昧リンクを候補 page へ勝手に配らない |
@@ -139,6 +140,7 @@ Markdown mirror facts:
 - `[[Page]]`, `[[Page|alias]]`, `[[Page#Heading]]`, `[[folder/Page.md]]`, `![[Embed]]`, `#tag` を internal edge として materialize する。heading / alias は target resolution からは落とし、path suffix は file stem に畳む。
 - inline backtick 内と fenced code block 内の `[[...]]` は edge にしない。この repo の `wiki/` ではバックティックのプレーン名を親 llm-wiki 参照として扱い、grasp 内 edge にしない方針と整合する。
 - Dogfood: grasp 自身の `wiki/` は Markdown mirror として import でき、file back された current facts / backlog / decisions / log を `search` / `read` / `backlinks` / `related` / `path` で再利用できる。`log.md` は search には出るが、artifact outgoing edge 除外により既定 graph 近傍を支配しない。
+- Forest import: `import-forest` は `wikis.yaml` style registry の top-level `wikis:` entries から `name` / `path` を読み、各 `<path>/wiki`（`--wiki-dir` で変更可、`.` で path 自体）を同じ SQLite store の別 project namespace に import する。`--markdown-exclude-dir` は各 entry に適用される。per-entry failure は `diagnostic.type` 付きで `projects[]` に残し、全体は継続する。結果には forest aggregate と post-import `ambiguities` report が入る。
 
 parser が link から除外するもの:
 

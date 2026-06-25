@@ -112,6 +112,12 @@ frontmatter `title` があれば page title に使い、無ければ first H1、
 `--markdown-exclude-dir raw` のように directory basename を指定すると、重い raw/generated directory を再帰 import から外せます。`source/` は raw 由来の digest として保持され、通常の content と同じく link graph に入ります。再 import 時は manifest を見て、本文だけ変わったファイルを page 単位で差分更新します。frontmatter `title` / first H1 / `id` / `aliases` / graph role / exclude dirs や file set が変わった時は、安全のため project 全体を再構築します。
 同じ visible handle が複数 page identity に対応する場合、`grasp read <handle>` は片方を勝手に選ばず候補を返します。`grasp backlinks <handle>` は曖昧な handle 自体への incoming lines を主に返し、候補 page ごとの確定 backlinks も分けて返します。`grasp ambiguities` は store 全体または selected project の曖昧 handle を一覧します。候補から選ぶ時は `grasp read --page-id <id>`、Markdown mirror の source path で選ぶ時は `grasp read --path source/Digest.md` を使います。
 
+`wikis.yaml` のような registry で複数 Markdown wiki を管理している場合は、各 entry を別 project namespace としてまとめて import できます。各 wiki の失敗は全体を止めず diagnostics に集約され、import 後の ambiguity summary も同じ結果で確認できます。
+
+```bash
+grasp import-forest /Users/nishio/llm-wiki/wikis.yaml --markdown-exclude-dir raw
+```
+
 ### 3. AI に聞く
 
 Skill を登録してあれば、あとは AI エージェントに自然言語で話しかけるだけです。
@@ -153,6 +159,7 @@ grasp read "<ページタイトル>"
 | `export-ai <title>` | main + 1-hop / 2-hop ページ本文を 1 テキストへ展開（alias `export-for-ai`） |
 | `stats` | ストアの件数・更新日時などを確認 |
 | `import --cosense <json>` / `import --markdown <folder>` | Cosense JSON エクスポート、または read-only Markdown folder mirror を project namespace に取り込み・再構築 |
+| `import-forest <wikis.yaml>` | registry の複数 Markdown wiki を 1 store の複数 project namespace に一括 import。entry ごとの diagnostics と forest-level ambiguity summary を返す |
 | `acquire <project-url>` | 管理者 export なしで hosted Cosense から読めるページを partial corpus として取得（要 `cosense` CLI） |
 | `sync <project-url>` | hosted Cosense の最近更新ページを差分取り込み（保守用・要 `cosense` CLI install + 認証） |
 

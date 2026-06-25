@@ -783,3 +783,10 @@
 - `--project` 未指定時は `read` 系と違い、複数 project store でも全 project を scan する。forest import 後に「どの wiki / handle が曖昧か」をまず把握するための report surface。
 - schema は v7 のまま。public compatibility version は `1.7.2`。
 - 検証: `python3 -m unittest discover -s tests`（69 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-25 23:02] implementation+file back | `import-forest` orchestration を追加
+- `import-forest <wikis.yaml>` command を追加。top-level `wikis:` entries の `name` / `path` を読み、各 `<path>/<wiki-dir>` を project `<name>` として Markdown import する。`--wiki-dir .` なら path 自体を wiki として扱う。
+- per-entry failure / missing / skipped は全体を止めず `projects[]` の diagnostics として返す。結果には success/failure/missing/skipped counts、aggregate pages/lines/edges/unresolved、post-import `ambiguities` summary が入る。
+- schema は v7 のまま。public compatibility version は `1.7.3`。
+- dogfood: `/Users/nishio/llm-wiki/wikis.yaml` を temp store に `--markdown-exclude-dir raw` で実行し、42 success / 0 failure / 0 missing / 0 skipped。aggregate は 42 projects / 3338 pages / 265,012 lines / 23,183 edges / 1,627 unresolved、ambiguous handles 8、wall time 6.025 秒。
+- 検証: `python3 -m unittest discover -s tests`（73 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
