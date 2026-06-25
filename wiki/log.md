@@ -771,3 +771,9 @@
 - Codex が wiki を読んだ時点で、[[whole-store-graph-and-cross-project-edges]] は「v6 decision / `SCHEMA_VERSION = "6"`」のままだが、実際の schema v6 は `page_handles`、schema v7 は edge `resolution_status` と Markdown collision softening に使われ済みだった。これは今後の実装者に「cross-project は schema 6 で実装する」と誤読させる stale point。
 - 修正: 決定の中身は有効な design intent として維持し、当初の「v6」は歴史的ラベルへ降格。今後は **whole-store cross-project decision** と呼び、実装時点の next schema generation で `target_project` / `link_kind` / `connection_strength` / whole-store retrieval を入れる、と明記した。
 - [[grasp-backlog]] / [index](index.md) / [[scrapbubble]] / [[multi-project-store]] の current-facing 表現から「v6」を implementation target として読める箇所を外した。過去の [[log]] entry と schema v6/v7 実装済み事実（Markdown identity/name collision）は履歴として保持。
+
+## [2026-06-25 19:36] implementation+file back | ambiguous backlinks の handle/candidate 分離
+- `backlinks <ambiguous handle>` は `resolution_status=ambiguous` / `ambiguity` を返し、`backlinks[]` と `handle_backlinks.items[]` には ambiguous handle 自体への incoming lines を返すようにした。これが primary facts。
+- 候補 page ごとの確定 backlinks は `candidate_backlinks[]` に分けて返す。`[[Shared]]` のような曖昧リンクは候補 page に自動割当しない。
+- schema は v7 のまま。public compatibility version は `1.7.1`。
+- 検証: `python3 -m unittest discover -s tests`（68 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。

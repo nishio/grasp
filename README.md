@@ -110,7 +110,7 @@ grasp --project notes read "<ファイル名から .md を除いた title>"
 
 frontmatter `title` があれば page title に使い、無ければ first H1、さらに無ければ file stem を使います。`aliases` と file stem は link handle になります。duplicate title / alias は import 全体を止めず、`read <handle>` の候補として返ります。duplicate frontmatter `id` だけは identity 衝突なので error です。既存ファイルへは書き戻しません。
 `--markdown-exclude-dir raw` のように directory basename を指定すると、重い raw/generated directory を再帰 import から外せます。`source/` は raw 由来の digest として保持され、通常の content と同じく link graph に入ります。再 import 時は manifest を見て、本文だけ変わったファイルを page 単位で差分更新します。frontmatter `title` / first H1 / `id` / `aliases` / graph role / exclude dirs や file set が変わった時は、安全のため project 全体を再構築します。
-同じ visible handle が複数 page identity に対応する場合、`grasp read <handle>` は片方を勝手に選ばず候補を返します。候補から選ぶ時は `grasp read --page-id <id>`、Markdown mirror の source path で選ぶ時は `grasp read --path source/Digest.md` を使います。
+同じ visible handle が複数 page identity に対応する場合、`grasp read <handle>` は片方を勝手に選ばず候補を返します。`grasp backlinks <handle>` は曖昧な handle 自体への incoming lines を主に返し、候補 page ごとの確定 backlinks も分けて返します。候補から選ぶ時は `grasp read --page-id <id>`、Markdown mirror の source path で選ぶ時は `grasp read --path source/Digest.md` を使います。
 
 ### 3. AI に聞く
 

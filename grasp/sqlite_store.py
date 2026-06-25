@@ -1399,13 +1399,114 @@ class SQLiteStore:
 
     def backlinks(self, title: str, limit: int | None = None, offset: int = 0) -> list[Edge]:
         project = self._require_project()
-        page = self.resolve_page(title)
-        if page is not None:
+        candidates = self.page_handle_candidates(title)
+        if len(candidates) > 1:
+            target_filter = "e.resolution_status = 'ambiguous' AND e.target_handle_norm = ?"
+            target_value = normalize_title(title)
+        elif len(candidates) == 1:
             target_filter = "e.resolution_status = 'resolved_unique' AND e.target_page_id = ?"
-            target_value = page.id
+            target_value = candidates[0]["page_id"]
         else:
             target_filter = "e.resolution_status = 'unresolved' AND e.target_handle_norm = ?"
             target_value = self._resolve_title_norm(title, project=project)
+        return self._backlinks_by_filter(project, target_filter, target_value, limit=limit, offset=offset)
+
+    def backlinks_report(self, title: str, limit: int | None = None, offset: int = 0) -> dict[str, Any]:
+        project = self._require_project()
+        candidates = self.page_handle_candidates(title)
+        if len(candidates) <= 1:
+            edges = self.backlinks(title, limit=limit, offset=offset)
+            resolution_status = "resolved_unique" if candidates else "unresolved"
+            return {
+                "query": title,
+                "resolution_status": resolution_status,
+                "ambiguity": None,
+                "backlinks": [edge.to_dict() for edge in edges],
+                "count_returned": len(edges),
+                "count_total": self._backlink_count_for_status(title, resolution_status, candidates),
+                "offset": offset,
+            }
+
+        handle_norm = normalize_title(title)
+        target_filter = "e.resolution_status = 'ambiguous' AND e.target_handle_norm = ?"
+        handle_edges = self._backlinks_by_filter(project, target_filter, handle_norm, limit=limit, offset=offset)
+        handle_items = [edge.to_dict() for edge in handle_edges]
+        handle_count_total = self._backlink_count_by_filter(project, target_filter, handle_norm)
+        candidate_backlinks = []
+        for candidate in candidates:
+            candidate_filter = "e.resolution_status = 'resolved_unique' AND e.target_page_id = ?"
+            candidate_edges = self._backlinks_by_filter(
+                project,
+                candidate_filter,
+                candidate["page_id"],
+                limit=limit,
+                offset=0,
+            )
+            candidate_backlinks.append(
+                {
+                    "candidate": candidate,
+                    "resolved_backlinks": [edge.to_dict() for edge in candidate_edges],
+                    "count_returned": len(candidate_edges),
+                    "count_total": self._backlink_count_by_filter(project, candidate_filter, candidate["page_id"]),
+                    "offset": 0,
+                }
+            )
+        return {
+            "query": title,
+            "resolution_status": "ambiguous",
+            "ambiguity": self._handle_ambiguity(title, candidates),
+            "backlinks": handle_items,
+            "count_returned": len(handle_items),
+            "count_total": handle_count_total,
+            "offset": offset,
+            "handle_backlinks": {
+                "items": handle_items,
+                "count_returned": len(handle_items),
+                "count_total": handle_count_total,
+                "offset": offset,
+            },
+            "candidate_backlinks": candidate_backlinks,
+        }
+
+    def _backlink_count_for_status(
+        self,
+        title: str,
+        resolution_status: str,
+        candidates: list[dict[str, Any]],
+    ) -> int:
+        project = self._require_project()
+        if resolution_status == "resolved_unique" and candidates:
+            return self._backlink_count_by_filter(
+                project,
+                "e.resolution_status = 'resolved_unique' AND e.target_page_id = ?",
+                candidates[0]["page_id"],
+            )
+        return self._backlink_count_by_filter(
+            project,
+            "e.resolution_status = 'unresolved' AND e.target_handle_norm = ?",
+            self._resolve_title_norm(title, project=project),
+        )
+
+    def _backlink_count_by_filter(self, project: str, target_filter: str, target_value: str) -> int:
+        row = self.connection.execute(
+            f"""
+            SELECT COUNT(*) AS count
+            FROM edges e
+            WHERE e.project = ? AND {target_filter}
+            """,
+            (project, target_value),
+        ).fetchone()
+        return int(row["count"])
+
+    def _backlinks_by_filter(
+        self,
+        project: str,
+        target_filter: str,
+        target_value: str,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Edge]:
         query = """
             SELECT
               e.source_page_id,

@@ -217,9 +217,9 @@ def build_parser() -> argparse.ArgumentParser:
     backlinks_parser = add_command_parser(
         subparsers,
         "backlinks",
-        help="List line-level backlinks to a page or missing target.",
+        help="List line-level backlinks to a page, missing target, or ambiguous handle.",
         description="Return source lines whose parsed links point at title.",
-        returns="query, backlinks[], count_returned, offset",
+        returns="query, resolution_status, ambiguity|null, backlinks[], count_returned, count_total, offset",
         examples=[
             "grasp backlinks 盲点 --limit 5",
             "grasp backlinks 民主主義 --limit 20 --offset 20",
@@ -227,7 +227,9 @@ def build_parser() -> argparse.ArgumentParser:
         ],
         notes=[
             "backlinks[] items: source_page_id, source_title, source_views, "
-            "source_updated, line_id, line_index, line_text, target_title."
+            "source_updated, line_id, line_index, line_text, target_title. "
+            "For ambiguous handles, backlinks[] are incoming lines to the handle; "
+            "candidate_backlinks[] contains resolved backlinks to each candidate page."
         ],
     )
     backlinks_parser.add_argument("title", help="Target page title or missing linked target.")
@@ -875,13 +877,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             related_snippet_mode=args.related_snippet_mode,
         )
     if args.command == "backlinks":
-        edges = store.backlinks(args.title, limit=args.limit, offset=args.offset)
-        return {
-            "query": args.title,
-            "backlinks": [edge.to_dict() for edge in edges],
-            "count_returned": len(edges),
-            "offset": args.offset,
-        }
+        return store.backlinks_report(args.title, limit=args.limit, offset=args.offset)
     if args.command == "related":
         related = store.related(args.title, limit=args.limit)
         return {
@@ -1427,7 +1423,7 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
     if command == "read":
         return format_read(result, aliases=aliases)
     if command == "backlinks":
-        return format_backlinks(result["query"], result["backlinks"], result.get("offset", 0), aliases=aliases)
+        return format_backlinks(result, aliases=aliases)
     if command == "related":
         return format_related(result["query"], result["related"], result.get("recovery_hints"), aliases=aliases)
     if command == "path":
@@ -1637,14 +1633,35 @@ def format_read(result: dict[str, Any], aliases: LineIdAliases | None = None) ->
     return with_alias_legend("".join(parts), aliases)
 
 
-def format_backlinks(
-    query: str,
-    backlinks: list[dict[str, Any]],
-    offset: int = 0,
-    aliases: LineIdAliases | None = None,
-) -> str:
+def format_backlinks(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
     aliases = aliases or LineIdAliases(enabled=False)
+    query = result["query"]
+    backlinks = result["backlinks"]
+    offset = result.get("offset", 0)
     parts = [f"# Backlinks: {query}\n", f"offset: {offset}\n"]
+    if result.get("resolution_status") == "ambiguous":
+        ambiguity = result.get("ambiguity") or {}
+        parts.append(f"resolution: ambiguous ({ambiguity.get('candidate_count', 0)} candidates)\n")
+        parts.append("\n## Incoming links to ambiguous handle\n")
+        handle_backlinks = result.get("handle_backlinks") or {}
+        handle_items = handle_backlinks.get("items", backlinks)
+        if not handle_items:
+            parts.append("(none)\n")
+        else:
+            parts.append(format_edge_list(handle_items, aliases=aliases))
+        parts.append("\n## Candidate pages\n")
+        for candidate_result in result.get("candidate_backlinks", []):
+            candidate = candidate_result["candidate"]
+            suffix = f" path={candidate['path']}" if candidate.get("path") else ""
+            parts.append(
+                f"- {candidate['title']} id={candidate['page_id']}{suffix}; "
+                f"resolved_backlinks={candidate_result['count_total']}\n"
+            )
+            resolved = candidate_result.get("resolved_backlinks", [])
+            if resolved:
+                parts.append(format_edge_list(resolved, aliases=aliases))
+        return with_alias_legend("".join(parts), aliases)
+
     if not backlinks:
         parts.append("(none)\n")
     else:
