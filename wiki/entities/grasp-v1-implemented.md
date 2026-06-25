@@ -52,7 +52,7 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.7.8`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.7.9`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -162,6 +162,7 @@ parser が link から除外するもの:
 - `cross-project-refs` / `cross-project-acquire` は `lines.text LIKE '%[/%'` で候補行を絞ってから Cosense shorthand link を Python parser で分類する schema-compatible extraction/orchestration primitive。通常 internal link graph には cross-project refs を materialize しない。`cross_project_refs_to` / `top_internal_links` も既存 lines/edges から都度読む summary primitive で、store schema は変えない。
 - `cross-project-spread` / `cross-project-spreads` は既存 `page_handles` / `edges.target_handle_norm` / `unresolved_targets` から normalized title の project spread を都度計算する schema-compatible weak signal surface。first-class cross-project edge ではなく、page identity は project-scoped のまま保持する。`cross-project-spreads` は seed title が無い時の discovery surface で、wiki structural names や numeric-only handles は rank band で下げる。
 - `suggest` fuzzy mode は既存 `pages.norm_title` を Python 側で scan する schema-compatible title retrieval primitive。長文 title の exact recall を優先するための lexical layer であり、semantic embedding search は未実装。
+- `grasp.journal` は LLM Wiki infra fast path の event JSONL contract module。schema v1、event types `page_create` / `page_update` / `section_append` / `page_rename` / `log_append` / `projection_export`、canonical JSONL encode / append / read validation を持つ。CLI write surface / replay / projection export は未実装。
 - `path` は実験的 command で、現状は command ごとに pages ∪ unresolved targets の一時 adjacency を構築する。nishio store の dogfood（66092 nodes / 115075 undirected edges）では `path KJ法 弱い紐帯 --max-depth 4 --limit 1` が約2-5s。hot read path ではなく graph reasoning primitive として扱う。
 - 初回 import は 1 回だけ数秒から十数秒程度。
 
