@@ -4,8 +4,10 @@ summary: write/identity 層に着手する。3 つの決定。①位置づけ＝
 sources:
   - nishio 指示 2026-06-24「当面書き込み機能は alpha testing と位置付ける。信用してここに大事なものを預ける人は自己責任。テスト方法はこのリポジトリの過去の wiki 編集を grasp で同様にやれるかとする」
   - nishio 指示 2026-06-24「実装順序は最もリスクが高いものの検証を先にすべき」
+  - nishio 合意 2026-06-26「Markdown を出力し続けるが、人間や Codex は直接 Markdown を編集せず grasp write が native store を更新し、そこから Markdown を再生成する」
   - wiki/concepts/development-arc-retrieval-ahead-of-authoring.md（retrieval≫authoring の非対称と Open Questions）
   - wiki/grasp-backlog.md「Local write and identity layer」「stable line identity」
+  - wiki/decisions/native-authority-markdown-projection.md
   - wiki/decisions/why-not-scrapbox-clone.md / wiki/decisions/positioning-two-personas.md（identity-without-name = 存在理由）
 ---
 
@@ -65,6 +67,12 @@ felt-sense link（行キー・著者 retrieval 意図）と come-from link（用
 - 単一 dogfooder（nishio）の git history を ground truth にするので、編集パターンが nishio 固有（file-back skill 経由が多い）。外部 persona2 の編集様式（手編集・rename 頻度）は別 corpus が要るかもしれない（[[development-arc-retrieval-ahead-of-authoring]] の dogfood 転移リスク）。
 
 ## Updates
+
+### 2026-06-26: LLM Wiki migration target は native authority + Markdown projection
+
+nishio と合意: LLM Wiki を grasp infrastructure へ移す目標形は [[native-authority-markdown-projection]]。**Markdown は出力し続けるが authority ではなく generated projection**。人間や Codex が直接 Markdown を patch するのではなく、`grasp write` が native store（＋ durable journal）を更新し、そこから Markdown を再生成する。
+
+この合意は本 decision の「原典は書き換えず local store に write」から一段進み、LLM Wiki cutover 後の原典関係を定義する。cutover 前は Markdown import が source、cutover 後は native store / journal が source、`wiki/` は review / backup / publish / interoperability の projection。したがって write 実装の最小 slice は一般 editor ではなく、file-back dogfood に必要な page create/update、append section、append log event、rename、export Markdown projection、status/diff/revert event。
 
 ### 2026-06-24: write line の versioning — メジャー `2`、alpha は SLA ラベル（version 非依存）、cadence A
 
