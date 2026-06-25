@@ -797,3 +797,10 @@
 - schema は v7 のまま。public compatibility version は `1.7.4`。
 - smoke: 小さい Markdown fixture で `related Shared --json` が `related=Source:ambiguous-handle-source`、`candidate_related=A:B,B:A` を返すことを確認。
 - 検証: `python3 -m unittest discover -s tests`（73 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-25 23:29] implementation+file back | `cross-project-spread` weak spread surface を追加
+- `cross-project-spread <title>` command を追加。normalized title が selected/all projects で materialized page handle / ambiguous handle / unresolved target / incoming link としてどれだけ広がるかを project label 付きで返す。
+- 出力は `connection_strength=weak-normalized-title` と明示し、page identity は `(project,page_id)` のまま merge しない。これは whole-store cross-project decision の full schema 実装ではなく、schema v7 compatible な観測 surface。
+- schema は v7 のまま。public compatibility version は `1.7.5`。
+- smoke: 3 project の Markdown fixture で `Shared` が resolved_unique / ambiguous / unresolved の各 signal として集計され、`signal_project_count=3`、`ambiguous_project_count=1`、`unresolved_project_count=1` を返すことを確認。
+- 検証: `python3 -m unittest discover -s tests`（74 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。

@@ -45,7 +45,7 @@ sources:
 - 複数 directory に `_overview` / `README` / `index` など同一 file stem alias がある。
 - source digest / session file と canonical page が同じ alias を持つ。
 
-schema v7 では duplicate title / alias collision は import error ではなくなった。単一 wiki の correctness は `read <handle>` の ambiguity と `read --page-id` / `read --path` の identity selection に寄せる。2026-06-25 の `1.7.1` で `backlinks <ambiguous handle>` は handle 自体への incoming lines と候補 page ごとの resolved backlinks を分けて返すようになり、`1.7.2` で `ambiguities` が store / project 内の ambiguous handles を一覧できるようになった。`1.7.3` で `wikis.yaml` からの一括 import command 化も済み、`1.7.4` で `related <ambiguous handle>` も handle source pages と候補 page related を分けて返すようになった。残る retrieval blocker は whole-store cross-project surface。
+schema v7 では duplicate title / alias collision は import error ではなくなった。単一 wiki の correctness は `read <handle>` の ambiguity と `read --page-id` / `read --path` の identity selection に寄せる。2026-06-25 の `1.7.1` で `backlinks <ambiguous handle>` は handle 自体への incoming lines と候補 page ごとの resolved backlinks を分けて返すようになり、`1.7.2` で `ambiguities` が store / project 内の ambiguous handles を一覧できるようになった。`1.7.3` で `wikis.yaml` からの一括 import command 化も済み、`1.7.4` で `related <ambiguous handle>` も handle source pages と候補 page related を分けて返すようになった。`1.7.5` で `cross-project-spread <title>` が normalized title の weak spread report を返すようになった。残る retrieval blocker は first-class cross-project edge と whole-store default retrieval。
 
 重要な設計制約: alias collision は単なる import UX ではなく、Scrapbox の name=identity 欠陥を `identity-without-name` で直す問題そのものに近い。path は一意性の根拠として diagnostic / fallback handle には使えるが、path-qualified string をそのまま page name にすると LLM / 人間の期待する `[[Title]]` とずれる。
 
@@ -62,8 +62,8 @@ schema v7 では duplicate title / alias collision は import error ではなく
 3. **artifact reduction と source role classification を分ける。**（2026-06-25 最小実装）
    `raw/` は heavy original dump なので `--markdown-exclude-dir raw` で除外可能。`source/` は raw digest / source-backed synthesis なので default exclude せず、`graph_role=source` として保持し content と同じく edge を materialize する。`drafts/` / generated temp は `graph_role=artifact` として search には残すが outgoing edges は除外する。duplicate title / alias は schema v7 の handle ambiguity として別管理する。
 
-4. **`import-forest` orchestration は実装済み。**
-   `1.7.3` で registry parse / per-entry diagnostics / aggregate / forest-level ambiguity summary を持つ command になった。`1.7.4` で ambiguous related も入ったため、次は whole-store cross-project surface。
+4. **`import-forest` orchestration と weak spread report は実装済み。**
+   `1.7.3` で registry parse / per-entry diagnostics / aggregate / forest-level ambiguity summary を持つ command になった。`1.7.4` で ambiguous related、`1.7.5` で `cross-project-spread` が入ったため、次は first-class cross-project edge / whole-store retrieval。
 
 ## Open Questions
 

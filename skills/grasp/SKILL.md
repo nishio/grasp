@@ -147,6 +147,7 @@ grasp --project <source-project> cross-project-acquire --limit 5 --seed-limit 10
 | `path <A> <B>` | pages / page なし target 間の短いリンク経路（no-path 時も recovery hints） |
 | `mentions <query>` | literal query の裸言及を link span 外 occurrence として数え、page-level link status と come-from 昇格候補 score を返す。`--unlinked` で no-link-handle page に絞る |
 | `co-links <query>` | query を含む行で同時に出る internal links を rank し、hub の slice handle を返す。`target_relation` と `--rank slice|raw` あり |
+| `cross-project-spread <title>` | normalized title が project 群にどれだけ広がるかを見る weak signal。materialized / ambiguous / unresolved / incoming counts を project label 付きで返し、page identity は merge しない |
 | `cross-project-refs` | Cosense shorthand `[/project/page]` を target-aware に抽出し、semantic / `.icon` / project root / self-project に分類して project 別に rank。`--seed-dir` で acquire seed files / commands を生成 |
 | `cross-project-acquire` | `cross-project-refs --semantic-only` の seed titles から複数 hosted project を `<project>:semantic` に一括 partial acquire。`--dry-run` あり。実行後は reciprocal refs / top internal links も返す |
 | `gather <query>` | link stats・裸言及 summary・co-link slices・backlinks・next recipes の bounded bundle。row 単位の returned / total / omitted counts 付き |

@@ -301,6 +301,34 @@ def build_parser() -> argparse.ArgumentParser:
     ambiguities_parser.add_argument("--offset", type=int, default=0, help="Number of ranked ambiguous handles to skip.")
     ambiguities_parser.add_argument("--candidate-limit", type=int, default=5, help="Maximum candidate pages to include per ambiguous handle.")
 
+    cross_project_spread_parser = add_command_parser(
+        subparsers,
+        "cross-project-spread",
+        help="Report where a normalized handle appears across project namespaces.",
+        description=(
+            "Scan the selected scope for a title/handle as materialized page handles, unresolved targets, "
+            "and incoming link handles. This is a weak normalized-title spread signal; page identities are not merged."
+        ),
+        returns=(
+            "query, handle_norm, scope, project|null, project_count, signal_project_count, projects_returned, "
+            "connection_strength, totals, top_source_projects[], projects[]"
+        ),
+        examples=[
+            "grasp cross-project-spread KJ法 --limit 20",
+            "grasp cross-project-spread README --candidate-limit 3",
+            "grasp --json cross-project-spread KJ法 --limit 10",
+        ],
+        notes=[
+            "Without --project, scans all projects in the store; with --project, scans only that namespace.",
+            "projects[] items include materialized candidate pages, unresolved target stats, and incoming link resolution counts.",
+            "connection_strength=weak-normalized-title means the command reports a retrieval hint, not an authored merge.",
+        ],
+    )
+    cross_project_spread_parser.add_argument("title", help="Title or visible link handle to scan across projects.")
+    cross_project_spread_parser.add_argument("--limit", type=int, default=50, help="Maximum project rows to return.")
+    cross_project_spread_parser.add_argument("--offset", type=int, default=0, help="Number of ranked project rows to skip.")
+    cross_project_spread_parser.add_argument("--candidate-limit", type=int, default=5, help="Maximum materialized candidate pages per project.")
+
     related_parser = add_command_parser(
         subparsers,
         "related",
@@ -962,6 +990,13 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return store.backlinks_report(args.title, limit=args.limit, offset=args.offset)
     if args.command == "ambiguities":
         return store.ambiguities(limit=args.limit, offset=args.offset, candidate_limit=args.candidate_limit)
+    if args.command == "cross-project-spread":
+        return store.cross_project_spread(
+            args.title,
+            limit=args.limit,
+            offset=args.offset,
+            candidate_limit=args.candidate_limit,
+        )
     if args.command == "related":
         return store.related_report(args.title, limit=args.limit)
     if args.command == "path":
@@ -1507,6 +1542,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_backlinks(result, aliases=aliases)
     if command == "ambiguities":
         return format_ambiguities(result)
+    if command == "cross-project-spread":
+        return format_cross_project_spread(result)
     if command == "related":
         return format_related_result(result, aliases=aliases)
     if command == "path":
@@ -1839,6 +1876,68 @@ def format_ambiguities(result: dict[str, Any]) -> str:
         if item.get("candidates_truncated"):
             omitted = item["candidate_count"] - item["candidates_returned"]
             parts.append(f"  - ... {omitted} more candidates\n")
+    return "".join(parts)
+
+
+def format_cross_project_spread(result: dict[str, Any]) -> str:
+    totals = result["totals"]
+    resolution_counts = totals.get("resolution_counts", {})
+    parts = [
+        f"# Cross-project spread: {result['query']}\n",
+        f"normalized: {result['handle_norm']}\n",
+        f"scope: {result['scope']}\n",
+        f"connection_strength: {result['connection_strength']}\n",
+        f"projects: {result['signal_project_count']} / {result['project_count']} with signal\n",
+        (
+            "totals: "
+            f"materialized_projects={totals['materialized_project_count']}, "
+            f"ambiguous_projects={totals['ambiguous_project_count']}, "
+            f"unresolved_projects={totals['unresolved_project_count']}, "
+            f"incoming_links={totals['incoming_link_count']}\n"
+        ),
+        (
+            "resolution_counts: "
+            f"resolved={resolution_counts.get('resolved_unique', 0)}, "
+            f"ambiguous={resolution_counts.get('ambiguous', 0)}, "
+            f"unresolved={resolution_counts.get('unresolved', 0)}\n"
+        ),
+        f"note: {result['note']}\n",
+    ]
+    top_sources = result.get("top_source_projects") or []
+    if top_sources:
+        parts.append("\n## Top Source Projects\n")
+        for item in top_sources:
+            counts = item["resolution_counts"]
+            parts.append(
+                f"- {item['project']}: links={item['incoming_link_count']}, "
+                f"source_pages={item['incoming_source_page_count']}, "
+                f"resolved={counts.get('resolved_unique', 0)}, "
+                f"ambiguous={counts.get('ambiguous', 0)}, unresolved={counts.get('unresolved', 0)}\n"
+            )
+    projects = result.get("projects") or []
+    parts.append("\n## Projects\n")
+    if not projects:
+        parts.append("(none)\n")
+    for item in projects:
+        materialized = item["materialized"]
+        incoming = item["incoming"]
+        counts = incoming["resolution_counts"]
+        unresolved = item.get("unresolved")
+        unresolved_text = f", unresolved_links={unresolved['link_count']}" if unresolved else ""
+        parts.append(
+            f"- {item['project']}: candidates={materialized['candidate_count']}, "
+            f"incoming={incoming['incoming_link_count']} "
+            f"(resolved={counts.get('resolved_unique', 0)}, ambiguous={counts.get('ambiguous', 0)}, "
+            f"unresolved={counts.get('unresolved', 0)}){unresolved_text}\n"
+        )
+        for candidate in materialized.get("candidates") or []:
+            suffix = f" path={candidate['path']}" if candidate.get("path") else ""
+            parts.append(
+                f"  - {candidate['title']} id={candidate['page_id']} "
+                f"role={candidate.get('graph_role') or 'content'}{suffix}\n"
+            )
+        if materialized.get("candidates_truncated"):
+            parts.append("  - ...\n")
     return "".join(parts)
 
 

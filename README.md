@@ -146,6 +146,7 @@ grasp read "<ページタイトル>"
 | `search <query>` | 本文行を検索。既定は空白も含めて入力文字列そのものの line substring。`--mode boolean` で AND/OR/NOT、`--scope line|page` で行単位/ページ単位を切替。`--context N` で各 hit の前後 N 行を同梱。0件時は NFKC/長音ゆれの normalized fallback を試す |
 | `mentions <query>` | literal query の裸言及を、link span 外の occurrence として数える。page already has exact link / query-containing link / no link handle で分類し、come-from 昇格候補 score を返す。`--unlinked` で no link handle の page だけに絞る |
 | `co-links <query>` | query を含む行で同時に出る internal links を rank し、巨大 hub の slice handle を見つける。既定 `--rank slice` は query-containing target title を後ろへ回し、`--rank raw` で count order を見る |
+| `cross-project-spread <title>` | normalized title が各 project で materialized page / ambiguous handle / unresolved target / incoming link としてどれだけ広がるかを weak signal として返す。page identity は merge しない |
 | `cross-project-refs` | Cosense shorthand `[/project/page]` を parsed link target として抽出し、semantic / `.icon` / project root / self-project に分類して project 別に rank。`--semantic-only` で acquisition seed 向けに絞り、`--seed-dir` で project 別 seed file と acquire command を生成 |
 | `cross-project-acquire` | `cross-project-refs --semantic-only` の seed titles を使い、複数 target project を `<project>:semantic` namespace に一括 partial acquire。`--dry-run` で計画だけ返せ、実行後は reciprocal refs / top internal links も返す |
 | `gather <query>` | link stats・裸言及 summary・co-link slices・backlinks・次の recipe を bounded bundle として返す。returned / total / omitted は row 単位で明示。`--budget` は近似 row limit |
