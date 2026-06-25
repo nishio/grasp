@@ -1,6 +1,6 @@
 ---
 type: decision
-summary: grasp store は外部 source から再生成可能な projection なので schema は自由に壊してよい（v6 へ）。cross-project link `[/P/T]` を import 時に first-class edge として materialize し、intra link と同じ backlinks/related/path/unresolved 機構に乗せる。retrieval は whole-store default（`--project` は絞り込み、結果は project ラベル付き、materialized page node は namespace 分離のまま）。node 状態は page 単位の materialized / referenced-only で、project は単なる namespace、acquire = referenced-only node の materialize。**referenced-only（赤）node は normalize title で project 横断統合**（Cosense にない概念ハブ、nishio tentative）。cross-project の名前一致接続は **弱い接続（AI 向けヒント）**、人間の明示リンクは **強い接続** として区別する。原則は discover-broad-filter-post-hoc（relevance で pre-filter せず、ラベル付きで全部 surface、絞りは post-hoc、性能は bound で対処し hide しない）。multi-project-store の2 clause を supersede。
+summary: grasp store は外部 source から再生成可能な projection なので schema は自由に壊してよい。cross-project link `[/P/T]` を import 時に first-class edge として materialize し、intra link と同じ backlinks/related/path/unresolved 機構に乗せる。retrieval は whole-store default（`--project` は絞り込み、結果は project ラベル付き、materialized page node は namespace 分離のまま）。node 状態は page 単位の materialized / referenced-only で、project は単なる namespace、acquire = referenced-only node の materialize。**referenced-only（赤）node は normalize title で project 横断統合**（Cosense にない概念ハブ、nishio tentative）。cross-project の名前一致接続は **弱い接続（AI 向けヒント）**、人間の明示リンクは **強い接続** として区別する。原則は discover-broad-filter-post-hoc（relevance で pre-filter せず、ラベル付きで全部 surface、絞りは post-hoc、性能は bound で対処し hide しない）。multi-project-store の2 clause を supersede。当初の「v6」は設計ラベルで、実装時の `SCHEMA_VERSION=6` 指示ではない。
 sources:
   - nishio 設計対話 2026-06-24（cross-project-refs を互換重視で実装する方針への反論「互換性を捨ててどうあるのが理想か」）
   - nishio 判断 2026-06-24「人間が気付けないものを AI が気づくのは良い。不要なものは見つけた後に filter」「明示的に project を限定しない限り default で全体から検索」「project でなく page 単位で『参照されているがまだ実体取得していない』がある」
@@ -9,13 +9,13 @@ sources:
   - [[cross-project-reference-acquire-2026-06-24]]（dogfood: 183 project / 4,141 refs / reciprocal refs）
 ---
 
-# Decision: whole-store グラフと cross-project first-class edge（v6）
+# Decision: whole-store グラフと cross-project first-class edge
 
-決定の塊。cross-project-refs を「v5 互換・schema bump なし・保存済み本文から parse-on-read」で足す方針を破棄し、互換性を捨てた理想形を v6 として確定した。Codex はこれを実装し、実装で判明した制約を [[grasp-v1-implemented]] / 本ページへ file back する。**本ページは design intent であり current facts ではない**（実装済み事実は entities/ 側）。
+決定の塊。cross-project-refs を「v5 互換・schema bump なし・保存済み本文から parse-on-read」で足す方針を破棄し、互換性を捨てた理想形を当時「v6」と呼んで確定した。**ただしその後、実際の schema v6/v7 は Markdown identity/name collision work（`page_handles` / edge `resolution_status`）で消費済み**。今後この決定を実装するときは「whole-store cross-project」決定として扱い、実装時点の next schema generation で進める。Codex は実装で判明した制約を [[grasp-v1-implemented]] / 本ページへ file back する。**本ページは design intent であり current facts ではない**（実装済み事実は entities/ 側）。
 
 ## 決定（要点）
 
-1. **store = 再生成可能な projection。schema は自由に壊す。** SSoT は SQLite の行ではなく外部 source（Cosense export / Markdown folder / acquire 結果、すべて `<store>.imports/` に cache 済み）。`ensure_store_schema` は `SCHEMA_VERSION` 不一致で store を作り直し、`recover_store_from_import_cache` が cache から全 project 再 import する機構が既にある。∴「schema bump を避ける」ことに価値はない。理想形を決めて `SCHEMA_VERSION = "6"` に上げ、再 import する。
+1. **store = 再生成可能な projection。schema は自由に壊す。** SSoT は SQLite の行ではなく外部 source（Cosense export / Markdown folder / acquire 結果、すべて `<store>.imports/` に cache 済み）。`ensure_store_schema` は `SCHEMA_VERSION` 不一致で store を作り直し、`recover_store_from_import_cache` が cache から全 project 再 import する機構が既にある。∴「schema bump を避ける」ことに価値はない。理想形を決めて実装時点の next schema generation に上げ、再 import する。
 
 2. **原則: discover-broad, filter post-hoc。** CLI は relevance で **pre-filter しない**。target_project / link_kind / scope ラベル付きで全部 surface し、絞り込み（semantic-only, same-project-only 等）は **見えた集合への post-hoc flag** にする。出力量は rank + omitted-count で bound する（discover ≠ 無制限に吐く）。性能問題は bound（limit / depth / ranking / index）で対処し、**hide では対処しない**。grasp が既に持つ「raw + ranking を返し AI が畳む」「`returned_counts` / `omitted_counts`」方針（[[grasp-backlog]] の `--cluster` 却下・`gather` counts）を cross-project / whole-store に拡張しただけで、新しい哲学ではない。
 
@@ -42,7 +42,7 @@ sources:
 - 赤リンク = acquire の bibliography に畳まれる。未取得 namespace への ref は「参照してるが未取得の知識圏を指す referenced-only node」。`unresolved`（whole-store）が「villagepump に未取得の参照 833 件」を link_count 順で出す = dogfood が one-off script でやった seed ranking。`acquire` がそれを materialize し、edge が一斉に resolve する。専用 verb `cross-project-refs` は不要になり、`unresolved` + `acquire` + `backlinks` の組み合わせになる。
 - whole-store default は「人間が気付けないものを AI が気づく」を優先する nishio 判断の帰結。project を1つに絞らせる現挙動は、AI に「どの project か」を先に決めさせ、跨ぐ繋がりを発見不能にする。ラベル付き whole-store なら混ぜずに気づける。
 
-## v6 schema 方向（design intent, 未実装）
+## schema 方向（design intent, 未実装）
 
 ```text
 edges(
@@ -112,6 +112,12 @@ unresolved_targets(
   - 残る dogfood: 同綴り別概念の誤接続「頻度」を実データで測る（weak 層に閉じるので致命ではないが、weak の rank / 閾値調整に要る）。表記ゆれ（`yyyy/MM/dd` ⇄ `yyyy-MM-dd`、[[scrapbubble]] が「実装したい」と挙げた link 同一判定）を normalize でどこまで吸収するか。
 
 ## Updates
+
+### 2026-06-25: 「v6」は歴史的ラベルに降格、実装は next schema generation で行う
+
+本決定は作成時に「v6 decision」と呼ばれ、本文にも `SCHEMA_VERSION = "6"` と書かれていた。しかし 2026-06-25 の Markdown identity/name collision work で実際の schema v6 は `page_handles`、schema v7 は edge `resolution_status` に使われた（[[history]] / [[grasp-v1-implemented]]）。このため、今後の実装指示として「v6 bump」と読むと current facts と矛盾する。
+
+修正: 本決定の中身は有効な design intent のまま残すが、番号は歴史的ラベルとして扱う。今後は **whole-store cross-project decision** と呼び、実装時点の next schema generation で `target_project` / `link_kind` / `connection_strength` / whole-store retrieval を入れる。[[grasp-backlog]] / [index](../index.md) / [[scrapbubble]] 側も「v6」を current implementation target として読ませない表現に直した。
 
 ### 2026-06-25: ScrapBubble の whiteList 透過が prior art（cross-project は Co- 無しでも価値）
 

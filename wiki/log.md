@@ -766,3 +766,8 @@
 - wiki森 smoke: `/Users/nishio/llm-wiki/wikis.yaml` 42 entries を temp store へ同条件で import し、42 success / 0 failure / missing 0。aggregate は schema v7 / schema_ok true / 42 projects / 3338 pages / 264,963 lines / 23,180 edges / 1,627 unresolved、wall time 約 22.1 秒。
 - 検証: `python3 -m unittest discover -s tests`（68 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
 - 残件: `backlinks <ambiguous handle>` の UX と JSON contract、forest import orchestration、whole-store cross-project edge との統合。
+
+## [2026-06-25 19:18] file back | whole-store cross-project の「v6」呼称を current schema 番号から切り離し
+- Codex が wiki を読んだ時点で、[[whole-store-graph-and-cross-project-edges]] は「v6 decision / `SCHEMA_VERSION = "6"`」のままだが、実際の schema v6 は `page_handles`、schema v7 は edge `resolution_status` と Markdown collision softening に使われ済みだった。これは今後の実装者に「cross-project は schema 6 で実装する」と誤読させる stale point。
+- 修正: 決定の中身は有効な design intent として維持し、当初の「v6」は歴史的ラベルへ降格。今後は **whole-store cross-project decision** と呼び、実装時点の next schema generation で `target_project` / `link_kind` / `connection_strength` / whole-store retrieval を入れる、と明記した。
+- [[grasp-backlog]] / [index](index.md) / [[scrapbubble]] / [[multi-project-store]] の current-facing 表現から「v6」を implementation target として読める箇所を外した。過去の [[log]] entry と schema v6/v7 実装済み事実（Markdown identity/name collision）は履歴として保持。
