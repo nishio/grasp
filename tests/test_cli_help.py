@@ -14,6 +14,7 @@ COMMANDS = [
     "read",
     "backlinks",
     "ambiguities",
+    "cross-project-spread",
     "related",
     "path",
     "link-stats",

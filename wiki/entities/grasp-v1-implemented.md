@@ -52,7 +52,7 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.7.4`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.7.5`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -78,6 +78,7 @@ v1 scope 外:
 | `backlinks <title>` | `(source page, line-id, line text)` の行レベル backlinks。missing target にも効く。visible handle が複数 page identity に束縛される時は `resolution_status=ambiguous` と `ambiguity` を返し、`backlinks[]` / `handle_backlinks.items[]` は ambiguous handle 自体への incoming lines、`candidate_backlinks[]` は候補 page ごとの resolved backlinks を返す。曖昧リンクを候補 page へ勝手に配らない |
 | `ambiguities` | `page_handles` の 1:N handle を一覧する。`--project` 指定時は selected project、未指定時は store 全 project を対象にし、project 別 ambiguous handle count / ambiguous incoming link count / source page count と、各 handle の bounded candidate pages を返す |
 | `related <title>` | existing page は page 間 edge の 2-hop pages。missing target は source pages。visible handle が複数 page identity に束縛される時は `resolution_status=ambiguous` と `ambiguity` を返し、`related[]` は ambiguous handle 自体への source pages、`candidate_related[]` は候補 page ごとの existing-page related を返す。曖昧リンクを候補 page へ勝手に配らない。空結果時は `recovery_hints` を返す |
+| `cross-project-spread <title>` | normalized title が selected/all projects で materialized page handle / ambiguous handle / unresolved target / incoming link としてどれだけ広がるかを `connection_strength=weak-normalized-title` の report として返す。page identity は `(project,page_id)` のまま merge せず、project label / candidate counts / resolution counts を返す。schema v7 の `page_handles` / `edges.target_handle_norm` / `unresolved_targets` から都度計算する |
 | `path <A> <B>` | pages ∪ unresolved targets を node、materialized internal links を無向 edge として shortest path を返す。`--max-depth` default 4、`--limit` default 3。edge には根拠 line を同梱する。端点が resolve できるが経路が無い時は `recovery_hints.path` に reason / next_max_depth / related / backlinks / link-stats を返す |
 | `link-stats <title>` | incoming link count / source page count / none-single-multi を返す。visible handle が複数 page identity に束縛される時は `ambiguity.type=handle_ambiguity` を返し、zero-hit recovery hints へ誤分類しない。zero-hit 時は `recovery_hints` も返す |
 | `peek <title>` | page lines のみ。`--line-offset N --line-limit M` で本文行だけをページングし、JSON は `line_offset`, `lines_truncated_before`, `lines_truncated_after` を返す |
@@ -158,6 +159,7 @@ parser が link から除外するもの:
 - 既定 `search` は `LIKE` 全行 scan 律速で約 180ms。boolean page scope は SQL の `EXISTS` でページ単位に条件判定し、該当 positive term を含む行を返す。literal 0件時の normalized fallback は NFKC query 正規化＋長音除去を SQLite `REPLACE` で行う。完全なかな/カナ変換 Python scan は 50k lines 以下の小規模 store に限る。FTS5 trigram hybrid は [[fts5-trigram-search]] の通り未実装候補。
 - `mentions` / `co-links` / `gather` は既存 `lines` / `edges` / `pages` から都度計算する schema-compatible retrieval primitive。query literal の `LIKE` hit 行を起点にするため、巨大・一般語 query では `search` 同様に scan cost を払う。`gather --budget` は厳密 token budget ではなく bounded row limit selector。omitted counts も token ではなく row 単位。
 - `cross-project-refs` / `cross-project-acquire` は `lines.text LIKE '%[/%'` で候補行を絞ってから Cosense shorthand link を Python parser で分類する schema-compatible extraction/orchestration primitive。通常 internal link graph には cross-project refs を materialize しない。`cross_project_refs_to` / `top_internal_links` も既存 lines/edges から都度読む summary primitive で、store schema は変えない。
+- `cross-project-spread` は既存 `page_handles` / `edges.target_handle_norm` / `unresolved_targets` から normalized title の project spread を都度計算する schema-compatible weak signal surface。first-class cross-project edge ではなく、page identity は project-scoped のまま保持する。
 - `path` は実験的 command で、現状は command ごとに pages ∪ unresolved targets の一時 adjacency を構築する。nishio store の dogfood（66092 nodes / 115075 undirected edges）では `path KJ法 弱い紐帯 --max-depth 4 --limit 1` が約2-5s。hot read path ではなく graph reasoning primitive として扱う。
 - 初回 import は 1 回だけ数秒から十数秒程度。
 

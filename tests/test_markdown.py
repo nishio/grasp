@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from grasp.cli import format_ambiguities, format_backlinks, format_related_result
+from grasp.cli import format_ambiguities, format_backlinks, format_cross_project_spread, format_related_result
 from grasp.markdown import (
     MarkdownCollisionError,
     MarkdownMirror,
@@ -505,6 +505,55 @@ class MarkdownImportTests(unittest.TestCase):
                     {project["project"]: project["ambiguous_link_count"] for project in report["projects"]},
                     {"one": 1, "two": 1},
                 )
+            finally:
+                store.close()
+
+    def test_cross_project_spread_reports_weak_normalized_title_signal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            store_path = base / "store.sqlite"
+
+            one = base / "one"
+            one.mkdir()
+            (one / "A.md").write_text("---\naliases: [Shared]\n---\n# A\n", encoding="utf-8")
+            (one / "Source.md").write_text("links to [[Shared]]\n", encoding="utf-8")
+            import_markdown_folder_to_sqlite(one, store_path, project_name="one")
+
+            two = base / "two"
+            two.mkdir()
+            (two / "A.md").write_text("---\naliases: [Shared]\n---\n# A\n", encoding="utf-8")
+            (two / "B.md").write_text("---\naliases: [Shared]\n---\n# B\n", encoding="utf-8")
+            (two / "Source.md").write_text("links to [[Shared]]\n", encoding="utf-8")
+            import_markdown_folder_to_sqlite(two, store_path, project_name="two")
+
+            three = base / "three"
+            three.mkdir()
+            (three / "Source.md").write_text("links to [[Shared]]\n", encoding="utf-8")
+            import_markdown_folder_to_sqlite(three, store_path, project_name="three")
+
+            store = SQLiteStore(store_path)
+            try:
+                spread = store.cross_project_spread("Shared", limit=10, candidate_limit=1)
+                self.assertEqual(spread["scope"], "all-projects")
+                self.assertEqual(spread["connection_strength"], "weak-normalized-title")
+                self.assertEqual(spread["project_count"], 3)
+                self.assertEqual(spread["signal_project_count"], 3)
+                self.assertEqual(spread["totals"]["materialized_project_count"], 2)
+                self.assertEqual(spread["totals"]["ambiguous_project_count"], 1)
+                self.assertEqual(spread["totals"]["unresolved_project_count"], 1)
+                self.assertEqual(
+                    spread["totals"]["resolution_counts"],
+                    {"resolved_unique": 1, "ambiguous": 1, "unresolved": 1},
+                )
+                projects = {item["project"]: item for item in spread["projects"]}
+                self.assertEqual(projects["one"]["materialized"]["candidate_count"], 1)
+                self.assertEqual(projects["two"]["materialized"]["candidate_count"], 2)
+                self.assertTrue(projects["two"]["materialized"]["candidates_truncated"])
+                self.assertEqual(projects["three"]["unresolved"]["link_count"], 1)
+                text = format_cross_project_spread(spread)
+                self.assertIn("# Cross-project spread: Shared", text)
+                self.assertIn("connection_strength: weak-normalized-title", text)
+                self.assertIn("ambiguous_projects=1", text)
             finally:
                 store.close()
 

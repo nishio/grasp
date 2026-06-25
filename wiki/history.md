@@ -60,6 +60,7 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
+| `1.7.5` | schema `7` | 2026-06-25 | schema `7` compatible | `cross-project-spread <title>` command を追加。normalized title が selected/all projects で materialized page handle / ambiguous handle / unresolved target / incoming link としてどれだけ広がるかを `weak-normalized-title` signal として返す。page identity は project-scoped のまま merge しない。schema は不変 |
 | `1.7.4` | schema `7` | 2026-06-25 | schema `7` compatible | `related <ambiguous handle>` の contract を追加。primary `related[]` は ambiguous handle 自体への source pages、`candidate_related[]` は候補 page ごとの existing-page related を返す。曖昧リンクを候補 page へ自動割当しない。schema は不変 |
 | `1.7.3` | schema `7` | 2026-06-25 | schema `7` compatible | `import-forest` command を追加。`wikis.yaml` 形式の `wikis:` entries を読み、各 `<path>/<wiki-dir>` を project `<name>` として Markdown import する。entry ごとの success / failure / missing / skipped diagnostics、aggregate counts、post-import `ambiguities` summary を返す。schema は不変 |
 | `1.7.2` | schema `7` | 2026-06-25 | schema `7` compatible | `ambiguities` command を追加。`page_handles` の 1:N handle を store 全体または selected project で列挙し、project 別 ambiguous handle count / ambiguous incoming link count / source page count と、各 handle の bounded candidates を返す。schema は不変 |
@@ -105,6 +106,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.7.4`
+- Current public compatibility version: `1.7.5`
 - Current internal `SCHEMA_VERSION`: `7`
-- Current package metadata should match `1.7.4`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.7.5`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

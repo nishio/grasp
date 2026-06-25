@@ -36,6 +36,8 @@ sources:
    - **誤接続リスクはこの weak 層に閉じる**: 同綴り別概念（`Apple`=会社/果物）が誤接続しても弱いヒントとして label されるだけで、authored（strong）グラフを汚さない。strength 区別が、point 7 で受容した誤接続リスクの **封じ込め機構** になる。
    - retrieval は strong / weak を **label して返し、weak は strong より下に rank** する。AI / 人間が weight を決める（discover-broad-filter-post-hoc: weak も surface するが「弱い」と分かる形で）。
 
+2026-06-25 実装メモ: `1.7.5` の `cross-project-spread <title>` は、この決定の full schema 実装ではなく schema v7 compatible な観測 surface。`page_handles` / `edges.target_handle_norm` / `unresolved_targets` から normalized title の spread を project label 付きで返し、`connection_strength=weak-normalized-title` と明示する。page identity は merge しない。first-class cross-project edge / whole-store default retrieval は引き続き未実装。
+
 ## 理由
 
 - cross ref を二級市民にしているのは互換性のためだけだった。[[cross-project-reference-acquire-2026-06-24]] dogfood は `/nishio` が 183 project / 4,141 refs を外に張り、取得した外部 page が `/nishio` へ reciprocal ref を返すこと（共同知識圏の輪郭）を実測した。cross ref を edge にすれば、この reciprocal が **本物の backlink** になり、Scrapbox の自動双方向・2-hop・赤リンクが project を跨いで効く。これは grasp の存在理由（Scrapbox のグラフモデルを CLI で体験させる）そのもの。

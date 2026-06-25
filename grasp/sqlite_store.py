@@ -1207,6 +1207,79 @@ class SQLiteStore:
             "ambiguities": items,
         }
 
+    def cross_project_spread(
+        self,
+        title: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        candidate_limit: int = 5,
+    ) -> dict[str, Any]:
+        projects = self._ambiguity_scope_projects()
+        limit = max(0, limit)
+        offset = max(0, offset)
+        candidate_limit = max(0, candidate_limit)
+        handle_norm = normalize_title(title)
+        scope = "project" if self.project else "all-projects"
+        edge_stats = self._spread_edge_stats(projects, handle_norm)
+        unresolved = self._spread_unresolved_targets(projects, handle_norm)
+        items = []
+        for project in projects:
+            candidates = self.page_handle_candidates(handle_norm, project=project)
+            stats = edge_stats.get(project, _empty_spread_edge_stats())
+            unresolved_item = unresolved.get(project)
+            if not candidates and not unresolved_item and stats["incoming_link_count"] == 0:
+                continue
+            returned_candidates = candidates[:candidate_limit] if candidate_limit else []
+            items.append(
+                {
+                    "project": project,
+                    "materialized": {
+                        "candidate_count": len(candidates),
+                        "candidates": returned_candidates,
+                        "candidates_returned": len(returned_candidates),
+                        "candidates_truncated": len(candidates) > len(returned_candidates),
+                        "ambiguous": len(candidates) > 1,
+                    },
+                    "unresolved": unresolved_item,
+                    "incoming": stats,
+                    "signals": {
+                        "has_materialized_page": bool(candidates),
+                        "has_unresolved_target": unresolved_item is not None,
+                        "has_incoming_links": stats["incoming_link_count"] > 0,
+                    },
+                }
+            )
+        items.sort(key=_spread_project_rank_key)
+        returned_items = items[offset : offset + limit] if limit else []
+        totals = _spread_totals(items)
+        return {
+            "query": title,
+            "handle_norm": handle_norm,
+            "scope": scope,
+            "project": projects[0] if scope == "project" and projects else None,
+            "project_count": len(projects),
+            "signal_project_count": len(items),
+            "projects_returned": len(returned_items),
+            "limit": limit,
+            "offset": offset,
+            "candidate_limit": candidate_limit,
+            "connection_strength": "weak-normalized-title",
+            "note": "Spread is a weak normalized-title signal. Page identities stay project-scoped and are not merged.",
+            "totals": totals,
+            "top_source_projects": [
+                {
+                    "project": item["project"],
+                    "incoming_link_count": item["incoming"]["incoming_link_count"],
+                    "incoming_source_page_count": item["incoming"]["incoming_source_page_count"],
+                    "resolution_counts": item["incoming"]["resolution_counts"],
+                }
+                for item in items
+                if item["incoming"]["incoming_link_count"] > 0
+            ][:10],
+            "projects": returned_items,
+        }
+
     def _ambiguity_scope_projects(self) -> list[str]:
         names = self.project_names()
         if self.project:
@@ -1215,6 +1288,65 @@ class SQLiteStore:
                 raise ValueError(f"project does not exist: {self.project}; available projects: {available}")
             return [self.project]
         return names
+
+    def _spread_edge_stats(self, projects: list[str], handle_norm: str) -> dict[str, dict[str, Any]]:
+        if not projects:
+            return {}
+        placeholders = ",".join("?" for _ in projects)
+        rows = self.connection.execute(
+            f"""
+            SELECT
+              project,
+              COUNT(*) AS incoming_link_count,
+              COUNT(DISTINCT source_page_id) AS incoming_source_page_count,
+              SUM(CASE WHEN resolution_status = 'resolved_unique' THEN 1 ELSE 0 END) AS resolved_unique,
+              SUM(CASE WHEN resolution_status = 'ambiguous' THEN 1 ELSE 0 END) AS ambiguous,
+              SUM(CASE WHEN resolution_status = 'unresolved' THEN 1 ELSE 0 END) AS unresolved
+            FROM edges
+            WHERE project IN ({placeholders})
+              AND target_handle_norm = ?
+            GROUP BY project
+            """,
+            [*projects, handle_norm],
+        ).fetchall()
+        return {
+            row["project"]: {
+                "incoming_link_count": int(row["incoming_link_count"]),
+                "incoming_source_page_count": int(row["incoming_source_page_count"]),
+                "resolution_counts": {
+                    "resolved_unique": int(row["resolved_unique"] or 0),
+                    "ambiguous": int(row["ambiguous"] or 0),
+                    "unresolved": int(row["unresolved"] or 0),
+                },
+            }
+            for row in rows
+        }
+
+    def _spread_unresolved_targets(self, projects: list[str], handle_norm: str) -> dict[str, dict[str, Any]]:
+        if not projects:
+            return {}
+        placeholders = ",".join("?" for _ in projects)
+        rows = self.connection.execute(
+            f"""
+            SELECT *
+            FROM unresolved_targets
+            WHERE project IN ({placeholders})
+              AND target_norm = ?
+            """,
+            [*projects, handle_norm],
+        ).fetchall()
+        return {
+            row["project"]: {
+                "project": row["project"],
+                "title": row["title"],
+                "normalized_title": row["target_norm"],
+                "link_count": int(row["link_count"]),
+                "source_page_count": int(row["source_page_count"]),
+                "total_source_views": int(row["total_source_views"]),
+                "latest_source_updated": int(row["latest_source_updated"]),
+            }
+            for row in rows
+        }
 
     def _ambiguities_sql(self, projects: list[str]) -> str:
         placeholders = ",".join("?" for _ in projects)
@@ -5027,6 +5159,68 @@ def _unresolved_target_output_rank_key(item: dict[str, Any]) -> tuple[Any, ...]:
         -int(item.get("latest_source_updated") or 0),
         str(item.get("title") or "").casefold(),
     )
+
+
+def _empty_spread_edge_stats() -> dict[str, Any]:
+    return {
+        "incoming_link_count": 0,
+        "incoming_source_page_count": 0,
+        "resolution_counts": {
+            "resolved_unique": 0,
+            "ambiguous": 0,
+            "unresolved": 0,
+        },
+    }
+
+
+def _spread_project_rank_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    incoming = item["incoming"]
+    materialized = item["materialized"]
+    unresolved = item.get("unresolved")
+    return (
+        -int(incoming["incoming_link_count"]),
+        -int(incoming["incoming_source_page_count"]),
+        -int(materialized["candidate_count"]),
+        0 if unresolved is not None else 1,
+        item["project"],
+    )
+
+
+def _spread_totals(items: list[dict[str, Any]]) -> dict[str, Any]:
+    resolution_counts = Counter()
+    incoming_link_count = 0
+    incoming_source_page_count = 0
+    page_candidate_count = 0
+    materialized_project_count = 0
+    ambiguous_project_count = 0
+    unresolved_project_count = 0
+    incoming_project_count = 0
+    for item in items:
+        materialized = item["materialized"]
+        incoming = item["incoming"]
+        page_candidate_count += int(materialized["candidate_count"])
+        if materialized["candidate_count"]:
+            materialized_project_count += 1
+        if materialized["ambiguous"]:
+            ambiguous_project_count += 1
+        if item.get("unresolved") is not None:
+            unresolved_project_count += 1
+        if incoming["incoming_link_count"]:
+            incoming_project_count += 1
+        incoming_link_count += int(incoming["incoming_link_count"])
+        incoming_source_page_count += int(incoming["incoming_source_page_count"])
+        resolution_counts.update(incoming["resolution_counts"])
+    return {
+        "signal_project_count": len(items),
+        "materialized_project_count": materialized_project_count,
+        "ambiguous_project_count": ambiguous_project_count,
+        "unresolved_project_count": unresolved_project_count,
+        "incoming_project_count": incoming_project_count,
+        "page_candidate_count": page_candidate_count,
+        "incoming_link_count": incoming_link_count,
+        "incoming_source_page_count": incoming_source_page_count,
+        "resolution_counts": dict(resolution_counts),
+    }
 
 
 def rebuild_unresolved_targets(connection: sqlite3.Connection, project: str) -> None:
