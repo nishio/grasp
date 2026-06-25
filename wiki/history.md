@@ -60,6 +60,7 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
+| `1.7.0` | schema `7` | 2026-06-25 | `1.6.x` store は rebuild | `edges` に `target_handle`, `target_handle_norm`, `target_page_id`, `resolution_status` を追加。edge resolution は `page_handles` から `resolved_unique` / `ambiguous` / `unresolved` を materialize し、ambiguous handle を unresolved target や既存 page backlink と誤分類しない。Markdown duplicate title / alias は import 全体を止めず、`read <handle>` の ambiguity 候補として surface する。duplicate frontmatter `id` は identity 衝突なので引き続き hard error |
 | `1.6.0` | schema `6` | 2026-06-25 | `1.5.x` store は rebuild | SQLite schema に `page_handles` を追加し、visible handle（title / Markdown alias）と page identity `(project,page_id)` を分離する入口を作った。`read <handle>` は handle が複数 page identity に束縛される時、暗黙に片方を選ばず `ambiguity.type=handle_ambiguity` と候補 page_id / path / graph_role を返す。`read --page-id <id>` / `read --path <relative-path>` で明示 identity を選択できる。Markdown import source を import cache manifest に `source_type=markdown` / `exclude_dirs` 付きで保存し、schema mismatch recovery が Markdown folder mirror も再構築できる |
 | `1.5.29` | schema `5` | 2026-06-25 | schema `5` compatible | Markdown import が `source/` / `sources/` と frontmatter `role/type: source` を `graph_role=source` と分類する。`source` role は raw 由来 digest / source-backed synthesis として保持し、`content` と同じく outgoing edges を materialize する。`drafts/` / generated temp / frontmatter `role/type: artifact|draft|generated` は `graph_role=artifact` として search には残すが outgoing edges は除外する。collision diagnostics は entry ごとの `graph_role` を返す。SQLite schema と Markdown manifest version は不変 |
 | `1.5.28` | schema `5` | 2026-06-25 | schema `5` compatible | Markdown import に `--markdown-exclude-dir <name>` を追加。指定した directory basename 配下の `.md` を read-only mirror から除外し、`raw/` など heavy raw/generated directory を森スケール dogfood で避けられる。Markdown manifest version は `3` になり、exclude dirs も manifest identity に含めるため条件変更時は full rebuild。SQLite schema は不変 |
@@ -100,6 +101,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.6.0`
-- Current internal `SCHEMA_VERSION`: `6`
-- Current package metadata should match `1.6.0`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current public compatibility version: `1.7.0`
+- Current internal `SCHEMA_VERSION`: `7`
+- Current package metadata should match `1.7.0`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

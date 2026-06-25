@@ -159,6 +159,8 @@ grasp 自身の `wiki/` を temp store に import して確認した結果、Mar
 
 失敗 5 entries は missing folder や raw directory の重さではなく、すべて duplicate title / alias collision。類型は draft variants の同一 H1、複数 directory の `_overview` / `README` / `index` file stem alias、source digest / session file と canonical page の alias 衝突。したがって森スケールの次 blocker は performance ではなく collision policy。read-only mirror は duplicate を即 import error にするだけでなく、handle ambiguity を表現する必要がある。`source/` は raw 由来の digest / source-backed synthesis なので default exclude ではなく、保持した上で source role / evidence layer として扱う。
 
+2026-06-25 schema v7 追記: `edges.resolution_status` と Markdown import softening により、同じ条件の forest smoke は 42/42 entries 成功になった。duplicate title / alias は import error ではなく `read <handle>` の ambiguity と `edges.resolution_status=ambiguous` で表現する。残件は ambiguous handle を `backlinks` / `related` / forest report でどう surface するか。
+
 ## Update: LLM Wiki log / event stream boundary
 
 2026-06-24 判断: **LLM Wiki の `log.md` は知識ページではなく append-only event stream / provenance record** として扱う。並行エージェントが1ファイルへ追記して衝突する問題は現実の運用上の理由だが、grasp 側の本筋は「巨大な `log.md` を ordinary page として読むか、entry を first-class record として materialize するか」。
@@ -209,7 +211,7 @@ Scrapbox 互換では `#1` は link として成立する。したがって pars
 ## Open Questions
 
 - CLI 名: 初期実装は `import --markdown <folder>`。将来 persona2 向けに `index-md` alias を足すか。
-- duplicate title / alias collision の扱いは [[markdown-identity-name-collision-policy]] に分離。実装は artifact reduction 後に handle ambiguity を表現する schema/query へ進める。
+- duplicate title / alias collision の扱いは [[markdown-identity-name-collision-policy]] に分離。schema v6/v7 で handle ambiguity と edge resolution の最小実装は入った。残件は ambiguous handle の retrieval UX。
 - heading / block ref を line-id とどう対応させるか。
 - `#tag` と wikilink を同一 edge type にするか。
 - search index は FTS5 trigram hybrid にするか、まず correctness 優先で `LIKE` にするか（[[fts5-trigram-search]]）。

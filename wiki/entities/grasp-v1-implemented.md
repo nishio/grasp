@@ -52,15 +52,15 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.6.0`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.7.0`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
 - `grasp import --markdown <folder>` は folder 名を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --markdown <folder>` で明示 override できる。既存 Markdown file へは書き戻さない。
-- current schema は v6。schema version は table shape だけでなく parser/index semantics の変更にも使う。v6 は `page_handles` を追加し、visible handle と page identity の分離を読み取り surface に出すため、v5 store は import cache から再構築される。
+- current schema は v7。schema version は table shape だけでなく parser/index semantics の変更にも使う。v7 は `edges` に raw handle / resolved page id / resolution status を追加し、ambiguous handle を unresolved target や existing page backlink と誤分類しないため、v6 store は import cache から再構築される。
 - current schema store への import は他 project を保持する。古い schema の store に import する時は current schema として作り直す。
 - legacy `--export` / `--rebuild-store` / `--force` / 暗黙 seed は v1 surface には無い。
-- SQLite schema は projects / pages / page_handles / lines / edges / unresolved_targets / unresolved_target_examples を持つ。pages/lines/edges/unresolved は project 列で namespace 化し、page id / line id は project と組にした複合 key で扱う。`page_handles` は `(project, handle_norm) -> page_id` を 1:N で materialize し、Markdown source path / graph_role も候補情報として保持する。
+- SQLite schema は projects / pages / page_handles / lines / edges / unresolved_targets / unresolved_target_examples を持つ。pages/lines/edges/unresolved は project 列で namespace 化し、page id / line id は project と組にした複合 key で扱う。`page_handles` は `(project, handle_norm) -> page_id` を 1:N で materialize し、Markdown source path / graph_role も候補情報として保持する。`edges` は `target_handle` / `target_handle_norm`（source text の handle）、`target_page_id`（unique 解決時のみ）、`resolution_status`（`resolved_unique` / `ambiguous` / `unresolved`）を持つ。
 - `stats` は store path, selected project, project list, schema version, source export, imported_at, counts, acquisition metadata などを返す。project 未指定かつ複数 project がある時は aggregate counts と `projects[]` を返す。store が存在しない場合も traceback/error ではなく `diagnostic.type=store_missing` と次アクションを返す。
 - import 済み Cosense JSON は store 横の `<store>.imports/` に project ごとの復旧用コピーとして保持する。Markdown folder mirror は folder path / `source_type=markdown` / exclude dirs を manifest に保持する。manifest は project override と cached/source path を持つ。
 - 古い schema の store でも `stats` は診断用に読める。`read` / `peek` など通常 command は schema mismatch を検出すると、復旧用コピーからサイレントに current schema へ再構築してから続行する。復旧用コピーが無い古い store では、metadata の `last_source_export` / `source_export` が存在すればそれを fallback に使う。どちらも無ければ従来通り手動 `grasp import --cosense <json>` を促す。import cache は seed snapshot なので、hosted の最新差分は復旧後も `sync` の責務。
@@ -71,13 +71,13 @@ v1 scope 外:
 | command | v1 implemented behavior |
 |---|---|
 | `import --cosense <json>` | Cosense JSON export を project namespace に構築・置換。他 project は保持。line は metadata dict と plain string の両方を許容する |
-| `import --markdown <folder>` | Markdown folder を read-only mirror として project namespace に構築・置換。他 project は保持。frontmatter `title` / first H1 / file stem で title を決め、frontmatter `id` / `aliases` / `tags` を読み、`[[wikilink]]` / `#tag` を edge にする。`--markdown-exclude-dir <name>` で heavy raw/generated directory を除外できる |
+| `import --markdown <folder>` | Markdown folder を read-only mirror として project namespace に構築・置換。他 project は保持。frontmatter `title` / first H1 / file stem で title を決め、frontmatter `id` / `aliases` / `tags` を読み、`[[wikilink]]` / `#tag` を edge にする。duplicate title / alias は import 全体を止めず ambiguous handle として materialize する。duplicate `id` は hard error。`--markdown-exclude-dir <name>` で heavy raw/generated directory を除外できる |
 | `stats` | store の schema / project list / metadata / count を表示。store missing 時は diagnostic と next actions を返す |
 | `read <title>` | existing page は本文 + backlinks + related + unresolved。missing linked target は link stats + backlinks + source pages。zero-hit 時は `recovery_hints` も返す。visible handle が複数 page identity に束縛される時は暗黙に片方を選ばず `ambiguity.type=handle_ambiguity` と候補 page_id / path / graph_role を返す。`read --page-id <id>` / `read --path <relative-path>` は identity を明示して読む。`--related-snippets` で related/source pages の snippet を同梱する。既定 `--related-snippet-mode lead` は先頭 N 行（default 5）、`edge` は related/source item を導いたリンク行を中心に `snippet_lines` / `snippet_window` を返す。`--around-line <line-id> --line-context N` で完全 line_id からページを解決し、中心行の前後 N 行だけを `lines[]` と `line_window` で返す |
 | `backlinks <title>` | `(source page, line-id, line text)` の行レベル backlinks。missing target にも効く |
 | `related <title>` | existing page は page 間 edge の 2-hop pages。missing target は source pages。空結果時は `recovery_hints` を返す |
 | `path <A> <B>` | pages ∪ unresolved targets を node、materialized internal links を無向 edge として shortest path を返す。`--max-depth` default 4、`--limit` default 3。edge には根拠 line を同梱する。端点が resolve できるが経路が無い時は `recovery_hints.path` に reason / next_max_depth / related / backlinks / link-stats を返す |
-| `link-stats <title>` | incoming link count / source page count / none-single-multi を返す。zero-hit 時は `recovery_hints` も返す |
+| `link-stats <title>` | incoming link count / source page count / none-single-multi を返す。visible handle が複数 page identity に束縛される時は `ambiguity.type=handle_ambiguity` を返し、zero-hit recovery hints へ誤分類しない。zero-hit 時は `recovery_hints` も返す |
 | `peek <title>` | page lines のみ。`--line-offset N --line-limit M` で本文行だけをページングし、JSON は `line_offset`, `lines_truncated_before`, `lines_truncated_after` を返す |
 | `suggest <partial>` | title 部分一致候補 |
 | `search <query>` | 既定は空白も含む literal line substring search。`--mode boolean` で AND/OR/NOT、括弧、quoted phrase、隣接 term の implicit AND を扱う。`--scope line` は行単位、`--scope page` はページ単位で式を評価する。`--context N` で各 hit に前後 N 行の `context_lines[]` と `context_window` を同梱し、text 出力でも hit 直下に bounded context を表示する。literal 0件時は NFKC query 正規化＋長音除去の normalized fallback を試し、text は `[normalized]`、JSON は `match_mode: "normalized"` を返す。空結果時は `recovery_hints` も返す |
@@ -125,9 +125,9 @@ v1 scope 外:
 Markdown mirror facts:
 
 - `grasp import --markdown <folder>` は再帰的に `.md` を読み、hidden path component 配下の file は除外する。`--markdown-exclude-dir <name>` を繰り返すと、その directory basename 配下の file も除外する（例: `raw/`）。
-- page title は frontmatter `title` があればそれ、なければ first H1、さらに無ければ file stem（`foo.md` → `foo`）。同一 normalized title は import 時に error にする（schema v6 `page_handles` は ambiguous read の substrate だが、Markdown duplicate title / alias の import softening はまだ未実装）。
+- page title は frontmatter `title` があればそれ、なければ first H1、さらに無ければ file stem（`foo.md` → `foo`）。同一 normalized title は import 可能で、`page_handles` の 1:N handle として `read <handle>` の ambiguity 候補になる。
 - page id は frontmatter `id` があればそれ、なければ relative path の SHA-1 先頭 24 hex から作る。line id は Cosense import と同じく `<page-id>:<line-index>`。
-- frontmatter `aliases` と file stem は title resolve 候補になり、schema v6 では `page_handles` にも materialize される。import 時に `[[alias]]` は canonical page title へ解決して edge 化し、store metadata の alias map により `read <alias>` / `backlinks <alias>` / `link-stats <alias>` も canonical page を読む。duplicate alias はまだ import error であり、ambiguous edge resolution は未実装。
+- frontmatter `aliases` と file stem は link handle になり、`page_handles` に materialize される。unique handle への `[[alias]]` は `edges.resolution_status=resolved_unique` として `target_page_id` に解決され、duplicate alias は `resolution_status=ambiguous` になる。ambiguous edge は unresolved target には入れず、既存 page backlink / related にも暗黙接続しない。
 - frontmatter `tags` は page から tag target への outgoing edge として materialize する。`#tag` 付きの同じ frontmatter line で重複する場合は line 単位で重複 edge を避ける。
 - Markdown mirror は `index.md` / `forest-index.md` / `maps/` / `views/` / frontmatter `role: navigation` を navigation artifact、`log.md` / `log/*.md` / frontmatter `type: log-entry` を log artifact と分類し、これらの outgoing edges を既定 content graph から除外する。`drafts/` / generated temp / frontmatter `role/type: artifact|draft|generated` は artifact と分類し、search には残すが outgoing edges は除外する。
 - Markdown mirror は `source/` / `sources/` / frontmatter `role/type: source` を `graph_role=source` と分類する。`source` role は raw 由来 digest / source-backed synthesis として保持し、`content` と同じく outgoing edges を materialize する。これは `raw/` の default exclude とは別で、`source/` digest は除外しない。

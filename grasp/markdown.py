@@ -162,12 +162,11 @@ class MarkdownMirror:
                 )
             )
 
-        collisions = markdown_title_collisions(records)
-        collisions.extend(markdown_id_collisions(records))
-        collisions.extend(markdown_alias_collisions(records))
-        if collisions:
-            raise MarkdownCollisionError(collisions)
+        id_collisions = markdown_id_collisions(records)
+        if id_collisions:
+            raise MarkdownCollisionError(id_collisions)
 
+        title_collisions = markdown_title_collisions(records)
         title_aliases = build_title_aliases(records)
         pages = [record.page for record in records]
         edges: list[Edge] = []
@@ -183,9 +182,8 @@ class MarkdownMirror:
                     in_code_fence=in_code_fence,
                 )
                 for target_title in links:
-                    resolved_title = resolve_markdown_target(target_title, title_aliases)
-                    edges.append(markdown_edge(page, line, resolved_title))
-                    line_target_norms.setdefault(line.line_id, set()).add(normalize_title(resolved_title))
+                    edges.append(markdown_edge(page, line, target_title))
+                    line_target_norms.setdefault(line.line_id, set()).add(normalize_title(target_title))
             for tag, line_index in record.tags:
                 if 0 <= line_index < len(page.lines):
                     line = page.lines[line_index]
@@ -199,7 +197,7 @@ class MarkdownMirror:
         return cls(
             pages=pages,
             edges=edges,
-            title_collisions={},
+            title_collisions={collision.key: [entry.path for entry in collision.entries] for collision in title_collisions},
             title_aliases={
                 alias_norm: title
                 for alias_norm, title in title_aliases.items()
@@ -507,24 +505,20 @@ def normalize_frontmatter_tag(value: str) -> str:
 
 
 def build_title_aliases(records: list[MarkdownPageRecord]) -> dict[str, str]:
-    collisions = markdown_alias_collisions(records)
-    if collisions:
-        raise MarkdownCollisionError(collisions)
-    owners: dict[str, tuple[str, str]] = {}
+    owners: dict[str, list[tuple[str, str, str]]] = defaultdict(list)
     for record in records:
         page = record.page
         for title in [page.title, *record.aliases]:
             norm = normalize_title(title)
             if not norm:
                 continue
-            owner = owners.get(norm)
-            if owner is not None and owner[0] != page.title:
-                raise ValueError(
-                    "duplicate Markdown page aliases: "
-                    f"{title!r} is used by {owner[1]} and {record.relative_path.as_posix()}"
-                )
-            owners[norm] = (page.title, record.relative_path.as_posix())
-    return {norm: title for norm, (title, _) in owners.items()}
+            owners[norm].append((page.id, page.title, record.relative_path.as_posix()))
+    aliases: dict[str, str] = {}
+    for norm, entries in owners.items():
+        page_ids = {page_id for page_id, _title, _path in entries}
+        if len(page_ids) == 1:
+            aliases[norm] = entries[0][1]
+    return aliases
 
 
 def resolve_markdown_target(target_title: str, title_aliases: dict[str, str]) -> str:

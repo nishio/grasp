@@ -759,3 +759,10 @@
 - `/Users/nishio/llm-wiki/wikis.yaml` の 42 entries を対象に、temp store へ `import --markdown --project <name> --markdown-exclude-dir raw` を再実行。private 本文は出力せず aggregate / failure type のみ観測。
 - 結果: 37 success / 5 failure / missing 0。成功 aggregate は schema v6 / schema_ok true / 37 projects / 2460 pages / 213,526 lines / 22,569 edges / 1,412 unresolved、wall time 約 25.8 秒。
 - 失敗型は `markdown_collision` のまま（alias collision 4、alias+title collision 1）。v6 `page_handles` は成功 project の import を壊していないが、Markdown import softening は未実装なので 5件の blocker は残る。
+
+## [2026-06-25 19:07] implementation+dogfood | schema v7 edge resolution と Markdown collision softening
+- SQLite schema を v7 に更新し、`edges` に `target_handle` / `target_handle_norm` / `target_page_id` / `resolution_status` を追加。`page_handles` から `resolved_unique` / `ambiguous` / `unresolved` を materialize し、ambiguous handle を unresolved target や existing page backlink と誤分類しないようにした。
+- Markdown duplicate title / alias は import 全体を止めず、`read <handle>` の ambiguity 候補として surface する。`link-stats <handle>` も ambiguity を返し、recovery hints へ誤分類しない。duplicate frontmatter `id` は identity 衝突なので hard error のまま。
+- wiki森 smoke: `/Users/nishio/llm-wiki/wikis.yaml` 42 entries を temp store へ同条件で import し、42 success / 0 failure / missing 0。aggregate は schema v7 / schema_ok true / 42 projects / 3338 pages / 264,963 lines / 23,180 edges / 1,627 unresolved、wall time 約 22.1 秒。
+- 検証: `python3 -m unittest discover -s tests`（68 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+- 残件: `backlinks <ambiguous handle>` の UX と JSON contract、forest import orchestration、whole-store cross-project edge との統合。
