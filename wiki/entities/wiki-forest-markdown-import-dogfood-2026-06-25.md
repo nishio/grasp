@@ -1,6 +1,6 @@
 ---
 type: entity
-summary: 2026-06-25 に llm-wiki の `wikis.yaml` 全 entries を対象に Markdown mirror import を temp store で dogfood した結果。37/42 projects は import 成功し、次 blocker は performance ではなく duplicate title / alias collision だと判明した。v6 で `page_handles` / read ambiguity は入ったが、Markdown import softening は未完。
+summary: 2026-06-25 に llm-wiki の `wikis.yaml` 全 entries を対象に Markdown mirror import を temp store で dogfood した結果。初回は 37/42 projects 成功で blocker は duplicate title / alias collision だった。schema v7 の edge resolution と import softening 後は 42/42 projects が import 成功した。
 sources:
   - /Users/nishio/llm-wiki/wikis.yaml
   - temp store dogfood `/tmp/grasp-forest-import.*`（private 内容は読まず、aggregate / failure type のみ観測）
@@ -27,9 +27,11 @@ sources:
 
 2026-06-25 16:42 に schema v6 実装後の smoke として同じ registry / `--markdown-exclude-dir raw` 条件を temp store で再実行した。結果は 42 entries 中 37 success / 5 failure / missing 0 で、失敗型はすべて `markdown_collision` のまま。成功 aggregate は schema v6 / schema_ok true / 37 projects / 2460 pages / 213,526 lines / 22,569 edges / 1,412 unresolved、wall time 約 25.8 秒。v6 `page_handles` 追加は成功 project の import を壊していないが、collision 5件は import softening 未実装のため残る。
 
+2026-06-25 19:07 に schema v7 実装後の smoke として同じ条件を再実行した。結果は 42 entries 中 42 success / 0 failure / missing 0。aggregate は schema v7 / schema_ok true / 42 projects / 3338 pages / 264,963 lines / 23,180 edges / 1,627 unresolved、wall time 約 22.1 秒。duplicate title / alias collision は import 全体を止めなくなった。ambiguous handle edge は `resolution_status=ambiguous` として unresolved から分離される。
+
 ## Analysis
 
-一番重要な発見: **次の blocker は scale / raw size ではなく collision policy**。
+初回 dogfood の一番重要な発見: **scale / raw size より先に collision policy が blocker になる**。
 
 `--markdown-exclude-dir raw` は効いた。`llm-wiki-about-nishio` のように raw が大きい wiki でも、wiki 本文だけなら import は軽い。37 projects / 213k lines / 22.5k edges を約 22 秒で作れたので、forest dogfood の初期運用は performance では止まっていない。
 
@@ -41,7 +43,7 @@ sources:
 - 複数 directory に `_overview` / `README` / `index` など同一 file stem alias がある。
 - source digest / session file と canonical page が同じ alias を持つ。
 
-現在の Markdown mirror は collision を import error にする。これは単一 wiki の correctness では安全側だが、forest orchestration では 1 project の collision がその project 全体を落とす。全件 import には、collision をまず「観測可能な診断」に変える必要がある。
+schema v7 では duplicate title / alias collision は import error ではなくなった。単一 wiki の correctness は `read <handle>` の ambiguity と `read --page-id` / `read --path` の identity selection に寄せる。forest orchestration の次 blocker は collision ではなく、ambiguous handle をどう surface / rank するかと、`wikis.yaml` からの一括 import command 化。
 
 重要な設計制約: alias collision は単なる import UX ではなく、Scrapbox の name=identity 欠陥を `identity-without-name` で直す問題そのものに近い。path は一意性の根拠として diagnostic / fallback handle には使えるが、path-qualified string をそのまま page name にすると LLM / 人間の期待する `[[Title]]` とずれる。
 
@@ -53,19 +55,19 @@ sources:
    `MarkdownMirror.from_folder` の duplicate title / alias / id error を、機械可読な collision kind / normalized handle / paths / candidate title を持つ診断にする。CLI は text では短く、`--json` では full diagnostics を返す。
 
 2. **alias collision policy を identity/name 分離として設計する。**（[[markdown-identity-name-collision-policy]]）
-   Page title / alias collision は同一 visible handle が複数 identity に束縛される問題。短期 workaround は path を diagnostic / fallback handle に持つことだが、path-qualified string を page name へ昇格しない。schema v6 の `page_handles` と `read` の ambiguous query result / `--page-id` / `--path` は実装済み。残りは Markdown import が duplicate title / alias を hard error にする制約の softening と、edge resolution の ambiguity 化。
+   Page title / alias collision は同一 visible handle が複数 identity に束縛される問題。path-qualified string を page name へ昇格しない。schema v6 の `page_handles` と `read` の ambiguous query result / `--page-id` / `--path`、schema v7 の edge `resolution_status` と Markdown duplicate title / alias import softening は実装済み。残りは ambiguous handle retrieval UX。
 
 3. **artifact reduction と source role classification を分ける。**（2026-06-25 最小実装）
-   `raw/` は heavy original dump なので `--markdown-exclude-dir raw` で除外可能。`source/` は raw digest / source-backed synthesis なので default exclude せず、`graph_role=source` として保持し content と同じく edge を materialize する。`drafts/` / generated temp は `graph_role=artifact` として search には残すが outgoing edges は除外する。ただし duplicate title を許すわけではなく、そこは import softening が別途必要。
+   `raw/` は heavy original dump なので `--markdown-exclude-dir raw` で除外可能。`source/` は raw digest / source-backed synthesis なので default exclude せず、`graph_role=source` として保持し content と同じく edge を materialize する。`drafts/` / generated temp は `graph_role=artifact` として search には残すが outgoing edges は除外する。duplicate title / alias は schema v7 の handle ambiguity として別管理する。
 
 4. **`import-forest` orchestration は急がない。**
-   37/42 は手動 loop で成立したので orchestration は価値がある。ただし先に collision policy と artifact 除外を詰めないと、orchestration command は「既知の失敗を集計するだけ」になる。
+   v7 で 42/42 が temp store に入るため、orchestration は「既知失敗の集計」ではなく実用的な森 import surface になった。ただし command 化は急がず、まず ambiguous handle の表示 / ranking と whole-store cross-project の設計との接続を詰める。
 
 ## Open Questions
 
-- Page title collision の import softening をどこまで許すか。同一 title は graph identity 衝突ではなく handle ambiguity だが、現 importer は safety のため hard error のまま。安易に path-qualified title へ自動改名すると `[[Title]]` の期待とずれる。
-- alias collision softening を行うなら、どの条件で「意味のあるリンク解決」ではなく「曖昧 handle」として扱うか。path は一意だが、page name に混ぜると retrieval surface が汚れる。
-- `artifact` role の duplicate title を import error のままにするか、search-only record として title ambiguity から外すか。
+- ambiguous handle を forest-level report としてどう surface するか。`read` では候補を返せるが、森全体の import後に「どの wiki に ambiguity がどれだけあるか」を見る dashboard / stats は未実装。
+- `backlinks <ambiguous handle>` を「ambiguous handle への incoming lines」として返すか、候補 page ごとの resolved backlinks に分けるか。
+- `artifact` role 由来の ambiguity を forest report / ranking でどう弱めるか。
 - `source/` digest を content graph にどこまで混ぜるか。保持はするが、canonical synthesis と同列に ranking すると重複根拠が増える可能性がある。
 - collision report を store metadata に保存するか、import command の一回限り出力に留めるか。forest dashboard / import-forest を作るなら保存した方がよい。
 

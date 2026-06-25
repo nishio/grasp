@@ -28,26 +28,30 @@ path は一意性を持つが、path-qualified string を page name に混ぜな
 - **duplicate alias / file-stem handle**: handle ambiguity。import は page materialization を失敗させるべきではないが、`[[Handle]]` を黙って一方へ解決してはいけない。edge は `target_handle_norm=handle` として保持し、resolution status を `ambiguous` にする。
 - **unresolved handle**: 従来の赤リンク。0 件束縛。
 
-したがって将来の edge resolution は三値ではなく四値になる:
+したがって edge interpretation は三値のリンク解決だけでは足りず、semantic annotation を含めて次の状態を扱う:
 
 - `resolved_unique`: handle が 1 page identity に束縛される。
 - `ambiguous`: handle が複数 page identities に束縛される。
 - `unresolved`: handle に対応する page が無い。
 - `non_semantic`: `#1` など link-shaped だが意味リンクではない annotation。これは collision とは別問題。
 
-## v6 でも急に import softening しない理由
+## v7 で softening した範囲
 
-SQLite schema v6 は `page_handles` で handle ambiguity を表現できるが、query 実装全体はまだ normalized title が一意である前提を多く残す。`read <handle>` は ambiguity result を返せるようになった一方、`backlinks` / `related` / unresolved / Markdown outgoing edge resolution は `target_norm` を title handle として扱う。ここで duplicate title import を全面的に許すと、store は作れても retrieval の一部が暗黙に片方を選ぶ、または ambiguous handle を unresolved と誤分類する。
+SQLite schema v7 は `edges` に source handle と resolution status を持たせたため、Markdown duplicate title / alias を import 全体の hard error にしない。`[[Handle]]` は import 時に raw `target_handle` として保持され、`page_handles` から次のように解決される。
 
-よって短期は structured diagnostics を出し、同名を自動改名しない。import softening を進める時は、`read` 以外の query surface と edge resolution も ambiguity-aware にする。
+- 0 page: `resolution_status=unresolved`
+- 1 page: `resolution_status=resolved_unique`, `target_page_id=<page id>`
+- N pages: `resolution_status=ambiguous`
+
+これにより ambiguous handle は unresolved hub とも existing page backlink とも別扱いになる。`read <handle>` は候補 pages を返し、`read --page-id` / `read --path` で identity を選べる。一方、`backlinks <ambiguous handle>` の UX はまだ決めていないため、現時点では暗黙に候補 page へ配らない。
 
 ## 実装順
 
-1. **diagnostic phase**: 実装済み。`MarkdownCollisionError` は title / id / alias collision の kind, key, paths, entries を返す。
-2. **artifact reduction / source role phase**: 実装済みの最小形。`raw/` は heavy original dump なので `--markdown-exclude-dir raw` で除外可能。`source/` は raw を読んで作った digest / source-backed synthesis なので default exclude せず、`graph_role=source` として保持し content と同じく edge を materialize する。`drafts/` や generated temp files は `graph_role=artifact` として search には残すが outgoing edges を除外する。ただしこれは duplicate title を許す実装ではない。
+1. **diagnostic phase**: 実装済み。`MarkdownCollisionError` は現在 duplicate id に対して kind, key, paths, entries を返す。title / alias collision は v7 では import error ではない。
+2. **artifact reduction / source role phase**: 実装済みの最小形。`raw/` は heavy original dump なので `--markdown-exclude-dir raw` で除外可能。`source/` は raw を読んで作った digest / source-backed synthesis なので default exclude せず、`graph_role=source` として保持し content と同じく edge を materialize する。`drafts/` や generated temp files は `graph_role=artifact` として search には残すが outgoing edges を除外する。
 3. **handle binding phase**: 最小実装済み。schema v6 で `page_handles` を導入し、`handle_norm -> page_id` は 1:N を許す。Cosense title と Markdown title / alias / source path / graph_role を materialize する。旧 `title_aliases` metadata は unique handle の fast path に残る。
-4. **ambiguous query phase**: `read <handle>` は最小実装済み。N 件束縛を見たら、勝手に選ばず `ambiguity.type=handle_ambiguity` と title / page_id / source path / graph_role を返す。`backlinks <handle>` など他 query surface は未実装。
-5. **edge resolution phase**: edges に source handle と resolution status を持たせる。unique の時だけ target page identity に解決し、ambiguous の時は unresolved hub とも existing page とも別に扱う。
+4. **ambiguous query phase**: `read <handle>` は最小実装済み。N 件束縛を見たら、勝手に選ばず `ambiguity.type=handle_ambiguity` と title / page_id / source path / graph_role を返す。`link-stats <handle>` も ambiguity を返し、recovery hints へ誤分類しない。`backlinks <handle>` / `related <handle>` の ambiguous UX は未実装。
+5. **edge resolution phase**: 最小実装済み。schema v7 で edges に source handle と resolution status を持たせる。unique の時だけ target page identity に解決し、ambiguous の時は unresolved hub とも existing page とも別に扱う。
 6. **explicit identity read phase**: 最小実装済み。`read --page-id <id>` または `read --path <relative-path>` で identity を指定して読む。path は selection key であり page name ではない。
 
 `import-forest` orchestration はこの後でよい。先に作ると、既知 collision を集計する command になり、identity/name 分離の問題を隠す。

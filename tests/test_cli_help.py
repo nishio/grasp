@@ -1265,10 +1265,8 @@ class CliHelpTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
             root.mkdir()
-            (root / "one").mkdir()
-            (root / "two").mkdir()
-            (root / "one" / "A.md").write_text("# A\n", encoding="utf-8")
-            (root / "two" / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "A.md").write_text("---\nid: same-id\n---\n# A\n", encoding="utf-8")
+            (root / "B.md").write_text("---\nid: same-id\n---\n# B\n", encoding="utf-8")
             store_path = Path(tmpdir) / "store.sqlite"
 
             completed = subprocess.run(
@@ -1293,8 +1291,8 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(completed.stdout, "")
         result = json.loads(completed.stderr)
         self.assertEqual(result["diagnostic"]["type"], "markdown_collision")
-        self.assertEqual(result["diagnostic"]["collision_counts"], {"title": 1})
-        self.assertEqual(set(result["diagnostic"]["collisions"][0]["paths"]), {"one/A.md", "two/A.md"})
+        self.assertEqual(result["diagnostic"]["collision_counts"], {"id": 1})
+        self.assertEqual(set(result["diagnostic"]["collisions"][0]["paths"]), {"A.md", "B.md"})
 
     def test_cross_project_refs_writes_acquire_seed_files(self):
         fixture = {

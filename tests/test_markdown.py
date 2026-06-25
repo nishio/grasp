@@ -294,22 +294,49 @@ class MarkdownImportTests(unittest.TestCase):
                 {"alias_map_changed", "identity_changed"},
             )
 
-    def test_duplicate_file_stem_titles_are_rejected(self):
+    def test_duplicate_file_stem_titles_import_as_ambiguous_handles(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "one").mkdir()
             (root / "two").mkdir()
             (root / "one" / "A.md").write_text("# A\n", encoding="utf-8")
             (root / "two" / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "Source.md").write_text("links to [[A]]\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
 
-            with self.assertRaisesRegex(MarkdownCollisionError, "duplicate Markdown page titles") as caught:
+            stats = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            self.assertEqual(stats["pages"], 3)
+            self.assertEqual(stats["edges"], 1)
+            self.assertEqual(stats["unresolved_targets"], 0)
+
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                read = store.read("A")
+                self.assertIsNone(read["page"])
+                self.assertEqual(read["ambiguity"]["type"], "handle_ambiguity")
+                self.assertEqual(read["ambiguity"]["candidate_count"], 2)
+                self.assertEqual(
+                    {candidate["path"] for candidate in read["ambiguity"]["candidates"]},
+                    {"one/A.md", "two/A.md"},
+                )
+                source = store.read("Source", unresolved_limit=10)
+                self.assertEqual(source["unresolved_targets"], [])
+            finally:
+                store.close()
+
+    def test_duplicate_frontmatter_ids_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "A.md").write_text("---\nid: same-id\n---\n# A\n", encoding="utf-8")
+            (root / "B.md").write_text("---\nid: same-id\n---\n# B\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(MarkdownCollisionError, "duplicate Markdown page ids") as caught:
                 MarkdownMirror.from_folder(root)
 
             diagnostic = caught.exception.to_diagnostic()
-            self.assertEqual(diagnostic["type"], "markdown_collision")
-            self.assertEqual(diagnostic["collision_counts"], {"title": 1})
-            self.assertEqual(diagnostic["collisions"][0]["kind"], "title")
-            self.assertEqual(set(diagnostic["collisions"][0]["paths"]), {"one/A.md", "two/A.md"})
+            self.assertEqual(diagnostic["collision_counts"], {"id": 1})
+            self.assertEqual(diagnostic["collisions"][0]["kind"], "id")
 
     def test_frontmatter_title_id_aliases_and_tags_are_indexed(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -354,7 +381,7 @@ class MarkdownImportTests(unittest.TestCase):
             finally:
                 store.close()
 
-    def test_alias_collision_is_rejected(self):
+    def test_alias_collision_imports_as_ambiguous_handle(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "A.md").write_text(
@@ -365,20 +392,31 @@ class MarkdownImportTests(unittest.TestCase):
                 "\n".join(["---", "aliases: [Shared]", "---", "# B"]),
                 encoding="utf-8",
             )
+            (root / "Source.md").write_text("links to [[Shared]]\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
 
-            with self.assertRaisesRegex(MarkdownCollisionError, "duplicate Markdown page aliases") as caught:
-                MarkdownMirror.from_folder(root)
+            stats = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
 
-            diagnostic = caught.exception.to_diagnostic()
-            self.assertEqual(diagnostic["collision_counts"], {"alias": 1})
-            self.assertEqual(diagnostic["collisions"][0]["key"], "shared")
-            self.assertEqual(
-                {
-                    (entry["path"], entry["handle"], entry["source"])
-                    for entry in diagnostic["collisions"][0]["entries"]
-                },
-                {("A.md", "Shared", "alias"), ("B.md", "Shared", "alias")},
-            )
+            self.assertEqual(stats["pages"], 3)
+            self.assertEqual(stats["edges"], 1)
+            self.assertEqual(stats["unresolved_targets"], 0)
+
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                read = store.read("Shared")
+                self.assertIsNone(read["page"])
+                self.assertEqual(read["ambiguity"]["type"], "handle_ambiguity")
+                self.assertEqual(read["ambiguity"]["candidate_count"], 2)
+                candidates = {candidate["title"] for candidate in read["ambiguity"]["candidates"]}
+                self.assertEqual(candidates, {"A", "B"})
+                edge = store.backlinks_by_norm_query("shared")[0]
+                self.assertEqual(edge.resolution_status, "ambiguous")
+                self.assertIsNone(edge.target_page_id)
+                link_stats = store.link_stats("Shared")
+                self.assertEqual(link_stats["ambiguity"]["candidate_count"], 2)
+                self.assertIsNone(link_stats["recovery_hints"])
+            finally:
+                store.close()
 
     def test_reimport_updates_content_only_changes_incrementally(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -292,6 +292,10 @@ class Edge:
     line_text: str
     target_title: str
     target_norm: str
+    target_handle: str | None = None
+    target_handle_norm: str | None = None
+    target_page_id: str | None = None
+    resolution_status: str = "unresolved"
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -303,6 +307,10 @@ class Edge:
             "line_index": self.line_index,
             "line_text": self.line_text,
             "target_title": self.target_title,
+            "target_handle": self.target_handle or self.target_title,
+            "target_handle_norm": self.target_handle_norm or self.target_norm,
+            "target_page_id": self.target_page_id,
+            "resolution_status": self.resolution_status,
         }
         annotation = edge_semantic_annotation(self)
         if annotation is not None:

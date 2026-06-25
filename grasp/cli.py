@@ -1819,6 +1819,12 @@ def format_link_stats(result: dict[str, Any], aliases: LineIdAliases | None = No
     page = result.get("page")
     if page is not None:
         parts.append(f"id: {page['id']}\nviews: {page['views']}\nlines: {page['line_count']}\n")
+    ambiguity = result.get("ambiguity")
+    if ambiguity is not None:
+        parts.append(f"ambiguity: {ambiguity['candidate_count']} candidates\n")
+        for candidate in ambiguity.get("candidates", [])[:10]:
+            suffix = f" path={candidate['path']}" if candidate.get("path") else ""
+            parts.append(f"- {candidate['title']} id={candidate['page_id']}{suffix}\n")
     parts.append(format_recovery_hints(result["query"], result.get("recovery_hints"), aliases=aliases))
     return with_alias_legend("".join(parts), aliases)
 

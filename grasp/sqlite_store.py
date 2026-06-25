@@ -32,7 +32,7 @@ from .cosense import (
 from .markdown import MarkdownMirror, MarkdownPageRecord, markdown_wikilink_target
 
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "7"
 IMPORT_CACHE_MANIFEST_VERSION = 1
 PYTHON_LOOSE_SEARCH_MAX_LINES = 50_000
 
@@ -104,6 +104,10 @@ CREATE TABLE edges (
   line_id TEXT NOT NULL,
   target_title TEXT NOT NULL,
   target_norm TEXT NOT NULL,
+  target_handle TEXT NOT NULL,
+  target_handle_norm TEXT NOT NULL,
+  target_page_id TEXT,
+  resolution_status TEXT NOT NULL,
   FOREIGN KEY(project) REFERENCES projects(name) ON DELETE CASCADE,
   FOREIGN KEY(project, source_page_id) REFERENCES pages(project, id) ON DELETE CASCADE,
   FOREIGN KEY(project, line_id) REFERENCES lines(project, line_id) ON DELETE CASCADE
@@ -138,6 +142,9 @@ CREATE INDEX idx_page_handles_project_handle_norm ON page_handles(project, handl
 CREATE INDEX idx_page_handles_project_source_path ON page_handles(project, source_path);
 CREATE INDEX idx_lines_project_page_index ON lines(project, page_id, line_index);
 CREATE INDEX idx_edges_project_target_norm ON edges(project, target_norm);
+CREATE INDEX idx_edges_project_target_handle_norm ON edges(project, target_handle_norm);
+CREATE INDEX idx_edges_project_target_page ON edges(project, target_page_id);
+CREATE INDEX idx_edges_project_resolution ON edges(project, resolution_status);
 CREATE INDEX idx_edges_project_source_page ON edges(project, source_page_id);
 CREATE INDEX idx_edges_project_line ON edges(project, line_id);
 CREATE INDEX idx_unresolved_targets_project_rank ON unresolved_targets(project, link_count DESC, source_page_count DESC, total_source_views DESC, latest_source_updated DESC, title);
@@ -231,30 +238,13 @@ def import_export_to_sqlite(
                     for line in page.lines
                 ),
             )
-            connection.executemany(
-                """
-                INSERT INTO edges (project, source_page_id, line_id, target_title, target_norm)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    (
-                        project,
-                        edge.source_page_id,
-                        edge.line_id,
-                        edge.target_title,
-                        edge.target_norm,
-                    )
-                    for edge in source.edges
-                ),
-            )
+            _insert_edges(connection, project, source.edges)
+            refresh_edge_resolutions(connection, project)
             rebuild_unresolved_targets(connection, project)
-            unresolved_count = len(
-                {
-                    edge.target_norm
-                    for edge in source.edges
-                    if edge.target_norm not in source.pages_by_norm
-                }
-            )
+            unresolved_count = connection.execute(
+                "SELECT COUNT(*) FROM unresolved_targets WHERE project = ?",
+                (project,),
+            ).fetchone()[0]
             connection.execute(
                 """
                 UPDATE projects
@@ -323,6 +313,7 @@ def import_markdown_folder_to_sqlite(
             if full_rebuild_reason is not None:
                 _delete_project(connection, project)
                 _insert_markdown_project(connection, project, source, folder_path, now)
+                refresh_edge_resolutions(connection, project)
                 rebuild_unresolved_targets(connection, project)
                 unresolved_count = connection.execute(
                     "SELECT COUNT(*) FROM unresolved_targets WHERE project = ?",
@@ -354,6 +345,7 @@ def import_markdown_folder_to_sqlite(
                         edges_by_page_id.get(record.page.id, []),
                     )
                 if changed_paths:
+                    refresh_edge_resolutions(connection, project)
                     rebuild_unresolved_targets(connection, project)
                     _refresh_project_counts_sql(connection, project)
                     connection.execute(
@@ -681,6 +673,109 @@ def _page_handle_rows_for_markdown_records(
     return rows
 
 
+def _insert_edges(connection: sqlite3.Connection, project: str, edges: list[Edge]) -> None:
+    connection.executemany(
+        """
+        INSERT INTO edges (
+          project,
+          source_page_id,
+          line_id,
+          target_title,
+          target_norm,
+          target_handle,
+          target_handle_norm,
+          target_page_id,
+          resolution_status
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            (
+                project,
+                edge.source_page_id,
+                edge.line_id,
+                edge.target_title,
+                edge.target_norm,
+                edge.target_handle or edge.target_title,
+                edge.target_handle_norm or normalize_title(edge.target_handle or edge.target_title),
+                edge.target_page_id,
+                edge.resolution_status,
+            )
+            for edge in edges
+        ),
+    )
+
+
+def _insert_edge_rows(connection: sqlite3.Connection, rows: list[tuple[str, str, str, str, str]]) -> None:
+    connection.executemany(
+        """
+        INSERT INTO edges (
+          project,
+          source_page_id,
+          line_id,
+          target_title,
+          target_norm,
+          target_handle,
+          target_handle_norm,
+          target_page_id,
+          resolution_status
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'unresolved')
+        """,
+        (
+            (
+                project,
+                source_page_id,
+                line_id,
+                target_title,
+                normalize_title(target_title),
+                target_title,
+                normalize_title(target_title),
+            )
+            for project, source_page_id, line_id, target_title, _target_norm in rows
+        ),
+    )
+
+
+def refresh_edge_resolutions(connection: sqlite3.Connection, project: str) -> None:
+    connection.execute(
+        """
+        WITH handle_counts AS (
+          SELECT project, handle_norm, COUNT(DISTINCT page_id) AS page_count, MIN(page_id) AS page_id
+          FROM page_handles
+          WHERE project = ?
+          GROUP BY project, handle_norm
+        )
+        UPDATE edges
+        SET
+          resolution_status = CASE
+            WHEN COALESCE((SELECT page_count FROM handle_counts WHERE handle_counts.handle_norm = edges.target_handle_norm), 0) = 0
+              THEN 'unresolved'
+            WHEN (SELECT page_count FROM handle_counts WHERE handle_counts.handle_norm = edges.target_handle_norm) = 1
+              THEN 'resolved_unique'
+            ELSE 'ambiguous'
+          END,
+          target_page_id = CASE
+            WHEN (SELECT page_count FROM handle_counts WHERE handle_counts.handle_norm = edges.target_handle_norm) = 1
+              THEN (SELECT page_id FROM handle_counts WHERE handle_counts.handle_norm = edges.target_handle_norm)
+            ELSE NULL
+          END
+        WHERE project = ?
+        """,
+        (project, project),
+    )
+    connection.execute(
+        """
+        UPDATE edges
+        SET
+          target_title = COALESCE((SELECT title FROM pages WHERE pages.project = edges.project AND pages.id = edges.target_page_id), target_handle),
+          target_norm = COALESCE((SELECT norm_title FROM pages WHERE pages.project = edges.project AND pages.id = edges.target_page_id), target_handle_norm)
+        WHERE project = ?
+        """,
+        (project,),
+    )
+
+
 def _connection_metadata(connection: sqlite3.Connection) -> dict[str, str]:
     try:
         rows = connection.execute("SELECT key, value FROM metadata").fetchall()
@@ -782,22 +877,7 @@ def _insert_markdown_records(
             for line in page.lines
         ),
     )
-    connection.executemany(
-        """
-        INSERT INTO edges (project, source_page_id, line_id, target_title, target_norm)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (
-            (
-                project,
-                edge.source_page_id,
-                edge.line_id,
-                edge.target_title,
-                edge.target_norm,
-            )
-            for edge in edges
-        ),
-    )
+    _insert_edges(connection, project, edges)
 
 
 def _replace_markdown_record(
@@ -1258,18 +1338,10 @@ class SQLiteStore:
             self._refresh_project_counts(project)
 
     def resolve_page(self, title: str) -> Page | None:
-        project = self._require_project()
-        norm_title = self._resolve_title_norm(title, project=project)
-        row = self.connection.execute(
-            """
-            SELECT * FROM pages
-            WHERE project = ? AND norm_title = ?
-            ORDER BY rowid
-            LIMIT 1
-            """,
-            (project, norm_title),
-        ).fetchone()
-        return self._page_from_row(row) if row is not None else None
+        candidates = self.page_handle_candidates(title)
+        if len(candidates) != 1:
+            return None
+        return self._page_by_id(candidates[0]["page_id"])
 
     def page_lines(self, page: Page, limit: int | None = None, offset: int = 0) -> tuple[list[Line], bool]:
         project = self._require_project()
@@ -1327,7 +1399,13 @@ class SQLiteStore:
 
     def backlinks(self, title: str, limit: int | None = None, offset: int = 0) -> list[Edge]:
         project = self._require_project()
-        norm_title = self._resolve_title_norm(title, project=project)
+        page = self.resolve_page(title)
+        if page is not None:
+            target_filter = "e.resolution_status = 'resolved_unique' AND e.target_page_id = ?"
+            target_value = page.id
+        else:
+            target_filter = "e.resolution_status = 'unresolved' AND e.target_handle_norm = ?"
+            target_value = self._resolve_title_norm(title, project=project)
         query = """
             SELECT
               e.source_page_id,
@@ -1338,14 +1416,18 @@ class SQLiteStore:
               line.line_index,
               line.text AS line_text,
               e.target_title,
-              e.target_norm
+              e.target_norm,
+              e.target_handle,
+              e.target_handle_norm,
+              e.target_page_id,
+              e.resolution_status
             FROM edges e
             JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
             JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
-            WHERE e.project = ? AND e.target_norm = ?
+            WHERE e.project = ? AND {target_filter}
             ORDER BY source.views DESC, COALESCE(source.updated, 0) DESC, source.title, line.line_index
-        """
-        params: list[Any] = [project, norm_title]
+        """.format(target_filter=target_filter)
+        params: list[Any] = [project, target_value]
         if limit is not None and limit >= 0:
             query += " LIMIT ? OFFSET ?"
             params.extend([limit, offset])
@@ -1356,9 +1438,15 @@ class SQLiteStore:
 
     def link_stats(self, title: str) -> dict[str, Any]:
         project = self._require_project()
-        page = self.resolve_page(title)
+        candidates = self.page_handle_candidates(title)
+        ambiguity = self._handle_ambiguity(title, candidates) if len(candidates) > 1 else None
+        page = self._page_by_id(candidates[0]["page_id"]) if len(candidates) == 1 else None
         norm = page.norm_title if page is not None else self._resolve_title_norm(title, project=project)
-        if page is None:
+        if page is None and ambiguity is not None:
+            link_count = 0
+            source_page_count = 0
+            canonical_title = title
+        elif page is None:
             unresolved_target = self.connection.execute(
                 "SELECT * FROM unresolved_targets WHERE project = ? AND target_norm = ?",
                 (project, norm),
@@ -1371,9 +1459,9 @@ class SQLiteStore:
                 """
                 SELECT COUNT(*) AS link_count, COUNT(DISTINCT source_page_id) AS source_page_count
                 FROM edges
-                WHERE project = ? AND target_norm = ?
+                WHERE project = ? AND resolution_status = 'resolved_unique' AND target_page_id = ?
                 """,
-                (project, norm),
+                (project, page.id),
             ).fetchone()
             link_count = int(row["link_count"])
             source_page_count = int(row["source_page_count"])
@@ -1385,12 +1473,13 @@ class SQLiteStore:
             "normalized_title": norm,
             "page_exists": page is not None,
             "page": page.to_summary() if page is not None else None,
+            "ambiguity": ambiguity,
             "link_count": link_count,
             "source_page_count": source_page_count,
             "link_multiplicity": link_multiplicity(link_count),
             "recovery_hints": None,
         }
-        if page is None and link_count == 0:
+        if page is None and link_count == 0 and ambiguity is None:
             result["recovery_hints"] = self.recovery_hints(title, limit=3)
         return result
 
@@ -1496,7 +1585,7 @@ class SQLiteStore:
               MIN(e.target_title) AS target_title
             FROM edges e
             JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
-            WHERE e.project = ? AND e.target_norm = ?
+            WHERE e.project = ? AND e.resolution_status = 'unresolved' AND e.target_handle_norm = ?
             GROUP BY source.id
             ORDER BY score DESC, source.views DESC, COALESCE(source.updated, 0) DESC, source.title
         """
@@ -1711,18 +1800,22 @@ class SQLiteStore:
               line.line_index,
               line.text AS line_text,
               e.target_title,
-              e.target_norm
+              e.target_norm,
+              e.target_handle,
+              e.target_handle_norm,
+              e.target_page_id,
+              e.resolution_status
             FROM edges e
             JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
             JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
-            WHERE e.project = ?
+            WHERE e.project = ? AND e.resolution_status IN ('resolved_unique', 'unresolved')
             ORDER BY source.views DESC, COALESCE(source.updated, 0) DESC, source.title, line.line_index
             """,
             (project,),
         ).fetchall()
         for row in edge_rows:
             source_key = self._page_node_key(row["source_page_id"])
-            target_page_id = page_id_by_norm.get(row["target_norm"])
+            target_page_id = row["target_page_id"] if row["resolution_status"] == "resolved_unique" else None
             target_key = (
                 self._page_node_key(target_page_id)
                 if target_page_id is not None
@@ -1749,6 +1842,10 @@ class SQLiteStore:
                     "line_text": row["line_text"],
                     "target_title": row["target_title"],
                     "target_norm": row["target_norm"],
+                    "target_handle": row["target_handle"],
+                    "target_handle_norm": row["target_handle_norm"],
+                    "target_page_id": row["target_page_id"],
+                    "resolution_status": row["resolution_status"],
                 }
                 annotation = edge_semantic_annotation_from_fields(row["target_title"], row["line_text"])
                 if annotation is not None:
@@ -2030,6 +2127,7 @@ class SQLiteStore:
                 COUNT(*) AS link_count,
                 COUNT(DISTINCT e.line_id) AS line_count,
                 COUNT(DISTINCT e.source_page_id) AS source_page_count,
+                MAX(CASE WHEN e.resolution_status = 'resolved_unique' THEN 1 ELSE 0 END) AS target_page_exists,
                 MAX(COALESCE(source.updated, 0)) AS latest_source_updated
               FROM edges e
               JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
@@ -2070,11 +2168,10 @@ class SQLiteStore:
               edge_stats.source_page_count,
               COALESCE(source_stats.total_source_views, 0) AS total_source_views,
               edge_stats.latest_source_updated,
-              target.id IS NOT NULL AS target_page_exists
+              edge_stats.target_page_exists
             FROM edge_stats
             JOIN source_stats ON source_stats.target_norm = edge_stats.target_norm
             JOIN title_choice ON title_choice.target_norm = edge_stats.target_norm
-            LEFT JOIN pages target ON target.project = ? AND target.norm_title = edge_stats.target_norm
             ORDER BY
               edge_stats.link_count DESC,
               edge_stats.source_page_count DESC,
@@ -2083,7 +2180,7 @@ class SQLiteStore:
               title_choice.target_title
             LIMIT ?
             """,
-            (project, project, project, project, limit),
+            (project, project, project, limit),
         ).fetchall()
         return [
             {
@@ -2483,7 +2580,11 @@ class SQLiteStore:
               line.line_index,
               line.text AS line_text,
               e.target_title,
-              e.target_norm
+              e.target_norm,
+              e.target_handle,
+              e.target_handle_norm,
+              e.target_page_id,
+              e.resolution_status
             FROM edges e
             JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
             JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
@@ -3244,7 +3345,11 @@ class SQLiteStore:
               line.line_index,
               line.text AS line_text,
               e.target_title,
-              e.target_norm
+              e.target_norm,
+              e.target_handle,
+              e.target_handle_norm,
+              e.target_page_id,
+              e.resolution_status
             FROM edges e
             JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
             JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
@@ -3381,8 +3486,9 @@ class SQLiteStore:
               MIN(e.id) AS first_edge_id
             FROM edges e
             JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
-            JOIN pages target ON target.project = e.project AND target.norm_title = e.target_norm
+            JOIN pages target ON target.project = e.project AND target.id = e.target_page_id
             WHERE e.project = ? AND e.source_page_id = ? AND target.id != ?
+              AND e.resolution_status = 'resolved_unique'
             GROUP BY target.id
             ORDER BY first_line_index, first_edge_id
             """,
@@ -3401,7 +3507,7 @@ class SQLiteStore:
             FROM edges e
             JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
             JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
-            WHERE e.project = ? AND e.target_norm = ?
+            WHERE e.project = ? AND e.resolution_status = 'unresolved' AND e.target_handle_norm = ?
             GROUP BY source.id
             ORDER BY link_count DESC, source.views DESC, COALESCE(source.updated, 0) DESC, source.title, first_line_index
         """
@@ -3429,6 +3535,8 @@ class SQLiteStore:
             JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
             JOIN lines source_line ON source_line.project = e.project AND source_line.line_id = e.line_id
             WHERE seed.project = ? AND seed.source_page_id = ? AND source.id != ?
+              AND seed.resolution_status = 'resolved_unique'
+              AND e.resolution_status = 'resolved_unique'
             GROUP BY source.id, e.target_norm
             ORDER BY seed_line_index, seed_edge_id, source.views DESC, COALESCE(source.updated, 0) DESC, source.title, first_source_line_index
             """,
@@ -3459,8 +3567,7 @@ class SQLiteStore:
               SELECT e.target_norm, e.target_title, e.source_page_id, source.views, source.updated
               FROM edges e
               JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
-              LEFT JOIN pages target ON target.project = e.project AND target.norm_title = e.target_norm
-              WHERE e.project = ? AND target.id IS NULL
+              WHERE e.project = ? AND e.resolution_status = 'unresolved'
               {source_filter}
             ),
             edge_stats AS (
@@ -3602,7 +3709,11 @@ class SQLiteStore:
               line.line_index,
               line.text AS line_text,
               e.target_title,
-              e.target_norm
+              e.target_norm,
+              e.target_handle,
+              e.target_handle_norm,
+              e.target_page_id,
+              e.resolution_status
             FROM edges e
             JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
             JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
@@ -3624,14 +3735,15 @@ class SQLiteStore:
             """
             SELECT target.id AS page_id
             FROM edges e
-            JOIN pages target ON target.project = e.project AND target.norm_title = e.target_norm
+            JOIN pages target ON target.project = e.project AND target.id = e.target_page_id
             WHERE e.project = ? AND e.source_page_id = ? AND target.id != ?
+              AND e.resolution_status = 'resolved_unique'
             UNION
             SELECT e.source_page_id AS page_id
             FROM edges e
-            WHERE e.project = ? AND e.target_norm = ? AND e.source_page_id != ?
+            WHERE e.project = ? AND e.resolution_status = 'resolved_unique' AND e.target_page_id = ? AND e.source_page_id != ?
             """,
-            (project, page_id, page_id, project, norm_title, page_id),
+            (project, page_id, page_id, project, page_id, page_id),
         ).fetchall()
         return {row["page_id"] for row in rows}
 
@@ -3744,13 +3856,8 @@ class SQLiteStore:
             """,
             line_rows,
         )
-        self.connection.executemany(
-            """
-            INSERT INTO edges (project, source_page_id, line_id, target_title, target_norm)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            edge_rows,
-        )
+        _insert_edge_rows(self.connection, edge_rows)
+        refresh_edge_resolutions(self.connection, project)
 
     def _refresh_project_counts(self, project: str) -> None:
         self.connection.execute(
@@ -3789,6 +3896,7 @@ class SQLiteStore:
         )
 
     def _edge_from_row(self, row: sqlite3.Row) -> Edge:
+        keys = set(row.keys())
         return Edge(
             source_page_id=row["source_page_id"],
             source_title=row["source_title"],
@@ -3799,6 +3907,10 @@ class SQLiteStore:
             line_text=row["line_text"],
             target_title=row["target_title"],
             target_norm=row["target_norm"],
+            target_handle=row["target_handle"] if "target_handle" in keys else row["target_title"],
+            target_handle_norm=row["target_handle_norm"] if "target_handle_norm" in keys else row["target_norm"],
+            target_page_id=row["target_page_id"] if "target_page_id" in keys else None,
+            resolution_status=row["resolution_status"] if "resolution_status" in keys else "unresolved",
         )
 
     def _count(self, table: str, *, project: str | None = None) -> int:
@@ -4570,8 +4682,7 @@ def rebuild_unresolved_targets(connection: sqlite3.Connection, project: str) -> 
           SELECT e.target_norm, e.target_title, e.source_page_id, source.views, source.updated
           FROM edges e
           JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
-          LEFT JOIN pages target ON target.project = e.project AND target.norm_title = e.target_norm
-          WHERE e.project = ? AND target.id IS NULL
+          WHERE e.project = ? AND e.resolution_status = 'unresolved'
         ),
         edge_stats AS (
           SELECT
@@ -4646,8 +4757,7 @@ def rebuild_unresolved_target_examples(connection: sqlite3.Connection, project: 
           FROM edges e
           JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
           JOIN lines line ON line.project = e.project AND line.line_id = e.line_id
-          LEFT JOIN pages target ON target.project = e.project AND target.norm_title = e.target_norm
-          WHERE e.project = ? AND target.id IS NULL
+          WHERE e.project = ? AND e.resolution_status = 'unresolved'
         )
         SELECT ? AS project, target_norm, rank, source_page_id, line_id, target_title
         FROM ranked
