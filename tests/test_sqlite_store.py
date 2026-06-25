@@ -296,6 +296,55 @@ class SQLiteStoreTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_read_returns_ambiguity_for_duplicate_visible_handle(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "Same",
+                    "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "created": 1,
+                    "updated": 1,
+                    "views": 1,
+                    "lines": [{"text": "Same", "created": 1, "updated": 1, "userId": "u"}],
+                },
+                {
+                    "title": "same",
+                    "id": "bbbbbbbbbbbbbbbbbbbbbbbb",
+                    "created": 1,
+                    "updated": 2,
+                    "views": 2,
+                    "lines": [{"text": "same", "created": 1, "updated": 2, "userId": "u"}],
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+            import_export_to_sqlite(export_path, store_path)
+
+            store = SQLiteStore(store_path, project="fixture")
+            try:
+                ambiguous = store.read("Same")
+                self.assertIsNone(ambiguous["page"])
+                self.assertEqual(ambiguous["ambiguity"]["type"], "handle_ambiguity")
+                self.assertEqual(ambiguous["ambiguity"]["candidate_count"], 2)
+                self.assertEqual(
+                    {candidate["page_id"] for candidate in ambiguous["ambiguity"]["candidates"]},
+                    {"aaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbb"},
+                )
+
+                selected = store.read(page_id="bbbbbbbbbbbbbbbbbbbbbbbb")
+                self.assertEqual(selected["page"]["title"], "same")
+                self.assertIsNone(selected["ambiguity"])
+            finally:
+                store.close()
+
     def test_imports_multiple_projects_into_one_store_without_mixing_graphs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             export_path = Path(tmpdir) / "export.json"

@@ -748,3 +748,14 @@
 - Markdown import が `source/` / `sources/` / frontmatter `role/type: source` を `graph_role=source` と分類するようにした。`source` role は raw digest / source-backed synthesis なので、content と同じく outgoing edges を materialize する。
 - `drafts/` / generated temp / frontmatter `role/type: artifact|draft|generated` は `graph_role=artifact` と分類し、search には残すが outgoing edges は除外する。これは duplicate title を許す実装ではなく、handle ambiguity は schema v6 `page_handles` の残件。
 - public compatibility version を `1.5.29` に更新。SQLite schema と Markdown manifest version は不変。
+
+## [2026-06-25 16:39] implementation+file back | schema v6 page_handles と read ambiguity を実装
+- SQLite schema を v6 に更新し、`page_handles` table を追加。Cosense title と Markdown title / alias / source path / graph_role を page identity `(project,page_id)` とは別に materialize する。
+- `read <handle>` は visible handle が複数 page identity に束縛される時、暗黙に片方を選ばず `ambiguity.type=handle_ambiguity` と候補 page_id / path / graph_role を返す。`read --page-id <id>` / `read --path <relative-path>` で identity を明示できる。
+- Markdown folder import も import cache manifest に `source_type=markdown` / `exclude_dirs` 付きで保存し、schema mismatch recovery が Cosense JSON copy だけでなく Markdown mirror も再構築できるようにした。
+- 残件: Markdown import は duplicate title / alias をまだ hard error にする。`backlinks` / `related` / `link-stats` / outgoing edge resolution も ambiguous handle を first-class に扱う段階は未実装。
+
+## [2026-06-25 16:42] dogfood | schema v6 で wiki森 Markdown import smoke
+- `/Users/nishio/llm-wiki/wikis.yaml` の 42 entries を対象に、temp store へ `import --markdown --project <name> --markdown-exclude-dir raw` を再実行。private 本文は出力せず aggregate / failure type のみ観測。
+- 結果: 37 success / 5 failure / missing 0。成功 aggregate は schema v6 / schema_ok true / 37 projects / 2460 pages / 213,526 lines / 22,569 edges / 1,412 unresolved、wall time 約 25.8 秒。
+- 失敗型は `markdown_collision` のまま（alias collision 4、alias+title collision 1）。v6 `page_handles` は成功 project の import を壊していないが、Markdown import softening は未実装なので 5件の blocker は残る。

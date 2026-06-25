@@ -178,7 +178,7 @@ def build_parser() -> argparse.ArgumentParser:
         returns=(
             "query, page|null, link_stats, lines, lines_truncated, backlinks, "
             "line_window|null, backlink_count_returned, backlink_count_total, related, "
-            "unresolved_targets, recovery_hints|null; with --around-line, lines[] is the bounded "
+            "unresolved_targets, recovery_hints|null, ambiguity|null; with --around-line, lines[] is the bounded "
             "window around that line; with --related-snippets, related[] items also include "
             "snippet_lines[], snippet_truncated, and snippet_mode"
         ),
@@ -188,18 +188,23 @@ def build_parser() -> argparse.ArgumentParser:
             "grasp read --around-line 5928725cba093700118fa5b2:12 --line-context 4",
             "grasp read 盲点カード --related-snippets --related-snippet-lines 5",
             "grasp read 盲点カード --related-snippets --related-snippet-mode edge",
+            "grasp read --page-id 5928725cba093700118fa5b2",
+            "grasp read --path source/Digest.md",
             "grasp --json read 民主主義 --backlinks-limit 3 --related-limit 5",
         ],
         notes=[
             "For missing targets, related[] contains source pages with relation=backlink-source.",
             "unresolved_targets[] is populated only for existing pages.",
             "--around-line accepts a full line_id from JSON or --full-ids text output. Local aliases like P1:12 are per-output only.",
+            "--page-id and --path select a page identity directly when a visible handle is ambiguous.",
             "--related-snippets includes the first N lines of each related/source page, matching the Cosense related-pane reading pattern.",
             "--related-snippet-mode edge centers snippets on the link line that explains each related/source item.",
         ],
     )
     read_parser.add_argument("title", nargs="?", help="Page title or missing linked target to open. Optional when --around-line is set.")
     read_parser.add_argument("--around-line", default=None, help="Open the page containing this full line_id and return a bounded line window around it.")
+    read_parser.add_argument("--page-id", default=None, help="Open a materialized page by stable page id instead of visible title/alias.")
+    read_parser.add_argument("--path", dest="source_path", default=None, help="Open a Markdown mirror page by source path relative to the imported folder.")
     read_parser.add_argument("--line-context", type=int, default=5, help="Number of lines before and after --around-line to return.")
     read_parser.add_argument("--line-limit", type=int, default=None, help="Maximum page lines to return; omit for all lines.")
     read_parser.add_argument("--backlinks-limit", type=int, default=20, help="Maximum backlink lines to return.")
@@ -838,6 +843,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return store.stats()
     if args.command == "read":
         if args.around_line:
+            if args.page_id or args.source_path:
+                raise ValueError("--around-line cannot be combined with --page-id or --path")
             if args.line_limit is not None:
                 raise ValueError("--line-limit cannot be combined with --around-line; use --line-context")
             return store.read_around_line(
@@ -851,10 +858,14 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
                 related_snippet_lines=args.related_snippet_lines,
                 related_snippet_mode=args.related_snippet_mode,
             )
-        if args.title is None:
-            raise ValueError("read requires a title or --around-line <line-id>")
+        if args.page_id and args.source_path:
+            raise ValueError("read accepts only one of --page-id or --path")
+        if args.title is None and args.page_id is None and args.source_path is None:
+            raise ValueError("read requires a title, --page-id, --path, or --around-line <line-id>")
         return store.read(
             args.title,
+            page_id=args.page_id,
+            source_path=args.source_path,
             line_limit=args.line_limit,
             backlink_limit=args.backlinks_limit,
             related_limit=args.related_limit,
@@ -1554,6 +1565,23 @@ def format_diagnostic(diagnostic: dict[str, Any] | None) -> str:
 def format_read(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
     aliases = aliases or LineIdAliases(enabled=False)
     parts: list[str] = []
+    ambiguity = result.get("ambiguity")
+    if ambiguity:
+        parts.append(f"# {result['query']}\n")
+        parts.append("page: ambiguous handle\n")
+        parts.append(f"handle_norm: {ambiguity['handle_norm']}\n")
+        parts.append(f"candidates: {ambiguity['candidate_count']}\n")
+        parts.append("\n## Candidates\n")
+        for candidate in ambiguity.get("candidates") or []:
+            path = candidate.get("path")
+            path_text = f" path={path}" if path else ""
+            parts.append(
+                f"- {candidate['title']} id={candidate['page_id']}"
+                f" role={candidate.get('graph_role') or 'content'}{path_text}\n"
+            )
+        parts.append("\nUse `read --page-id <id>` or `read --path <path>` to choose one.\n")
+        return "".join(parts)
+
     page = result["page"]
     title = page["title"] if page else result["query"]
     parts.append(f"# {title}\n")
