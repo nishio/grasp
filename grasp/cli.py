@@ -10,6 +10,7 @@ from textwrap import dedent
 from typing import Any
 
 from .cosense_cli import CosenseCliClient, acquire_from_cosense, sync_from_cosense
+from .forest import import_forest_from_registry
 from .markdown import MarkdownCollisionError
 from .sqlite_store import (
     SCHEMA_VERSION,
@@ -67,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
               grasp read 盲点カード --json --backlinks-limit 5 --related-limit 5
               grasp import --cosense raw/nishio.json
               grasp import --markdown wiki --project grasp-wiki
+              grasp import-forest /Users/nishio/llm-wiki/wikis.yaml --markdown-exclude-dir raw
               grasp --project nishio:search acquire https://scrapbox.io/nishio/ --search "[nishio.icon]" --limit 20
 
             Output:
@@ -143,6 +145,42 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help="Directory basename to skip when importing a Markdown mirror. Repeat for multiple names, e.g. --markdown-exclude-dir raw.",
     )
+
+    import_forest_parser = add_command_parser(
+        subparsers,
+        "import-forest",
+        help="Import a wikis.yaml registry of Markdown wiki folders into one store.",
+        description=(
+            "Read a wiki-forest registry and import each entry's Markdown wiki folder as a separate project. "
+            "Per-entry failures are collected as diagnostics instead of stopping the whole forest."
+        ),
+        returns=(
+            "registry, store, wiki_dir, markdown_exclude_dirs, entry_count, success_count, failure_count, "
+            "missing_count, skipped_count, aggregate, projects[], ambiguities|null, wall_seconds"
+        ),
+        examples=[
+            "grasp import-forest /Users/nishio/llm-wiki/wikis.yaml --markdown-exclude-dir raw",
+            "grasp --store /tmp/grasp-forest.sqlite --json import-forest /Users/nishio/llm-wiki/wikis.yaml --markdown-exclude-dir raw",
+        ],
+        notes=[
+            "Registry entries are expected under top-level wikis: with name and path fields.",
+            "Each entry imports <path>/<wiki-dir> as project <name>. Default --wiki-dir is wiki.",
+            "Registry names must be unique because project name is the local namespace.",
+            "Other projects already in the store are preserved.",
+            "The result includes an ambiguities summary so duplicate handles can be reviewed immediately after import.",
+        ],
+    )
+    import_forest_parser.add_argument("registry", type=Path, help="Path to wikis.yaml registry.")
+    import_forest_parser.add_argument("--wiki-dir", default="wiki", help="Directory name under each registry path to import. Use '.' when the path itself is the wiki.")
+    import_forest_parser.add_argument(
+        "--markdown-exclude-dir",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Directory basename to skip when importing each Markdown mirror. Repeat for multiple names.",
+    )
+    import_forest_parser.add_argument("--ambiguity-limit", type=int, default=50, help="Maximum ambiguous handles to include in the post-import summary.")
+    import_forest_parser.add_argument("--ambiguity-candidate-limit", type=int, default=5, help="Maximum candidate pages per ambiguous handle in the post-import summary.")
 
     add_command_parser(
         subparsers,
@@ -768,6 +806,21 @@ def main(argv: list[str] | None = None) -> int:
                 emit_error_result(error)
                 return 2
             parser.error(str(error))
+        except ValueError as error:
+            parser.error(str(error))
+        emit_result(args, result)
+        return 0
+
+    if args.command == "import-forest":
+        try:
+            result = import_forest_from_registry(
+                args.registry,
+                args.store,
+                wiki_dir=args.wiki_dir,
+                exclude_dirs=tuple(args.markdown_exclude_dir),
+                ambiguity_limit=args.ambiguity_limit,
+                ambiguity_candidate_limit=args.ambiguity_candidate_limit,
+            )
         except ValueError as error:
             parser.error(str(error))
         emit_result(args, result)
@@ -1447,6 +1500,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
     aliases = aliases or LineIdAliases(enabled=False)
     if command == "import":
         return format_import(result)
+    if command == "import-forest":
+        return format_import_forest(result)
     if command == "stats":
         return format_stats(result)
     if command == "read":
@@ -1517,6 +1572,54 @@ def format_import(result: dict[str, Any]) -> str:
         f"unresolved_targets: {result['unresolved_targets']}\n"
         f"{markdown_section}"
     )
+
+
+def format_import_forest(result: dict[str, Any]) -> str:
+    aggregate = result["aggregate"]
+    parts = [
+        "# Import Forest\n",
+        f"registry: {result['registry']}\n",
+        f"store: {result['store']}\n",
+        f"wiki_dir: {result['wiki_dir']}\n",
+        f"entries: {result['entry_count']}\n",
+        f"success: {result['success_count']}\n",
+        f"failure: {result['failure_count']}\n",
+        f"missing: {result['missing_count']}\n",
+        f"skipped: {result['skipped_count']}\n",
+        f"pages: {aggregate['pages']}\n",
+        f"lines: {aggregate['lines']}\n",
+        f"edges: {aggregate['edges']}\n",
+        f"unresolved_targets: {aggregate['unresolved_targets']}\n",
+        f"wall_seconds: {result['wall_seconds']}\n",
+    ]
+    ambiguities = result.get("ambiguities")
+    if ambiguities:
+        if "diagnostic" in ambiguities:
+            parts.append(f"ambiguities: unavailable ({ambiguities['diagnostic']['type']})\n")
+        else:
+            parts.append(
+                f"ambiguities: {ambiguities['handles_returned']} / {ambiguities['handle_count']} handles returned\n"
+            )
+    failures = [project for project in result["projects"] if project["status"] in {"failure", "missing", "skipped"}]
+    if failures:
+        parts.append("\n## Failures\n")
+        for project in failures[:20]:
+            diagnostic = project.get("diagnostic") or {}
+            label = project.get("name") or f"entry-{project['index']}"
+            parts.append(f"- {label}: {project['status']} ({diagnostic.get('type')}) {diagnostic.get('message', '')}\n")
+        if len(failures) > 20:
+            parts.append(f"- ... {len(failures) - 20} more\n")
+    successes = [project for project in result["projects"] if project["status"] == "success"]
+    if successes:
+        parts.append("\n## Imported Projects\n")
+        for project in successes[:20]:
+            parts.append(
+                f"- {project['project']}: pages={project['pages']}, lines={project['lines']}, "
+                f"edges={project['edges']}, unresolved={project['unresolved_targets']}\n"
+            )
+        if len(successes) > 20:
+            parts.append(f"- ... {len(successes) - 20} more\n")
+    return "".join(parts)
 
 
 def format_stats(result: dict[str, Any]) -> str:

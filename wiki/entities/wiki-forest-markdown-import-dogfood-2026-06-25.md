@@ -1,6 +1,6 @@
 ---
 type: entity
-summary: 2026-06-25 に llm-wiki の `wikis.yaml` 全 entries を対象に Markdown mirror import を temp store で dogfood した結果。初回は 37/42 projects 成功で blocker は duplicate title / alias collision だった。schema v7 の edge resolution と import softening 後は 42/42 projects が import 成功した。
+summary: 2026-06-25 に llm-wiki の `wikis.yaml` 全 entries を対象に Markdown mirror import を temp store で dogfood した結果。初回は 37/42 projects 成功で blocker は duplicate title / alias collision だった。schema v7 の edge resolution と import softening 後は 42/42 projects が import 成功し、`1.7.3` で `import-forest` command 化した。
 sources:
   - /Users/nishio/llm-wiki/wikis.yaml
   - temp store dogfood `/tmp/grasp-forest-import.*`（private 内容は読まず、aggregate / failure type のみ観測）
@@ -29,6 +29,8 @@ sources:
 
 2026-06-25 19:07 に schema v7 実装後の smoke として同じ条件を再実行した。結果は 42 entries 中 42 success / 0 failure / missing 0。aggregate は schema v7 / schema_ok true / 42 projects / 3338 pages / 264,963 lines / 23,180 edges / 1,627 unresolved、wall time 約 22.1 秒。duplicate title / alias collision は import 全体を止めなくなった。ambiguous handle edge は `resolution_status=ambiguous` として unresolved から分離される。
 
+2026-06-25 に `1.7.3` の `import-forest` command として同じ registry を直接実行した。結果は 42 entries 中 42 success / 0 failure / 0 missing / 0 skipped。aggregate は 42 projects / 3338 pages / 265,012 lines / 23,183 edges / 1,627 unresolved、wall time 6.025 秒、ambiguous handles は 8。command output は per-entry diagnostics と post-import `ambiguities` summary を返すため、手動 shell loop は不要になった。
+
 ## Analysis
 
 初回 dogfood の一番重要な発見: **scale / raw size より先に collision policy が blocker になる**。
@@ -43,7 +45,7 @@ sources:
 - 複数 directory に `_overview` / `README` / `index` など同一 file stem alias がある。
 - source digest / session file と canonical page が同じ alias を持つ。
 
-schema v7 では duplicate title / alias collision は import error ではなくなった。単一 wiki の correctness は `read <handle>` の ambiguity と `read --page-id` / `read --path` の identity selection に寄せる。2026-06-25 の `1.7.1` で `backlinks <ambiguous handle>` は handle 自体への incoming lines と候補 page ごとの resolved backlinks を分けて返すようになり、`1.7.2` で `ambiguities` が store / project 内の ambiguous handles を一覧できるようになった。forest orchestration の次 blocker は collision ではなく、`wikis.yaml` からの一括 import command 化と、`related <ambiguous handle>` の surface。
+schema v7 では duplicate title / alias collision は import error ではなくなった。単一 wiki の correctness は `read <handle>` の ambiguity と `read --page-id` / `read --path` の identity selection に寄せる。2026-06-25 の `1.7.1` で `backlinks <ambiguous handle>` は handle 自体への incoming lines と候補 page ごとの resolved backlinks を分けて返すようになり、`1.7.2` で `ambiguities` が store / project 内の ambiguous handles を一覧できるようになった。`1.7.3` で `wikis.yaml` からの一括 import command 化も済んだ。残る retrieval blocker は `related <ambiguous handle>` と whole-store cross-project surface。
 
 重要な設計制約: alias collision は単なる import UX ではなく、Scrapbox の name=identity 欠陥を `identity-without-name` で直す問題そのものに近い。path は一意性の根拠として diagnostic / fallback handle には使えるが、path-qualified string をそのまま page name にすると LLM / 人間の期待する `[[Title]]` とずれる。
 
@@ -60,16 +62,15 @@ schema v7 では duplicate title / alias collision は import error ではなく
 3. **artifact reduction と source role classification を分ける。**（2026-06-25 最小実装）
    `raw/` は heavy original dump なので `--markdown-exclude-dir raw` で除外可能。`source/` は raw digest / source-backed synthesis なので default exclude せず、`graph_role=source` として保持し content と同じく edge を materialize する。`drafts/` / generated temp は `graph_role=artifact` として search には残すが outgoing edges は除外する。duplicate title / alias は schema v7 の handle ambiguity として別管理する。
 
-4. **`import-forest` orchestration は急がない。**
-   v7 で 42/42 が temp store に入り、`ambiguities` で ambiguity report も取れるため、orchestration は「既知失敗の集計」ではなく実用的な森 import surface になった。ただし command 化は急がず、まず whole-store cross-project の設計との接続を詰める。
+4. **`import-forest` orchestration は実装済み。**
+   `1.7.3` で registry parse / per-entry diagnostics / aggregate / forest-level ambiguity summary を持つ command になった。次はこの store を読む側の `related <ambiguous handle>` と whole-store cross-project surface。
 
 ## Open Questions
 
-- `ambiguities` の forest-level report を `import-forest` の summary にどう組み込むか。
+- `import-forest` の結果を store metadata に保存するか、一回限りの command output に留めるか。
 - `related <ambiguous handle>` を handle source pages と候補 page の related にどう分けるか。
 - `artifact` role 由来の ambiguity を forest report / ranking でどう弱めるか。
 - `source/` digest を content graph にどこまで混ぜるか。保持はするが、canonical synthesis と同列に ranking すると重複根拠が増える可能性がある。
-- collision report を store metadata に保存するか、import command の一回限り出力に留めるか。forest dashboard / import-forest を作るなら保存した方がよい。
 
 ## Related
 

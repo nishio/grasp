@@ -41,6 +41,11 @@ description: >-
   ```
 
   最小 Markdown mirror は frontmatter `title` / `id` / `aliases` / `tags` を読み、title が無い場合は first H1、さらに無ければ file stem を title にする。`[[...]]` と `#tag` を grasp 内 edge にする。duplicate title / alias は import 全体を止めず、`read <handle>` の ambiguity 候補として返る。`backlinks <ambiguous handle>` は handle 自体への incoming lines を主に返し、候補 page ごとの確定 backlinks も分けて返す。`ambiguities` は store 全体または selected project の曖昧 handle を一覧する。duplicate frontmatter `id` は identity 衝突なので error。バックティックのプレーン名（親 llm-wiki への cross-wiki 参照）は edge にしない。既存 Markdown folder へは書き戻さない。重い raw/generated directory を避けたい時は `--markdown-exclude-dir raw` のように directory basename を指定する。再 import は content-only 変更なら差分更新し、title / id / aliases / graph role / exclude dirs / file set が変わった時は安全に full rebuild する。`index.md` / `log.md` など navigation/log artifact は本文検索対象に残しつつ、既定 content graph では outgoing edges を除外する。Obsidian block refs はまだ未実装。
+- ユーザが `wikis.yaml` のような Markdown wiki registry 全体を読みたい場合は、task-local store へ `import-forest` で一括 index する。各 entry は project `<name>` として `<path>/<wiki-dir>` を import し、entry ごとの missing/failure/skipped diagnostics と forest-level `ambiguities` summary を返す:
+
+  ```bash
+  grasp --store /tmp/grasp-forest.sqlite import-forest /path/to/wikis.yaml --markdown-exclude-dir raw
+  ```
 
 ## grasp とはどういう物か
 
@@ -150,6 +155,7 @@ grasp --project <source-project> cross-project-acquire --limit 5 --seed-limit 10
 | `peek <title>` | 本文行のみ。`--line-offset N --line-limit M` でページング |
 | `stats` | store の状態・件数 |
 | `import --cosense <json>` / `import --markdown <folder>` | Cosense JSON / Markdown folder mirror の取り込み・再構築 |
+| `import-forest <wikis.yaml>` | Markdown wiki registry の複数 entries を 1 store の複数 project namespace に一括 import。entry diagnostics と ambiguity summary 付き |
 | `export-ai <title>` | Export for AI 風の単一テキスト bundle（alias `export-for-ai`） |
 | `sync <url>` | hosted 差分取り込み（保守） |
 | `acquire <url>` | admin export なしの hosted 部分取得 seed |
@@ -160,7 +166,7 @@ grasp --project <source-project> cross-project-acquire --limit 5 --seed-limit 10
 - 1つの store に複数 project namespace を保持できる。`grasp import --cosense <json>` は export JSON の `name` を、`grasp import --markdown <folder>` は folder 名を project 名として使い、同名 project だけを置き換える。project 名を明示する時は `grasp import --project <name> --cosense <json>` / `grasp import --project <name> --markdown <folder>`。
 - 一回限りのユーザ指定 JSON を読む時は、必要に応じて `--store <task-local.sqlite>` を使い、既定 store に project を増やさない。
 - 未インストール環境では grasp repository root から `python3 -m grasp <verb>`（`pip install -e <grasp-repo>` 済みなら `grasp` が PATH）。
-- `grasp import --cosense <json>` で Cosense JSON export、`grasp import --markdown <folder>` で read-only Markdown mirror を import する。以降は sub-second。別パスは `--store` / `$GRASP_STORE`、別 home は `$GRASP_HOME`。
+- `grasp import --cosense <json>` で Cosense JSON export、`grasp import --markdown <folder>` で read-only Markdown mirror、`grasp import-forest <wikis.yaml>` で registry 配下の複数 Markdown wiki を import する。以降は sub-second。別パスは `--store` / `$GRASP_STORE`、別 home は `$GRASP_HOME`。
 - import 済み JSON は store 横の `<store>.imports/` に復旧用コピーとして保持される。通常 command が古い schema の store を見つけた時は、復旧用コピーからサイレントに current schema へ再構築して続行する。`stats` は診断用なので自動再構築しない。hosted の最新差分は復旧後も `sync` の責務。
 - 複数 project がある store で読む時は `grasp --project <name> read "ページタイトル"` のように project を指定する。project が1つだけなら省略可。
 - text 出力の `line_id` は既定で `P1:0` のような実行内ローカル別名に短縮され、先頭付近に `P1=<page-id>` の legend が出る。親へ根拠として返す時は、必要なら `source_title` とこの alias ではなく `--json` の完全 `line_id` を使う。
