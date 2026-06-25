@@ -71,12 +71,21 @@ class MarkdownParsingTests(unittest.TestCase):
         self.assertEqual(markdown_graph_role(Path("index.md"), parse_frontmatter([])), "navigation")
         self.assertEqual(markdown_graph_role(Path("log.md"), parse_frontmatter([])), "log")
         self.assertEqual(markdown_graph_role(Path("maps") / "A.md", parse_frontmatter([])), "navigation")
+        self.assertEqual(markdown_graph_role(Path("source") / "Digest.md", parse_frontmatter([])), "source")
+        self.assertEqual(markdown_graph_role(Path("drafts") / "Draft.md", parse_frontmatter([])), "artifact")
         self.assertEqual(
             markdown_graph_role(
                 Path("A.md"),
                 parse_frontmatter(["---", "role: navigation", "---", "# A"]),
             ),
             "navigation",
+        )
+        self.assertEqual(
+            markdown_graph_role(
+                Path("A.md"),
+                parse_frontmatter(["---", "type: source", "---", "# A"]),
+            ),
+            "source",
         )
 
     def test_first_markdown_h1_title_skips_frontmatter_and_code_fences(self):
@@ -146,21 +155,26 @@ class MarkdownImportTests(unittest.TestCase):
             root = Path(tmpdir)
             (root / "index.md").write_text("# Index\n[[A]]\n", encoding="utf-8")
             (root / "log.md").write_text("## [2026-06-25 00:00] event | touched [[A]]\n", encoding="utf-8")
+            (root / "source").mkdir()
+            (root / "source" / "Digest.md").write_text("# Digest\nsource-backed [[A]]\n", encoding="utf-8")
             (root / "A.md").write_text("# A\n", encoding="utf-8")
             (root / "Source.md").write_text("links to [[A]]\n", encoding="utf-8")
             store_path = Path(tmpdir) / "store.sqlite"
 
             stats = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
 
-            self.assertEqual(stats["pages"], 4)
-            self.assertEqual(stats["edges"], 1)
+            self.assertEqual(stats["pages"], 5)
+            self.assertEqual(stats["edges"], 2)
             self.assertEqual(stats["unresolved_targets"], 0)
 
             store = SQLiteStore(store_path, project="wiki")
             try:
                 read = store.read("A", backlink_limit=10, related_limit=10, unresolved_limit=10)
-                self.assertEqual(read["backlink_count_total"], 1)
-                self.assertEqual(read["backlinks"][0]["source_title"], "Source")
+                self.assertEqual(read["backlink_count_total"], 2)
+                self.assertEqual(
+                    {backlink["source_title"] for backlink in read["backlinks"]},
+                    {"Digest", "Source"},
+                )
                 hits = store.search("touched", limit=5)
                 self.assertEqual([hit["source_title"] for hit in hits], ["log"])
             finally:

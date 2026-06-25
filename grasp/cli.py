@@ -112,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Import replaces only the selected project namespace. Other projects in the same store are preserved.",
             "Project name defaults to the export's name field or folder name. Use --project to override.",
             "Markdown mirror uses frontmatter title/id/aliases/tags when present, falls back to first H1 then file stem, and parses [[wikilinks]] plus #tags as internal edges.",
-            "Use --markdown-exclude-dir to skip heavy generated/source directories such as raw in Markdown mirrors.",
+            "Use --markdown-exclude-dir to skip heavy raw/generated directories. source/ is kept as source-backed digest content.",
             "Markdown re-import uses a manifest: content-only file changes update incrementally; title/alias/id/graph-role/exclude-dir/file-set changes trigger a safe full rebuild.",
             "A cached copy of each imported Cosense JSON is kept beside the store for automatic schema recovery.",
         ],

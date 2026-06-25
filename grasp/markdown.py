@@ -36,6 +36,7 @@ class MarkdownCollisionEntry:
     page_id: str
     handle: str
     source: str
+    graph_role: str
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -44,6 +45,7 @@ class MarkdownCollisionEntry:
             "page_id": self.page_id,
             "handle": self.handle,
             "source": self.source,
+            "graph_role": self.graph_role,
         }
 
 
@@ -79,7 +81,7 @@ class MarkdownCollisionError(ValueError):
             "collisions": [collision.to_dict() for collision in self.collisions],
             "next_actions": [
                 "Inspect collisions[].entries[].path to identify the duplicate title, id, or alias source.",
-                "If a collision comes from generated or draft/source artifacts, retry with --markdown-exclude-dir <name>.",
+                "If a collision comes from generated or draft artifacts, retry with --markdown-exclude-dir <name>.",
                 "If the same visible name intentionally refers to multiple pages, keep page identity separate from display name before softening import.",
             ],
         }
@@ -171,7 +173,7 @@ class MarkdownMirror:
         edges: list[Edge] = []
         line_target_norms: dict[str, set[str]] = defaultdict(set)
         for record in records:
-            if record.graph_role != "content":
+            if not markdown_graph_role_emits_edges(record.graph_role):
                 continue
             page = record.page
             in_code_fence = False
@@ -387,13 +389,17 @@ def frontmatter_graph_role(values: dict[str, list[tuple[str, int]]]) -> str:
     candidates = []
     for key in ("graph_role", "role", "layer"):
         candidates.extend(value for value, _ in values.get(key, []))
-    candidates.extend(value for value, _ in values.get("type", []) if value == "log-entry")
+    candidates.extend(value for value, _ in values.get("type", []))
     for value in candidates:
         normalized = normalize_frontmatter_key(value)
         if normalized in {"navigation", "index", "catalog", "map", "view"}:
             return "navigation"
         if normalized in {"log", "event_stream", "event-stream", "log_entry", "log-entry"}:
             return "log"
+        if normalized in {"source", "source_digest", "source_backed", "evidence"}:
+            return "source"
+        if normalized in {"artifact", "draft", "generated", "temp", "temporary"}:
+            return "artifact"
     return "content"
 
 
@@ -407,9 +413,17 @@ def markdown_graph_role(relative_path: Path, metadata: MarkdownMetadata) -> str:
         return "navigation"
     if name == "log.md" or "log" in parts[:-1]:
         return "log"
+    if any(part in {"source", "sources"} for part in parts[:-1]):
+        return "source"
+    if any(part in {"draft", "drafts", "generated", "tmp", "temp"} for part in parts[:-1]):
+        return "artifact"
     if any(part in {"maps", "views"} for part in parts[:-1]):
         return "navigation"
     return "content"
+
+
+def markdown_graph_role_emits_edges(graph_role: str) -> bool:
+    return graph_role in {"content", "source"}
 
 
 def markdown_title_collisions(records: list[MarkdownPageRecord]) -> list[MarkdownCollision]:
@@ -464,6 +478,7 @@ def markdown_collision_entry(record: MarkdownPageRecord, *, handle: str, source:
         page_id=page.id,
         handle=handle,
         source=source,
+        graph_role=record.graph_role,
     )
 
 
