@@ -52,7 +52,7 @@ grasp/
 `python3 scripts/lint_wiki.py`（孤立・壊れたリンク・未登録）→ 意味的 lint（実装済み事実・backlog・decision の矛盾 / stale open q）→ log に `## [YYYY-MM-DD HH:MM] lint | <summary>`。
 
 ### Ship loop
-Claude Code では `/ship-next`（`.claude/commands/ship-next.md`）で、差分理解 → wiki file back → `python3 -m unittest discover -s tests` / `python3 scripts/lint_wiki.py` / `git diff --check` → commit → push → "what's next?" 提示までを一つの作業ループとして閉じる。空差分なら empty commit せず、current backlog から次候補だけ答える。
+Claude Code では `/ship-next`（`.claude/commands/ship-next.md`）、Codex では `/next`（repo-local plugin `plugins/grasp-next/commands/next.md`）で、差分理解 → wiki file back → `python3 -m unittest discover -s tests` / `python3 scripts/lint_wiki.py` / `git diff --check` → commit → push → "what's next?" 提示までを一つの作業ループとして閉じる。空差分なら empty commit せず、current backlog から次候補だけ答える。Codex で `/next` を出すには、`.agents/plugins/marketplace.json` の repo marketplace から `grasp-next` plugin を install / enable する。
 
 ## 運用方針
 

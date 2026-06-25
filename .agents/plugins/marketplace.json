@@ -1,0 +1,20 @@
+{
+  "name": "grasp",
+  "interface": {
+    "displayName": "grasp"
+  },
+  "plugins": [
+    {
+      "name": "grasp-next",
+      "source": {
+        "source": "local",
+        "path": "./plugins/grasp-next"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

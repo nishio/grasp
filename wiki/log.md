@@ -723,3 +723,8 @@
 - 結果: 37 entries 成功 / 5 entries 失敗 / missing folder 0。成功分 aggregate は 37 projects / 2458 pages / 213,309 lines / 22,550 edges / 1,412 unresolved。合計 import wall time は約 22.3 秒。`stats` は schema v5 / schema_ok true。
 - 失敗はすべて duplicate title / alias collision。典型は draft variants の同一 H1、複数 directory の `_overview` / `README` / `index` file stem alias、source/session file と canonical page の alias 衝突。次 blocker は raw 除外や performance でなく collision policy。
 - file back: [[grasp-backlog]] の duplicate title / alias collision と wiki森 import orchestration、[[markdown-obsidian-indexed-mirror]] の dogfood section に反映。
+
+## [2026-06-25 13:04] file back | wiki森 import dogfood を独立 analysis page に昇格し、次計画を整理
+- 新ページ [[wiki-forest-markdown-import-dogfood-2026-06-25]] を作成。log/backlog/decision に散っていた dogfood 結果を、Result / Analysis / Plan / Open Questions として coding agent が読める source of truth にした。
+- 新計画: collision diagnostics → alias collision softening → draft/source artifact 除外 → forest import orchestration。orchestration は 37/42 成功で価値ありだが、先に collision policy を入れないと失敗集計 command になる。
+- repo-local Codex plugin `/next` 用の未コミット差分（AGENTS / `.agents/plugins/marketplace.json` / `plugins/grasp-next/`）もユーザ指示により commit 対象にする。
