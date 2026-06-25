@@ -41,7 +41,7 @@ sources:
 
 - surface 命名: `index-md` / `import-md` / `import --format markdown <folder>` を足すか（現状は `import --markdown <folder>`）。
 - Obsidian block refs / heading anchors の line-id 対応。
-- ambiguous handle の残り retrieval UX。方針は [[markdown-identity-name-collision-policy]]。structured diagnostics / `source` role / `artifact` role / schema v6 `page_handles` / `read` の `handle_ambiguity` / `read --page-id` / `read --path` / schema v7 `edges.resolution_status` / Markdown duplicate title・alias import softening / `backlinks <ambiguous handle>` の handle backlinks + candidate backlinks contract は実装済み。`source/` は raw を読んで作った source-backed digest なので default exclude しない。残りは `related <ambiguous handle>` と forest-level ambiguity report / ranking。
+- ambiguous handle の残り retrieval UX。方針は [[markdown-identity-name-collision-policy]]。structured diagnostics / `source` role / `artifact` role / schema v6 `page_handles` / `read` の `handle_ambiguity` / `read --page-id` / `read --path` / schema v7 `edges.resolution_status` / Markdown duplicate title・alias import softening / `backlinks <ambiguous handle>` の handle backlinks + candidate backlinks contract / `ambiguities` report は実装済み。`source/` は raw を読んで作った source-backed digest なので default exclude しない。残りは `related <ambiguous handle>` と import-forest orchestration。
 - alias / title / id / file set 変更時の細かい差分 index（現状は安全側で full rebuild）。
 
 ### dogfood corpus を wiki森全体へ広げる

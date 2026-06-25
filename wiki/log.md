@@ -777,3 +777,9 @@
 - 候補 page ごとの確定 backlinks は `candidate_backlinks[]` に分けて返す。`[[Shared]]` のような曖昧リンクは候補 page に自動割当しない。
 - schema は v7 のまま。public compatibility version は `1.7.1`。
 - 検証: `python3 -m unittest discover -s tests`（68 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-25 19:53] implementation+file back | forest-level ambiguity report を追加
+- `ambiguities` command を追加。`page_handles` の 1:N handle を store 全体または selected project で列挙し、project 別 ambiguous handle count / ambiguous incoming link count / source page count と、各 handle の bounded candidates を返す。
+- `--project` 未指定時は `read` 系と違い、複数 project store でも全 project を scan する。forest import 後に「どの wiki / handle が曖昧か」をまず把握するための report surface。
+- schema は v7 のまま。public compatibility version は `1.7.2`。
+- 検証: `python3 -m unittest discover -s tests`（69 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。

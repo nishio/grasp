@@ -1169,6 +1169,194 @@ class SQLiteStore:
             "candidates": candidates,
         }
 
+    def ambiguities(self, limit: int = 50, offset: int = 0, candidate_limit: int = 5) -> dict[str, Any]:
+        projects = self._ambiguity_scope_projects()
+        limit = max(0, limit)
+        offset = max(0, offset)
+        candidate_limit = max(0, candidate_limit)
+        scope = "project" if self.project else "all-projects"
+        if not projects:
+            return {
+                "scope": scope,
+                "project": self.project,
+                "project_count": 0,
+                "projects": [],
+                "handle_count": 0,
+                "handles_returned": 0,
+                "limit": limit,
+                "offset": offset,
+                "candidate_limit": candidate_limit,
+                "ambiguities": [],
+            }
+
+        rows = self.connection.execute(
+            self._ambiguities_sql(projects),
+            [*projects, *projects, limit, offset],
+        ).fetchall()
+        items = [self._ambiguity_item_from_row(row, candidate_limit) for row in rows]
+        return {
+            "scope": scope,
+            "project": projects[0] if scope == "project" else None,
+            "project_count": len(projects),
+            "projects": self._ambiguity_project_summaries(projects),
+            "handle_count": self._ambiguity_count(projects),
+            "handles_returned": len(items),
+            "limit": limit,
+            "offset": offset,
+            "candidate_limit": candidate_limit,
+            "ambiguities": items,
+        }
+
+    def _ambiguity_scope_projects(self) -> list[str]:
+        names = self.project_names()
+        if self.project:
+            if self.project not in names:
+                available = ", ".join(names) or "(none)"
+                raise ValueError(f"project does not exist: {self.project}; available projects: {available}")
+            return [self.project]
+        return names
+
+    def _ambiguities_sql(self, projects: list[str]) -> str:
+        placeholders = ",".join("?" for _ in projects)
+        return f"""
+            WITH ambiguous AS (
+              SELECT
+                h.project,
+                h.handle_norm,
+                COUNT(DISTINCT h.page_id) AS candidate_count
+              FROM page_handles h
+              WHERE h.project IN ({placeholders})
+              GROUP BY h.project, h.handle_norm
+              HAVING COUNT(DISTINCT h.page_id) > 1
+            ),
+            edge_stats AS (
+              SELECT
+                e.project,
+                e.target_handle_norm AS handle_norm,
+                COUNT(*) AS ambiguous_link_count,
+                COUNT(DISTINCT e.source_page_id) AS ambiguous_source_page_count
+              FROM edges e
+              WHERE e.project IN ({placeholders})
+                AND e.resolution_status = 'ambiguous'
+              GROUP BY e.project, e.target_handle_norm
+            )
+            SELECT
+              ambiguous.project,
+              ambiguous.handle_norm,
+              ambiguous.candidate_count,
+              COALESCE(edge_stats.ambiguous_link_count, 0) AS ambiguous_link_count,
+              COALESCE(edge_stats.ambiguous_source_page_count, 0) AS ambiguous_source_page_count
+            FROM ambiguous
+            LEFT JOIN edge_stats
+              ON edge_stats.project = ambiguous.project
+             AND edge_stats.handle_norm = ambiguous.handle_norm
+            ORDER BY
+              ambiguous_link_count DESC,
+              ambiguous_source_page_count DESC,
+              ambiguous.candidate_count DESC,
+              ambiguous.project,
+              ambiguous.handle_norm
+            LIMIT ? OFFSET ?
+        """
+
+    def _ambiguity_count(self, projects: list[str]) -> int:
+        placeholders = ",".join("?" for _ in projects)
+        row = self.connection.execute(
+            f"""
+            SELECT COUNT(*) AS count
+            FROM (
+              SELECT h.project, h.handle_norm
+              FROM page_handles h
+              WHERE h.project IN ({placeholders})
+              GROUP BY h.project, h.handle_norm
+              HAVING COUNT(DISTINCT h.page_id) > 1
+            )
+            """,
+            projects,
+        ).fetchone()
+        return int(row["count"])
+
+    def _ambiguity_project_summaries(self, projects: list[str]) -> list[dict[str, Any]]:
+        placeholders = ",".join("?" for _ in projects)
+        rows = self.connection.execute(
+            f"""
+            WITH ambiguous AS (
+              SELECT
+                h.project,
+                h.handle_norm,
+                COUNT(DISTINCT h.page_id) AS candidate_count
+              FROM page_handles h
+              WHERE h.project IN ({placeholders})
+              GROUP BY h.project, h.handle_norm
+              HAVING COUNT(DISTINCT h.page_id) > 1
+            ),
+            edge_stats AS (
+              SELECT
+                e.project,
+                e.target_handle_norm AS handle_norm,
+                COUNT(*) AS ambiguous_link_count,
+                COUNT(DISTINCT e.source_page_id) AS ambiguous_source_page_count
+              FROM edges e
+              WHERE e.project IN ({placeholders})
+                AND e.resolution_status = 'ambiguous'
+              GROUP BY e.project, e.target_handle_norm
+            )
+            SELECT
+              ambiguous.project,
+              COUNT(*) AS ambiguous_handle_count,
+              COALESCE(SUM(edge_stats.ambiguous_link_count), 0) AS ambiguous_link_count,
+              COALESCE(SUM(edge_stats.ambiguous_source_page_count), 0) AS ambiguous_source_page_count,
+              MAX(ambiguous.candidate_count) AS max_candidate_count
+            FROM ambiguous
+            LEFT JOIN edge_stats
+              ON edge_stats.project = ambiguous.project
+             AND edge_stats.handle_norm = ambiguous.handle_norm
+            GROUP BY ambiguous.project
+            ORDER BY ambiguous_handle_count DESC, ambiguous_link_count DESC, ambiguous.project
+            """,
+            [*projects, *projects],
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _ambiguity_item_from_row(self, row: sqlite3.Row, candidate_limit: int) -> dict[str, Any]:
+        project = row["project"]
+        handle_norm = row["handle_norm"]
+        candidates = self.page_handle_candidates(handle_norm, project=project)
+        returned_candidates = candidates[:candidate_limit] if candidate_limit else []
+        return {
+            "project": project,
+            "handle": self._preferred_ambiguity_handle(handle_norm, candidates),
+            "handle_norm": handle_norm,
+            "candidate_count": row["candidate_count"],
+            "candidates": returned_candidates,
+            "candidates_returned": len(returned_candidates),
+            "candidates_truncated": len(candidates) > len(returned_candidates),
+            "ambiguous_link_count": row["ambiguous_link_count"],
+            "ambiguous_source_page_count": row["ambiguous_source_page_count"],
+            "graph_role_counts": dict(Counter(candidate["graph_role"] for candidate in candidates)),
+        }
+
+    def _preferred_ambiguity_handle(self, handle_norm: str, candidates: list[dict[str, Any]]) -> str:
+        source_rank = {"title": 0, "alias": 1, "path": 2}
+        role_rank = {"content": 0, "source": 1, "artifact": 2}
+        handles = [
+            matched
+            for candidate in candidates
+            for matched in candidate["matched_handles"]
+            if normalize_title(matched["handle"]) == handle_norm
+        ]
+        if not handles:
+            return handle_norm
+        handles.sort(
+            key=lambda matched: (
+                source_rank.get(matched["source"], 9),
+                role_rank.get(matched["graph_role"], 9),
+                matched["handle"].casefold(),
+                matched.get("path") or "",
+            )
+        )
+        return handles[0]["handle"]
+
     def _selected_project_or_none(self) -> str | None:
         if self.project:
             return self.project

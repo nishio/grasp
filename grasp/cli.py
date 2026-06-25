@@ -236,6 +236,33 @@ def build_parser() -> argparse.ArgumentParser:
     backlinks_parser.add_argument("--limit", type=int, default=50, help="Maximum backlink lines to return.")
     backlinks_parser.add_argument("--offset", type=int, default=0, help="Number of ranked backlink lines to skip.")
 
+    ambiguities_parser = add_command_parser(
+        subparsers,
+        "ambiguities",
+        help="List ambiguous visible handles across the selected scope.",
+        description=(
+            "Report duplicate page handles where one visible title/alias/file stem maps to multiple page identities. "
+            "Without --project, this command scans all projects in the store."
+        ),
+        returns=(
+            "scope, project|null, project_count, projects[], handle_count, handles_returned, "
+            "limit, offset, candidate_limit, ambiguities[]"
+        ),
+        examples=[
+            "grasp ambiguities --limit 20",
+            "grasp --project notes ambiguities --limit 20 --candidate-limit 3",
+            "grasp --json ambiguities --limit 5",
+        ],
+        notes=[
+            "ambiguities[] items include project, handle, handle_norm, candidate_count, candidates[], "
+            "ambiguous_link_count, ambiguous_source_page_count, and graph_role_counts.",
+            "ambiguous_link_count counts incoming links whose target handle is ambiguous; candidates[] is bounded by --candidate-limit.",
+        ],
+    )
+    ambiguities_parser.add_argument("--limit", type=int, default=50, help="Maximum ambiguous handles to return.")
+    ambiguities_parser.add_argument("--offset", type=int, default=0, help="Number of ranked ambiguous handles to skip.")
+    ambiguities_parser.add_argument("--candidate-limit", type=int, default=5, help="Maximum candidate pages to include per ambiguous handle.")
+
     related_parser = add_command_parser(
         subparsers,
         "related",
@@ -878,6 +905,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         )
     if args.command == "backlinks":
         return store.backlinks_report(args.title, limit=args.limit, offset=args.offset)
+    if args.command == "ambiguities":
+        return store.ambiguities(limit=args.limit, offset=args.offset, candidate_limit=args.candidate_limit)
     if args.command == "related":
         related = store.related(args.title, limit=args.limit)
         return {
@@ -1424,6 +1453,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_read(result, aliases=aliases)
     if command == "backlinks":
         return format_backlinks(result, aliases=aliases)
+    if command == "ambiguities":
+        return format_ambiguities(result)
     if command == "related":
         return format_related(result["query"], result["related"], result.get("recovery_hints"), aliases=aliases)
     if command == "path":
@@ -1667,6 +1698,48 @@ def format_backlinks(result: dict[str, Any], aliases: LineIdAliases | None = Non
     else:
         parts.append(format_edge_list(backlinks, aliases=aliases))
     return with_alias_legend("".join(parts), aliases)
+
+
+def format_ambiguities(result: dict[str, Any]) -> str:
+    parts = [
+        "# Ambiguous Handles\n",
+        f"scope: {result['scope']}\n",
+        f"project_count: {result['project_count']}\n",
+        f"handles: {result['handles_returned']} / {result['handle_count']} returned\n",
+        f"offset: {result['offset']}\n",
+        f"candidate_limit: {result['candidate_limit']}\n",
+    ]
+    projects = result.get("projects", [])
+    if projects:
+        parts.append("\n## Projects\n")
+        for project in projects:
+            parts.append(
+                f"- {project['project']}: handles={project['ambiguous_handle_count']}, "
+                f"ambiguous_links={project['ambiguous_link_count']}, "
+                f"source_pages={project['ambiguous_source_page_count']}, "
+                f"max_candidates={project['max_candidate_count']}\n"
+            )
+    parts.append("\n## Handles\n")
+    if not result.get("ambiguities"):
+        parts.append("(none)\n")
+        return "".join(parts)
+    for item in result["ambiguities"]:
+        parts.append(
+            f"- [{item['project']}] {item['handle']} ({item['handle_norm']}): "
+            f"candidates={item['candidate_count']}, "
+            f"ambiguous_links={item['ambiguous_link_count']}, "
+            f"source_pages={item['ambiguous_source_page_count']}\n"
+        )
+        for candidate in item.get("candidates", []):
+            suffix = f" path={candidate['path']}" if candidate.get("path") else ""
+            parts.append(
+                f"  - {candidate['title']} id={candidate['page_id']} "
+                f"role={candidate['graph_role']}{suffix}\n"
+            )
+        if item.get("candidates_truncated"):
+            omitted = item["candidate_count"] - item["candidates_returned"]
+            parts.append(f"  - ... {omitted} more candidates\n")
+    return "".join(parts)
 
 
 def format_edge_list(edges: list[dict[str, Any]], aliases: LineIdAliases | None = None) -> str:
