@@ -51,6 +51,8 @@ LLM Wiki の file-back dogfood に必要な面から始める:
 
 巨大な editor は不要。まず「普段の wiki 作業」が grasp 経由で閉じることを優先する。
 
+実行順の詳細は [[llm-wiki-infra-fast-path-plan]]。この decision は目標形、本 plan は最速 dogfood の phase table と done 条件を持つ。
+
 ## Open Questions
 
 - durable journal の正確な authority は何か。SQLite が primary で journal が audit log なのか、journal が replayable source of truth で SQLite が materialized index なのか。
