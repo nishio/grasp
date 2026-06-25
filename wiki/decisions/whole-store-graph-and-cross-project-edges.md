@@ -36,7 +36,7 @@ sources:
    - **誤接続リスクはこの weak 層に閉じる**: 同綴り別概念（`Apple`=会社/果物）が誤接続しても弱いヒントとして label されるだけで、authored（strong）グラフを汚さない。strength 区別が、point 7 で受容した誤接続リスクの **封じ込め機構** になる。
    - retrieval は strong / weak を **label して返し、weak は strong より下に rank** する。AI / 人間が weight を決める（discover-broad-filter-post-hoc: weak も surface するが「弱い」と分かる形で）。
 
-2026-06-25 実装メモ: `1.7.5` の `cross-project-spread <title>` は、この決定の full schema 実装ではなく schema v7 compatible な観測 surface。`page_handles` / `edges.target_handle_norm` / `unresolved_targets` から normalized title の spread を project label 付きで返し、`connection_strength=weak-normalized-title` と明示する。page identity は merge しない。first-class cross-project edge / whole-store default retrieval は引き続き未実装。
+2026-06-25/26 実装メモ: `1.7.5` の `cross-project-spread <title>` と `1.7.6` の `cross-project-spreads` は、この決定の full schema 実装ではなく schema v7 compatible な観測 surface。`page_handles` / `edges.target_handle_norm` / `unresolved_targets` から normalized title の spread を project label 付きで返し、`connection_strength=weak-normalized-title` と明示する。page identity は merge しない。`cross-project-spreads` は seed title なしの ranking で、structural-name / numeric-only / artifact-only は label して rank down する。first-class cross-project edge / whole-store default retrieval は引き続き未実装。
 
 ## 理由
 

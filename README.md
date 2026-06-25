@@ -147,6 +147,7 @@ grasp read "<ページタイトル>"
 | `mentions <query>` | literal query の裸言及を、link span 外の occurrence として数える。page already has exact link / query-containing link / no link handle で分類し、come-from 昇格候補 score を返す。`--unlinked` で no link handle の page だけに絞る |
 | `co-links <query>` | query を含む行で同時に出る internal links を rank し、巨大 hub の slice handle を見つける。既定 `--rank slice` は query-containing target title を後ろへ回し、`--rank raw` で count order を見る |
 | `cross-project-spread <title>` | normalized title が各 project で materialized page / ambiguous handle / unresolved target / incoming link としてどれだけ広がるかを weak signal として返す。page identity は merge しない |
+| `cross-project-spreads` | normalized handle を project spread で rank し、森を跨ぐ weak signal を seed title なしに発見する。structural-name / numeric-only / artifact-only は label して下位 band に回す |
 | `cross-project-refs` | Cosense shorthand `[/project/page]` を parsed link target として抽出し、semantic / `.icon` / project root / self-project に分類して project 別に rank。`--semantic-only` で acquisition seed 向けに絞り、`--seed-dir` で project 別 seed file と acquire command を生成 |
 | `cross-project-acquire` | `cross-project-refs --semantic-only` の seed titles を使い、複数 target project を `<project>:semantic` namespace に一括 partial acquire。`--dry-run` で計画だけ返せ、実行後は reciprocal refs / top internal links も返す |
 | `gather <query>` | link stats・裸言及 summary・co-link slices・backlinks・次の recipe を bounded bundle として返す。returned / total / omitted は row 単位で明示。`--budget` は近似 row limit |

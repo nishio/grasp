@@ -329,6 +329,35 @@ def build_parser() -> argparse.ArgumentParser:
     cross_project_spread_parser.add_argument("--offset", type=int, default=0, help="Number of ranked project rows to skip.")
     cross_project_spread_parser.add_argument("--candidate-limit", type=int, default=5, help="Maximum materialized candidate pages per project.")
 
+    cross_project_spreads_parser = add_command_parser(
+        subparsers,
+        "cross-project-spreads",
+        help="Rank normalized handles by weak cross-project spread.",
+        description=(
+            "List title/handle norms that appear across multiple project namespaces as materialized page handles, "
+            "unresolved targets, or incoming link handles. This is a discovery surface for weak normalized-title signals."
+        ),
+        returns=(
+            "scope, project|null, project_count, total_handle_count, handle_count, handles_returned, "
+            "connection_strength, rank_basis, spreads[]"
+        ),
+        examples=[
+            "grasp cross-project-spreads --limit 20",
+            "grasp cross-project-spreads --min-projects 3 --project-limit 5",
+            "grasp --json cross-project-spreads --limit 10",
+        ],
+        notes=[
+            "spreads[] items include title, handle_norm, project_spread, materialized/unresolved/incoming counts, rank_band, and project_samples[].",
+            "Concept-like handles rank before structural-name, numeric-only, and artifact-only handles; lower bands are still reported when they enter the bounded result set.",
+            "Use cross-project-spread <title> to inspect one returned handle in detail.",
+        ],
+    )
+    cross_project_spreads_parser.add_argument("--limit", type=int, default=50, help="Maximum handle rows to return.")
+    cross_project_spreads_parser.add_argument("--offset", type=int, default=0, help="Number of ranked handle rows to skip.")
+    cross_project_spreads_parser.add_argument("--min-projects", type=int, default=2, help="Minimum project_spread required for a handle.")
+    cross_project_spreads_parser.add_argument("--project-limit", type=int, default=3, help="Maximum project samples to include per handle.")
+    cross_project_spreads_parser.add_argument("--candidate-limit", type=int, default=1, help="Maximum materialized candidate pages per sampled project.")
+
     related_parser = add_command_parser(
         subparsers,
         "related",
@@ -997,6 +1026,14 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             offset=args.offset,
             candidate_limit=args.candidate_limit,
         )
+    if args.command == "cross-project-spreads":
+        return store.cross_project_spreads(
+            limit=args.limit,
+            offset=args.offset,
+            min_projects=args.min_projects,
+            project_limit=args.project_limit,
+            candidate_limit=args.candidate_limit,
+        )
     if args.command == "related":
         return store.related_report(args.title, limit=args.limit)
     if args.command == "path":
@@ -1544,6 +1581,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_ambiguities(result)
     if command == "cross-project-spread":
         return format_cross_project_spread(result)
+    if command == "cross-project-spreads":
+        return format_cross_project_spreads(result)
     if command == "related":
         return format_related_result(result, aliases=aliases)
     if command == "path":
@@ -1938,6 +1977,44 @@ def format_cross_project_spread(result: dict[str, Any]) -> str:
             )
         if materialized.get("candidates_truncated"):
             parts.append("  - ...\n")
+    return "".join(parts)
+
+
+def format_cross_project_spreads(result: dict[str, Any]) -> str:
+    parts = [
+        "# Cross-project spreads\n",
+        f"scope: {result['scope']}\n",
+        f"connection_strength: {result['connection_strength']}\n",
+        f"handles: {result['handles_returned']} / {result['handle_count']} returned",
+        f" (total scanned: {result['total_handle_count']}, min_projects={result['min_projects']})\n",
+        f"rank_basis: {result['rank_basis']}\n",
+        f"note: {result['note']}\n",
+        "\n## Spreads\n",
+    ]
+    spreads = result.get("spreads") or []
+    if not spreads:
+        parts.append("(none)\n")
+        return "".join(parts)
+    for item in spreads:
+        counts = item["resolution_counts"]
+        parts.append(
+            f"- {item['title']} ({item['handle_norm']}): "
+            f"spread={item['project_spread']}, band={item['rank_band']}, "
+            f"materialized_projects={item['materialized_project_count']}, "
+            f"unresolved_projects={item['unresolved_project_count']}, "
+            f"incoming_links={item['incoming_link_count']} "
+            f"(resolved={counts.get('resolved_unique', 0)}, ambiguous={counts.get('ambiguous', 0)}, "
+            f"unresolved={counts.get('unresolved', 0)})\n"
+        )
+        for project in item.get("project_samples") or []:
+            materialized = project["materialized"]
+            incoming = project["incoming"]
+            unresolved = project.get("unresolved")
+            unresolved_text = f", unresolved_links={unresolved['link_count']}" if unresolved else ""
+            parts.append(
+                f"  - {project['project']}: candidates={materialized['candidate_count']}, "
+                f"incoming={incoming['incoming_link_count']}{unresolved_text}\n"
+            )
     return "".join(parts)
 
 

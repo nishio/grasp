@@ -2,7 +2,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from grasp.cli import format_ambiguities, format_backlinks, format_cross_project_spread, format_related_result
+from grasp.cli import (
+    format_ambiguities,
+    format_backlinks,
+    format_cross_project_spread,
+    format_cross_project_spreads,
+    format_related_result,
+)
 from grasp.markdown import (
     MarkdownCollisionError,
     MarkdownMirror,
@@ -516,19 +522,22 @@ class MarkdownImportTests(unittest.TestCase):
             one = base / "one"
             one.mkdir()
             (one / "A.md").write_text("---\naliases: [Shared]\n---\n# A\n", encoding="utf-8")
-            (one / "Source.md").write_text("links to [[Shared]]\n", encoding="utf-8")
+            (one / "Overview.md").write_text("# Overview\n", encoding="utf-8")
+            (one / "Source.md").write_text("links to [[Shared]] and [[1]]\n", encoding="utf-8")
             import_markdown_folder_to_sqlite(one, store_path, project_name="one")
 
             two = base / "two"
             two.mkdir()
             (two / "A.md").write_text("---\naliases: [Shared]\n---\n# A\n", encoding="utf-8")
             (two / "B.md").write_text("---\naliases: [Shared]\n---\n# B\n", encoding="utf-8")
-            (two / "Source.md").write_text("links to [[Shared]]\n", encoding="utf-8")
+            (two / "Overview.md").write_text("# Overview\n", encoding="utf-8")
+            (two / "Source.md").write_text("links to [[Shared]] and [[1]]\n", encoding="utf-8")
             import_markdown_folder_to_sqlite(two, store_path, project_name="two")
 
             three = base / "three"
             three.mkdir()
-            (three / "Source.md").write_text("links to [[Shared]]\n", encoding="utf-8")
+            (three / "Overview.md").write_text("# Overview\n", encoding="utf-8")
+            (three / "Source.md").write_text("links to [[Shared]] and [[1]]\n", encoding="utf-8")
             import_markdown_folder_to_sqlite(three, store_path, project_name="three")
 
             store = SQLiteStore(store_path)
@@ -554,6 +563,22 @@ class MarkdownImportTests(unittest.TestCase):
                 self.assertIn("# Cross-project spread: Shared", text)
                 self.assertIn("connection_strength: weak-normalized-title", text)
                 self.assertIn("ambiguous_projects=1", text)
+
+                spreads = store.cross_project_spreads(limit=10, project_limit=2, candidate_limit=0)
+                self.assertEqual(spreads["scope"], "all-projects")
+                self.assertEqual(spreads["connection_strength"], "weak-normalized-title")
+                self.assertEqual(spreads["spreads"][0]["handle_norm"], "shared")
+                self.assertEqual(spreads["spreads"][0]["rank_band"], "concept-like")
+                self.assertEqual(spreads["spreads"][0]["project_spread"], 3)
+                self.assertEqual(spreads["spreads"][0]["project_samples_returned"], 2)
+                numeric = next(item for item in spreads["spreads"] if item["handle_norm"] == "1")
+                self.assertEqual(numeric["rank_band"], "numeric-only")
+                self.assertEqual(numeric["project_spread"], 3)
+                overview = next(item for item in spreads["spreads"] if item["handle_norm"] == "overview")
+                self.assertEqual(overview["rank_band"], "structural-name")
+                ranked_text = format_cross_project_spreads(spreads)
+                self.assertIn("# Cross-project spreads", ranked_text)
+                self.assertIn("Shared (shared): spread=3, band=concept-like", ranked_text)
             finally:
                 store.close()
 

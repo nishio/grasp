@@ -31,6 +31,8 @@ sources:
 
 2026-06-25 に `1.7.3` の `import-forest` command として同じ registry を直接実行した。結果は 42 entries 中 42 success / 0 failure / 0 missing / 0 skipped。aggregate は 42 projects / 3338 pages / 265,012 lines / 23,183 edges / 1,627 unresolved、wall time 6.025 秒、ambiguous handles は 8。command output は per-entry diagnostics と post-import `ambiguities` summary を返すため、手動 shell loop は不要になった。
 
+2026-06-26 に `1.7.6` の `cross-project-spreads` を同じ条件の temp forest store に対して dogfood した。import は 42 success / 0 failure / 3338 pages / 265,031 lines / 23,183 edges / 1,627 unresolved。spread ranking は total normalized handles 6,131、`min_projects=2` で 211 handles。`cross-project-spread <title>` 単体では seed title が必要で俯瞰にならず、`index` / `log` / `overview` / numeric-only handles が上位を潰す問題が見えたため、ranking command は `structural-name` / `numeric-only` / `artifact-only` rank band を付けて下げる。dogfood 後の top concept-like は `nishio` / `ブロードリスニング` / `Plurality` / `Kozaneba` など、森を跨ぐ実概念になった。
+
 ## Analysis
 
 初回 dogfood の一番重要な発見: **scale / raw size より先に collision policy が blocker になる**。
@@ -45,7 +47,7 @@ sources:
 - 複数 directory に `_overview` / `README` / `index` など同一 file stem alias がある。
 - source digest / session file と canonical page が同じ alias を持つ。
 
-schema v7 では duplicate title / alias collision は import error ではなくなった。単一 wiki の correctness は `read <handle>` の ambiguity と `read --page-id` / `read --path` の identity selection に寄せる。2026-06-25 の `1.7.1` で `backlinks <ambiguous handle>` は handle 自体への incoming lines と候補 page ごとの resolved backlinks を分けて返すようになり、`1.7.2` で `ambiguities` が store / project 内の ambiguous handles を一覧できるようになった。`1.7.3` で `wikis.yaml` からの一括 import command 化も済み、`1.7.4` で `related <ambiguous handle>` も handle source pages と候補 page related を分けて返すようになった。`1.7.5` で `cross-project-spread <title>` が normalized title の weak spread report を返すようになった。残る retrieval blocker は first-class cross-project edge と whole-store default retrieval。
+schema v7 では duplicate title / alias collision は import error ではなくなった。単一 wiki の correctness は `read <handle>` の ambiguity と `read --page-id` / `read --path` の identity selection に寄せる。2026-06-25 の `1.7.1` で `backlinks <ambiguous handle>` は handle 自体への incoming lines と候補 page ごとの resolved backlinks を分けて返すようになり、`1.7.2` で `ambiguities` が store / project 内の ambiguous handles を一覧できるようになった。`1.7.3` で `wikis.yaml` からの一括 import command 化も済み、`1.7.4` で `related <ambiguous handle>` も handle source pages と候補 page related を分けて返すようになった。`1.7.5` で `cross-project-spread <title>` が normalized title の weak spread report を返し、`1.7.6` で seed title なしの `cross-project-spreads` ranking が入った。残る retrieval blocker は first-class cross-project edge と whole-store default retrieval。
 
 重要な設計制約: alias collision は単なる import UX ではなく、Scrapbox の name=identity 欠陥を `identity-without-name` で直す問題そのものに近い。path は一意性の根拠として diagnostic / fallback handle には使えるが、path-qualified string をそのまま page name にすると LLM / 人間の期待する `[[Title]]` とずれる。
 
@@ -62,8 +64,8 @@ schema v7 では duplicate title / alias collision は import error ではなく
 3. **artifact reduction と source role classification を分ける。**（2026-06-25 最小実装）
    `raw/` は heavy original dump なので `--markdown-exclude-dir raw` で除外可能。`source/` は raw digest / source-backed synthesis なので default exclude せず、`graph_role=source` として保持し content と同じく edge を materialize する。`drafts/` / generated temp は `graph_role=artifact` として search には残すが outgoing edges は除外する。duplicate title / alias は schema v7 の handle ambiguity として別管理する。
 
-4. **`import-forest` orchestration と weak spread report は実装済み。**
-   `1.7.3` で registry parse / per-entry diagnostics / aggregate / forest-level ambiguity summary を持つ command になった。`1.7.4` で ambiguous related、`1.7.5` で `cross-project-spread` が入ったため、次は first-class cross-project edge / whole-store retrieval。
+4. **`import-forest` orchestration と weak spread ranking は実装済み。**
+   `1.7.3` で registry parse / per-entry diagnostics / aggregate / forest-level ambiguity summary を持つ command になった。`1.7.4` で ambiguous related、`1.7.5` で query 指定の `cross-project-spread`、`1.7.6` で seed title なしの `cross-project-spreads` ranking が入った。次は first-class cross-project edge / whole-store retrieval。
 
 ## Open Questions
 
