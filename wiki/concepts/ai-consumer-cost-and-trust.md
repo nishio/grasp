@@ -43,6 +43,8 @@ grasp の `read` / `link-stats` の zero-hit、`search` の空結果、`related`
 
 これが **recall（明示 boolean / page scope / 正規化マッチ）を vector search より先に直す**理由でもある: 沈黙の偽陰性は AI には人間より危険なので、embeddings の前に boolean/正規化/negative-contract で底上げするのが AI 価値の順序。page 単位 AND は 2026-06-23 に一度 implicit に実装したが、2026-06-24 に default literal + 明示 `--mode boolean --scope page` へ変更した。`search` 空結果の recovery hints は 2026-06-23 に実装済み。
 
+2026-06-26 update: nishio 指摘により、**長文タイトルを知っている前提だと見つけられない**問題を title retrieval の独立課題として追加。Cosense では asearch algorithm による曖昧検索、その後 embedding search がこの穴を埋めた。grasp では順序を分ける: まず `suggest` の asearch-style lexical fuzzy（exact/prefix/substring 優先、断片語・文字順序近似）で negative-result contract を強化する。embedding search は次層で、同概念別語を候補提示するが自動 merge しない（`fuzzy propose / human recognize`）。
+
 ## 根
 
 両軸の根は同じ — grasp は AI 消費者にとって **round-trip が実費で、沈黙が主張**。capability の絶対量でなく recall と往復コストに AI は依存する。この model が read=近傍同梱（implemented）を正当化し、Tier 1-2 backlog（remaining recall・negative-contract・snippets・gather・token economy）の優先度を決める。dated な観測元は [[ai-consumer-feedback-2026-06-23]]。

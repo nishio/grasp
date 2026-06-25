@@ -129,8 +129,8 @@ line_tombstones(project, id, page_id, deleted_at, last_text?)
 
 recall（boolean / page scope / 正規化 fallback）は実装済み。順序は **recall を直してから** FTS5 速度最適化（recall と速度は別軸）。未実装:
 
+- **semantic embedding search**。長文 title / うろ覚えパンチライン問題への第一段として `suggest` の asearch-style lexical fuzzy title suggestion は実装済み（`1.7.7`）。ただしこれは表記・断片・文字順序近似であり、同概念別語の semantic retrieval ではない。embedding はその後続層として、`fuzzy propose / human recognize` の候補提示に留め、自動 merge しない。
 - **大規模 store での完全なかな/カナ・全半角本文正規化 index**。本文側を materialize した normalized column / FTS hybrid / trigram で持たない限り、完全な正規化 search は大規模 store で高コスト（現状の Python scan は 50k lines 以下に限定）。
-- vector search。
 - FTS5 trigram hybrid による `search` 高速化。literal substring semantics を守るには `LIKE` fallback / post-filter が要る（[[fts5-trigram-search]]）。
 - backlink line の前後文脈窓。
 - related ranking の重み調整と、大規模化した時の 2-hop cost 対策。

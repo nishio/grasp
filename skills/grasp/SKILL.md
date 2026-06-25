@@ -67,7 +67,7 @@ description: >-
 → `grasp read <title>`。本文＋逆リンク＋related＋未解決を一括取得。これが基本。related の見出しだけでは足りず冒頭本文も同時に見たい時は `--related-snippets`（既定 5 行、`--related-snippet-lines N` で調整）。related/source item がなぜ出たかを見たい時は `--related-snippet-mode edge` を足して根拠リンク行を同梱する。逆リンクや related が切れていたら `--backlinks-limit` 等で広げる。
 
 ### テーマ・問いから探す（タイトル未確定）
-→ `grasp search <query>` で**本文行**を検索（行レベル hit）し、良さそうな `source_title` を `grasp read` で開く。タイトルの当たりが付くなら `grasp suggest <partial>`（タイトル補完）。
+→ `grasp search <query>` で**本文行**を検索（行レベル hit）し、良さそうな `source_title` を `grasp read` で開く。タイトルの当たりが付くなら `grasp suggest <partial>`（タイトル補完）。`suggest` の既定は fuzzy で、長文タイトルに対し空白区切り断片や詰めた文字順序でも候補を返す。厳密な部分一致だけにしたい時は `--mode substring`。
 - `search` の既定は、空白も含めて入力文字列そのものを探す literal line substring 検索。英文 phrase や空白入り query はまずこの既定でよい。
 - 複数語を論理条件として探したい時は `--mode boolean` を付ける。AND / OR / NOT、括弧、quoted phrase、隣接 term の implicit AND が使える。例: `grasp search "KJ法 AND 表札" --mode boolean --scope page`。
 - `--scope line` は1行内で式を評価し、`--scope page` は同一ページ内の全行で式を評価してから該当行を返す。旧「空白区切り page AND」は `--mode boolean --scope page "alpha beta"` で明示的に再現する。
@@ -141,7 +141,7 @@ grasp --project <source-project> cross-project-acquire --limit 5 --seed-limit 10
 | --- | --- |
 | `read <title>` | 本文＋逆リンク＋related＋未解決を近傍同梱で（`--related-snippets` で related/source ページ冒頭、`--related-snippet-mode edge` で根拠リンク行も同梱） |
 | `search <query>` | 本文行を検索。既定は literal line substring、`--mode boolean` で AND/OR/NOT、`--scope line|page` で評価単位を切替、`--context N` で hit 周辺行を同梱 |
-| `suggest <partial>` | タイトル補完 |
+| `suggest <partial>` | タイトル補完。既定 fuzzy は長文タイトルの断片語・文字順序近似を拾う。`--mode substring` で厳密部分一致 |
 | `backlinks <title>` | 行レベル逆リンク（page なし target も） |
 | `related <title>` | 2-hop ページ / page なし target の source pages / ambiguous handle の source pages + candidate related |
 | `path <A> <B>` | pages / page なし target 間の短いリンク経路（no-path 時も recovery hints） |

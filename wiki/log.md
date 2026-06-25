@@ -816,3 +816,10 @@
 - nishio と合意: LLM Wiki のインフラを Markdown の束から grasp へ移す時、Markdown は出力し続けるが authority ではなく generated projection にする。人間や Codex が直接 Markdown を編集するのではなく、`grasp write` が native store を更新し、そこから Markdown を再生成する。
 - 新 decision [[native-authority-markdown-projection]] を追加。native store（＋ durable journal）を source of truth、Markdown を review / backup / publish / interoperability 用 projection とする。direct Markdown edit は cutover 前の source import か emergency path に限定する方向。
 - [[write-layer-alpha-and-replay-test]] に cutover 後の原典関係を追記。[[persistence-custom-format]] には「Markdown を保存形式にしない」は「Markdown を捨てる」ではなく projection へ降ろすことだと追記。[[grasp-backlog]] には `export-markdown` / status-diff-revert / durable journal policy を write 層の未実装項目として追加。
+
+## [2026-06-26 00:11] implementation+file back | `suggest` を asearch-style fuzzy title retrieval に拡張
+- nishio 指摘: タイトルが長文であり、タイトルを知っている前提だと見つけられない問題は、Cosense では asearch algorithm による曖昧検索と後続の embedding 検索が解いていた。
+- `suggest` の既定を fuzzy に拡張。exact / prefix / substring を優先しつつ、長文 title に対する空白区切り断片一致と文字順序近似を返す。JSON suggestion は `match_mode` / `match_score` / `matched_terms` を持つ。`--mode substring` で従来の厳密部分一致に戻せる。
+- smoke: wiki 森 temp store の `llm-wiki` project で `suggest '書字 副産物'` と `suggest '再会書字委譲'` が `再会は書字のタダの副産物で、委譲が奪った` を返した。
+- schema は v7 のまま。public compatibility version は `1.7.7`。
+- 検証: `python3 -m unittest discover -s tests`（75 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
