@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from grasp.cli import format_ambiguities, format_backlinks
+from grasp.cli import format_ambiguities, format_backlinks, format_related_result
 from grasp.markdown import (
     MarkdownCollisionError,
     MarkdownMirror,
@@ -442,6 +442,23 @@ class MarkdownImportTests(unittest.TestCase):
                 self.assertIn("resolution: ambiguous (2 candidates)", text)
                 self.assertIn("## Incoming links to ambiguous handle", text)
                 self.assertIn("resolved_backlinks=1", text)
+
+                related_report = store.related_report("Shared", limit=10)
+                self.assertEqual(related_report["resolution_status"], "ambiguous")
+                self.assertEqual(related_report["ambiguity"]["candidate_count"], 2)
+                self.assertEqual(
+                    [(item["title"], item["relation"]) for item in related_report["related"]],
+                    [("Source", "ambiguous-handle-source")],
+                )
+                candidate_related = {
+                    item["candidate"]["title"]: [related["title"] for related in item["related"]]
+                    for item in related_report["candidate_related"]
+                }
+                self.assertEqual(candidate_related, {"A": ["B"], "B": ["A"]})
+                related_text = format_related_result(related_report)
+                self.assertIn("resolution: ambiguous (2 candidates)", related_text)
+                self.assertIn("## Source pages linking to ambiguous handle", related_text)
+                self.assertIn("related=1", related_text)
 
                 ambiguities = store.ambiguities(limit=10, candidate_limit=1)
                 self.assertEqual(ambiguities["scope"], "project")

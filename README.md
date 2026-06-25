@@ -110,7 +110,7 @@ grasp --project notes read "<ファイル名から .md を除いた title>"
 
 frontmatter `title` があれば page title に使い、無ければ first H1、さらに無ければ file stem を使います。`aliases` と file stem は link handle になります。duplicate title / alias は import 全体を止めず、`read <handle>` の候補として返ります。duplicate frontmatter `id` だけは identity 衝突なので error です。既存ファイルへは書き戻しません。
 `--markdown-exclude-dir raw` のように directory basename を指定すると、重い raw/generated directory を再帰 import から外せます。`source/` は raw 由来の digest として保持され、通常の content と同じく link graph に入ります。再 import 時は manifest を見て、本文だけ変わったファイルを page 単位で差分更新します。frontmatter `title` / first H1 / `id` / `aliases` / graph role / exclude dirs や file set が変わった時は、安全のため project 全体を再構築します。
-同じ visible handle が複数 page identity に対応する場合、`grasp read <handle>` は片方を勝手に選ばず候補を返します。`grasp backlinks <handle>` は曖昧な handle 自体への incoming lines を主に返し、候補 page ごとの確定 backlinks も分けて返します。`grasp ambiguities` は store 全体または selected project の曖昧 handle を一覧します。候補から選ぶ時は `grasp read --page-id <id>`、Markdown mirror の source path で選ぶ時は `grasp read --path source/Digest.md` を使います。
+同じ visible handle が複数 page identity に対応する場合、`grasp read <handle>` は片方を勝手に選ばず候補を返します。`grasp backlinks <handle>` は曖昧な handle 自体への incoming lines を主に返し、候補 page ごとの確定 backlinks も分けて返します。`grasp related <handle>` も曖昧 handle への source pages と候補 page ごとの related を分けて返します。`grasp ambiguities` は store 全体または selected project の曖昧 handle を一覧します。候補から選ぶ時は `grasp read --page-id <id>`、Markdown mirror の source path で選ぶ時は `grasp read --path source/Digest.md` を使います。
 
 `wikis.yaml` のような registry で複数 Markdown wiki を管理している場合は、各 entry を別 project namespace としてまとめて import できます。各 wiki の失敗は全体を止めず diagnostics に集約され、import 後の ambiguity summary も同じ結果で確認できます。
 
@@ -151,7 +151,7 @@ grasp read "<ページタイトル>"
 | `gather <query>` | link stats・裸言及 summary・co-link slices・backlinks・次の recipe を bounded bundle として返す。returned / total / omitted は row 単位で明示。`--budget` は近似 row limit |
 | `suggest <partial>` | タイトルの部分一致補完 |
 | `backlinks <title>` | 行レベルの逆リンク（本文の無いターゲットにも効く） |
-| `related <title>` | 既存ページなら 2-hop ページ、本文の無いターゲットならそれを参照する source ページ |
+| `related <title>` | 既存ページなら 2-hop ページ、本文の無いターゲットならそれを参照する source ページ。曖昧 handle は handle source pages と候補 page ごとの related を分けて返す |
 | `path <A> <B>` | 2つのページ / 未解決ターゲットがリンクグラフ上でどう繋がるかを短い経路で見る。経路なしでも related / backlinks などの recovery hints を返す |
 | `link-stats <title>` | incoming リンク数と 0 / 1 / N（none / single / multi）区別 |
 | `unresolved` | 本文の無いリンクターゲットをランク付けして一覧（後述の注意あり） |
