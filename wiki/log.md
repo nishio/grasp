@@ -804,3 +804,10 @@
 - schema は v7 のまま。public compatibility version は `1.7.5`。
 - smoke: 3 project の Markdown fixture で `Shared` が resolved_unique / ambiguous / unresolved の各 signal として集計され、`signal_project_count=3`、`ambiguous_project_count=1`、`unresolved_project_count=1` を返すことを確認。
 - 検証: `python3 -m unittest discover -s tests`（74 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 00:03] implementation+dogfood+file back | `cross-project-spreads` ranking を追加
+- wiki 森 temp store で `cross-project-spread <title>` を dogfood。42 projects / 3338 pages / 265,031 lines / 23,183 edges / 1,627 unresolved は import 成功したが、query 指定版だけでは seed title が必要で、`index` / `log` / `overview` / numeric-only handles が上位を潰すことが分かった。
+- `cross-project-spreads` command を追加。normalized handle を project spread で rank し、seed title なしに weak cross-project signal を発見できる。`structural-name` / `numeric-only` / `artifact-only` は消さずに rank band で下げる。
+- dogfood: total normalized handles 6,131、`min_projects=2` で 211 handles。rank band 調整後の上位 concept-like は `nishio` / `ブロードリスニング` / `Plurality` / `Kozaneba` などになった。
+- schema は v7 のまま。public compatibility version は `1.7.6`。
+- 検証: `python3 -m unittest discover -s tests`（74 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。

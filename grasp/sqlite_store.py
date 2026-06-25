@@ -35,6 +35,17 @@ from .markdown import MarkdownMirror, MarkdownPageRecord, markdown_wikilink_targ
 SCHEMA_VERSION = "7"
 IMPORT_CACHE_MANIFEST_VERSION = 1
 PYTHON_LOOSE_SEARCH_MAX_LINES = 50_000
+STRUCTURAL_SPREAD_HANDLE_NORMS = frozenset(
+    {
+        "forest index",
+        "index",
+        "log",
+        "overview",
+        "readme",
+        "wiki index",
+        "wiki log",
+    }
+)
 
 
 SCHEMA = """
@@ -1280,6 +1291,59 @@ class SQLiteStore:
             "projects": returned_items,
         }
 
+    def cross_project_spreads(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        min_projects: int = 2,
+        project_limit: int = 3,
+        candidate_limit: int = 1,
+    ) -> dict[str, Any]:
+        projects = self._ambiguity_scope_projects()
+        limit = max(0, limit)
+        offset = max(0, offset)
+        min_projects = max(1, min_projects)
+        project_limit = max(0, project_limit)
+        candidate_limit = max(0, candidate_limit)
+        scope = "project" if self.project else "all-projects"
+        rows = self._cross_project_spread_rows(projects)
+        all_items = [_spread_summary_from_row(row) for row in rows]
+        items = [item for item in all_items if item["project_spread"] >= min_projects]
+        items.sort(key=_cross_project_spread_summary_rank_key)
+        returned_base = items[offset : offset + limit] if limit else []
+        returned_items = []
+        for item in returned_base:
+            spread = self.cross_project_spread(
+                item["title"],
+                limit=project_limit,
+                candidate_limit=candidate_limit,
+            )
+            detailed = dict(item)
+            detailed["project_samples"] = spread["projects"]
+            detailed["project_samples_returned"] = len(spread["projects"])
+            returned_items.append(detailed)
+        return {
+            "scope": scope,
+            "project": projects[0] if scope == "project" and projects else None,
+            "project_count": len(projects),
+            "total_handle_count": len(all_items),
+            "handle_count": len(items),
+            "handles_returned": len(returned_items),
+            "limit": limit,
+            "offset": offset,
+            "min_projects": min_projects,
+            "project_limit": project_limit,
+            "candidate_limit": candidate_limit,
+            "connection_strength": "weak-normalized-title",
+            "rank_basis": (
+                "Concept-like handles rank before structural-name, numeric-only, and artifact-only handles; "
+                "within each band, project_spread and incoming links rank higher."
+            ),
+            "note": "Spread ranking is a weak normalized-title discovery surface. Page identities stay project-scoped and are not merged.",
+            "spreads": returned_items,
+        }
+
     def _ambiguity_scope_projects(self) -> list[str]:
         names = self.project_names()
         if self.project:
@@ -1347,6 +1411,120 @@ class SQLiteStore:
             }
             for row in rows
         }
+
+    def _cross_project_spread_rows(self, projects: list[str]) -> list[sqlite3.Row]:
+        if not projects:
+            return []
+        placeholders = ",".join("?" for _ in projects)
+        return self.connection.execute(
+            f"""
+            WITH handle_project_stats AS (
+              SELECT
+                handle_norm,
+                project,
+                COUNT(DISTINCT page_id) AS candidate_count,
+                MIN(handle) AS sample_handle,
+                SUM(CASE WHEN graph_role IN ('navigation', 'log', 'artifact') THEN 1 ELSE 0 END) AS artifact_handle_count,
+                SUM(CASE WHEN graph_role NOT IN ('navigation', 'log', 'artifact') THEN 1 ELSE 0 END) AS content_handle_count
+              FROM page_handles
+              WHERE project IN ({placeholders})
+              GROUP BY handle_norm, project
+            ),
+            handle_stats AS (
+              SELECT
+                handle_norm,
+                COUNT(*) AS materialized_project_count,
+                SUM(candidate_count) AS page_candidate_count,
+                SUM(CASE WHEN candidate_count > 1 THEN 1 ELSE 0 END) AS ambiguous_project_count,
+                SUM(CASE WHEN content_handle_count = 0 THEN 1 ELSE 0 END) AS artifact_project_count,
+                SUM(CASE WHEN content_handle_count > 0 THEN 1 ELSE 0 END) AS content_project_count,
+                MIN(sample_handle) AS sample_handle
+              FROM handle_project_stats
+              GROUP BY handle_norm
+            ),
+            unresolved_project_rows AS (
+              SELECT
+                target_norm AS handle_norm,
+                project,
+                title,
+                link_count
+              FROM unresolved_targets
+              WHERE project IN ({placeholders})
+            ),
+            unresolved_stats AS (
+              SELECT
+                handle_norm,
+                COUNT(DISTINCT project) AS unresolved_project_count,
+                SUM(link_count) AS unresolved_link_count,
+                MIN(title) AS sample_unresolved_title
+              FROM unresolved_project_rows
+              GROUP BY handle_norm
+            ),
+            edge_project_rows AS (
+              SELECT
+                target_handle_norm AS handle_norm,
+                project,
+                source_page_id,
+                resolution_status
+              FROM edges
+              WHERE project IN ({placeholders})
+            ),
+            edge_stats AS (
+              SELECT
+                handle_norm,
+                COUNT(DISTINCT project) AS incoming_project_count,
+                COUNT(*) AS incoming_link_count,
+                COUNT(DISTINCT project || char(31) || source_page_id) AS incoming_source_page_count,
+                SUM(CASE WHEN resolution_status = 'resolved_unique' THEN 1 ELSE 0 END) AS resolved_unique,
+                SUM(CASE WHEN resolution_status = 'ambiguous' THEN 1 ELSE 0 END) AS ambiguous,
+                SUM(CASE WHEN resolution_status = 'unresolved' THEN 1 ELSE 0 END) AS unresolved
+              FROM edge_project_rows
+              GROUP BY handle_norm
+            ),
+            signal_projects AS (
+              SELECT handle_norm, project FROM handle_project_stats
+              UNION
+              SELECT handle_norm, project FROM unresolved_project_rows
+              UNION
+              SELECT handle_norm, project FROM edge_project_rows
+            ),
+            signal_stats AS (
+              SELECT handle_norm, COUNT(DISTINCT project) AS project_spread
+              FROM signal_projects
+              GROUP BY handle_norm
+            ),
+            all_norms AS (
+              SELECT handle_norm FROM handle_stats
+              UNION
+              SELECT handle_norm FROM unresolved_stats
+              UNION
+              SELECT handle_norm FROM edge_stats
+            )
+            SELECT
+              all_norms.handle_norm,
+              COALESCE(handle_stats.sample_handle, unresolved_stats.sample_unresolved_title, all_norms.handle_norm) AS title,
+              COALESCE(signal_stats.project_spread, 0) AS project_spread,
+              COALESCE(handle_stats.materialized_project_count, 0) AS materialized_project_count,
+              COALESCE(handle_stats.page_candidate_count, 0) AS page_candidate_count,
+              COALESCE(handle_stats.ambiguous_project_count, 0) AS ambiguous_project_count,
+              COALESCE(handle_stats.artifact_project_count, 0) AS artifact_project_count,
+              COALESCE(handle_stats.content_project_count, 0) AS content_project_count,
+              COALESCE(unresolved_stats.unresolved_project_count, 0) AS unresolved_project_count,
+              COALESCE(unresolved_stats.unresolved_link_count, 0) AS unresolved_link_count,
+              COALESCE(edge_stats.incoming_project_count, 0) AS incoming_project_count,
+              COALESCE(edge_stats.incoming_link_count, 0) AS incoming_link_count,
+              COALESCE(edge_stats.incoming_source_page_count, 0) AS incoming_source_page_count,
+              COALESCE(edge_stats.resolved_unique, 0) AS resolved_unique,
+              COALESCE(edge_stats.ambiguous, 0) AS ambiguous,
+              COALESCE(edge_stats.unresolved, 0) AS unresolved
+            FROM all_norms
+            LEFT JOIN signal_stats ON signal_stats.handle_norm = all_norms.handle_norm
+            LEFT JOIN handle_stats ON handle_stats.handle_norm = all_norms.handle_norm
+            LEFT JOIN unresolved_stats ON unresolved_stats.handle_norm = all_norms.handle_norm
+            LEFT JOIN edge_stats ON edge_stats.handle_norm = all_norms.handle_norm
+            """,
+            [*projects, *projects, *projects],
+        ).fetchall()
 
     def _ambiguities_sql(self, projects: list[str]) -> str:
         placeholders = ",".join("?" for _ in projects)
@@ -5221,6 +5399,80 @@ def _spread_totals(items: list[dict[str, Any]]) -> dict[str, Any]:
         "incoming_source_page_count": incoming_source_page_count,
         "resolution_counts": dict(resolution_counts),
     }
+
+
+def _spread_summary_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    handle_norm = row["handle_norm"]
+    rank_band = _spread_summary_rank_band(
+        handle_norm,
+        int(row["page_candidate_count"]),
+        int(row["artifact_project_count"]),
+        int(row["content_project_count"]),
+        int(row["incoming_link_count"]),
+        int(row["unresolved_link_count"]),
+    )
+    return {
+        "title": row["title"],
+        "handle_norm": handle_norm,
+        "project_spread": int(row["project_spread"]),
+        "materialized_project_count": int(row["materialized_project_count"]),
+        "page_candidate_count": int(row["page_candidate_count"]),
+        "ambiguous_project_count": int(row["ambiguous_project_count"]),
+        "artifact_project_count": int(row["artifact_project_count"]),
+        "content_project_count": int(row["content_project_count"]),
+        "unresolved_project_count": int(row["unresolved_project_count"]),
+        "unresolved_link_count": int(row["unresolved_link_count"]),
+        "incoming_project_count": int(row["incoming_project_count"]),
+        "incoming_link_count": int(row["incoming_link_count"]),
+        "incoming_source_page_count": int(row["incoming_source_page_count"]),
+        "resolution_counts": {
+            "resolved_unique": int(row["resolved_unique"]),
+            "ambiguous": int(row["ambiguous"]),
+            "unresolved": int(row["unresolved"]),
+        },
+        "rank_band": rank_band,
+        "rank_reason": _spread_summary_rank_reason(rank_band),
+        "connection_strength": "weak-normalized-title",
+    }
+
+
+def _spread_summary_rank_band(
+    handle_norm: str,
+    page_candidate_count: int,
+    artifact_project_count: int,
+    content_project_count: int,
+    incoming_link_count: int,
+    unresolved_link_count: int,
+) -> str:
+    if handle_norm in STRUCTURAL_SPREAD_HANDLE_NORMS:
+        return "structural-name"
+    if page_candidate_count > 0 and content_project_count == 0:
+        return "artifact-only"
+    if handle_norm.isdecimal():
+        return "numeric-only"
+    return "concept-like"
+
+
+def _spread_summary_rank_reason(rank_band: str) -> str:
+    if rank_band == "structural-name":
+        return "common wiki structural handle, ranked below concept-like handles"
+    if rank_band == "artifact-only":
+        return "materialized only as navigation/log/artifact handles, with no incoming or unresolved signal"
+    if rank_band == "numeric-only":
+        return "numeric-only handles are often issue/list markers, so they rank below concept-like handles"
+    return "concept-like handle"
+
+
+def _cross_project_spread_summary_rank_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    band_order = {"concept-like": 0, "structural-name": 1, "numeric-only": 2, "artifact-only": 3}
+    return (
+        band_order.get(item["rank_band"], 9),
+        -int(item["project_spread"]),
+        -int(item["incoming_link_count"]),
+        -int(item["unresolved_link_count"]),
+        -int(item["materialized_project_count"]),
+        str(item["title"]).casefold(),
+    )
 
 
 def rebuild_unresolved_targets(connection: sqlite3.Connection, project: str) -> None:
