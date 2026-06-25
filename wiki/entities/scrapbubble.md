@@ -1,6 +1,6 @@
 ---
 type: entity
-summary: ScrapBubble（takker99）は Scrapbox の UserScript で、リンクを hover すると遷移せずに飛び先ページを「吹き出し（bubble）」で表示し、関連ページリスト（2-hop）・逆リンクへ再帰的に潜れる。whiteList で複数 project を透過的に繋ぎ（自分の public+private、TamperMonkey 版は他者 project も）、空リンク（赤）は接続検知次第 blue に切替、cache-first・最大3 fetch・api/projects 更新時刻チェックで bounded、`?followRename=true` で改名追従する。**grasp の read 模型（近傍同梱・2-hop・逆リンク・赤リンク解決・cross-project）を、消費者だけ替えて AI-CLI でなく人間ブラウザ hover GUI として実装した双子**。同じ Scrapbox graph を「遷移せず近傍を見る」primitive にした並行先行例で、grasp の whole-store cross-project（v6）/ read=近傍同梱（軸1）/ incremental-sync の cache reuse / identity-without-name を別経路で裏付ける。followRename は grasp が data model で直す name=identity 欠陥を fetch 時 workaround で当てた downstream 証拠。whiteList は grasp が削ぐ Co-（他者 project 読み）と非 Co-（自分の public+private）を束ねており、grasp の cross-project は後者だけ。
+summary: ScrapBubble（takker99）は Scrapbox の UserScript で、リンクを hover すると遷移せずに飛び先ページを「吹き出し（bubble）」で表示し、関連ページリスト（2-hop）・逆リンクへ再帰的に潜れる。whiteList で複数 project を透過的に繋ぎ（自分の public+private、TamperMonkey 版は他者 project も）、空リンク（赤）は接続検知次第 blue に切替、cache-first・最大3 fetch・api/projects 更新時刻チェックで bounded、`?followRename=true` で改名追従する。**grasp の read 模型（近傍同梱・2-hop・逆リンク・赤リンク解決・cross-project）を、消費者だけ替えて AI-CLI でなく人間ブラウザ hover GUI として実装した双子**。同じ Scrapbox graph を「遷移せず近傍を見る」primitive にした並行先行例で、grasp の whole-store cross-project / read=近傍同梱（軸1）/ incremental-sync の cache reuse / identity-without-name を別経路で裏付ける。followRename は grasp が data model で直す name=identity 欠陥を fetch 時 workaround で当てた downstream 証拠。whiteList は grasp が削ぐ Co-（他者 project 読み）と非 Co-（自分の public+private）を束ねており、grasp の cross-project は後者だけ。
 sources:
   - https://github.com/takker99/ScrapBubble （README: "Show n-hop link destination pages beyond projects" / MIT / TypeScript+Deno / Preact / ~45 releases, latest 0.9.15 2025-09）
   - https://scrapbox.io/villagepump/ScrapBubble （UserScript 紹介・使い方・リリースノート, raw/scrapbubble--villagepump-ScrapBubble.json）
@@ -38,8 +38,8 @@ ScrapBubble の各機構は grasp の surface / 決定にほぼ1対1で対応す
 | hover bubble ＝ 遷移せず飛び先本文を読む | `read` ＝近傍同梱 / `--related-snippets` | **遷移を畳む＝round-trip を畳む**（[[ai-consumer-cost-and-trust]] 軸1）。bubble は人間版の近傍同梱 |
 | card-bubble（関連ページリスト） | `related`（2-hop） | 同じ 2-hop 関連模型 |
 | タイトル hover →逆リンク、再帰的に潜行 | `backlinks` ＋ 反復 read | 同じ逆リンク graph。人間は nested bubble、AI は反復 call |
-| 赤リンク→接続検知で blue／全 project 空は全走査 | `unresolved_targets`、v6 の target_project 存在チェック | 同じ赤リンク semantics。**「全 namespace を見ないと赤判定できない」コストも共通**（[[whole-store-graph-and-cross-project-edges]]） |
-| `whiteList` で複数 project 透過 | whole-store default retrieval（v6） | 同じ cross-project graph の価値。grasp は project ラベル付きで全体から検索（[[whole-store-graph-and-cross-project-edges]]） |
+| 赤リンク→接続検知で blue／全 project 空は全走査 | `unresolved_targets`、whole-store cross-project の target_project 存在チェック | 同じ赤リンク semantics。**「全 namespace を見ないと赤判定できない」コストも共通**（[[whole-store-graph-and-cross-project-edges]]） |
+| `whiteList` で複数 project 透過 | whole-store default retrieval | 同じ cross-project graph の価値。grasp は project ラベル付きで全体から検索（[[whole-store-graph-and-cross-project-edges]]） |
 | `?followRename=true`（改名追従） | identity-without-name（page `id`/`aliases`） | **同じ name=identity 欠陥への別解**（下記） |
 | リンク同一判定カスタム／表記ゆれ吸収／類似タイトル関連 | normalized search fallback / `mentions` の正規化 / 赤 node の normalize-title 統合 | 同じ「title が identity ゆえの表記ゆれ」問題 |
 | cache-first・最大3 fetch・api/projects 更新時刻チェック | `acquire`/`sync` の bounded fetch ＋ updated metadata 一致で reuse | 同じ bounded-fetch + cache-reuse な freshness（[[incremental-sync]]） |
@@ -83,7 +83,7 @@ villagepump `複数のprojectを透過的に扱う` に、daiiz が cross-projec
 ## 関連
 
 - [[why-not-scrapbox-clone]] — 双子だが grasp は Co- を削ぎ identity-without-name を足す。followRename はその name=identity 欠陥の downstream 証拠
-- [[whole-store-graph-and-cross-project-edges]] — whiteList 透過 ↔ whole-store cross-project（v6）。決定ページが `[/takker/ScrapBubble]` を slash-in-title の実例に使っている
+- [[whole-store-graph-and-cross-project-edges]] — whiteList 透過 ↔ whole-store cross-project。決定ページが `[/takker/ScrapBubble]` を slash-in-title の実例に使っている
 - [[ai-consumer-cost-and-trust]] — bubble ＝人間版の近傍同梱（軸1 round-trip 畳み）／「リンク貼って満足」は第3消費者軸
 - [[incremental-sync]] — cache-first・updated 時刻チェックの独立収束
 - [[come-from-declared-gather]] — daiiz deferral の「育てる vs preview」テンション

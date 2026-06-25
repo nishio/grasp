@@ -52,14 +52,14 @@ nishio 設計判断（Scrapbox `villagepump/grasp`, 出典 raw/grasp-villagepump
 - 接続を import 時に materialize するか、cross-project query 時に都度束ねるか（[[cross-project-reference-acquire-2026-06-24]] / `cross-project-refs` は後者寄り＝materialize せず都度抽出の方針）。
 - tentative なので、実装着手前に「resolved は分離 / unresolved は接続」の非対称が AI 読解で本当に有用かを dogfood で確かめる。
 
-### 2026-06-24: v6 全体決定が含意の2 clause を supersede（上の tentative Update を吸収・収束）
+### 2026-06-24: whole-store cross-project 決定が含意の2 clause を supersede（上の tentative Update を吸収・収束）
 
-[[whole-store-graph-and-cross-project-edges]]（v6）が本 decision の含意 clause を覆す。**materialized page node を namespace ごとに分けて merge しない核は維持**し、変えるのは edge・default scope・赤 node の扱い:
+[[whole-store-graph-and-cross-project-edges]]（当初は v6 decision と呼んだが、現行では schema 番号ではなく設計名として扱う）が本 decision の含意 clause を覆す。**materialized page node を namespace ごとに分けて merge しない核は維持**し、変えるのは edge・default scope・赤 node の扱い:
 
 - 「project 間リンク / cross-project related は作らない」→ cross-project link `[/P/T]` を import 時に **first-class edge として materialize** する（上 Update の Q「materialize するか都度束ねるか」を materialize 側で決着）。
 - 「retrieval は selected project 内だけ / 複数 project なら `--project` 必須」→ **retrieval default は whole-store、`--project` は絞り込み**。「自動 merge で AI が誤読」懸念は、merge せず **結果を project ラベル付きで返す** ことで解消する（scope を絞る代わりに label を付ける）。
 
 上の tentative Update（villagepump 由来）との関係:
 
-- **resolved page**: tentative Update は「resolved page graph は分離維持」とした。v6 は **whole-store + label で接続**する（`villagepump/Keicho` を read すると `/nishio` が backlink に出る）。誤読回避を「分離」でなく「labeling」で達成する立場（materialized page の identity は (project, id) のまま分離）。
-- **同名 bare 赤リンクの統合（収束）**: tentative Update の「別 project の同名赤リンク `[X]` を normalize 名 key で同一 node に束ねる」を **v6 が採用**した（nishio 2026-06-24「自信は低いが Cosense にない価値を生むので一旦この方針」）。赤 node（referenced-only）は normalize title を project 非依存 key として統合し、materialized page は namespaced のまま。誤接続リスク（同綴り別概念）は受容し、provenance を残して後から判別可能にする。tentative（撤回あり）。詳細・残る境界 Q は [[whole-store-graph-and-cross-project-edges]] の point 7 / Open Questions。
+- **resolved page**: tentative Update は「resolved page graph は分離維持」とした。whole-store cross-project 決定は **whole-store + label で接続**する（`villagepump/Keicho` を read すると `/nishio` が backlink に出る）。誤読回避を「分離」でなく「labeling」で達成する立場（materialized page の identity は (project, id) のまま分離）。
+- **同名 bare 赤リンクの統合（収束）**: tentative Update の「別 project の同名赤リンク `[X]` を normalize 名 key で同一 node に束ねる」を **whole-store cross-project 決定が採用**した（nishio 2026-06-24「自信は低いが Cosense にない価値を生むので一旦この方針」）。赤 node（referenced-only）は normalize title を project 非依存 key として統合し、materialized page は namespaced のまま。誤接続リスク（同綴り別概念）は受容し、provenance を残して後から判別可能にする。tentative（撤回あり）。詳細・残る境界 Q は [[whole-store-graph-and-cross-project-edges]] の point 7 / Open Questions。
