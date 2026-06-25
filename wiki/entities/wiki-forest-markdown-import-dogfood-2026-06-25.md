@@ -29,13 +29,15 @@ sources:
 
 一番重要な発見: **次の blocker は scale / raw size ではなく collision policy**。
 
-`--markdown-exclude-dir raw` は効いた。`llm-wiki-about-nishio` のように raw/source が大きい wiki でも、wiki 本文だけなら import は軽い。37 projects / 213k lines / 22.5k edges を約 22 秒で作れたので、forest dogfood の初期運用は performance では止まっていない。
+`--markdown-exclude-dir raw` は効いた。`llm-wiki-about-nishio` のように raw が大きい wiki でも、wiki 本文だけなら import は軽い。37 projects / 213k lines / 22.5k edges を約 22 秒で作れたので、forest dogfood の初期運用は performance では止まっていない。
+
+`source/` は `raw/` と同列に扱わない。LLM Wiki の `source/` は raw を読んで作った digest / source-backed synthesis であり、回答根拠になりうる。したがって default exclude ではなく、必要なら `graph_role=source` / evidence layer / ranking policy で扱いを分ける対象。
 
 失敗 5 件はすべて duplicate title / alias collision。類型:
 
 - draft variants が同一 H1 を持つ。
 - 複数 directory に `_overview` / `README` / `index` など同一 file stem alias がある。
-- source/session file と canonical page が同じ alias を持つ。
+- source digest / session file と canonical page が同じ alias を持つ。
 
 現在の Markdown mirror は collision を import error にする。これは単一 wiki の correctness では安全側だが、forest orchestration では 1 project の collision がその project 全体を落とす。全件 import には、collision をまず「観測可能な診断」に変える必要がある。
 
@@ -51,8 +53,8 @@ sources:
 2. **alias collision policy を identity/name 分離として設計する。**（[[markdown-identity-name-collision-policy]]）
    Page title / alias collision は同一 visible handle が複数 identity に束縛される問題。短期 workaround は path を diagnostic / fallback handle に持つことだが、path-qualified string を page name へ昇格しない。実装は artifact reduction の後、schema v6 の `page_handles` と ambiguous query result へ進める。
 
-3. **draft/source artifact 除外を追加する。**
-   `--markdown-exclude-dir raw` と同じ basename 方式で、`drafts/` や `source/` を除外可能にするか、frontmatter / path heuristic で graph_role=`artifact` を導入する。draft variants の同一 H1 は title collision なので、alias 無効化だけでは解けない。
+3. **artifact reduction と source role classification を分ける。**
+   `raw/` は heavy original dump なので default 除外候補。`drafts/` は知識ページでない途中生成物なら除外または `graph_role=artifact` 候補。一方 `source/` は raw digest / source-backed synthesis なので default exclude しない。必要なら `graph_role=source` として保持し、content graph / ranking / provenance で扱いを分ける。
 
 4. **`import-forest` orchestration は急がない。**
    37/42 は手動 loop で成立したので orchestration は価値がある。ただし先に collision policy と artifact 除外を詰めないと、orchestration command は「既知の失敗を集計するだけ」になる。
@@ -61,7 +63,8 @@ sources:
 
 - Page title collision の softening をどこまで許すか。同一 title は graph identity 衝突なので、安易に path-qualified title へ自動改名すると `[[Title]]` の期待とずれる。
 - alias collision softening を行うなら、どの条件で「意味のあるリンク解決」ではなく「曖昧 handle」として扱うか。path は一意だが、page name に混ぜると retrieval surface が汚れる。
-- `drafts/` / `source/` は既定除外にするか、明示 `--markdown-exclude-dir` に留めるか。wiki ごとの意味が違うため、既定除外は過剰かもしれない。
+- `drafts/` は既定除外にするか、明示 `--markdown-exclude-dir` に留めるか。wiki ごとの意味が違うため、既定除外は過剰かもしれない。
+- `source/` digest を content graph にどこまで混ぜるか。保持はするが、canonical synthesis と同列に ranking すると重複根拠が増える可能性がある。
 - collision report を store metadata に保存するか、import command の一回限り出力に留めるか。forest dashboard / import-forest を作るなら保存した方がよい。
 
 ## Related

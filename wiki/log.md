@@ -738,3 +738,8 @@
 - `tests/test_cli_help.py` の raw `sqlite3.connect` を明示 close に修正。Python sqlite3 の connection context manager は commit/rollback 用であり close しないため、ResourceWarning の原因になっていた。
 - 新 decision [[markdown-identity-name-collision-policy]] を追加。duplicate title / alias は import UX ではなく、visible handle が複数 page identity に束縛される問題として扱う。path は source address / fallback selection key であり、page name へ混ぜない。
 - 次の実装順は artifact reduction（`drafts/` / `source/` 除外または `graph_role=artifact`）→ schema v6 `page_handles` → ambiguous query result。`import-forest` は引き続き急がない。
+
+## [2026-06-25 14:18] correction | `source/` digest は default exclude しない
+- nishio 指摘: LLM Wiki の `source/` は `raw/` を読んで作成した digest / source-backed synthesis なので、`raw/` と同列に除外すべきではない。
+- 修正方針: `raw/` は heavy original dump として除外候補、`drafts/` / generated temp は artifact reduction 候補。`source/` は保持し、必要なら `graph_role=source` / evidence layer / ranking policy で canonical synthesis と扱いを分ける。
+- [[wiki-forest-markdown-import-dogfood-2026-06-25]] / [[grasp-backlog]] / [[markdown-identity-name-collision-policy]] / [[markdown-obsidian-indexed-mirror]] の `draft/source artifact 除外` 表現を修正。
