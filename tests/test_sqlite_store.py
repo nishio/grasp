@@ -400,6 +400,61 @@ class SQLiteStoreTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_line_windows_return_stored_opaque_line_ids(self):
+        fixture = {
+            "name": "fixture",
+            "displayName": "fixture",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "Opaque",
+                    "id": "opaque-page",
+                    "created": 1,
+                    "updated": 10,
+                    "views": 1,
+                    "lines": [
+                        {"text": "before", "created": 1, "updated": 1, "userId": "u"},
+                        {"text": "needle center", "created": 1, "updated": 2, "userId": "u"},
+                        {"text": "after", "created": 1, "updated": 3, "userId": "u"},
+                    ],
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(fixture, ensure_ascii=False), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+
+            store = SQLiteStore(store_path)
+            try:
+                with store.connection:
+                    store.connection.execute(
+                        """
+                        UPDATE lines
+                        SET line_id = ?
+                        WHERE project = ? AND page_id = ? AND line_index = ?
+                        """,
+                        ("opaque-line-b", "fixture", "opaque-page", 1),
+                    )
+
+                read = store.read_around_line(
+                    "opaque-line-b",
+                    line_context=1,
+                    backlink_limit=0,
+                    related_limit=0,
+                    unresolved_limit=0,
+                )
+                self.assertEqual(read["line_window"]["around_line_id"], "opaque-line-b")
+                self.assertEqual([line["text"] for line in read["lines"]], ["before", "needle center", "after"])
+
+                hits = store.search("needle", limit=1, context=1)
+                self.assertEqual(hits[0]["line_id"], "opaque-line-b")
+                self.assertEqual(hits[0]["context_window"]["around_line_id"], "opaque-line-b")
+            finally:
+                store.close()
+
     def test_imports_multiple_projects_into_one_store_without_mixing_graphs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             export_path = Path(tmpdir) / "export.json"

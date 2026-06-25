@@ -48,11 +48,11 @@ v1 scope 外:
 - `README.md` は「主たるユーザは人間 CLI operator ではなく AI agent」という前提に更新済み。
 - `skills/grasp/SKILL.md` が「いつ使うか」を持ち、CLI mechanics は `grasp <cmd> --help` に寄せる。
 - `--store` / `--project` は root option として command 前に置く。`--json` / `--full-ids` は agent が末尾へ置くミスを回復するため、command 後にも hidden alias として受ける。
-- text 出力の line-id は既定で実行内ローカル別名（`P1:0` など）に短縮し、先頭付近に `line-id aliases: P1=<page-id>` legend を出す。JSON は従来通り完全 `page.id:line-index` を返す。text で完全 ID が必要な時は `--full-ids`。
+- text 出力の line-id は既定で実行内ローカル別名（`P1:0` など）に短縮し、先頭付近に `line-id aliases: P1=<page-id>` legend を出す。JSON は stored full `line_id` を返す。現行 Cosense / Markdown import はまだ `page.id:line-index` 由来の line id を mint するが、window metadata は `page.id:line-index` を合成せず stored id を返す。text で完全 ID が必要な時は `--full-ids`。
 
 ## store
 
-- current public compatibility version は `1.7.7`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.7.8`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -116,7 +116,7 @@ v1 scope 外:
 
 ## import and parser facts
 
-- Cosense export の line には安定 id が無いので、v1 は `page.id:line-index` を `line-id` として採番する。これは read-only snapshot 内の **positional locator** であり、行挿入や write / transclude を跨ぐ安定 line identity ではない。text 出力では token 節約のため local alias に畳むが、JSON と `--full-ids` は完全 ID を出す。stable line identity の設計要件は [[grasp-backlog]]。
+- Cosense export の line には安定 id が無いので、v1 import は `page.id:line-index` 由来の `line-id` を採番する。これは read-only snapshot 内の **positional locator** であり、行挿入や write / transclude を跨ぐ安定 line identity ではない。text 出力では token 節約のため local alias に畳むが、JSON と `--full-ids` は stored full ID を出す。`line_window.around_line_id` / search context window も stored id を返す。stable line identity の設計要件は [[grasp-backlog]]。
 - Cosense export の line は metadata ON の `{text, created, updated, userId}` dict と、metadata なしの plain string の両方を許容する。plain string line は `text=<その文字列>`、`created/updated/user_id=None` として import し、リンク抽出対象にもする。
 - link graph は export に保存されないため、line text から edge を materialize する。
 - title / link resolve は case-insensitive + whitespace folding。

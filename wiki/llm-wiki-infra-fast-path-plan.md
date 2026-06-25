@@ -52,7 +52,7 @@ Non-goals for this fast path:
 3. `export-markdown --check` の no-op projection を通す。
 4. `append-section` + `append-log` でこの plan page か別小ページを更新する。
 
-この slice は rename をまだ実装しなくても、日常 file-back dogfood を始められる。ただし `2.0.0` 境界は [[write-layer-alpha-and-replay-test]] の通り stable identity + rename replay が通った時点にする。
+この slice は rename をまだ実装しなくても、日常 file-back dogfood を始められる。ただしこれは **append-only authoring alpha** の fast path であり、identity-without-name の差別化を claim する段階ではない。`2.0.0` 境界は [[write-layer-alpha-and-replay-test]] の通り stable identity + rename replay が通った時点にする。
 
 ## Risk register
 
