@@ -1,0 +1,30 @@
+{
+  "name": "grasp-next",
+  "version": "0.1.0+codex.20260624171142",
+  "description": "Codex slash command for closing the grasp ship loop.",
+  "author": {
+    "name": "nishio"
+  },
+  "homepage": "https://github.com/nishio/grasp",
+  "repository": "https://github.com/nishio/grasp",
+  "license": "MIT",
+  "keywords": [
+    "grasp",
+    "codex",
+    "slash-command"
+  ],
+  "interface": {
+    "displayName": "grasp next",
+    "shortDescription": "Ship grasp work and pick the next task.",
+    "longDescription": "Adds a Codex slash command for the grasp development loop: inspect changes, file back useful facts, verify, commit, push, and answer what to build next in Japanese.",
+    "developerName": "nishio",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Run /next for the grasp repo."
+    ]
+  }
+}
