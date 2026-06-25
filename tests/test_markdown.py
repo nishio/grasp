@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from grasp.cli import format_backlinks
+from grasp.cli import format_ambiguities, format_backlinks
 from grasp.markdown import (
     MarkdownCollisionError,
     MarkdownMirror,
@@ -442,6 +442,52 @@ class MarkdownImportTests(unittest.TestCase):
                 self.assertIn("resolution: ambiguous (2 candidates)", text)
                 self.assertIn("## Incoming links to ambiguous handle", text)
                 self.assertIn("resolved_backlinks=1", text)
+
+                ambiguities = store.ambiguities(limit=10, candidate_limit=1)
+                self.assertEqual(ambiguities["scope"], "project")
+                self.assertEqual(ambiguities["handle_count"], 1)
+                self.assertEqual(ambiguities["projects"][0]["ambiguous_handle_count"], 1)
+                ambiguity = ambiguities["ambiguities"][0]
+                self.assertEqual(ambiguity["handle"], "Shared")
+                self.assertEqual(ambiguity["candidate_count"], 2)
+                self.assertEqual(ambiguity["candidates_returned"], 1)
+                self.assertTrue(ambiguity["candidates_truncated"])
+                self.assertEqual(ambiguity["ambiguous_link_count"], 1)
+                ambiguity_text = format_ambiguities(ambiguities)
+                self.assertIn("# Ambiguous Handles", ambiguity_text)
+                self.assertIn("handles=1", ambiguity_text)
+            finally:
+                store.close()
+
+    def test_ambiguities_defaults_to_all_projects(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            store_path = base / "store.sqlite"
+            for project in ("one", "two"):
+                root = base / project
+                root.mkdir()
+                (root / "A.md").write_text(
+                    "\n".join(["---", "aliases: [Shared]", "---", f"# {project} A"]),
+                    encoding="utf-8",
+                )
+                (root / "B.md").write_text(
+                    "\n".join(["---", "aliases: [Shared]", "---", f"# {project} B"]),
+                    encoding="utf-8",
+                )
+                (root / "Source.md").write_text("links to [[Shared]]\n", encoding="utf-8")
+                import_markdown_folder_to_sqlite(root, store_path, project_name=project)
+
+            store = SQLiteStore(store_path)
+            try:
+                report = store.ambiguities(limit=10, candidate_limit=2)
+                self.assertEqual(report["scope"], "all-projects")
+                self.assertEqual(report["project_count"], 2)
+                self.assertEqual(report["handle_count"], 2)
+                self.assertEqual({item["project"] for item in report["ambiguities"]}, {"one", "two"})
+                self.assertEqual(
+                    {project["project"]: project["ambiguous_link_count"] for project in report["projects"]},
+                    {"one": 1, "two": 1},
+                )
             finally:
                 store.close()
 

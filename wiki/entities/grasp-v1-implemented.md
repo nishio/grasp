@@ -52,7 +52,7 @@ v1 scope 外:
 
 ## store
 
-- current public compatibility version は `1.7.1`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.7.2`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -75,6 +75,7 @@ v1 scope 外:
 | `stats` | store の schema / project list / metadata / count を表示。store missing 時は diagnostic と next actions を返す |
 | `read <title>` | existing page は本文 + backlinks + related + unresolved。missing linked target は link stats + backlinks + source pages。zero-hit 時は `recovery_hints` も返す。visible handle が複数 page identity に束縛される時は暗黙に片方を選ばず `ambiguity.type=handle_ambiguity` と候補 page_id / path / graph_role を返す。`read --page-id <id>` / `read --path <relative-path>` は identity を明示して読む。`--related-snippets` で related/source pages の snippet を同梱する。既定 `--related-snippet-mode lead` は先頭 N 行（default 5）、`edge` は related/source item を導いたリンク行を中心に `snippet_lines` / `snippet_window` を返す。`--around-line <line-id> --line-context N` で完全 line_id からページを解決し、中心行の前後 N 行だけを `lines[]` と `line_window` で返す |
 | `backlinks <title>` | `(source page, line-id, line text)` の行レベル backlinks。missing target にも効く。visible handle が複数 page identity に束縛される時は `resolution_status=ambiguous` と `ambiguity` を返し、`backlinks[]` / `handle_backlinks.items[]` は ambiguous handle 自体への incoming lines、`candidate_backlinks[]` は候補 page ごとの resolved backlinks を返す。曖昧リンクを候補 page へ勝手に配らない |
+| `ambiguities` | `page_handles` の 1:N handle を一覧する。`--project` 指定時は selected project、未指定時は store 全 project を対象にし、project 別 ambiguous handle count / ambiguous incoming link count / source page count と、各 handle の bounded candidate pages を返す |
 | `related <title>` | existing page は page 間 edge の 2-hop pages。missing target は source pages。空結果時は `recovery_hints` を返す |
 | `path <A> <B>` | pages ∪ unresolved targets を node、materialized internal links を無向 edge として shortest path を返す。`--max-depth` default 4、`--limit` default 3。edge には根拠 line を同梱する。端点が resolve できるが経路が無い時は `recovery_hints.path` に reason / next_max_depth / related / backlinks / link-stats を返す |
 | `link-stats <title>` | incoming link count / source page count / none-single-multi を返す。visible handle が複数 page identity に束縛される時は `ambiguity.type=handle_ambiguity` を返し、zero-hit recovery hints へ誤分類しない。zero-hit 時は `recovery_hints` も返す |
@@ -129,6 +130,7 @@ Markdown mirror facts:
 - page id は frontmatter `id` があればそれ、なければ relative path の SHA-1 先頭 24 hex から作る。line id は Cosense import と同じく `<page-id>:<line-index>`。
 - frontmatter `aliases` と file stem は link handle になり、`page_handles` に materialize される。unique handle への `[[alias]]` は `edges.resolution_status=resolved_unique` として `target_page_id` に解決され、duplicate alias は `resolution_status=ambiguous` になる。ambiguous edge は unresolved target には入れず、既存 page backlink / related にも暗黙接続しない。
 - `backlinks <ambiguous handle>` は ambiguous handle 自体への incoming lines を primary に返し、候補 page ごとの resolved backlinks は `candidate_backlinks[]` に分けて返す。これは曖昧リンクを candidate page へ自動割当しないための contract。
+- `ambiguities` は duplicate title / alias / file stem の current report surface。forest import 後に「どの project / handle が曖昧か」を、incoming ambiguous link count と bounded candidates 付きで見る。
 - frontmatter `tags` は page から tag target への outgoing edge として materialize する。`#tag` 付きの同じ frontmatter line で重複する場合は line 単位で重複 edge を避ける。
 - Markdown mirror は `index.md` / `forest-index.md` / `maps/` / `views/` / frontmatter `role: navigation` を navigation artifact、`log.md` / `log/*.md` / frontmatter `type: log-entry` を log artifact と分類し、これらの outgoing edges を既定 content graph から除外する。`drafts/` / generated temp / frontmatter `role/type: artifact|draft|generated` は artifact と分類し、search には残すが outgoing edges は除外する。
 - Markdown mirror は `source/` / `sources/` / frontmatter `role/type: source` を `graph_role=source` と分類する。`source` role は raw 由来 digest / source-backed synthesis として保持し、`content` と同じく outgoing edges を materialize する。これは `raw/` の default exclude とは別で、`source/` digest は除外しない。

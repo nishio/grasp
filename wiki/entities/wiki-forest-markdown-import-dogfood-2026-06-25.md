@@ -43,7 +43,7 @@ sources:
 - 複数 directory に `_overview` / `README` / `index` など同一 file stem alias がある。
 - source digest / session file と canonical page が同じ alias を持つ。
 
-schema v7 では duplicate title / alias collision は import error ではなくなった。単一 wiki の correctness は `read <handle>` の ambiguity と `read --page-id` / `read --path` の identity selection に寄せる。2026-06-25 の `1.7.1` で `backlinks <ambiguous handle>` は handle 自体への incoming lines と候補 page ごとの resolved backlinks を分けて返すようになった。forest orchestration の次 blocker は collision ではなく、ambiguous handle を forest-level report / ranking でどう surface するかと、`wikis.yaml` からの一括 import command 化。
+schema v7 では duplicate title / alias collision は import error ではなくなった。単一 wiki の correctness は `read <handle>` の ambiguity と `read --page-id` / `read --path` の identity selection に寄せる。2026-06-25 の `1.7.1` で `backlinks <ambiguous handle>` は handle 自体への incoming lines と候補 page ごとの resolved backlinks を分けて返すようになり、`1.7.2` で `ambiguities` が store / project 内の ambiguous handles を一覧できるようになった。forest orchestration の次 blocker は collision ではなく、`wikis.yaml` からの一括 import command 化と、`related <ambiguous handle>` の surface。
 
 重要な設計制約: alias collision は単なる import UX ではなく、Scrapbox の name=identity 欠陥を `identity-without-name` で直す問題そのものに近い。path は一意性の根拠として diagnostic / fallback handle には使えるが、path-qualified string をそのまま page name にすると LLM / 人間の期待する `[[Title]]` とずれる。
 
@@ -55,17 +55,17 @@ schema v7 では duplicate title / alias collision は import error ではなく
    `MarkdownMirror.from_folder` の duplicate title / alias / id error を、機械可読な collision kind / normalized handle / paths / candidate title を持つ診断にする。CLI は text では短く、`--json` では full diagnostics を返す。
 
 2. **alias collision policy を identity/name 分離として設計する。**（[[markdown-identity-name-collision-policy]]）
-   Page title / alias collision は同一 visible handle が複数 identity に束縛される問題。path-qualified string を page name へ昇格しない。schema v6 の `page_handles` と `read` の ambiguous query result / `--page-id` / `--path`、schema v7 の edge `resolution_status` と Markdown duplicate title / alias import softening、`backlinks <ambiguous handle>` の handle/candidate 分離は実装済み。残りは `related <ambiguous handle>` と forest-level ambiguity report。
+   Page title / alias collision は同一 visible handle が複数 identity に束縛される問題。path-qualified string を page name へ昇格しない。schema v6 の `page_handles` と `read` の ambiguous query result / `--page-id` / `--path`、schema v7 の edge `resolution_status` と Markdown duplicate title / alias import softening、`backlinks <ambiguous handle>` の handle/candidate 分離、`ambiguities` report は実装済み。残りは `related <ambiguous handle>`。
 
 3. **artifact reduction と source role classification を分ける。**（2026-06-25 最小実装）
    `raw/` は heavy original dump なので `--markdown-exclude-dir raw` で除外可能。`source/` は raw digest / source-backed synthesis なので default exclude せず、`graph_role=source` として保持し content と同じく edge を materialize する。`drafts/` / generated temp は `graph_role=artifact` として search には残すが outgoing edges は除外する。duplicate title / alias は schema v7 の handle ambiguity として別管理する。
 
 4. **`import-forest` orchestration は急がない。**
-   v7 で 42/42 が temp store に入るため、orchestration は「既知失敗の集計」ではなく実用的な森 import surface になった。ただし command 化は急がず、まず ambiguous handle の表示 / ranking と whole-store cross-project の設計との接続を詰める。
+   v7 で 42/42 が temp store に入り、`ambiguities` で ambiguity report も取れるため、orchestration は「既知失敗の集計」ではなく実用的な森 import surface になった。ただし command 化は急がず、まず whole-store cross-project の設計との接続を詰める。
 
 ## Open Questions
 
-- ambiguous handle を forest-level report としてどう surface するか。`read` / `backlinks` では候補を返せるが、森全体の import後に「どの wiki に ambiguity がどれだけあるか」を見る dashboard / stats は未実装。
+- `ambiguities` の forest-level report を `import-forest` の summary にどう組み込むか。
 - `related <ambiguous handle>` を handle source pages と候補 page の related にどう分けるか。
 - `artifact` role 由来の ambiguity を forest report / ranking でどう弱めるか。
 - `source/` digest を content graph にどこまで混ぜるか。保持はするが、canonical synthesis と同列に ranking すると重複根拠が増える可能性がある。

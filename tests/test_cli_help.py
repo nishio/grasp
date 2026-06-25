@@ -12,6 +12,7 @@ COMMANDS = [
     "stats",
     "read",
     "backlinks",
+    "ambiguities",
     "related",
     "path",
     "link-stats",

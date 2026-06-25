@@ -60,6 +60,7 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
+| `1.7.2` | schema `7` | 2026-06-25 | schema `7` compatible | `ambiguities` command を追加。`page_handles` の 1:N handle を store 全体または selected project で列挙し、project 別 ambiguous handle count / ambiguous incoming link count / source page count と、各 handle の bounded candidates を返す。schema は不変 |
 | `1.7.1` | schema `7` | 2026-06-25 | schema `7` compatible | `backlinks <ambiguous handle>` が `resolution_status=ambiguous` と `ambiguity` を返し、`backlinks[]` / `handle_backlinks.items[]` には ambiguous handle 自体への incoming lines、`candidate_backlinks[]` には候補 page ごとの resolved backlinks を分けて返す。schema は不変 |
 | `1.7.0` | schema `7` | 2026-06-25 | `1.6.x` store は rebuild | `edges` に `target_handle`, `target_handle_norm`, `target_page_id`, `resolution_status` を追加。edge resolution は `page_handles` から `resolved_unique` / `ambiguous` / `unresolved` を materialize し、ambiguous handle を unresolved target や既存 page backlink と誤分類しない。Markdown duplicate title / alias は import 全体を止めず、`read <handle>` の ambiguity 候補として surface する。duplicate frontmatter `id` は identity 衝突なので引き続き hard error |
 | `1.6.0` | schema `6` | 2026-06-25 | `1.5.x` store は rebuild | SQLite schema に `page_handles` を追加し、visible handle（title / Markdown alias）と page identity `(project,page_id)` を分離する入口を作った。`read <handle>` は handle が複数 page identity に束縛される時、暗黙に片方を選ばず `ambiguity.type=handle_ambiguity` と候補 page_id / path / graph_role を返す。`read --page-id <id>` / `read --path <relative-path>` で明示 identity を選択できる。Markdown import source を import cache manifest に `source_type=markdown` / `exclude_dirs` 付きで保存し、schema mismatch recovery が Markdown folder mirror も再構築できる |
@@ -102,6 +103,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.7.1`
+- Current public compatibility version: `1.7.2`
 - Current internal `SCHEMA_VERSION`: `7`
-- Current package metadata should match `1.7.1`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.7.2`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
