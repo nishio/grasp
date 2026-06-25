@@ -841,3 +841,11 @@
 - これは [[llm-wiki-infra-fast-path-plan]] Phase 0 の前処理。まだ `adopt-markdown` / replay / write CLI / projection export は未実装。
 - schema は v7 のまま。public compatibility version は `1.7.9`。
 - 検証: `python3 -m unittest discover -s tests`（80 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 00:44] implementation+dogfood+file back | `adopt-markdown` と `export-markdown --check` を追加
+- `adopt-markdown <folder>` command を追加。Markdown folder を既存 import path で SQLite materialized index に入れ、各 page を `page_create` event として JSONL journal に append する。既存 journal は `--replace-journal` なしでは上書きしない。
+- `export-markdown --output <folder> --check` command を追加。Markdown-backed project の stored lines を source path へ projection し、既存 files と比較する。差分があれば `ok=false` で exit 1。通常実行では changed / missing files を書くが、extra files は削除しない。
+- dogfood: temp store で repo `wiki/` を `adopt-markdown wiki --project grasp-wiki` し、`export-markdown --output wiki --check` が 36 files / changed 0 / missing 0 / extra 0 で clean。
+- これは [[llm-wiki-infra-fast-path-plan]] Phase 1-2 の最小 no-op gate。まだ replay / write CLI / semantic index-log regeneration は未実装。
+- schema は v7 のまま。public compatibility version は `1.7.10`。
+- 検証: `python3 -m unittest discover -s tests`（81 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。

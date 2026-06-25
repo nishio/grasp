@@ -9,6 +9,7 @@ from pathlib import Path
 
 COMMANDS = [
     "import",
+    "adopt-markdown",
     "import-forest",
     "stats",
     "read",
@@ -28,6 +29,7 @@ COMMANDS = [
     "cross-project-acquire",
     "gather",
     "export-ai",
+    "export-markdown",
     "sync",
     "acquire",
     "unresolved",
@@ -1163,6 +1165,92 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(read_result["page"]["title"], "A")
         self.assertEqual(read_result["backlink_count_total"], 1)
         self.assertEqual(read_result["unresolved_targets"][0]["title"], "Missing")
+
+    def test_adopt_markdown_writes_journal_and_export_check_noops(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nlinks to [[B]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            adopt_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            check_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--check",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "A.md").write_text("# A\nlinks to [[B]]\nchanged\n", encoding="utf-8")
+            dirty_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--check",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            journal_events = [
+                json.loads(line)
+                for line in journal_path.read_text(encoding="utf-8").splitlines()
+            ]
+
+        adopt_result = json.loads(adopt_completed.stdout)
+        check_result = json.loads(check_completed.stdout)
+        dirty_result = json.loads(dirty_completed.stdout)
+
+        self.assertEqual(adopt_result["journal_events"], 2)
+        self.assertEqual(adopt_result["adopted_pages"], 2)
+        self.assertEqual([event["event_type"] for event in journal_events], ["page_create", "page_create"])
+        self.assertEqual(journal_events[0]["project"], "wiki")
+        self.assertIn("lines", journal_events[0]["payload"])
+        self.assertTrue(check_result["ok"])
+        self.assertEqual(check_result["changed_files"], [])
+        self.assertEqual(dirty_completed.returncode, 1)
+        self.assertFalse(dirty_result["ok"])
+        self.assertEqual(dirty_result["changed_files"], ["A.md"])
 
     def test_read_markdown_page_by_source_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:

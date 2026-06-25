@@ -60,6 +60,7 @@ v1 系では public version を `1.x.y` とする。
 
 | Version | Internal store | Date | Store compatibility | Main changes |
 |---|---:|---|---|---|
+| `1.7.10` | schema `7` | 2026-06-26 | schema `7` compatible | `adopt-markdown <folder>` と `export-markdown --output <folder> --check` を追加。既存 Markdown wiki を SQLite materialized index + JSONL journal に採用し、stored lines から Markdown projection の no-op check を行える。repo `wiki/` dogfood で 36 files clean。write/replay/rename は未実装、schema は不変 |
 | `1.7.9` | schema `7` | 2026-06-26 | schema `7` compatible | LLM Wiki infra fast path Phase 0 の前処理として `grasp.journal` を追加。event JSONL schema v1、`page_create` / `page_update` / `section_append` / `page_rename` / `log_append` / `projection_export` の event type contract、canonical JSONL encode / append / read validation を固定。CLI surface と store schema は不変 |
 | `1.7.8` | schema `7` | 2026-06-26 | schema `7` compatible | `line_window.around_line_id` / search context window が `page_id:line_index` を合成せず、stored `lines.line_id` を返すようにした。stable line identity の完全実装ではなく、opaque line id 化の前処理。schema は不変 |
 | `1.7.7` | schema `7` | 2026-06-26 | schema `7` compatible | `suggest` の既定を asearch-style lexical fuzzy title suggestion に拡張。exact / prefix / substring を優先しつつ、長文タイトルに対する空白区切り断片一致と文字順序近似を返す。`--mode substring` で従来の厳密部分一致に戻せる。schema は不変 |
@@ -110,6 +111,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.7.9`
+- Current public compatibility version: `1.7.10`
 - Current internal `SCHEMA_VERSION`: `7`
-- Current package metadata should match `1.7.9`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.7.10`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

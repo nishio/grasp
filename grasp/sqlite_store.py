@@ -29,7 +29,7 @@ from .cosense import (
     parse_cosense_cross_project_links,
     parse_cosense_links,
 )
-from .markdown import MarkdownMirror, MarkdownPageRecord, markdown_wikilink_target
+from .markdown import MarkdownMirror, MarkdownPageRecord, iter_markdown_files, markdown_wikilink_target
 
 
 SCHEMA_VERSION = "7"
@@ -969,6 +969,19 @@ def _changed_markdown_paths(old_manifest: dict[str, Any] | None, new_manifest: d
     return sorted(changed)
 
 
+def _safe_markdown_output_path(output: Path, relative_path: str) -> Path:
+    path = Path(relative_path)
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"unsafe Markdown projection path: {relative_path}")
+    return output / path
+
+
+def _markdown_lines_to_text(lines: list[str]) -> str:
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
+
+
 def _refresh_project_counts_sql(connection: sqlite3.Connection, project: str) -> None:
     connection.execute(
         """
@@ -1865,6 +1878,83 @@ class SQLiteStore:
             (project, page.id, offset, limit),
         ).fetchall()
         return [self._line_from_row(row) for row in rows], offset + len(rows) < page.line_count
+
+    def export_markdown(self, output_folder: str | Path, *, check: bool = False) -> dict[str, Any]:
+        project = self._require_project()
+        output = Path(output_folder)
+        manifest = self._markdown_manifest_for_project(project)
+        files = manifest.get("files")
+        if not isinstance(files, dict) or not files:
+            raise ValueError(f"project is not a Markdown mirror project or has no Markdown manifest: {project}")
+
+        projections = self._markdown_projection_files(project, files)
+        changed_files: list[str] = []
+        missing_files: list[str] = []
+        written_files: list[str] = []
+        for relative_path, text in projections.items():
+            target = _safe_markdown_output_path(output, relative_path)
+            if not target.exists():
+                missing_files.append(relative_path)
+                if not check:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(text, encoding="utf-8")
+                    written_files.append(relative_path)
+                continue
+            current = target.read_text(encoding="utf-8")
+            if current != text:
+                changed_files.append(relative_path)
+                if not check:
+                    target.write_text(text, encoding="utf-8")
+                    written_files.append(relative_path)
+
+        exclude_dirs = tuple(str(item) for item in manifest.get("exclude_dirs") or [])
+        existing_files = {
+            path.relative_to(output).as_posix()
+            for path in iter_markdown_files(output, exclude_dirs=exclude_dirs)
+        } if output.exists() else set()
+        extra_files = sorted(existing_files - set(projections))
+        ok = not changed_files and not missing_files and not extra_files
+        return {
+            "project": project,
+            "output": str(output),
+            "check": check,
+            "ok": ok,
+            "file_count": len(projections),
+            "checked_files": len(projections) if check else 0,
+            "written_files": written_files,
+            "written_count": len(written_files),
+            "changed_files": sorted(changed_files),
+            "missing_files": sorted(missing_files),
+            "extra_files": extra_files,
+        }
+
+    def _markdown_manifest_for_project(self, project: str) -> dict[str, Any]:
+        metadata = self.metadata()
+        if metadata.get(f"project.{project}.source_type") != "markdown":
+            return {}
+        manifest = _json_metadata(metadata, f"project.{project}.markdown_manifest")
+        return manifest if isinstance(manifest, dict) else {}
+
+    def _markdown_projection_files(self, project: str, files: dict[str, Any]) -> dict[str, str]:
+        projections: dict[str, str] = {}
+        for relative_path in sorted(str(path) for path in files):
+            item = files.get(relative_path)
+            if not isinstance(item, dict):
+                continue
+            page_id = str(item.get("page_id") or "")
+            if not page_id:
+                continue
+            lines = self.connection.execute(
+                """
+                SELECT text
+                FROM lines
+                WHERE project = ? AND page_id = ?
+                ORDER BY line_index
+                """,
+                (project, page_id),
+            ).fetchall()
+            projections[relative_path] = _markdown_lines_to_text([row["text"] for row in lines])
+        return projections
 
     def page_lines_around(
         self,

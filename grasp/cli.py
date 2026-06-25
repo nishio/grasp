@@ -11,7 +11,8 @@ from typing import Any
 
 from .cosense_cli import CosenseCliClient, acquire_from_cosense, sync_from_cosense
 from .forest import import_forest_from_registry
-from .markdown import MarkdownCollisionError
+from .journal import append_journal_event, make_journal_event
+from .markdown import MarkdownCollisionError, MarkdownMirror
 from .sqlite_store import (
     SCHEMA_VERSION,
     SQLiteStore,
@@ -144,6 +145,39 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="NAME",
         help="Directory basename to skip when importing a Markdown mirror. Repeat for multiple names, e.g. --markdown-exclude-dir raw.",
+    )
+
+    adopt_parser = add_command_parser(
+        subparsers,
+        "adopt-markdown",
+        help="Adopt an existing Markdown wiki into the store and event journal.",
+        description=(
+            "Import a Markdown folder into the SQLite materialized index and append page_create events "
+            "to a durable JSONL journal. This is the Phase 1 bridge toward native authority + Markdown projection."
+        ),
+        returns=(
+            "store, project, journal, journal_events, adopted_pages, pages, lines, edges, unresolved_targets, markdown_import"
+        ),
+        examples=[
+            "grasp adopt-markdown wiki --project grasp-wiki --journal wiki.grasp/events.jsonl",
+            "grasp --store /tmp/grasp.sqlite adopt-markdown wiki --project grasp-wiki --replace-journal",
+        ],
+        notes=[
+            "The default journal path is <markdown-folder-name>.grasp/events.jsonl beside the folder.",
+            "Existing journals are not overwritten unless --replace-journal is supplied.",
+            "The journal event contract is fixed in grasp.journal; replay/write surfaces are added later.",
+        ],
+    )
+    adopt_parser.add_argument("folder", type=Path, help="Markdown folder to adopt.")
+    adopt_parser.add_argument("--project", dest="adopt_project", default=None, help="Project namespace. Defaults to --project, then folder name.")
+    adopt_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <folder>.grasp/events.jsonl beside the Markdown folder.")
+    adopt_parser.add_argument("--replace-journal", action="store_true", help="Replace an existing journal file before appending adoption events.")
+    adopt_parser.add_argument(
+        "--markdown-exclude-dir",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Directory basename to skip when adopting the Markdown mirror. Repeat for multiple names.",
     )
 
     import_forest_parser = add_command_parser(
@@ -717,6 +751,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export_ai_parser.add_argument("--output", type=Path, default=None, help="Write export text to this file instead of stdout.")
 
+    export_markdown_parser = add_command_parser(
+        subparsers,
+        "export-markdown",
+        help="Export a Markdown projection from a Markdown-backed project.",
+        description=(
+            "Project stored Markdown lines back to a folder. With --check, compare projection output to existing files "
+            "without writing and return a non-zero exit status if the projection is not clean."
+        ),
+        returns=(
+            "project, output, check, ok, file_count, checked_files, written_files, written_count, "
+            "changed_files, missing_files, extra_files"
+        ),
+        examples=[
+            "grasp --project grasp-wiki export-markdown --output wiki --check",
+            "grasp --project grasp-wiki --json export-markdown --output wiki --check",
+            "grasp --project grasp-wiki export-markdown --output wiki",
+        ],
+        notes=[
+            "This initial projection preserves stored lines and paths; formatting synthesis comes later.",
+            "--check is the no-op gate for adopting an existing Markdown wiki before write dogfood.",
+        ],
+    )
+    export_markdown_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder.")
+    export_markdown_parser.add_argument("--check", action="store_true", help="Only compare projection output; do not write files.")
+
     sync_parser = add_command_parser(
         subparsers,
         "sync",
@@ -841,6 +900,79 @@ def add_command_parser(
     return command_parser
 
 
+def default_journal_path(folder: Path) -> Path:
+    return folder.parent / f"{folder.name}.grasp" / "events.jsonl"
+
+
+def adopt_markdown(
+    folder: Path,
+    store_path: Path,
+    *,
+    project: str | None,
+    journal_path: Path | None,
+    replace_journal: bool,
+    exclude_dirs: tuple[str, ...],
+) -> dict[str, Any]:
+    folder = Path(folder)
+    journal = journal_path or default_journal_path(folder)
+    if journal.exists() and not replace_journal:
+        raise ValueError(f"journal already exists: {journal}; use --replace-journal to overwrite")
+
+    mirror = MarkdownMirror.from_folder(folder, exclude_dirs=exclude_dirs)
+    stats = import_markdown_folder_to_sqlite(
+        folder,
+        store_path,
+        project_name=project,
+        exclude_dirs=exclude_dirs,
+    )
+    adopted_project = str(stats["project"])
+    events = [
+        make_journal_event(
+            "page_create",
+            project=adopted_project,
+            payload=adopt_markdown_record_payload(record),
+        )
+        for record in mirror.records
+    ]
+    if replace_journal:
+        journal.parent.mkdir(parents=True, exist_ok=True)
+        journal.write_text("", encoding="utf-8")
+    for event in events:
+        append_journal_event(journal, event)
+
+    result = dict(stats)
+    result.update(
+        {
+            "journal": str(journal),
+            "journal_events": len(events),
+            "adopted_pages": len(events),
+        }
+    )
+    return result
+
+
+def adopt_markdown_record_payload(record: Any) -> dict[str, Any]:
+    return {
+        "source_path": record.relative_path.as_posix(),
+        "page_id": record.page.id,
+        "title": record.page.title,
+        "aliases": record.aliases,
+        "graph_role": record.graph_role,
+        "source_hash": record.source_hash,
+        "lines": [
+            {
+                "line_id": line.line_id,
+                "line_index": line.index,
+                "text": line.text,
+                "created": line.created,
+                "updated": line.updated,
+                "user_id": line.user_id,
+            }
+            for line in record.page.lines
+        ],
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -870,6 +1002,27 @@ def main(argv: list[str] | None = None) -> int:
                     project_name=project,
                     exclude_dirs=tuple(args.markdown_exclude_dir),
                 )
+        except MarkdownCollisionError as error:
+            if args.json:
+                emit_error_result(error)
+                return 2
+            parser.error(str(error))
+        except ValueError as error:
+            parser.error(str(error))
+        emit_result(args, result)
+        return 0
+
+    if args.command == "adopt-markdown":
+        project = args.adopt_project or args.project
+        try:
+            result = adopt_markdown(
+                args.folder,
+                args.store,
+                project=project,
+                journal_path=args.journal,
+                replace_journal=args.replace_journal,
+                exclude_dirs=tuple(args.markdown_exclude_dir),
+            )
         except MarkdownCollisionError as error:
             if args.json:
                 emit_error_result(error)
@@ -924,6 +1077,8 @@ def main(argv: list[str] | None = None) -> int:
         if store is not None:
             store.close()
     emit_result(args, result)
+    if args.command == "export-markdown" and args.check and not result.get("ok"):
+        return 1
     return 0
 
 
@@ -1183,6 +1338,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             args.output.write_text(result["text"], encoding="utf-8")
             result["output"] = str(args.output)
         return result
+    if args.command == "export-markdown":
+        return store.export_markdown(args.output, check=args.check)
     if args.command == "unresolved":
         return {
             "unresolved_targets": store.unresolved_targets(limit=args.limit),
@@ -1582,6 +1739,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
     aliases = aliases or LineIdAliases(enabled=False)
     if command == "import":
         return format_import(result)
+    if command == "adopt-markdown":
+        return format_adopt_markdown(result)
     if command == "import-forest":
         return format_import_forest(result)
     if command == "stats":
@@ -1629,6 +1788,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_gather(result, aliases=aliases)
     if command in {"export-ai", "export-for-ai"}:
         return format_export_ai(result)
+    if command == "export-markdown":
+        return format_export_markdown(result)
     if command == "unresolved":
         return with_alias_legend(format_unresolved_targets(result["unresolved_targets"], aliases=aliases), aliases)
     if command == "sync":
@@ -1658,6 +1819,38 @@ def format_import(result: dict[str, Any]) -> str:
         f"unresolved_targets: {result['unresolved_targets']}\n"
         f"{markdown_section}"
     )
+
+
+def format_adopt_markdown(result: dict[str, Any]) -> str:
+    return (
+        format_import(result)
+        + f"journal: {result['journal']}\n"
+        + f"journal_events: {result['journal_events']}\n"
+        + f"adopted_pages: {result['adopted_pages']}\n"
+    )
+
+
+def format_export_markdown(result: dict[str, Any]) -> str:
+    parts = [
+        "# Markdown Projection\n",
+        f"project: {result['project']}\n",
+        f"output: {result['output']}\n",
+        f"check: {str(result['check']).lower()}\n",
+        f"ok: {str(result['ok']).lower()}\n",
+        f"files: {result['file_count']}\n",
+        f"written: {result['written_count']}\n",
+    ]
+    for key, label in (
+        ("changed_files", "changed"),
+        ("missing_files", "missing"),
+        ("extra_files", "extra"),
+        ("written_files", "written_files"),
+    ):
+        files = result.get(key) or []
+        if files:
+            parts.append(f"{label}:\n")
+            parts.extend(f"- {path}\n" for path in files)
+    return "".join(parts)
 
 
 def format_import_forest(result: dict[str, Any]) -> str:
