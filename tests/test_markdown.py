@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from grasp.markdown import (
+    MarkdownCollisionError,
     MarkdownMirror,
     first_markdown_h1_title,
     markdown_graph_role,
@@ -287,8 +288,14 @@ class MarkdownImportTests(unittest.TestCase):
             (root / "one" / "A.md").write_text("# A\n", encoding="utf-8")
             (root / "two" / "A.md").write_text("# A\n", encoding="utf-8")
 
-            with self.assertRaisesRegex(ValueError, "duplicate Markdown page titles"):
+            with self.assertRaisesRegex(MarkdownCollisionError, "duplicate Markdown page titles") as caught:
                 MarkdownMirror.from_folder(root)
+
+            diagnostic = caught.exception.to_diagnostic()
+            self.assertEqual(diagnostic["type"], "markdown_collision")
+            self.assertEqual(diagnostic["collision_counts"], {"title": 1})
+            self.assertEqual(diagnostic["collisions"][0]["kind"], "title")
+            self.assertEqual(set(diagnostic["collisions"][0]["paths"]), {"one/A.md", "two/A.md"})
 
     def test_frontmatter_title_id_aliases_and_tags_are_indexed(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -345,8 +352,19 @@ class MarkdownImportTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with self.assertRaisesRegex(ValueError, "duplicate Markdown page aliases"):
+            with self.assertRaisesRegex(MarkdownCollisionError, "duplicate Markdown page aliases") as caught:
                 MarkdownMirror.from_folder(root)
+
+            diagnostic = caught.exception.to_diagnostic()
+            self.assertEqual(diagnostic["collision_counts"], {"alias": 1})
+            self.assertEqual(diagnostic["collisions"][0]["key"], "shared")
+            self.assertEqual(
+                {
+                    (entry["path"], entry["handle"], entry["source"])
+                    for entry in diagnostic["collisions"][0]["entries"]
+                },
+                {("A.md", "Shared", "alias"), ("B.md", "Shared", "alias")},
+            )
 
     def test_reimport_updates_content_only_changes_incrementally(self):
         with tempfile.TemporaryDirectory() as tmpdir:
