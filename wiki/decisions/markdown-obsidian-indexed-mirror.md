@@ -209,7 +209,7 @@ Scrapbox 互換では `#1` は link として成立する。したがって pars
 ## Open Questions
 
 - CLI 名: 初期実装は `import --markdown <folder>`。将来 persona2 向けに `index-md` alias を足すか。
-- duplicate title / alias collision の扱い。
+- duplicate title / alias collision の扱いは [[markdown-identity-name-collision-policy]] に分離。実装は artifact reduction 後に handle ambiguity を表現する schema/query へ進める。
 - heading / block ref を line-id とどう対応させるか。
 - `#tag` と wikilink を同一 edge type にするか。
 - search index は FTS5 trigram hybrid にするか、まず correctness 優先で `LIKE` にするか（[[fts5-trigram-search]]）。
