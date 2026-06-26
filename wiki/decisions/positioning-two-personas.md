@@ -84,3 +84,15 @@ persona2 向けに振りすぎると「Obsidian-but-for-LLMs / CLI 付き graph 
 - **persona1 は一般化する第一証拠、だが persona2 framing は依然未検証。** takker は JP・Cosense native・cosense-cli インサイダーで教科書的 persona1。彼が反射的に grasp を「offline 版 cosense-cli」と呼んだ＝放っておくと**インサイダーは Scrapbox 系譜の枠に入れる**。本 decision の GTM は逆に Scrapbox を lineage に後置し Markdown 束 framing を lede にする方針なので整合はするが、**upside-risk の persona2（Markdown 束・非 Scrapbox・非日本語）framing は実在の persona2 にまだ一度も当たっていない**。下 Open Q3 の「.md 束より良い」実演は依然 nishio の想定に留まる。
 - **grasp はモデル水準を下げる（persona2 GTM の追い風）。** 安いモデルで完走したのは、構造化出力を CLI が作り agent は薄い recipe を回すだけだから（[[takker-opencode-villagepump-test-2026-06-24]] / [[delivery-cli-plus-skill]]）。「手持ちの・安い coding agent でも動く」は persona2 獲得の messaging になり、Claude 前提でない portability を裏付ける。
 - **公開 dogfooding flywheel は高利回りだが persona1 止まり。** 公開 Scrapbox に書く→エコシステム隣接者が自分の agent/corpus で試す→実バグを踏む→PR まで来る（PR #2 merged）、という自己 dogfooding では出せない検証がタダで来た。HN/Reddit GTM はこれを意図的に回す価値があるが、現状この経路が届くのは persona1 型の人。persona2 を当てるには別チャネル（Markdown/Obsidian コミュニティ）が要る。
+
+### 2026-06-26: grasp の価値は既存リンク密度に比例する → persona2 は逆風（動機と表裏）
+
+本 decision は persona2 の felt friction を「逆リンクをエミュレートすらしない、flat な .md に forward link だけ」と置き、それを grasp が埋める gap として framing している。2026-06-26 対話で同じ事実の**裏面**が surface した: grasp の graph materialization 価値（read=近傍同梱・backlinks・related・unresolved）は **元 corpus のリンク密度に比例**し、edge が多いほど rich に返る。
+
+∴ 非対称: 価値は persona1（高密度＝nishio の 25k Cosense store、[[kj-link-hub-audit-2026-06-24]] の KJ法 hub 144→490）で最大、persona2（低密度＝まばらな .md）で最小。persona2 の定義的特徴（forward link のみ・逆リンク不在）は grasp が埋める**動機**であると同時に、grasp が materialize できる graph が薄いという**構造的逆風**でもある。「逆リンクが無いから grasp が要る」と「逆リンクが無いから grasp が返せるものが少ない」は同じ事実の表裏。§設計含意1 の「persona2 は逆リンクをエミュレートすらしない」を gap でなく headwind 側から読み直したもの。
+
+含意（persona2 に効く正直な pitch は density 非依存側に寄せる）:
+- (1) **density 非依存の優位を lede に**: [[read-vs-grep-benchmark-2026-06-24]] の「14M token は window に入らない / grasp search は bounded・ranked・structured」は元 link 密度に依存しない。persona2 への lede は graph 逆リンクでなくこちら（§罠 design dilution とも整合: 差別化は「逆リンクがある」でなく「read が近傍を一体で返す」）。
+- (2) **潜在 edge を提案する半-authoring**: 低密度 corpus で価値を出すには「既存リンクを読む」を超え「リンクされていない mention を surface → come-from 昇格提案」（[[come-from-declared-gather]] §6 (c) AI default 裸）まで踏み込む要。これは retrieval でなく authoring 寄りで、Markdown adapter（release gate）の次の persona2 gate になりうる。
+
+Open Q3（「.md 束より良い」最小デモ）への含意: 低密度 corpus では graph 差が出にくいので、高密度デモ corpus を選ぶ（自己選択 bias のリスク）か、低密度でも効く bounded-retrieval 差（grep 比）を見せるか、を分けて設計する。
