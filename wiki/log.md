@@ -977,3 +977,9 @@
 - Added `log-records` to list/filter `log_entry_import` journal records without opening SQLite; filters include query, op, source path, record id, since/until, limit, and offset.
 - Added `history <query>` as the event-stream counterpart to `read <page>`; until subject extraction exists it is text search over heading/body/source fields.
 - Dogfooded against `wiki.grasp/events.jsonl` with `log-records --query line-id drift`.
+
+## [2026-06-26 18:15] implementation+dogfood+file-back | subject-aware log history
+- Added `subjects[]` to new `log_entry_import` records using body `[[wikilink]]` and Markdown path extraction; old records without subjects are inferred at read time.
+- `history <query>` and `log-records --subject` now match extracted subjects instead of free-text search, while `log-records --query` remains whitespace term AND text search.
+- Returned log records now include bounded same-subject `later_events[]`, `later_event_count`, and `later_events_omitted` so stale transition records are visible.
+- Dogfooded with `history grasp-v1-implemented --journal wiki.grasp/events.jsonl`; existing journal records produced subjects and later events without SQLite.
