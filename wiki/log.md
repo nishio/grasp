@@ -5,6 +5,12 @@
 - positioning の歯止め3点: (1) 継承部分は prior art で de-risk 済み→速く作ってよい (2) 唯一未踏なのは消費者を token-bounded AI に替えたコスト関数（近傍同梱＝採餌コスト / absence の hallucination）でここだけ prior art が無い→慎重に自前設計 (3) **pitch の lede は「論文的に新規」でなく「目前の問題を解く local graph store」**、論文系譜は補助線で lede にしない。継承は A 型（論文を読んで作ったと誤読させない）。[[positioning-two-personas]] / [[ai-consumer-cost-and-trust]] / [[scrapbubble]] / [[development-arc-retrieval-ahead-of-authoring]] に接続。
 - 統合: concepts/ 新規 + index.md concepts 表に1行。**write 方式**: `wiki.grasp/events.jsonl` がある（=grasp write-first 規約）が、新規 concept page + frontmatter(type/summary/sources) + index 表の行編集は alpha write 層が clean に表現できないため CLAUDE.md の direct Markdown patch fallback を採用（次の grasp-write session は `import --markdown wiki` で store を先に reconcile すること）。
 
+## [2026-06-26 23:07] file back | 「grasp を読んで考察」session の net-new 2点を come-from / positioning に file back（親 llm-wiki にも対の file back）＋ append-section 二重 heading gotcha
+- [[come-from-declared-gather]] §Updates: 束ねには2理由（substrate-限界 ∧ 人間労力-限界）。AI 著者化は後者を溶かす → unbundling は AI 著者で *より*安く synthesis 原理を強める。溶けない例外＝読者ケア（消費者が人間）。nishio の反論「それは人間前提の判断、こちらは AI が使う」の一段先。
+- [[positioning-two-personas]] §Updates: grasp の価値は既存リンク密度に比例 → persona2（低密度 .md）は「逆リンク不在＝動機」と同時に「materialize する graph が薄い＝構造的逆風」。正直な pitch は density 非依存（[[read-vs-grep-benchmark-2026-06-24]] bounded-retrieval）側へ。
+- 親 llm-wiki 側の対の file back: `graspは親llm-wikiの理論が数時間でコードになる-20260624` の留保「authoring 未着手＝良いリーダー止まり」を ground truth（1.5.23→1.7.34、write/journal/replay が main に landing 済み）で訂正。AI が 6/24 自己観察ページ本文を current state と誤読した実例（`状態想起はlog残行からするな` の snapshot ページ一般化）。
+- 手順 gotcha: append-section は既存同名 `## Updates` に merge せず EOF に新規 heading を作る（come-from=Updates 無し→1、positioning=既存有り→二重）。CLAUDE.md 規約どおり direct patch で merge → 直列 `write-page --from-file` で journal 同期し export-markdown --check / lint clean を確認。
+
 ## [2026-06-25 00:08] file back | cross-project 接続に強弱（strong/weak）軸を追加（v6 決定の境界2点を解決）
 - nishio が cross-project 統合の残る境界2点を決定: ①別 project に materialized X があれば、他 project の bare 赤 `[X]` はそれに解決する（「自 project だけでは得られない content を他から発見できる」）②赤ベースの接続は**弱い接続=AI 向けヒント**、人間が書いた明示リンクは**強い接続**。
 - [[whole-store-graph-and-cross-project-edges]] に **point 8（接続強弱）** を追加。strong=authored（intra `[X]` / explicit `[/P/T]`）、weak=grasp が normalize title の cross-project 一致で推論。赤-materialized 解決も weak。**誤接続（同綴り別概念）は weak 層に閉じる**ので authored グラフを汚さない＝strength が point 7 の誤接続リスクの封じ込め機構。`edges.connection_strength` を schema に追加、retrieval は strength を label し weak を下に rank。`link_kind` や typed/directional 軸とは直交。
@@ -1041,9 +1047,3 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 Added revert_events support to the continuous git history replay table.
 Added a 0db1449 sequence that creates llm-wiki-infra-fast-path-plan, updates the existing pages, then reverts the page_create event while keeping the updates.
 Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
-
-## [2026-06-26 23:07] file back | 「grasp を読んで考察」session の net-new 2点を come-from / positioning に file back（親 llm-wiki にも対の file back）＋ append-section 二重 heading gotcha
-- [[come-from-declared-gather]] §Updates: 束ねには2理由（substrate-限界 ∧ 人間労力-限界）。AI 著者化は後者を溶かす → unbundling は AI 著者で *より*安く synthesis 原理を強める。溶けない例外＝読者ケア（消費者が人間）。nishio の反論「それは人間前提の判断、こちらは AI が使う」の一段先。
-- [[positioning-two-personas]] §Updates: grasp の価値は既存リンク密度に比例 → persona2（低密度 .md）は「逆リンク不在＝動機」と同時に「materialize する graph が薄い＝構造的逆風」。正直な pitch は density 非依存（[[read-vs-grep-benchmark-2026-06-24]] bounded-retrieval）側へ。
-- 親 llm-wiki 側の対の file back: `graspは親llm-wikiの理論が数時間でコードになる-20260624` の留保「authoring 未着手＝良いリーダー止まり」を ground truth（1.5.23→1.7.34、write/journal/replay が main に landing 済み）で訂正。AI が 6/24 自己観察ページ本文を current state と誤読した実例（`状態想起はlog残行からするな` の snapshot ページ一般化）。
-- 手順 gotcha: append-section は既存同名 `## Updates` に merge せず EOF に新規 heading を作る（come-from=Updates 無し→1、positioning=既存有り→二重）。CLAUDE.md 規約どおり direct patch で merge → 直列 `write-page --from-file` で journal 同期し export-markdown --check / lint clean を確認。
