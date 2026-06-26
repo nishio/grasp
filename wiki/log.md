@@ -1000,3 +1000,8 @@
 - write-status --strict treats a clean journal-regenerated log projection as satisfying the log-page guard, even when stored log lines differ from generated log output.
 - Added regression coverage for record-file projection using the latest version only.
 - Updated [[grasp-v1-implemented]], [[history]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]].
+
+## [2026-06-26 21:26] implementation+test+file-back | projection frontmatter merge
+- `export-markdown` projection now merges generated `id` / `title` / `aliases` into existing frontmatter instead of dropping arbitrary metadata such as `type`, `summary`, or `sources`.
+- Added regression coverage for stale identity fields being replaced while arbitrary frontmatter survives; bumped package version to `1.7.31`.
+- Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
