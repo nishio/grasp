@@ -13,6 +13,7 @@ import time
 import unicodedata
 from typing import Any
 from urllib.parse import quote
+from uuid import uuid4
 
 from .cosense import (
     CrossProjectLink,
@@ -29,7 +30,7 @@ from .cosense import (
     parse_cosense_cross_project_links,
     parse_cosense_links,
 )
-from .markdown import MarkdownMirror, MarkdownPageRecord, iter_markdown_files, markdown_wikilink_target
+from .markdown import MarkdownMirror, MarkdownPageRecord, iter_markdown_files, markdown_wikilink_target, parse_markdown_links
 
 
 SCHEMA_VERSION = "7"
@@ -1955,6 +1956,77 @@ class SQLiteStore:
             ).fetchall()
             projections[relative_path] = _markdown_lines_to_text([row["text"] for row in lines])
         return projections
+
+    def append_markdown_lines(self, title: str, lines: list[str]) -> dict[str, Any]:
+        project = self._require_project()
+        if not lines:
+            raise ValueError("append requires at least one line")
+        if not self._markdown_manifest_for_project(project):
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+
+        candidates = self.page_handle_candidates(title)
+        if not candidates:
+            raise ValueError(f"page not found: {title}")
+        if len(candidates) > 1:
+            raise ValueError(f"page handle is ambiguous: {title}; use a unique title for append alpha")
+        page_id = str(candidates[0]["page_id"])
+        now = int(time.time())
+        start_row = self.connection.execute(
+            """
+            SELECT COALESCE(MAX(line_index) + 1, 0) AS start_index
+            FROM lines
+            WHERE project = ? AND page_id = ?
+            """,
+            (project, page_id),
+        ).fetchone()
+        start_index = int(start_row["start_index"])
+        appended = []
+        edge_rows = []
+        with self.connection:
+            for offset, text in enumerate(lines):
+                line_index = start_index + offset
+                line_id = f"line-{uuid4().hex}"
+                appended.append(
+                    {
+                        "line_id": line_id,
+                        "line_index": line_index,
+                        "text": text,
+                        "created": now,
+                        "updated": now,
+                        "user_id": "grasp",
+                    }
+                )
+                self.connection.execute(
+                    """
+                    INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (project, line_id, page_id, line_index, text, now, now, "grasp"),
+                )
+                for target_title in parse_markdown_links(text):
+                    edge_rows.append((project, page_id, line_id, target_title, normalize_title(target_title)))
+            _insert_edge_rows(self.connection, edge_rows)
+            refresh_edge_resolutions(self.connection, project)
+            rebuild_unresolved_targets(self.connection, project)
+            self.connection.execute(
+                """
+                UPDATE pages
+                SET updated = ?,
+                    line_count = (SELECT COUNT(*) FROM lines WHERE project = ? AND page_id = ?)
+                WHERE project = ? AND id = ?
+                """,
+                (now, project, page_id, project, page_id),
+            )
+            _refresh_project_counts_sql(self.connection, project)
+        page = self._page_by_id(page_id)
+        return {
+            "project": project,
+            "page": page.to_summary() if page is not None else {"id": page_id, "title": title},
+            "start_index": start_index,
+            "appended_lines": appended,
+            "appended_line_count": len(appended),
+            "edge_count": len(edge_rows),
+        }
 
     def page_lines_around(
         self,

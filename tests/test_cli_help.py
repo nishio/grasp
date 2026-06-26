@@ -30,6 +30,8 @@ COMMANDS = [
     "gather",
     "export-ai",
     "export-markdown",
+    "append-section",
+    "append-log",
     "sync",
     "acquire",
     "unresolved",
@@ -1251,6 +1253,105 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(dirty_completed.returncode, 1)
         self.assertFalse(dirty_result["ok"])
         self.assertEqual(dirty_result["changed_files"], ["A.md"])
+
+    def test_append_section_and_log_update_store_journal_and_projection(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            section_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-section",
+                    "A",
+                    "--heading",
+                    "Updates",
+                    "--line",
+                    "- detail [[B]]",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            log_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-log",
+                    "--timestamp",
+                    "2026-06-26 01:00",
+                    "--op",
+                    "test",
+                    "--summary",
+                    "append smoke",
+                    "--line",
+                    "- ok",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            journal_events = [
+                json.loads(line)
+                for line in journal_path.read_text(encoding="utf-8").splitlines()
+            ]
+            page_text = (root / "A.md").read_text(encoding="utf-8")
+            log_text = (root / "Log.md").read_text(encoding="utf-8")
+
+        section_result = json.loads(section_completed.stdout)
+        log_result = json.loads(log_completed.stdout)
+        self.assertEqual(
+            [event["event_type"] for event in journal_events],
+            ["page_create", "page_create", "section_append", "log_append"],
+        )
+        self.assertIn("\n## Updates\n- detail [[B]]\n", page_text)
+        self.assertIn("\n## [2026-06-26 01:00] test | append smoke\n- ok\n", log_text)
+        self.assertEqual(section_result["edge_count"], 1)
+        self.assertEqual(section_result["projection"]["written_files"], ["A.md"])
+        self.assertEqual(log_result["projection"]["written_files"], ["Log.md"])
 
     def test_read_markdown_page_by_source_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:

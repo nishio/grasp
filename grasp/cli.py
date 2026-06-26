@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -776,6 +777,60 @@ def build_parser() -> argparse.ArgumentParser:
     export_markdown_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder.")
     export_markdown_parser.add_argument("--check", action="store_true", help="Only compare projection output; do not write files.")
 
+    append_section_parser = add_command_parser(
+        subparsers,
+        "append-section",
+        help="Append a Markdown section through the alpha write path.",
+        description=(
+            "Append a section to a Markdown-backed page, update the SQLite materialized index, "
+            "append a section_append journal event, and export the Markdown projection."
+        ),
+        returns=(
+            "project, page, journal, output, event_id, appended_lines[], appended_line_count, edge_count, projection"
+        ),
+        examples=[
+            "grasp --project grasp-wiki append-section llm-wiki-infra-fast-path-plan --heading Updates --line '- note' --output wiki --journal wiki.grasp/events.jsonl",
+            "grasp --project grasp-wiki --json append-section scratch --heading Updates --line '- first' --line '- second' --output wiki",
+        ],
+        notes=[
+            "Alpha write surface: Markdown-backed projects only, no rename/replay yet.",
+            "The default journal path is <output-folder-name>.grasp/events.jsonl beside the output folder.",
+        ],
+    )
+    append_section_parser.add_argument("title", help="Target page title or unique handle.")
+    append_section_parser.add_argument("--heading", required=True, help="Section heading text without leading ##.")
+    append_section_parser.add_argument("--line", action="append", default=[], help="Body line to append. Repeat for multiple lines.")
+    append_section_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
+    append_section_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
+
+    append_log_parser = add_command_parser(
+        subparsers,
+        "append-log",
+        help="Append a log entry through the alpha write path.",
+        description=(
+            "Append a dated log entry to a Markdown-backed log page, update the SQLite materialized index, "
+            "append a log_append journal event, and export the Markdown projection."
+        ),
+        returns=(
+            "project, page, journal, output, event_id, timestamp, op, summary, appended_lines[], appended_line_count, edge_count, projection"
+        ),
+        examples=[
+            "grasp --project grasp-wiki append-log --op implementation --summary 'append-section alpha' --line '- details' --output wiki",
+            "grasp --project grasp-wiki --json append-log --timestamp '2026-06-26 01:00' --op test --summary 'smoke' --line '- ok' --output wiki",
+        ],
+        notes=[
+            "Default target title is Log.",
+            "Alpha write surface: Markdown-backed projects only, no rename/replay yet.",
+        ],
+    )
+    append_log_parser.add_argument("--title", default="Log", help="Target log page title or unique handle.")
+    append_log_parser.add_argument("--timestamp", default=None, help="Timestamp text for the log heading. Defaults to local YYYY-MM-DD HH:MM.")
+    append_log_parser.add_argument("--op", required=True, help="Operation label for the log heading.")
+    append_log_parser.add_argument("--summary", required=True, help="Short summary for the log heading.")
+    append_log_parser.add_argument("--line", action="append", default=[], help="Body line to append. Repeat for multiple lines.")
+    append_log_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
+    append_log_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
+
     sync_parser = add_command_parser(
         subparsers,
         "sync",
@@ -904,6 +959,10 @@ def default_journal_path(folder: Path) -> Path:
     return folder.parent / f"{folder.name}.grasp" / "events.jsonl"
 
 
+def journal_path_for_output(output: Path, journal_path: Path | None) -> Path:
+    return journal_path or default_journal_path(output)
+
+
 def adopt_markdown(
     folder: Path,
     store_path: Path,
@@ -971,6 +1030,71 @@ def adopt_markdown_record_payload(record: Any) -> dict[str, Any]:
             for line in record.page.lines
         ],
     }
+
+
+def run_append_section(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    journal = journal_path_for_output(args.output, args.journal)
+    section_lines = ["", f"## {args.heading}", *args.line]
+    append_result = store.append_markdown_lines(args.title, section_lines)
+    event = make_journal_event(
+        "section_append",
+        project=append_result["project"],
+        payload={
+            "page_id": append_result["page"]["id"],
+            "title": append_result["page"]["title"],
+            "heading": args.heading,
+            "lines": args.line,
+            "inserted_lines": append_result["appended_lines"],
+        },
+    )
+    append_journal_event(journal, event)
+    projection = store.export_markdown(args.output, check=False)
+    result = dict(append_result)
+    result.update(
+        {
+            "journal": str(journal),
+            "output": str(args.output),
+            "event_id": event["event_id"],
+            "projection": projection,
+        }
+    )
+    return result
+
+
+def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    journal = journal_path_for_output(args.output, args.journal)
+    timestamp = args.timestamp or datetime.now().strftime("%Y-%m-%d %H:%M")
+    heading = f"[{timestamp}] {args.op} | {args.summary}"
+    log_lines = ["", f"## {heading}", *args.line]
+    append_result = store.append_markdown_lines(args.title, log_lines)
+    event = make_journal_event(
+        "log_append",
+        project=append_result["project"],
+        payload={
+            "page_id": append_result["page"]["id"],
+            "title": append_result["page"]["title"],
+            "timestamp": timestamp,
+            "op": args.op,
+            "summary": args.summary,
+            "lines": args.line,
+            "inserted_lines": append_result["appended_lines"],
+        },
+    )
+    append_journal_event(journal, event)
+    projection = store.export_markdown(args.output, check=False)
+    result = dict(append_result)
+    result.update(
+        {
+            "journal": str(journal),
+            "output": str(args.output),
+            "event_id": event["event_id"],
+            "timestamp": timestamp,
+            "op": args.op,
+            "summary": args.summary,
+            "projection": projection,
+        }
+    )
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1340,6 +1464,10 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return result
     if args.command == "export-markdown":
         return store.export_markdown(args.output, check=args.check)
+    if args.command == "append-section":
+        return run_append_section(store, args)
+    if args.command == "append-log":
+        return run_append_log(store, args)
     if args.command == "unresolved":
         return {
             "unresolved_targets": store.unresolved_targets(limit=args.limit),
@@ -1790,6 +1918,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_export_ai(result)
     if command == "export-markdown":
         return format_export_markdown(result)
+    if command in {"append-section", "append-log"}:
+        return format_append_result(result)
     if command == "unresolved":
         return with_alias_legend(format_unresolved_targets(result["unresolved_targets"], aliases=aliases), aliases)
     if command == "sync":
@@ -1851,6 +1981,20 @@ def format_export_markdown(result: dict[str, Any]) -> str:
             parts.append(f"{label}:\n")
             parts.extend(f"- {path}\n" for path in files)
     return "".join(parts)
+
+
+def format_append_result(result: dict[str, Any]) -> str:
+    projection = result.get("projection") or {}
+    return (
+        "# Markdown Append\n"
+        f"project: {result['project']}\n"
+        f"page: {result['page']['title']}\n"
+        f"journal: {result['journal']}\n"
+        f"event_id: {result['event_id']}\n"
+        f"appended_lines: {result['appended_line_count']}\n"
+        f"edges: {result['edge_count']}\n"
+        f"projection_written: {projection.get('written_count', 0)}\n"
+    )
 
 
 def format_import_forest(result: dict[str, Any]) -> str:

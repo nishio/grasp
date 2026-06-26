@@ -54,7 +54,7 @@ Non-goals for this fast path:
 
 この slice は rename をまだ実装しなくても、日常 file-back dogfood を始められる。ただしこれは **append-only authoring alpha** の fast path であり、identity-without-name の差別化を claim する段階ではない。`2.0.0` 境界は [[write-layer-alpha-and-replay-test]] の通り stable identity + rename replay が通った時点にする。
 
-2026-06-26 status: Phase 0 の前処理として `grasp.journal` に event JSONL schema v1 と event type contract を固定した。続いて `adopt-markdown` と `export-markdown --check` を実装し、repo `wiki/` dogfood で 36 files clean を確認した。まだ replay / write CLI / semantic index-log regeneration は無い。
+2026-06-26 status: Phase 0 の前処理として `grasp.journal` に event JSONL schema v1 と event type contract を固定した。続いて `adopt-markdown` と `export-markdown --check` を実装し、repo `wiki/` dogfood で 36 files clean を確認した。Phase 3 の最小 append-only slice として `append-section` / `append-log` を追加し、temp copy の repo `wiki/` で append 後の `export-markdown --check` が 36 files clean になることを確認した。まだ `write page` / replay / status / diff / revert / rename / semantic index-log regeneration は無い。
 
 ## Risk register
 

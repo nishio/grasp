@@ -854,3 +854,10 @@
 - [[history]] の Version history を表から箇条書きへ変更。各 entry は version / 更新 commit 時刻（JST, 分まで）/ store / compat / changes を一行で持つ。
 - version / schema / compatibility の内容は変えず、`Date` だけを `git blame --line-porcelain wiki/history.md` 由来の committer time に置き換えた。
 - 検証: `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 10:00] implementation+dogfood+file back | `append-section` / `append-log` alpha write を追加
+- `append-section <title>` と `append-log` command を追加。Markdown-backed project の unique handle page に lines を追記し、SQLite `lines` / `edges` / unresolved / counts を更新し、`section_append` / `log_append` journal event を append し、Markdown projection を export する。
+- dogfood: temp copy の repo `wiki/` を `adopt-markdown` し、`append-section llm-wiki-infra-fast-path-plan` と `append-log` を実行した後、`export-markdown --check` が 36 files / changed 0 / missing 0 / extra 0 で clean。
+- これは [[llm-wiki-infra-fast-path-plan]] Phase 3 の append-only slice。まだ `write page` / replay / status / diff / revert / rename は未実装で、ambiguous handle には書かない。
+- schema は v7 のまま。public compatibility version は `1.7.11`。
+- 検証: `python3 -m unittest discover -s tests`（82 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
