@@ -1020,3 +1020,8 @@
 - Converted the consecutive git history replay test to a `CONTINUOUS_REPLAY_SEQUENCES` table with per-sequence commit/path lists and final assertions.
 - Added the `7360053` -> `8278069` handle ambiguity sequence alongside the existing source role sequence, both replayed in the same harness with final projection exact match and direct re-import.
 - Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
+
+## [2026-06-26 22:10] implementation+test+file-back | mixed operation continuous replay
+Extended the continuous git history replay table to support create_pages plus update_paths per step.
+Added 0db1449 -> a07f1af as a create-then-update sequence for llm-wiki-infra-fast-path-plan.
+Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
