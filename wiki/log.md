@@ -877,3 +877,11 @@
 - これは [[llm-wiki-infra-fast-path-plan]] Phase 4 の recovery を journal authority 側へ寄せる前処理。
 - schema は v7 のまま。public compatibility version は `1.7.13`。
 - 検証: `python3 -m unittest discover -s tests`（82 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 11:03] implementation+dogfood+file back | `write-page` と `page_update` replay/revert を追加
+- `write-page <title>` command を追加。Markdown-backed project の unique handle page の本文行を `--from-file` または repeat `--line` で全置換し、SQLite `lines` / outgoing `edges` / unresolved / counts を更新し、`page_update` event に before/after lines を記録し、Markdown projection を export する。title / aliases / source path / page id は変えない。
+- `revert-event` が `page_update` に対応。current lines が target event の after lines と一致する場合だけ before lines へ戻す。`replay-journal` も `page_update` とその `event_revert` を strict replay する。
+- dogfood: temp copy の repo `wiki/` で `write-page llm-wiki-infra-fast-path-plan --from-file /tmp/page.md` → `revert-event` → `replay-journal --check` → `export-markdown --check` を実行。write_lines 4 / write_edges 1、revert restored_lines 75、最終 replay/check とも clean。
+- これは [[llm-wiki-infra-fast-path-plan]] Phase 3 の `write page` 最小実装。まだ rename / source-path 変更 / semantic index-log regeneration / general revert は未実装。
+- schema は v7 のまま。public compatibility version は `1.7.14`。
+- 検証: `python3 -m unittest discover -s tests`（82 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。

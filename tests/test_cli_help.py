@@ -32,6 +32,7 @@ COMMANDS = [
     "export-markdown",
     "append-section",
     "append-log",
+    "write-page",
     "write-status",
     "write-diff",
     "revert-event",
@@ -1398,6 +1399,53 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
+            write_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    "A",
+                    "--line",
+                    "# A",
+                    "--line",
+                    "- rewritten [[C]]",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            write_result = json.loads(write_completed.stdout)
+            revert_write_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "revert-event",
+                    write_result["event_id"],
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
             replay_completed = subprocess.run(
                 [
                     sys.executable,
@@ -1428,16 +1476,28 @@ class CliHelpTests(unittest.TestCase):
         status_result = json.loads(status_completed.stdout)
         diff_result = json.loads(diff_completed.stdout)
         revert_result = json.loads(revert_completed.stdout)
+        revert_write_result = json.loads(revert_write_completed.stdout)
         replay_result = json.loads(replay_completed.stdout)
         self.assertEqual(
             [event["event_type"] for event in journal_events],
-            ["page_create", "page_create", "section_append", "log_append", "event_revert"],
+            [
+                "page_create",
+                "page_create",
+                "section_append",
+                "log_append",
+                "event_revert",
+                "page_update",
+                "event_revert",
+            ],
         )
         self.assertIn("\n## Updates\n- detail [[B]]\n", page_text)
+        self.assertNotIn("- rewritten [[C]]", page_text)
         self.assertEqual(log_text, "# Log\n")
         self.assertEqual(section_result["edge_count"], 1)
         self.assertEqual(section_result["projection"]["written_files"], ["A.md"])
         self.assertEqual(log_result["projection"]["written_files"], ["Log.md"])
+        self.assertEqual(write_result["edge_count"], 1)
+        self.assertEqual(write_result["projection"]["written_files"], ["A.md"])
         self.assertEqual(status_result["journal_event_count"], 4)
         self.assertTrue(status_result["projection"]["ok"])
         self.assertTrue(diff_result["ok"])
@@ -1445,6 +1505,8 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(revert_result["target_event_type"], "log_append")
         self.assertEqual(revert_result["projection"]["written_files"], ["Log.md"])
         self.assertEqual(revert_result["removed_line_count"], 3)
+        self.assertEqual(revert_write_result["target_event_type"], "page_update")
+        self.assertEqual(revert_write_result["restored_line_count"], 4)
         self.assertTrue(replay_result["ok"])
         self.assertEqual(replay_result["file_count"], 2)
 

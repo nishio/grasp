@@ -793,7 +793,7 @@ def build_parser() -> argparse.ArgumentParser:
             "grasp --project grasp-wiki --json append-section scratch --heading Updates --line '- first' --line '- second' --output wiki",
         ],
         notes=[
-            "Alpha write surface: Markdown-backed projects only, no rename/replay yet.",
+            "Alpha write surface: Markdown-backed projects only; rename is still out of scope.",
             "The default journal path is <output-folder-name>.grasp/events.jsonl beside the output folder.",
         ],
     )
@@ -820,7 +820,7 @@ def build_parser() -> argparse.ArgumentParser:
         ],
         notes=[
             "Default target title is Log.",
-            "Alpha write surface: Markdown-backed projects only, no rename/replay yet.",
+            "Alpha write surface: Markdown-backed projects only; rename is still out of scope.",
         ],
     )
     append_log_parser.add_argument("--title", default="Log", help="Target log page title or unique handle.")
@@ -831,13 +831,42 @@ def build_parser() -> argparse.ArgumentParser:
     append_log_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
     append_log_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
 
+    write_page_parser = add_command_parser(
+        subparsers,
+        "write-page",
+        help="Replace a Markdown page body through the alpha write path.",
+        description=(
+            "Replace all stored lines of an existing Markdown-backed page, append a page_update journal event, "
+            "update the SQLite materialized index, and export the Markdown projection. "
+            "Title, aliases, source path, and page id are not changed."
+        ),
+        returns=(
+            "project, page, journal, output, event_id, previous_lines[], lines[], previous_line_count, line_count, edge_count, projection"
+        ),
+        examples=[
+            "grasp --project grasp-wiki write-page scratch --from-file /tmp/scratch.md --output wiki",
+            "grasp --project grasp-wiki --json write-page scratch --line '# scratch' --line '- updated' --output wiki",
+        ],
+        notes=[
+            "Alpha write surface: Markdown-backed projects and unique handles only.",
+            "This is full-page replacement; rename and source-path changes are deliberately out of scope.",
+        ],
+    )
+    write_page_parser.add_argument("title", help="Target page title or unique handle.")
+    input_group = write_page_parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("--from-file", type=Path, default=None, help="Read replacement Markdown page body from this file.")
+    input_group.add_argument("--line", action="append", default=None, help="Replacement body line. Repeat for multiple lines.")
+    write_page_parser.add_argument("--message", default="", help="Optional update message stored in the journal payload.")
+    write_page_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
+    write_page_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
+
     write_status_parser = add_command_parser(
         subparsers,
         "write-status",
         help="Report alpha write journal and projection status.",
         description=(
             "Check whether the Markdown projection is clean for a Markdown-backed project and summarize "
-            "the append journal used by the alpha write path."
+            "the journal used by the alpha write path."
         ),
         returns="project, output, journal, journal_exists, journal_event_count, last_event|null, projection",
         examples=[
@@ -901,7 +930,7 @@ def build_parser() -> argparse.ArgumentParser:
         "replay-journal",
         help="Replay an alpha write journal into a Markdown projection.",
         description=(
-            "Replay page_create, section_append, log_append, and event_revert records from a JSONL journal "
+            "Replay page_create, page_update, section_append, log_append, and event_revert records from a JSONL journal "
             "to reconstruct a Markdown projection without reading SQLite."
         ),
         returns="project, journal, output, check, ok, event_count, applied_event_count, file_count, changed_files, missing_files, extra_files, written_files",
@@ -1184,6 +1213,45 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
     return result
 
 
+def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    journal = journal_path_for_output(args.output, args.journal)
+    replacement_lines = write_page_replacement_lines(args)
+    update_result = store.replace_markdown_page_lines(args.title, replacement_lines)
+    event = make_journal_event(
+        "page_update",
+        project=update_result["project"],
+        payload={
+            "page_id": update_result["page"]["id"],
+            "title": update_result["page"]["title"],
+            "message": args.message,
+            "previous_lines": update_result["previous_lines"],
+            "lines": update_result["lines"],
+        },
+    )
+    append_journal_event(journal, event)
+    projection = store.export_markdown(args.output, check=False)
+    result = dict(update_result)
+    result.update(
+        {
+            "journal": str(journal),
+            "output": str(args.output),
+            "event_id": event["event_id"],
+            "projection": projection,
+        }
+    )
+    return result
+
+
+def write_page_replacement_lines(args: argparse.Namespace) -> list[str]:
+    if args.from_file is not None:
+        if not args.from_file.exists():
+            raise ValueError(f"replacement file does not exist: {args.from_file}")
+        if args.from_file.is_dir():
+            raise ValueError(f"replacement file is a directory: {args.from_file}")
+        return args.from_file.read_text(encoding="utf-8").splitlines()
+    return list(args.line or [])
+
+
 def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = journal_path_for_output(args.output, args.journal)
     events = read_journal_events(journal)
@@ -1209,7 +1277,7 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     target = next((event for event in events if event["event_id"] == args.event_id), None)
     if target is None:
         raise ValueError(f"journal event not found: {args.event_id}")
-    if target["event_type"] not in {"section_append", "log_append"}:
+    if target["event_type"] not in {"section_append", "log_append", "page_update"}:
         raise ValueError(f"cannot revert event_type with this alpha command: {target['event_type']}")
     selected_project = store._require_project()
     if target["project"] != selected_project:
@@ -1226,21 +1294,39 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     page_id = str(payload.get("page_id") or "")
     if not page_id:
         raise ValueError("target event payload is missing page_id")
-    inserted_lines = payload.get("inserted_lines")
-    if not isinstance(inserted_lines, list):
-        raise ValueError("target event payload is missing inserted_lines")
-    reverted = store.revert_markdown_append(page_id, inserted_lines)
-    event = make_journal_event(
-        "event_revert",
-        project=reverted["project"],
-        payload={
+    if target["event_type"] == "page_update":
+        previous_lines = payload.get("previous_lines")
+        current_lines = payload.get("lines")
+        if not isinstance(previous_lines, list) or not isinstance(current_lines, list):
+            raise ValueError("page_update payload is missing previous_lines or lines")
+        reverted = store.revert_markdown_page_update(page_id, previous_lines, current_lines)
+        revert_payload = {
+            "target_event_id": target["event_id"],
+            "target_event_type": target["event_type"],
+            "page_id": page_id,
+            "title": payload.get("title") or reverted["page"].get("title"),
+            "previous_lines": previous_lines,
+            "current_lines": current_lines,
+            "restored_lines": reverted["lines"],
+            "reason": args.reason,
+        }
+    else:
+        inserted_lines = payload.get("inserted_lines")
+        if not isinstance(inserted_lines, list):
+            raise ValueError("target event payload is missing inserted_lines")
+        reverted = store.revert_markdown_append(page_id, inserted_lines)
+        revert_payload = {
             "target_event_id": target["event_id"],
             "target_event_type": target["event_type"],
             "page_id": page_id,
             "title": payload.get("title") or reverted["page"].get("title"),
             "removed_lines": reverted["removed_lines"],
             "reason": args.reason,
-        },
+        }
+    event = make_journal_event(
+        "event_revert",
+        project=reverted["project"],
+        payload=revert_payload,
     )
     append_journal_event(journal, event)
     projection = store.export_markdown(args.output, check=False)
@@ -1306,18 +1392,44 @@ def replay_journal_projection(
                 raise ValueError(f"{event_type} payload is missing inserted_lines in event {event['event_id']}")
             pages[page_id]["lines"].extend(_journal_line_for_replay(line) for line in inserted_lines)
             applied_event_count += 1
+        elif event_type == "page_update":
+            page_id = str(payload.get("page_id") or "")
+            previous_lines = payload.get("previous_lines")
+            lines = payload.get("lines")
+            if page_id not in pages:
+                raise ValueError(f"page_update references unknown page_id {page_id!r} in event {event['event_id']}")
+            if not isinstance(previous_lines, list) or not isinstance(lines, list):
+                raise ValueError(f"page_update payload is missing previous_lines or lines in event {event['event_id']}")
+            expected_previous = [_journal_line_for_replay(line) for line in previous_lines]
+            if pages[page_id]["lines"] != expected_previous:
+                raise ValueError(f"page_update previous_lines do not match current page in event {event['event_id']}")
+            pages[page_id]["lines"] = [_journal_line_for_replay(line) for line in lines]
+            applied_event_count += 1
         elif event_type == "event_revert":
             page_id = str(payload.get("page_id") or "")
-            removed_lines = payload.get("removed_lines")
+            target_event_type = payload.get("target_event_type")
             if page_id not in pages:
                 raise ValueError(f"event_revert references unknown page_id {page_id!r} in event {event['event_id']}")
-            if not isinstance(removed_lines, list) or not removed_lines:
-                raise ValueError(f"event_revert payload is missing removed_lines in event {event['event_id']}")
-            expected_tail = [_journal_line_for_replay(line) for line in removed_lines]
-            current_lines = pages[page_id]["lines"]
-            if current_lines[-len(expected_tail):] != expected_tail:
-                raise ValueError(f"event_revert does not match page tail in event {event['event_id']}")
-            del current_lines[-len(expected_tail):]
+            if target_event_type in {"section_append", "log_append"}:
+                removed_lines = payload.get("removed_lines")
+                if not isinstance(removed_lines, list) or not removed_lines:
+                    raise ValueError(f"event_revert payload is missing removed_lines in event {event['event_id']}")
+                expected_tail = [_journal_line_for_replay(line) for line in removed_lines]
+                current_lines = pages[page_id]["lines"]
+                if current_lines[-len(expected_tail):] != expected_tail:
+                    raise ValueError(f"event_revert does not match page tail in event {event['event_id']}")
+                del current_lines[-len(expected_tail):]
+            elif target_event_type == "page_update":
+                previous_lines = payload.get("previous_lines")
+                current_lines = payload.get("current_lines")
+                if not isinstance(previous_lines, list) or not isinstance(current_lines, list):
+                    raise ValueError(f"event_revert payload is missing page_update lines in event {event['event_id']}")
+                expected_current = [_journal_line_for_replay(line) for line in current_lines]
+                if pages[page_id]["lines"] != expected_current:
+                    raise ValueError(f"event_revert current_lines do not match page in event {event['event_id']}")
+                pages[page_id]["lines"] = [_journal_line_for_replay(line) for line in previous_lines]
+            else:
+                raise ValueError(f"event_revert target_event_type is unsupported: {target_event_type!r}")
             applied_event_count += 1
         elif event_type == "projection_export":
             applied_event_count += 1
@@ -1812,6 +1924,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return run_append_section(store, args)
     if args.command == "append-log":
         return run_append_log(store, args)
+    if args.command == "write-page":
+        return run_write_page(store, args)
     if args.command == "write-status":
         return run_write_status(store, args)
     if args.command == "write-diff":
@@ -2270,6 +2384,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_export_markdown(result)
     if command in {"append-section", "append-log"}:
         return format_append_result(result)
+    if command == "write-page":
+        return format_write_page_result(result)
     if command == "write-status":
         return format_write_status(result)
     if command == "write-diff":
@@ -2355,6 +2471,21 @@ def format_append_result(result: dict[str, Any]) -> str:
     )
 
 
+def format_write_page_result(result: dict[str, Any]) -> str:
+    projection = result.get("projection") or {}
+    return (
+        "# Write Page\n"
+        f"project: {result['project']}\n"
+        f"page: {result['page']['title']}\n"
+        f"journal: {result['journal']}\n"
+        f"event_id: {result['event_id']}\n"
+        f"previous_lines: {result['previous_line_count']}\n"
+        f"lines: {result['line_count']}\n"
+        f"edges: {result['edge_count']}\n"
+        f"projection_written: {projection.get('written_count', 0)}\n"
+    )
+
+
 def format_write_status(result: dict[str, Any]) -> str:
     projection = result["projection"]
     last_event = result.get("last_event") or {}
@@ -2389,6 +2520,7 @@ def format_write_diff(result: dict[str, Any]) -> str:
 
 def format_revert_event(result: dict[str, Any]) -> str:
     projection = result.get("projection") or {}
+    line_count = result.get("removed_line_count", result.get("restored_line_count", 0))
     return (
         "# Revert Event\n"
         f"project: {result['project']}\n"
@@ -2397,7 +2529,7 @@ def format_revert_event(result: dict[str, Any]) -> str:
         f"event_id: {result['event_id']}\n"
         f"target_event_id: {result['target_event_id']}\n"
         f"target_event_type: {result['target_event_type']}\n"
-        f"removed_lines: {result['removed_line_count']}\n"
+        f"lines: {line_count}\n"
         f"projection_written: {projection.get('written_count', 0)}\n"
     )
 

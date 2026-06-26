@@ -31,7 +31,15 @@ from .cosense import (
     parse_cosense_cross_project_links,
     parse_cosense_links,
 )
-from .markdown import MarkdownMirror, MarkdownPageRecord, iter_markdown_files, markdown_wikilink_target, parse_markdown_links
+from .markdown import (
+    MarkdownMirror,
+    MarkdownPageRecord,
+    iter_markdown_files,
+    markdown_graph_role_emits_edges,
+    markdown_wikilink_target,
+    parse_markdown_line_links,
+    parse_markdown_links,
+)
 
 
 SCHEMA_VERSION = "7"
@@ -2085,6 +2093,57 @@ class SQLiteStore:
             "edge_count": len(edge_rows),
         }
 
+    def replace_markdown_page_lines(self, title: str, lines: list[str]) -> dict[str, Any]:
+        project = self._require_project()
+        manifest = self._markdown_manifest_for_project(project)
+        if not manifest:
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+
+        candidates = self.page_handle_candidates(title)
+        if not candidates:
+            raise ValueError(f"page not found: {title}")
+        if len(candidates) > 1:
+            raise ValueError(f"page handle is ambiguous: {title}; use a unique title for write-page alpha")
+        page_id = str(candidates[0]["page_id"])
+        graph_role = self._markdown_graph_role_for_page(project, page_id)
+        previous_lines = self._markdown_line_payloads(project, page_id)
+        previous_by_index = {line["line_index"]: line for line in previous_lines}
+        now = int(time.time())
+        next_lines = []
+        for line_index, text in enumerate(lines):
+            previous = previous_by_index.get(line_index)
+            if previous is not None and previous["text"] == text:
+                next_lines.append(dict(previous))
+                next_lines[-1]["line_index"] = line_index
+                continue
+            next_lines.append(
+                {
+                    "line_id": f"line-{uuid4().hex}",
+                    "line_index": line_index,
+                    "text": text,
+                    "created": now,
+                    "updated": now,
+                    "user_id": "grasp",
+                }
+            )
+        edge_count = self._replace_markdown_page_line_payloads(
+            project,
+            page_id,
+            next_lines,
+            graph_role=graph_role,
+            updated=now,
+        )
+        page = self._page_by_id(page_id)
+        return {
+            "project": project,
+            "page": page.to_summary() if page is not None else {"id": page_id, "title": title},
+            "previous_lines": previous_lines,
+            "lines": self._markdown_line_payloads(project, page_id),
+            "previous_line_count": len(previous_lines),
+            "line_count": len(next_lines),
+            "edge_count": edge_count,
+        }
+
     def revert_markdown_append(self, page_id: str, inserted_lines: list[dict[str, Any]]) -> dict[str, Any]:
         project = self._require_project()
         if not self._markdown_manifest_for_project(project):
@@ -2165,6 +2224,154 @@ class SQLiteStore:
             "removed_lines": expected,
             "removed_line_count": len(expected),
         }
+
+    def revert_markdown_page_update(
+        self,
+        page_id: str,
+        previous_lines: list[dict[str, Any]],
+        current_lines: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        project = self._require_project()
+        if not self._markdown_manifest_for_project(project):
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+        expected_current = self._normalized_journal_lines(current_lines)
+        restored = self._normalized_journal_lines(previous_lines)
+        actual_current = self._line_compare_payloads(self._markdown_line_payloads(project, page_id))
+        if actual_current != self._line_compare_payloads(expected_current):
+            raise ValueError("page_update current lines no longer match the current page")
+        graph_role = self._markdown_graph_role_for_page(project, page_id)
+        now = int(time.time())
+        edge_count = self._replace_markdown_page_line_payloads(
+            project,
+            page_id,
+            restored,
+            graph_role=graph_role,
+            updated=now,
+        )
+        page = self._page_by_id(page_id)
+        return {
+            "project": project,
+            "page": page.to_summary() if page is not None else {"id": page_id},
+            "lines": self._markdown_line_payloads(project, page_id),
+            "restored_line_count": len(restored),
+            "edge_count": edge_count,
+        }
+
+    def _markdown_graph_role_for_page(self, project: str, page_id: str) -> str:
+        manifest = self._markdown_manifest_for_project(project)
+        files = manifest.get("files") if isinstance(manifest, dict) else None
+        if isinstance(files, dict):
+            for item in files.values():
+                if isinstance(item, dict) and str(item.get("page_id") or "") == page_id:
+                    return str(item.get("graph_role") or "content")
+        return "content"
+
+    def _markdown_line_payloads(self, project: str, page_id: str) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT line_id, line_index, text, created, updated, user_id
+            FROM lines
+            WHERE project = ? AND page_id = ?
+            ORDER BY line_index
+            """,
+            (project, page_id),
+        ).fetchall()
+        return [
+            {
+                "line_id": row["line_id"],
+                "line_index": row["line_index"],
+                "text": row["text"],
+                "created": row["created"],
+                "updated": row["updated"],
+                "user_id": row["user_id"],
+            }
+            for row in rows
+        ]
+
+    def _normalized_journal_lines(self, lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        normalized = []
+        now = int(time.time())
+        for line_index, item in enumerate(lines):
+            if not isinstance(item, dict):
+                raise ValueError("journal line payload must be an object")
+            line_id = str(item.get("line_id") or "")
+            if not line_id:
+                raise ValueError("journal line payload is missing line_id")
+            normalized.append(
+                {
+                    "line_id": line_id,
+                    "line_index": line_index,
+                    "text": str(item.get("text", "")),
+                    "created": item.get("created", now),
+                    "updated": item.get("updated", now),
+                    "user_id": item.get("user_id"),
+                }
+            )
+        return normalized
+
+    def _line_compare_payloads(self, lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {
+                "line_id": str(line.get("line_id") or ""),
+                "line_index": int(line.get("line_index", -1)),
+                "text": str(line.get("text", "")),
+            }
+            for line in lines
+        ]
+
+    def _replace_markdown_page_line_payloads(
+        self,
+        project: str,
+        page_id: str,
+        lines: list[dict[str, Any]],
+        *,
+        graph_role: str,
+        updated: int,
+    ) -> int:
+        edge_rows = []
+        emits_edges = markdown_graph_role_emits_edges(graph_role)
+        in_code_fence = False
+        with self.connection:
+            self.connection.execute(
+                "DELETE FROM edges WHERE project = ? AND source_page_id = ?",
+                (project, page_id),
+            )
+            self.connection.execute(
+                "DELETE FROM lines WHERE project = ? AND page_id = ?",
+                (project, page_id),
+            )
+            for line_index, item in enumerate(lines):
+                line_id = str(item.get("line_id") or f"line-{uuid4().hex}")
+                text = str(item.get("text", ""))
+                created = item.get("created")
+                line_updated = item.get("updated")
+                user_id = item.get("user_id")
+                self.connection.execute(
+                    """
+                    INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (project, line_id, page_id, line_index, text, created, line_updated, user_id),
+                )
+                if not emits_edges:
+                    continue
+                targets, in_code_fence = parse_markdown_line_links(text, in_code_fence=in_code_fence)
+                for target_title in targets:
+                    edge_rows.append((project, page_id, line_id, target_title, normalize_title(target_title)))
+            _insert_edge_rows(self.connection, edge_rows)
+            refresh_edge_resolutions(self.connection, project)
+            rebuild_unresolved_targets(self.connection, project)
+            self.connection.execute(
+                """
+                UPDATE pages
+                SET updated = ?,
+                    line_count = (SELECT COUNT(*) FROM lines WHERE project = ? AND page_id = ?)
+                WHERE project = ? AND id = ?
+                """,
+                (updated, project, page_id, project, page_id),
+            )
+            _refresh_project_counts_sql(self.connection, project)
+        return len(edge_rows)
 
     def page_lines_around(
         self,
