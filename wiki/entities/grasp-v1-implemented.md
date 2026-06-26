@@ -52,7 +52,7 @@ v1 stable scope 外:
 
 ## store
 
-- current public compatibility version は `1.7.16`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.7.17`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。

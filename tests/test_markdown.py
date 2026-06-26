@@ -123,7 +123,7 @@ class MarkdownParsingTests(unittest.TestCase):
                 "New.md",
                 page_id=path_id,
                 title="New",
-                aliases=[],
+                aliases=["New"],
                 lines=["# New", "body"],
             ),
             "# New\nbody\n",

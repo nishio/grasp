@@ -335,7 +335,7 @@ def markdown_projection_frontmatter_fields(
     title = str(title)
     identity_needs_frontmatter = page_id != markdown_page_id(Path(relative_path))
     title_needs_frontmatter = bool(title) and normalize_title(title) != normalize_title(h1_title or "")
-    if not aliases and not identity_needs_frontmatter and not title_needs_frontmatter:
+    if not identity_needs_frontmatter and not title_needs_frontmatter:
         return {}
     return {
         "id": page_id,
