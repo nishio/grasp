@@ -67,6 +67,24 @@ sources:
 
 - **meta 確認 ＋ 追補。** 本ページの結論「不確実下の AI の安全な既定＝共有 write path を使わない」は live で裏付いた: 私は使うと決めて入ったのに、共有 journal が私を direct-patch + git 手術へ押し戻した。追補: confidence コストは **upfront（--help を読む）だけでなく ongoing** — 並行可能性がある限り **各 write op の後に git レベル検証**が要り、これが per-op 固定費になる。∴ atomic file-back command / journal lock に加え、**「自分の store が `wiki/` に対し stale か」を write 前に出す staleness check**（friction 5 の前段）が、AI が共有 write を安全に既定化できる最小条件。
 
+### 2026-06-27 (sandbox 実走2): rename は graph では参照を保つが、title==H1 page では Markdown projection に alias が残らず import で red 化
+
+差別化核 `rename-page` を sandbox（throwaway store/journal、共有不触、実行後 rm -rf）で直接検証。grasp の存在理由（[[why-not-scrapbox-clone]] / [[write-layer-alpha-and-replay-test]]「rename で `[[..]]` 参照が壊れないか」）の make-or-break。
+
+**graph/store では参照保存は効く（✅）。** `rename-page` は page_id を保持し、旧 handle も新 handle も同一 page に解決、backlinks 生存、`heading_updated:true` で H1 自動更新。回復 toolkit も実は揃っていた: `revert-event <id>` で rename を **in-tool に綺麗に undo**（前 Updates の「回復は git に降りた」は **単発 undo には不要**＝revert-event がある。git 降下が要るのは並行/attribution の方）。`write-diff` は store↔projection drift を安く検出（ok/diffs:N）。`replay-journal` は projection 再生成（ただし **journal-authored page のみ**＝import baseline は含まない、2/40）。
+
+**だが Markdown projection の alias durability に条件依存の穴（❌、要 Codex 確認）。** 機構を repro で特定:
+
+- write-page --create が `id/title/aliases` frontmatter を注入するのは **title ≠ H1 の時だけ**（title==H1 なら identity は H1 から導出可ゆえ未注入）。実 wiki page は規約上 **title==H1**（grep で実 page の `id:`/`aliases:` frontmatter は **皆無**を確認）。
+- ∴ 通常 page（title==H1, frontmatter 無し）を rename すると、`heading_updated` が H1 を新名に更新して **title==H1 のまま**になり、**旧名は projection のどこにも残らない**。fresh `import --markdown` で `[[旧名]]` は **unresolved（red）化**、renamed page は backlink を失う。
+- 対照実験: title≠H1 page（frontmatter 注入済み）を rename すると `aliases: [..., 旧名]` が追記され、fresh re-import 後も `[[旧名]]` が **解決（✅）**。2 page 同時 import で「title==H1 の旧名→red / title≠H1 の旧名→解決」が同時に出て境界を確定。
+
+**含意（重要）。** backlog L87 の「rename identity を frontmatter 化し direct re-import 後も alias を保つ（1.7.16-17）」「`why-design-B`→`why-not-scrapbox-clone` rename invariant を replay harness で確認（1.7.36）」と、本 repro（**最頻ケース title==H1 の通常 page で alias が落ちる**）が食い違う。未reconcile の境界仮説2つ: ①harness は **`replay-journal`** path を test するが、本 repro の失敗は **`import --markdown`** path（rename event は journal にあるので replay なら復元、plain re-import なら喪失）②default の H1 更新が title==H1 を保ち frontmatter 注入を trigger しない。**→ これは「rename が壊れている」断定でなく、Codex に渡す調査 flag**（harness が write-page-create(title==H1)→rename→`import --markdown` path を cover しているか）。
+
+**silent な点が肝。** rename 直後の `export-markdown --check` は **ok:true**（store と projection は整合）。lossiness は **fresh re-import の時だけ**顕在化＝read 面の absence-hallucination（沈黙＝偽陰性）の write 版（緑信号のまま identity が落ちる）。私が前 log で書いた reconcile 手順「次の grasp-write session は `import --markdown wiki` で reconcile」は **rename を跨ぐと silent に参照を壊す**ので、identity authority は Markdown でなく journal（replay-journal）に置くべき＝[[native-authority-markdown-projection]] を一段強く要求する。
+
+→ backlog 候補（actionable）: (1) title==H1 page でも rename 時に旧名 alias を projection に durable 化。(2) replay harness に create(title==H1)→rename→**import-markdown** path を追加。(3) `import --markdown` が rename 跨ぎで lossy な点を明文化、reconcile 既定を replay-journal に。
+
 ## 関連
 
 - [[ai-consumer-cost-and-trust]] — read 面の cost-and-trust。本ページは write 面の対（confidence コスト + 並行安全性）
