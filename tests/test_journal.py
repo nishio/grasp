@@ -47,6 +47,7 @@ class JournalTests(unittest.TestCase):
                 "page_rename",
                 "log_append",
                 "projection_export",
+                "event_revert",
             },
         )
 

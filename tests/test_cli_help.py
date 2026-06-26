@@ -32,6 +32,9 @@ COMMANDS = [
     "export-markdown",
     "append-section",
     "append-log",
+    "write-status",
+    "write-diff",
+    "revert-event",
     "sync",
     "acquire",
     "unresolved",
@@ -1334,6 +1337,66 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
+            log_result = json.loads(log_completed.stdout)
+            status_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            diff_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-diff",
+                    "--output",
+                    str(root),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            revert_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "revert-event",
+                    log_result["event_id"],
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
             journal_events = [
                 json.loads(line)
                 for line in journal_path.read_text(encoding="utf-8").splitlines()
@@ -1342,16 +1405,25 @@ class CliHelpTests(unittest.TestCase):
             log_text = (root / "Log.md").read_text(encoding="utf-8")
 
         section_result = json.loads(section_completed.stdout)
-        log_result = json.loads(log_completed.stdout)
+        status_result = json.loads(status_completed.stdout)
+        diff_result = json.loads(diff_completed.stdout)
+        revert_result = json.loads(revert_completed.stdout)
         self.assertEqual(
             [event["event_type"] for event in journal_events],
-            ["page_create", "page_create", "section_append", "log_append"],
+            ["page_create", "page_create", "section_append", "log_append", "event_revert"],
         )
         self.assertIn("\n## Updates\n- detail [[B]]\n", page_text)
-        self.assertIn("\n## [2026-06-26 01:00] test | append smoke\n- ok\n", log_text)
+        self.assertEqual(log_text, "# Log\n")
         self.assertEqual(section_result["edge_count"], 1)
         self.assertEqual(section_result["projection"]["written_files"], ["A.md"])
         self.assertEqual(log_result["projection"]["written_files"], ["Log.md"])
+        self.assertEqual(status_result["journal_event_count"], 4)
+        self.assertTrue(status_result["projection"]["ok"])
+        self.assertTrue(diff_result["ok"])
+        self.assertEqual(diff_result["diff_count"], 0)
+        self.assertEqual(revert_result["target_event_type"], "log_append")
+        self.assertEqual(revert_result["projection"]["written_files"], ["Log.md"])
+        self.assertEqual(revert_result["removed_line_count"], 3)
 
     def test_read_markdown_page_by_source_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
