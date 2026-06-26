@@ -909,9 +909,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report alpha write journal and projection status.",
         description=(
             "Check whether the Markdown projection is clean for a Markdown-backed project and summarize "
-            "the journal used by the alpha write path."
+            "the journal used by the alpha write path. When a journal is available, also compare the "
+            "primary log page against the journal-regenerated projection so direct Markdown log edits "
+            "can be reported as stale."
         ),
-        returns="project, output, journal, journal_exists, journal_event_count, last_event|null, projection",
+        returns=(
+            "project, output, journal, journal_exists, journal_event_count, last_event|null, "
+            "projection, journal_log_stale, journal_log_changed_files, "
+            "journal_log_projection|null, journal_log_error|null"
+        ),
         examples=[
             "grasp --project grasp-wiki write-status --output wiki",
             "grasp --project grasp-wiki --json write-status --output wiki --journal wiki.grasp/events.jsonl",
@@ -919,6 +925,7 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "This is an alpha recovery surface for Markdown-backed write dogfood.",
             "projection.ok=false means export-markdown --check would fail.",
+            "journal_log_stale=true means the log page no longer matches the replayed journal log projection.",
         ],
     )
     write_status_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to check.")
@@ -1462,6 +1469,19 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     journal = journal_path_for_output(args.output, args.journal)
     events = read_journal_events(journal)
     projection = store.export_markdown(args.output, check=True)
+    journal_log_projection = None
+    journal_log_changed_files: list[str] = []
+    journal_log_error = None
+    if journal.exists() and events:
+        try:
+            journal_log_projection = store.export_markdown(
+                args.output,
+                check=True,
+                log_journal_events=events,
+            )
+            journal_log_changed_files = regenerated_projection_dirty_files(journal_log_projection)
+        except ValueError as error:
+            journal_log_error = str(error)
     return {
         "project": projection["project"],
         "output": str(args.output),
@@ -1470,7 +1490,19 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
         "journal_event_count": len(events),
         "last_event": events[-1] if events else None,
         "projection": projection,
+        "journal_log_stale": bool(journal_log_changed_files),
+        "journal_log_changed_files": journal_log_changed_files,
+        "journal_log_projection": journal_log_projection,
+        "journal_log_error": journal_log_error,
     }
+
+
+def regenerated_projection_dirty_files(projection: dict[str, Any]) -> list[str]:
+    regenerated = set(projection.get("regenerated_files") or [])
+    dirty = set(projection.get("changed_files") or [])
+    dirty.update(projection.get("missing_files") or [])
+    dirty.update(projection.get("extra_files") or [])
+    return sorted(regenerated & dirty)
 
 
 def run_write_diff(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
@@ -2885,8 +2917,9 @@ def format_rename_page_result(result: dict[str, Any]) -> str:
 
 def format_write_status(result: dict[str, Any]) -> str:
     projection = result["projection"]
+    journal_log_projection = result.get("journal_log_projection") or {}
     last_event = result.get("last_event") or {}
-    return (
+    text = (
         "# Write Status\n"
         f"project: {result['project']}\n"
         f"output: {result['output']}\n"
@@ -2899,6 +2932,14 @@ def format_write_status(result: dict[str, Any]) -> str:
         f"missing: {len(projection.get('missing_files') or [])}\n"
         f"extra: {len(projection.get('extra_files') or [])}\n"
     )
+    if journal_log_projection:
+        text += (
+            f"journal_log_stale: {str(result.get('journal_log_stale', False)).lower()}\n"
+            f"journal_log_changed: {len(result.get('journal_log_changed_files') or [])}\n"
+        )
+    elif result.get("journal_log_error"):
+        text += f"journal_log_error: {result['journal_log_error']}\n"
+    return text
 
 
 def format_write_diff(result: dict[str, Any]) -> str:
