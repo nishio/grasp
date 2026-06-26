@@ -39,13 +39,51 @@ SOURCE_ROLE_PATHS = [
     "index.md",
     "log.md",
 ]
-CONTINUOUS_REPLAY_COMMITS = [
-    (SOURCE_DIGEST_POLICY_COMMIT, SOURCE_DIGEST_POLICY_PATHS),
-    (SOURCE_ROLE_COMMIT, SOURCE_ROLE_PATHS),
+HANDLE_BINDING_COMMIT = "7360053e07a161da8a528746b078de87dcecfb03"
+HANDLE_BINDING_PATHS = [
+    "decisions/markdown-identity-name-collision-policy.md",
+    "entities/grasp-v1-implemented.md",
+    "entities/wiki-forest-markdown-import-dogfood-2026-06-25.md",
+    "grasp-backlog.md",
+    "history.md",
+    "index.md",
+    "log.md",
 ]
-CONTINUOUS_REPLAY_PATHS = list(
-    dict.fromkeys(path for _, paths in CONTINUOUS_REPLAY_COMMITS for path in paths)
-)
+EDGE_RESOLUTION_COMMIT = "827806943765365c4511d75fbf7316590c269f47"
+EDGE_RESOLUTION_PATHS = [
+    "decisions/markdown-identity-name-collision-policy.md",
+    "decisions/markdown-obsidian-indexed-mirror.md",
+    "entities/grasp-v1-implemented.md",
+    "entities/wiki-forest-markdown-import-dogfood-2026-06-25.md",
+    "grasp-backlog.md",
+    "history.md",
+    "index.md",
+    "log.md",
+]
+CONTINUOUS_REPLAY_SEQUENCES = [
+    {
+        "name": "source-role",
+        "commits": [
+            (SOURCE_DIGEST_POLICY_COMMIT, SOURCE_DIGEST_POLICY_PATHS),
+            (SOURCE_ROLE_COMMIT, SOURCE_ROLE_PATHS),
+        ],
+        "read_handle": "grasp-v1-implemented",
+        "expected_title": "entity: grasp v1 implemented surface",
+        "assert_path": "entities/grasp-v1-implemented.md",
+        "assert_text": "`source/` / `sources/`",
+    },
+    {
+        "name": "handle-ambiguity",
+        "commits": [
+            (HANDLE_BINDING_COMMIT, HANDLE_BINDING_PATHS),
+            (EDGE_RESOLUTION_COMMIT, EDGE_RESOLUTION_PATHS),
+        ],
+        "read_handle": "grasp-v1-implemented",
+        "expected_title": "entity: grasp v1 implemented surface",
+        "assert_path": "decisions/markdown-identity-name-collision-policy.md",
+        "assert_text": "resolution_status=ambiguous",
+    },
+]
 HISTORY_FIXTURE_PATHS = [
     "SPEC.md",
     "index.md",
@@ -68,6 +106,10 @@ def git_show_file(revision: str, path: str) -> str:
 
 def git_show_files(revision: str, paths: list[str]) -> dict[str, str]:
     return {path: git_show_file(revision, path) for path in paths}
+
+
+def replay_sequence_paths(sequence: dict) -> list[str]:
+    return list(dict.fromkeys(path for _, paths in sequence["commits"] for path in paths))
 
 
 def write_fixture_files(root: Path, fixture: dict[str, str]) -> None:
@@ -654,123 +696,124 @@ class GitHistoryReplayTests(unittest.TestCase):
         )
 
     def test_actual_consecutive_wiki_updates_replay_cleanly(self):
-        try:
-            before_fixture = git_show_files(f"{SOURCE_DIGEST_POLICY_COMMIT}^", CONTINUOUS_REPLAY_PATHS)
-            step_fixtures = [
-                (commit, paths, git_show_files(commit, paths))
-                for commit, paths in CONTINUOUS_REPLAY_COMMITS
-            ]
-            final_fixture = git_show_files(SOURCE_ROLE_COMMIT, CONTINUOUS_REPLAY_PATHS)
-        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-            raise unittest.SkipTest(f"git history fixture unavailable: {exc}") from exc
+        for sequence in CONTINUOUS_REPLAY_SEQUENCES:
+            with self.subTest(sequence=sequence["name"]):
+                commits = sequence["commits"]
+                sequence_paths = replay_sequence_paths(sequence)
+                try:
+                    before_fixture = git_show_files(f"{commits[0][0]}^", sequence_paths)
+                    step_fixtures = [
+                        (commit, paths, git_show_files(commit, paths))
+                        for commit, paths in commits
+                    ]
+                    final_fixture = git_show_files(commits[-1][0], sequence_paths)
+                except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+                    raise unittest.SkipTest(f"git history fixture unavailable: {exc}") from exc
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "wiki"
-            root.mkdir()
-            write_fixture_files(root, before_fixture)
-            store_path = Path(tmpdir) / "store.sqlite"
-            reimport_store_path = Path(tmpdir) / "reimport.sqlite"
-            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir) / "wiki"
+                    root.mkdir()
+                    write_fixture_files(root, before_fixture)
+                    store_path = Path(tmpdir) / "store.sqlite"
+                    reimport_store_path = Path(tmpdir) / "reimport.sqlite"
+                    journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
 
-            run_grasp_json(
-                "--store",
-                store_path,
-                "adopt-markdown",
-                root,
-                "--project",
-                "wiki",
-                "--journal",
-                journal_path,
-            )
-            update_source_paths_by_commit = []
-            replay_results = []
-            for commit, paths, fixture in step_fixtures:
-                step_root = Path(tmpdir) / commit[:7]
-                step_root.mkdir()
-                write_fixture_files(step_root, fixture)
-                commit_source_paths = []
-                for relative_path in paths:
-                    result = run_grasp_json(
+                    run_grasp_json(
                         "--store",
                         store_path,
+                        "adopt-markdown",
+                        root,
                         "--project",
                         "wiki",
-                        "write-page",
-                        Path(relative_path).stem,
-                        "--from-file",
-                        step_root / relative_path,
-                        "--output",
-                        root,
                         "--journal",
                         journal_path,
                     )
-                    self.assertEqual(result["event_type"], "page_update")
-                    commit_source_paths.append(result["source_path"])
-                update_source_paths_by_commit.append(commit_source_paths)
-                replay_results.append(
+                    update_source_paths_by_commit = []
+                    replay_results = []
+                    for commit, paths, fixture in step_fixtures:
+                        step_root = Path(tmpdir) / commit[:7]
+                        step_root.mkdir()
+                        write_fixture_files(step_root, fixture)
+                        commit_source_paths = []
+                        for relative_path in paths:
+                            result = run_grasp_json(
+                                "--store",
+                                store_path,
+                                "--project",
+                                "wiki",
+                                "write-page",
+                                Path(relative_path).stem,
+                                "--from-file",
+                                step_root / relative_path,
+                                "--output",
+                                root,
+                                "--journal",
+                                journal_path,
+                            )
+                            self.assertEqual(result["event_type"], "page_update")
+                            commit_source_paths.append(result["source_path"])
+                        update_source_paths_by_commit.append(commit_source_paths)
+                        replay_results.append(
+                            run_grasp_json(
+                                "--project",
+                                "wiki",
+                                "replay-journal",
+                                "--journal",
+                                journal_path,
+                                "--output",
+                                root,
+                                "--check",
+                            )
+                        )
+
                     run_grasp_json(
+                        "--store",
+                        reimport_store_path,
+                        "import",
+                        "--markdown",
+                        root,
                         "--project",
                         "wiki",
-                        "replay-journal",
-                        "--journal",
-                        journal_path,
-                        "--output",
-                        root,
-                        "--check",
                     )
+                    reimport_read = run_grasp_json(
+                        "--store",
+                        reimport_store_path,
+                        "--project",
+                        "wiki",
+                        "read",
+                        sequence["read_handle"],
+                        "--related-limit",
+                        "0",
+                        "--unresolved-limit",
+                        "0",
+                    )
+                    journal_events = [
+                        json.loads(line)
+                        for line in journal_path.read_text(encoding="utf-8").splitlines()
+                    ]
+                    projected_texts = {
+                        path: (root / path).read_text(encoding="utf-8")
+                        for path in sequence_paths
+                    }
+
+                projection_event_types = [
+                    event["event_type"]
+                    for event in journal_events
+                    if event["event_type"] != "log_entry_import"
+                ]
+                self.assertEqual(
+                    projection_event_types,
+                    ["page_create"] * len(sequence_paths)
+                    + ["page_update"] * sum(len(paths) for _, paths in commits),
                 )
-
-            run_grasp_json(
-                "--store",
-                reimport_store_path,
-                "import",
-                "--markdown",
-                root,
-                "--project",
-                "wiki",
-            )
-            reimport_implemented = run_grasp_json(
-                "--store",
-                reimport_store_path,
-                "--project",
-                "wiki",
-                "read",
-                "grasp-v1-implemented",
-                "--related-limit",
-                "0",
-                "--unresolved-limit",
-                "0",
-            )
-            journal_events = [
-                json.loads(line)
-                for line in journal_path.read_text(encoding="utf-8").splitlines()
-            ]
-            projected_texts = {
-                path: (root / path).read_text(encoding="utf-8")
-                for path in CONTINUOUS_REPLAY_PATHS
-            }
-
-        projection_event_types = [
-            event["event_type"]
-            for event in journal_events
-            if event["event_type"] != "log_entry_import"
-        ]
-        self.assertEqual(
-            projection_event_types,
-            ["page_create"] * len(CONTINUOUS_REPLAY_PATHS)
-            + ["page_update"] * sum(len(paths) for _, paths in CONTINUOUS_REPLAY_COMMITS),
-        )
-        self.assertEqual(
-            update_source_paths_by_commit,
-            [paths for _, paths in CONTINUOUS_REPLAY_COMMITS],
-        )
-        self.assertTrue(all(result["ok"] for result in replay_results))
-        self.assertEqual(projected_texts, final_fixture)
-        self.assertEqual(
-            reimport_implemented["page"]["title"],
-            "entity: grasp v1 implemented surface",
-        )
-        self.assertIn(
-            "`source/` / `sources/`",
-            projected_texts["entities/grasp-v1-implemented.md"],
-        )
+                self.assertEqual(
+                    update_source_paths_by_commit,
+                    [paths for _, paths in commits],
+                )
+                self.assertTrue(all(result["ok"] for result in replay_results))
+                self.assertEqual(projected_texts, final_fixture)
+                self.assertEqual(reimport_read["page"]["title"], sequence["expected_title"])
+                self.assertIn(
+                    sequence["assert_text"],
+                    projected_texts[sequence["assert_path"]],
+                )
