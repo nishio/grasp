@@ -14,6 +14,8 @@ from grasp.markdown import (
     MarkdownMirror,
     first_markdown_h1_title,
     markdown_graph_role,
+    markdown_page_id,
+    markdown_projection_text,
     parse_frontmatter,
     parse_markdown_links,
 )
@@ -113,6 +115,52 @@ class MarkdownParsingTests(unittest.TestCase):
         )
         self.assertEqual(first_markdown_h1_title(["# C#"]), "C#")
         self.assertEqual(first_markdown_h1_title(["# C# #"]), "C#")
+
+    def test_projection_frontmatter_persists_rename_identity_only_when_needed(self):
+        path_id = markdown_page_id(Path("New.md"))
+        self.assertEqual(
+            markdown_projection_text(
+                "New.md",
+                page_id=path_id,
+                title="New",
+                aliases=[],
+                lines=["# New", "body"],
+            ),
+            "# New\nbody\n",
+        )
+        self.assertEqual(
+            markdown_projection_text(
+                "New.md",
+                page_id="old-stable-id",
+                title="New",
+                aliases=["Old"],
+                lines=["# New", "body"],
+            ),
+            "\n".join(
+                [
+                    "---",
+                    "id: old-stable-id",
+                    "title: New",
+                    "aliases:",
+                    "  - Old",
+                    "---",
+                    "# New",
+                    "body",
+                    "",
+                ]
+            ),
+        )
+        existing = ["---", "id: old-stable-id", "title: New", "aliases:", "  - Old", "---", "# New"]
+        self.assertEqual(
+            markdown_projection_text(
+                "New.md",
+                page_id="old-stable-id",
+                title="New",
+                aliases=["Old"],
+                lines=existing,
+            ),
+            "\n".join([*existing, ""]),
+        )
 
 
 class MarkdownImportTests(unittest.TestCase):

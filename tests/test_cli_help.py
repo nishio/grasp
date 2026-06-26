@@ -1564,6 +1564,7 @@ class CliHelpTests(unittest.TestCase):
                 capture_output=True,
             )
             rename_result = json.loads(rename_completed.stdout)
+            reimport_store_path = Path(tmpdir) / "reimport.sqlite"
             read_old_completed = subprocess.run(
                 [
                     sys.executable,
@@ -1606,6 +1607,64 @@ class CliHelpTests(unittest.TestCase):
             )
             new_text_during_rename = (root / "New.md").read_text(encoding="utf-8")
             old_exists_during_rename = (root / "Old.md").exists()
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(reimport_store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            reimport_read_old_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(reimport_store_path),
+                    "--project",
+                    "wiki",
+                    "read",
+                    "Old",
+                    "--related-limit",
+                    "0",
+                    "--unresolved-limit",
+                    "0",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            reimport_check_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(reimport_store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--check",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
             revert_completed = subprocess.run(
                 [
                     sys.executable,
@@ -1655,6 +1714,8 @@ class CliHelpTests(unittest.TestCase):
 
         read_old_result = json.loads(read_old_completed.stdout)
         replay_after_rename = json.loads(replay_after_rename_completed.stdout)
+        reimport_read_old = json.loads(reimport_read_old_completed.stdout)
+        reimport_check = json.loads(reimport_check_completed.stdout)
         revert_result = json.loads(revert_completed.stdout)
         replay_after_revert = json.loads(replay_after_revert_completed.stdout)
         self.assertEqual(
@@ -1668,11 +1729,30 @@ class CliHelpTests(unittest.TestCase):
         self.assertTrue(rename_result["heading_updated"])
         self.assertEqual(rename_result["projection"]["written_files"], ["New.md"])
         self.assertEqual(rename_result["projection"]["removed_files"], ["Old.md"])
-        self.assertEqual(new_text_during_rename, "# New\nbody\n")
+        self.assertEqual(
+            new_text_during_rename,
+            "\n".join(
+                [
+                    "---",
+                    f"id: {rename_result['page']['id']}",
+                    "title: New",
+                    "aliases:",
+                    "  - Old",
+                    "---",
+                    "# New",
+                    "body",
+                    "",
+                ]
+            ),
+        )
         self.assertFalse(old_exists_during_rename)
         self.assertEqual(read_old_result["page"]["title"], "New")
         self.assertEqual(read_old_result["backlink_count_total"], 1)
         self.assertTrue(replay_after_rename["ok"])
+        self.assertEqual(reimport_read_old["page"]["id"], rename_result["page"]["id"])
+        self.assertEqual(reimport_read_old["page"]["title"], "New")
+        self.assertEqual(reimport_read_old["backlink_count_total"], 1)
+        self.assertTrue(reimport_check["ok"])
         self.assertEqual(revert_result["target_event_type"], "page_rename")
         self.assertEqual(revert_result["restored_line_count"], 2)
         self.assertTrue(old_exists_after_revert)

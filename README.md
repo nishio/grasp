@@ -166,7 +166,7 @@ grasp read "<ページタイトル>"
 | `append-section <title>` | Markdown-backed page に section を追記し、SQLite index / JSONL journal / Markdown projection を更新する alpha write surface |
 | `append-log` | Markdown-backed log page に dated entry を追記し、SQLite index / JSONL journal / Markdown projection を更新する alpha write surface |
 | `write-page <title>` | Markdown-backed page の本文行を全置換し、`page_update` event と projection を更新する alpha write surface |
-| `rename-page <target> <new-title>` | Markdown-backed page の page id を保ったまま title / optional source path を変更し、旧 title を alias として残す alpha write surface |
+| `rename-page <target> <new-title>` | Markdown-backed page の page id を保ったまま title / optional source path を変更し、旧 title を alias として残す alpha write surface。必要時は projection に `id` / `title` / `aliases` frontmatter を出す |
 | `write-status` | alpha write 用に journal 件数・last event・Markdown projection check を返す |
 | `write-diff` | filesystem 上の Markdown と stored projection の unified diff を返す |
 | `revert-event <event-id>` | `section_append` / `log_append` / `page_update` / `page_rename` を current state 一致時だけ取り消し、`event_revert` を journal に記録する |
@@ -203,7 +203,7 @@ grasp read "<ページタイトル>"
 ## Roadmap
 
 - **Markdown / Obsidian 互換性の拡張** — 最小の read-only mirror と content-only 差分 index、first H1 title resolution は実装済み。Obsidian block refs / より細かい alias-aware incremental rebuild などは今後の拡張。
-- **書き込み層（`write` / `rename`）** — alpha の `append-section` / `append-log` / `write-page` / `rename-page` と、その recovery surface（`write-status` / `write-diff` / `revert-event` / `replay-journal`）は入りましたが、frontmatter title 追従 / direct re-import 後の alias 永続化 / 汎用 revert は未実装です。Scrapbox / Cosenseを使っている人がAIから hosted に書くときはcosense-cliで書くことを想定しています。grasp の write 層は将来的にCosenseユーザでない人 or オンラインのCosenseに書くのではなくローカルに閉じて欲しいケース をサポートする目的です。
+- **書き込み層（`write` / `rename`）** — alpha の `append-section` / `append-log` / `write-page` / `rename-page` と、その recovery surface（`write-status` / `write-diff` / `revert-event` / `replay-journal`）は入りましたが、任意 frontmatter の merge / 汎用 revert は未実装です。Scrapbox / Cosenseを使っている人がAIから hosted に書くときはcosense-cliで書くことを想定しています。grasp の write 層は将来的にCosenseユーザでない人 or オンラインのCosenseに書くのではなくローカルに閉じて欲しいケース をサポートする目的です。
 - **ベクトル検索** — 文字列一致だけでなく、意味の近さで関連を辿る。
 
 スコープ外: リアルタイム多人数編集・同期・共有/権限・Web UI。単一ユーザ＋AI には不要で、これらを削ぎ落とすのが grasp の核です。

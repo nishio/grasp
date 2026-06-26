@@ -894,3 +894,11 @@
 - これは [[llm-wiki-infra-fast-path-plan]] Phase 5 の最小 rename slice。まだ semantic index-log regeneration / direct re-import 後の alias 永続化 / general revert / projection export 失敗時 rollback は未実装。
 - schema は v7 のまま。public compatibility version は `1.7.15`。
 - 検証: `python3 -m unittest discover -s tests`（83 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 12:40] implementation+dogfood+file back | rename identity を projection frontmatter に保持
+- `export-markdown` と `replay-journal` の Markdown projection が、path-derived id / first H1 / aliases だけでは identity が失われる page に限って `id` / `title` / `aliases` frontmatter を生成するようにした。既存 frontmatter が同じ identity metadata を持つ場合は触らない。
+- rename 後の `New.md` には旧 page id と旧名 alias が projection されるため、generated Markdown を direct `import --markdown` しても page id と `Old` alias が残る。
+- dogfood: temp wiki で `Old.md` + `A.md`（`[[Old]]`）を `rename-page Old New --new-path New.md` した後、generated `New.md` を別 store に direct import。`read Old` は同じ page id / title `New` / backlink count 1 を返し、`export-markdown --check` も clean。
+- これは [[llm-wiki-infra-fast-path-plan]] Phase 5 の rename slice の穴埋め。まだ semantic index-log regeneration / 任意 frontmatter merge / general revert / projection export 失敗時 rollback は未実装。
+- schema は v7 のまま。public compatibility version は `1.7.16`。
+- 検証: `python3 -m unittest discover -s tests`（84 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
