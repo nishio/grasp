@@ -1031,3 +1031,8 @@ Added rename_pages support to the continuous git history replay table.
 Moved the d4e4c39 why-design-B -> why-not-scrapbox-clone rename invariant into the table-driven continuous replay harness.
 Made rename-page JSON results include event_type=page_rename, matching write-page result shape.
 Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
+
+## [2026-06-26 22:54] implementation+test+file-back | event revert continuous replay
+Added revert_events support to the continuous git history replay table.
+Added a 0db1449 sequence that creates llm-wiki-infra-fast-path-plan, updates the existing pages, then reverts the page_create event while keeping the updates.
+Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
