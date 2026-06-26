@@ -954,6 +954,7 @@ def build_parser() -> argparse.ArgumentParser:
             "grasp --project grasp-wiki --json revert-event <event-id> --output wiki --journal wiki.grasp/events.jsonl",
         ],
         notes=[
+            "page_create requires current lines/title/path/aliases to match the created page before deletion.",
             "section_append/log_append require their inserted lines to remain at page tail.",
             "page_update/page_rename require the current lines and path/title state to match the target event.",
         ],
@@ -1374,6 +1375,16 @@ def remove_previous_projection_file(output: Path, previous_source_path: str, sou
     return [previous_source_path]
 
 
+def remove_projection_file(output: Path, source_path: str) -> list[str]:
+    target = _safe_replay_output_path(output, source_path)
+    if not target.exists():
+        return []
+    if target.is_dir():
+        raise ValueError(f"Markdown projection path is a directory: {source_path}")
+    target.unlink()
+    return [source_path]
+
+
 def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = journal_path_for_output(args.output, args.journal)
     events = read_journal_events(journal)
@@ -1399,7 +1410,7 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     target = next((event for event in events if event["event_id"] == args.event_id), None)
     if target is None:
         raise ValueError(f"journal event not found: {args.event_id}")
-    if target["event_type"] not in {"section_append", "log_append", "page_update", "page_rename"}:
+    if target["event_type"] not in {"page_create", "section_append", "log_append", "page_update", "page_rename"}:
         raise ValueError(f"cannot revert event_type with this alpha command: {target['event_type']}")
     selected_project = store._require_project()
     if target["project"] != selected_project:
@@ -1416,7 +1427,33 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     page_id = str(payload.get("page_id") or "")
     if not page_id:
         raise ValueError("target event payload is missing page_id")
-    if target["event_type"] == "page_update":
+    source_path = ""
+    if target["event_type"] == "page_create":
+        current_lines = payload.get("lines")
+        title = str(payload.get("title") or "")
+        source_path = str(payload.get("source_path") or "")
+        aliases = payload.get("aliases") or []
+        if not isinstance(current_lines, list) or not title or not source_path or not isinstance(aliases, list):
+            raise ValueError("page_create payload is incomplete")
+        reverted = store.revert_markdown_page_create(
+            page_id,
+            title=title,
+            source_path=source_path,
+            aliases=[str(alias) for alias in aliases],
+            current_lines=current_lines,
+        )
+        revert_payload = {
+            "target_event_id": target["event_id"],
+            "target_event_type": target["event_type"],
+            "page_id": page_id,
+            "title": title,
+            "source_path": source_path,
+            "aliases": aliases,
+            "current_lines": current_lines,
+            "removed_lines": reverted["removed_lines"],
+            "reason": args.reason,
+        }
+    elif target["event_type"] == "page_update":
         previous_lines = payload.get("previous_lines")
         current_lines = payload.get("lines")
         if not isinstance(previous_lines, list) or not isinstance(current_lines, list):
@@ -1500,6 +1537,8 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     removed_files = []
     if target["event_type"] == "page_rename":
         removed_files = remove_previous_projection_file(args.output, source_path, previous_source_path)
+    elif target["event_type"] == "page_create":
+        removed_files = remove_projection_file(args.output, source_path)
     projection = store.export_markdown(args.output, check=False)
     projection["removed_files"] = removed_files
     projection["removed_count"] = len(removed_files)
@@ -1607,7 +1646,26 @@ def replay_journal_projection(
             target_event_type = payload.get("target_event_type")
             if page_id not in pages:
                 raise ValueError(f"event_revert references unknown page_id {page_id!r} in event {event['event_id']}")
-            if target_event_type in {"section_append", "log_append"}:
+            if target_event_type == "page_create":
+                current_lines = payload.get("current_lines")
+                source_path = str(payload.get("source_path") or "")
+                title = str(payload.get("title") or "")
+                if not isinstance(current_lines, list):
+                    raise ValueError(f"event_revert payload is missing page_create lines in event {event['event_id']}")
+                if not source_path or not title:
+                    raise ValueError(f"event_revert payload is missing page_create title or source_path in event {event['event_id']}")
+                if pages[page_id]["source_path"] != _safe_replay_relative_path(source_path):
+                    raise ValueError(f"event_revert source_path does not match page in event {event['event_id']}")
+                if pages[page_id]["title"] != title:
+                    raise ValueError(f"event_revert title does not match page in event {event['event_id']}")
+                aliases = [str(alias) for alias in payload.get("aliases") or []]
+                if pages[page_id]["aliases"] != aliases:
+                    raise ValueError(f"event_revert aliases do not match page in event {event['event_id']}")
+                expected_current = [_journal_line_for_replay(line) for line in current_lines]
+                if pages[page_id]["lines"] != expected_current:
+                    raise ValueError(f"event_revert current_lines do not match page in event {event['event_id']}")
+                del pages[page_id]
+            elif target_event_type in {"section_append", "log_append"}:
                 removed_lines = payload.get("removed_lines")
                 if not isinstance(removed_lines, list) or not removed_lines:
                     raise ValueError(f"event_revert payload is missing removed_lines in event {event['event_id']}")

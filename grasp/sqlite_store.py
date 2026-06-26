@@ -2559,6 +2559,83 @@ class SQLiteStore:
             "edge_count": edge_count,
         }
 
+    def revert_markdown_page_create(
+        self,
+        page_id: str,
+        *,
+        title: str,
+        source_path: str,
+        aliases: list[str],
+        current_lines: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        project = self._require_project()
+        manifest = self._markdown_manifest_for_project(project)
+        files = manifest.get("files")
+        if not isinstance(files, dict):
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+        page = self._page_by_id(page_id)
+        if page is None:
+            raise ValueError(f"page id not found: {page_id}")
+        expected_current = self._normalized_journal_lines(current_lines)
+        actual_current = self._line_compare_payloads(self._markdown_line_payloads(project, page_id))
+        if actual_current != self._line_compare_payloads(expected_current):
+            raise ValueError("page_create current lines no longer match the current page")
+        if page.title != title:
+            raise ValueError("page_create title no longer matches the current page")
+        current_source_path, item = self._markdown_manifest_entry_for_page(manifest, page_id)
+        source_path = _safe_markdown_relative_path(source_path)
+        if current_source_path != source_path:
+            raise ValueError("page_create source path no longer matches the current page")
+        current_aliases = [str(alias) for alias in item.get("aliases") or []]
+        aliases = [str(alias) for alias in aliases]
+        if current_aliases != aliases:
+            raise ValueError("page_create aliases no longer match the current page")
+
+        new_files = {
+            str(path): dict(file_item)
+            for path, file_item in files.items()
+            if isinstance(file_item, dict) and str(file_item.get("page_id") or "") != page_id
+        }
+        manifest = dict(manifest)
+        manifest["files"] = new_files
+
+        alias_map = dict(self.project_title_aliases(project))
+        for alias in aliases:
+            alias_norm = normalize_title(alias)
+            if alias_norm and alias_map.get(alias_norm) == title:
+                alias_map.pop(alias_norm, None)
+
+        with self.connection:
+            self.connection.execute(
+                "DELETE FROM pages WHERE project = ? AND id = ?",
+                (project, page_id),
+            )
+            refresh_edge_resolutions(self.connection, project)
+            rebuild_unresolved_targets(self.connection, project)
+            _refresh_project_counts_sql(self.connection, project)
+            _write_metadata(
+                self.connection,
+                {
+                    f"project.{project}.title_aliases": json.dumps(
+                        alias_map,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    f"project.{project}.markdown_manifest": json.dumps(
+                        manifest,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                },
+            )
+        return {
+            "project": project,
+            "page": {"id": page_id, "title": title},
+            "source_path": source_path,
+            "removed_lines": expected_current,
+            "removed_line_count": len(expected_current),
+        }
+
     def revert_markdown_append(self, page_id: str, inserted_lines: list[dict[str, Any]]) -> dict[str, Any]:
         project = self._require_project()
         if not self._markdown_manifest_for_project(project):

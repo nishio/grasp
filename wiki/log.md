@@ -916,3 +916,11 @@
 - REST page は stable `lines[].id` / `commitId` / resolved `links` / `projectLinks` / `relatedPages` / `linked` / `pageRank` を返す。JSON export は bulk seed として有用だが、sync / acquire でこの metadata を補助列として取り込む余地がある。
 - rename/delete については、recent updated window だけでは不足。`listPages` full manifest reconcile（remote page id set と local id set の比較）を主軸にし、認証済み path では `/api/commits/:project/:pageId` の `TitleChange`、`/api/deleted-pages/:project/:pageId`、`/api/stream/:project` の `page.delete` を補助に使う案を [[incremental-sync]] と [[grasp-backlog]] に追記した。
 - 公開 API 実測では commits / snapshots / deleted-pages は未ログイン 401、stream は 200。direct public API fallback は可能だが、認証要 API と分ける必要がある。
+
+## [2026-06-26 13:43] implementation+dogfood+file back | `page_create` の revert/replay を追加
+- `revert-event` が `page_create` event を扱えるようにした。current lines / title / source path / aliases が created state と一致する場合だけ page を削除し、projection file も削除し、`event_revert` を append する。
+- `replay-journal` は `event_revert(target_event_type=page_create)` で replay state から page を削除する。後続編集で lines/title/path/aliases が変わっていれば revert は拒否する。
+- dogfood: temp wiki で `A.md`（`[[New]]`）を adopt し、`write-page New --create --path New.md` → `read New` → `replay-journal --check` → `revert-event` → `replay-journal --check` を実行。create 後は backlink count 1、revert 後は `New.md` が projection から消え、replay は clean。
+- これは `write-page --create` (`1.7.18`) の recovery 穴埋め。まだ semantic index-log regeneration / 任意 frontmatter merge / general revert / projection export 失敗時 rollback は未実装。
+- schema は v7 のまま。public compatibility version は `1.7.19`。
+- 検証: `python3 -m unittest discover -s tests`（87 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。

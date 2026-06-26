@@ -1355,16 +1355,59 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
+            new_text = (root / "New.md").read_text(encoding="utf-8")
+            revert_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "revert-event",
+                    json.loads(create_completed.stdout)["event_id"],
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            replay_after_revert_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--project",
+                    "wiki",
+                    "replay-journal",
+                    "--journal",
+                    str(journal_path),
+                    "--output",
+                    str(root),
+                    "--check",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
             journal_events = [
                 json.loads(line)
                 for line in journal_path.read_text(encoding="utf-8").splitlines()
             ]
-            new_text = (root / "New.md").read_text(encoding="utf-8")
+            new_exists_after_revert = (root / "New.md").exists()
 
         create_result = json.loads(create_completed.stdout)
         read_result = json.loads(read_completed.stdout)
         replay_result = json.loads(replay_completed.stdout)
-        self.assertEqual([event["event_type"] for event in journal_events], ["page_create", "page_create"])
+        revert_result = json.loads(revert_completed.stdout)
+        replay_after_revert = json.loads(replay_after_revert_completed.stdout)
+        self.assertEqual([event["event_type"] for event in journal_events], ["page_create", "page_create", "event_revert"])
         self.assertEqual(create_result["event_type"], "page_create")
         self.assertEqual(create_result["source_path"], "New.md")
         self.assertEqual(create_result["previous_line_count"], 0)
@@ -1375,6 +1418,11 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(read_result["page"]["title"], "New")
         self.assertEqual(read_result["backlink_count_total"], 1)
         self.assertTrue(replay_result["ok"])
+        self.assertEqual(revert_result["target_event_type"], "page_create")
+        self.assertEqual(revert_result["removed_line_count"], 2)
+        self.assertEqual(revert_result["projection"]["removed_files"], ["New.md"])
+        self.assertFalse(new_exists_after_revert)
+        self.assertTrue(replay_after_revert["ok"])
 
     def test_append_section_and_log_update_store_journal_and_projection(self):
         with tempfile.TemporaryDirectory() as tmpdir:
