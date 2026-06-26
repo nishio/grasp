@@ -12,7 +12,7 @@ from typing import Any
 
 from .cosense_cli import CosenseCliClient, acquire_from_cosense, sync_from_cosense
 from .forest import import_forest_from_registry
-from .journal import append_journal_event, make_journal_event
+from .journal import append_journal_event, make_journal_event, read_journal_events
 from .markdown import MarkdownCollisionError, MarkdownMirror
 from .sqlite_store import (
     SCHEMA_VERSION,
@@ -831,6 +831,71 @@ def build_parser() -> argparse.ArgumentParser:
     append_log_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
     append_log_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
 
+    write_status_parser = add_command_parser(
+        subparsers,
+        "write-status",
+        help="Report alpha write journal and projection status.",
+        description=(
+            "Check whether the Markdown projection is clean for a Markdown-backed project and summarize "
+            "the append journal used by the alpha write path."
+        ),
+        returns="project, output, journal, journal_exists, journal_event_count, last_event|null, projection",
+        examples=[
+            "grasp --project grasp-wiki write-status --output wiki",
+            "grasp --project grasp-wiki --json write-status --output wiki --journal wiki.grasp/events.jsonl",
+        ],
+        notes=[
+            "This is an alpha recovery surface for append-section / append-log dogfood.",
+            "projection.ok=false means export-markdown --check would fail.",
+        ],
+    )
+    write_status_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to check.")
+    write_status_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
+
+    write_diff_parser = add_command_parser(
+        subparsers,
+        "write-diff",
+        help="Show the Markdown projection diff for alpha write recovery.",
+        description=(
+            "Compare the stored Markdown projection with files on disk and return unified diffs "
+            "without writing files."
+        ),
+        returns="project, output, check, ok, changed_files, missing_files, extra_files, diff_count, diffs[]",
+        examples=[
+            "grasp --project grasp-wiki write-diff --output wiki",
+            "grasp --project grasp-wiki --json write-diff --output wiki --context 5",
+        ],
+        notes=[
+            "Diff direction is current filesystem -> stored projection.",
+            "Use export-markdown --output <folder> to write the projection after review.",
+        ],
+    )
+    write_diff_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to compare.")
+    write_diff_parser.add_argument("--context", type=int, default=3, help="Unified diff context lines.")
+
+    revert_event_parser = add_command_parser(
+        subparsers,
+        "revert-event",
+        help="Revert a tail append journal event.",
+        description=(
+            "Revert a section_append or log_append journal event only when its inserted lines still form "
+            "the current tail of the target page, then append an event_revert journal entry and export projection."
+        ),
+        returns="project, journal, output, event_id, target_event_id, target_event_type, page, removed_lines[], removed_line_count, projection",
+        examples=[
+            "grasp --project grasp-wiki revert-event <event-id> --output wiki",
+            "grasp --project grasp-wiki --json revert-event <event-id> --output wiki --journal wiki.grasp/events.jsonl",
+        ],
+        notes=[
+            "Only section_append and log_append events are supported.",
+            "Non-tail events are refused so later edits are not silently damaged.",
+        ],
+    )
+    revert_event_parser.add_argument("event_id", help="Journal event id to revert.")
+    revert_event_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
+    revert_event_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
+    revert_event_parser.add_argument("--reason", default="", help="Optional reason stored in the revert event payload.")
+
     sync_parser = add_command_parser(
         subparsers,
         "sync",
@@ -1091,6 +1156,80 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
             "timestamp": timestamp,
             "op": args.op,
             "summary": args.summary,
+            "projection": projection,
+        }
+    )
+    return result
+
+
+def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    journal = journal_path_for_output(args.output, args.journal)
+    events = read_journal_events(journal)
+    projection = store.export_markdown(args.output, check=True)
+    return {
+        "project": projection["project"],
+        "output": str(args.output),
+        "journal": str(journal),
+        "journal_exists": journal.exists(),
+        "journal_event_count": len(events),
+        "last_event": events[-1] if events else None,
+        "projection": projection,
+    }
+
+
+def run_write_diff(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    return store.markdown_projection_diff(args.output, context=args.context)
+
+
+def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    journal = journal_path_for_output(args.output, args.journal)
+    events = read_journal_events(journal)
+    target = next((event for event in events if event["event_id"] == args.event_id), None)
+    if target is None:
+        raise ValueError(f"journal event not found: {args.event_id}")
+    if target["event_type"] not in {"section_append", "log_append"}:
+        raise ValueError(f"cannot revert event_type with this alpha command: {target['event_type']}")
+    selected_project = store._require_project()
+    if target["project"] != selected_project:
+        raise ValueError(
+            f"journal event belongs to project {target['project']!r}; selected project is {selected_project!r}"
+        )
+    if any(
+        event["event_type"] == "event_revert"
+        and event.get("payload", {}).get("target_event_id") == args.event_id
+        for event in events
+    ):
+        raise ValueError(f"journal event is already reverted: {args.event_id}")
+    payload = target["payload"]
+    page_id = str(payload.get("page_id") or "")
+    if not page_id:
+        raise ValueError("target event payload is missing page_id")
+    inserted_lines = payload.get("inserted_lines")
+    if not isinstance(inserted_lines, list):
+        raise ValueError("target event payload is missing inserted_lines")
+    reverted = store.revert_markdown_append(page_id, inserted_lines)
+    event = make_journal_event(
+        "event_revert",
+        project=reverted["project"],
+        payload={
+            "target_event_id": target["event_id"],
+            "target_event_type": target["event_type"],
+            "page_id": page_id,
+            "title": payload.get("title") or reverted["page"].get("title"),
+            "removed_lines": reverted["removed_lines"],
+            "reason": args.reason,
+        },
+    )
+    append_journal_event(journal, event)
+    projection = store.export_markdown(args.output, check=False)
+    result = dict(reverted)
+    result.update(
+        {
+            "journal": str(journal),
+            "output": str(args.output),
+            "event_id": event["event_id"],
+            "target_event_id": target["event_id"],
+            "target_event_type": target["event_type"],
             "projection": projection,
         }
     )
@@ -1468,6 +1607,12 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return run_append_section(store, args)
     if args.command == "append-log":
         return run_append_log(store, args)
+    if args.command == "write-status":
+        return run_write_status(store, args)
+    if args.command == "write-diff":
+        return run_write_diff(store, args)
+    if args.command == "revert-event":
+        return run_revert_event(store, args)
     if args.command == "unresolved":
         return {
             "unresolved_targets": store.unresolved_targets(limit=args.limit),
@@ -1920,6 +2065,12 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_export_markdown(result)
     if command in {"append-section", "append-log"}:
         return format_append_result(result)
+    if command == "write-status":
+        return format_write_status(result)
+    if command == "write-diff":
+        return format_write_diff(result)
+    if command == "revert-event":
+        return format_revert_event(result)
     if command == "unresolved":
         return with_alias_legend(format_unresolved_targets(result["unresolved_targets"], aliases=aliases), aliases)
     if command == "sync":
@@ -1993,6 +2144,53 @@ def format_append_result(result: dict[str, Any]) -> str:
         f"event_id: {result['event_id']}\n"
         f"appended_lines: {result['appended_line_count']}\n"
         f"edges: {result['edge_count']}\n"
+        f"projection_written: {projection.get('written_count', 0)}\n"
+    )
+
+
+def format_write_status(result: dict[str, Any]) -> str:
+    projection = result["projection"]
+    last_event = result.get("last_event") or {}
+    return (
+        "# Write Status\n"
+        f"project: {result['project']}\n"
+        f"output: {result['output']}\n"
+        f"journal: {result['journal']}\n"
+        f"journal_exists: {str(result['journal_exists']).lower()}\n"
+        f"journal_events: {result['journal_event_count']}\n"
+        f"last_event: {last_event.get('event_type', '')} {last_event.get('event_id', '')}\n"
+        f"projection_ok: {str(projection['ok']).lower()}\n"
+        f"changed: {len(projection.get('changed_files') or [])}\n"
+        f"missing: {len(projection.get('missing_files') or [])}\n"
+        f"extra: {len(projection.get('extra_files') or [])}\n"
+    )
+
+
+def format_write_diff(result: dict[str, Any]) -> str:
+    parts = [
+        "# Write Diff\n",
+        f"project: {result['project']}\n",
+        f"output: {result['output']}\n",
+        f"ok: {str(result['ok']).lower()}\n",
+        f"diffs: {result['diff_count']}\n",
+    ]
+    for diff in result.get("diffs") or []:
+        parts.append(f"\n## {diff['kind']} {diff['path']}\n")
+        parts.extend(diff.get("diff") or [])
+    return "".join(parts)
+
+
+def format_revert_event(result: dict[str, Any]) -> str:
+    projection = result.get("projection") or {}
+    return (
+        "# Revert Event\n"
+        f"project: {result['project']}\n"
+        f"page: {result['page'].get('title', result['page'].get('id', ''))}\n"
+        f"journal: {result['journal']}\n"
+        f"event_id: {result['event_id']}\n"
+        f"target_event_id: {result['target_event_id']}\n"
+        f"target_event_type: {result['target_event_type']}\n"
+        f"removed_lines: {result['removed_line_count']}\n"
         f"projection_written: {projection.get('written_count', 0)}\n"
     )
 

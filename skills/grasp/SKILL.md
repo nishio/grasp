@@ -156,6 +156,9 @@ grasp --project <source-project> cross-project-acquire --limit 5 --seed-limit 10
 | `export-markdown --output <folder> --check` | Markdown projection の no-op gate。差分があれば exit 1 |
 | `append-section <title>` | Markdown-backed page に section を追記し、SQLite index / JSONL journal / Markdown projection を更新する alpha write surface |
 | `append-log` | Markdown-backed log page に dated entry を追記し、SQLite index / JSONL journal / Markdown projection を更新する alpha write surface |
+| `write-status` | alpha write 用に journal 件数・last event・Markdown projection check を返す |
+| `write-diff` | filesystem 上の Markdown と stored projection の unified diff を返す |
+| `revert-event <event-id>` | tail に残っている `section_append` / `log_append` event だけを取り消し、`event_revert` を journal に記録する |
 | `link-stats <title>` | incoming link count と 0/1/N |
 | `unresolved` | 未解決 target の rank view（TODO ではない） |
 | `peek <title>` | 本文行のみ。`--line-offset N --line-limit M` でページング |
@@ -172,7 +175,7 @@ grasp --project <source-project> cross-project-acquire --limit 5 --seed-limit 10
 - 1つの store に複数 project namespace を保持できる。`grasp import --cosense <json>` は export JSON の `name` を、`grasp import --markdown <folder>` は folder 名を project 名として使い、同名 project だけを置き換える。project 名を明示する時は `grasp import --project <name> --cosense <json>` / `grasp import --project <name> --markdown <folder>`。
 - 一回限りのユーザ指定 JSON を読む時は、必要に応じて `--store <task-local.sqlite>` を使い、既定 store に project を増やさない。
 - 未インストール環境では grasp repository root から `python3 -m grasp <verb>`（`pip install -e <grasp-repo>` 済みなら `grasp` が PATH）。
-- `grasp import --cosense <json>` で Cosense JSON export、`grasp import --markdown <folder>` で read-only Markdown mirror、`grasp import-forest <wikis.yaml>` で registry 配下の複数 Markdown wiki を import する。authoring fast path では `grasp adopt-markdown <folder> --journal <events.jsonl>`、`grasp export-markdown --output <folder> --check`、`grasp append-section ... --output <folder>`、`grasp append-log ... --output <folder>` を使う。append 系は Markdown-backed project の unique handle に限る alpha surface で、rename / replay / revert はまだ無い。以降は sub-second。別パスは `--store` / `$GRASP_STORE`、別 home は `$GRASP_HOME`。
+- `grasp import --cosense <json>` で Cosense JSON export、`grasp import --markdown <folder>` で read-only Markdown mirror、`grasp import-forest <wikis.yaml>` で registry 配下の複数 Markdown wiki を import する。authoring fast path では `grasp adopt-markdown <folder> --journal <events.jsonl>`、`grasp export-markdown --output <folder> --check`、`grasp append-section ... --output <folder>`、`grasp append-log ... --output <folder>`、`grasp write-status --output <folder>`、`grasp write-diff --output <folder>`、`grasp revert-event <event-id> --output <folder>` を使う。append 系は Markdown-backed project の unique handle に限る alpha surface。`revert-event` は append event の inserted lines が現在も page tail にある時だけ動く。rename / replay / 汎用 revert はまだ無い。以降は sub-second。別パスは `--store` / `$GRASP_STORE`、別 home は `$GRASP_HOME`。
 - import 済み JSON は store 横の `<store>.imports/` に復旧用コピーとして保持される。通常 command が古い schema の store を見つけた時は、復旧用コピーからサイレントに current schema へ再構築して続行する。`stats` は診断用なので自動再構築しない。hosted の最新差分は復旧後も `sync` の責務。
 - 複数 project がある store で読む時は `grasp --project <name> read "ページタイトル"` のように project を指定する。project が1つだけなら省略可。
 - text 出力の `line_id` は既定で `P1:0` のような実行内ローカル別名に短縮され、先頭付近に `P1=<page-id>` の legend が出る。親へ根拠として返す時は、必要なら `source_title` とこの alias ではなく `--json` の完全 `line_id` を使う。

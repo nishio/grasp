@@ -861,3 +861,11 @@
 - これは [[llm-wiki-infra-fast-path-plan]] Phase 3 の append-only slice。まだ `write page` / replay / status / diff / revert / rename は未実装で、ambiguous handle には書かない。
 - schema は v7 のまま。public compatibility version は `1.7.11`。
 - 検証: `python3 -m unittest discover -s tests`（82 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 10:24] implementation+dogfood+file back | append alpha の status / diff / revert を追加
+- `write-status`, `write-diff`, `revert-event <event-id>` command を追加。`write-status` は journal 件数・last event・projection check、`write-diff` は current filesystem -> stored projection の unified diff、`revert-event` は `section_append` / `log_append` の inserted lines が現在も page tail にある時だけ削除する。
+- journal event type に `event_revert` を追加。revert は対象 event を消さず、取り消し event を append する。non-tail event は拒否し、後続編集を silently damage しない。
+- dogfood: temp copy の repo `wiki/` で adopt→append-section→write-status→write-diff→revert-event→export-markdown --check を実行。status は projection ok / journal events 37、diff_count 0、revert removed_lines 3、last_event `event_revert`、最終 check clean。
+- これは [[llm-wiki-infra-fast-path-plan]] Phase 4 の最小 recovery slice。まだ `write page` / replay / rename / general revert / projection export 失敗時 rollback は未実装。
+- schema は v7 のまま。public compatibility version は `1.7.12`。
+- 検証: `python3 -m unittest discover -s tests`（82 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。

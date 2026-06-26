@@ -4,6 +4,7 @@ from collections import Counter, deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape as escape_html
+import difflib
 import json
 from pathlib import Path
 import os
@@ -1957,6 +1958,62 @@ class SQLiteStore:
             projections[relative_path] = _markdown_lines_to_text([row["text"] for row in lines])
         return projections
 
+    def markdown_projection_diff(self, output_folder: str | Path, *, context: int = 3) -> dict[str, Any]:
+        project = self._require_project()
+        output = Path(output_folder)
+        manifest = self._markdown_manifest_for_project(project)
+        files = manifest.get("files")
+        if not isinstance(files, dict) or not files:
+            raise ValueError(f"project is not a Markdown mirror project or has no Markdown manifest: {project}")
+
+        projections = self._markdown_projection_files(project, files)
+        status = self.export_markdown(output, check=True)
+        diffs = []
+        for relative_path, projected in projections.items():
+            target = _safe_markdown_output_path(output, relative_path)
+            if target.exists():
+                current = target.read_text(encoding="utf-8")
+                if current == projected:
+                    continue
+                kind = "changed"
+                current_lines = current.splitlines(keepends=True)
+            else:
+                kind = "missing"
+                current_lines = []
+            diff_lines = list(
+                difflib.unified_diff(
+                    current_lines,
+                    projected.splitlines(keepends=True),
+                    fromfile=f"current/{relative_path}",
+                    tofile=f"projection/{relative_path}",
+                    n=max(0, context),
+                )
+            )
+            diffs.append({"path": relative_path, "kind": kind, "diff": diff_lines})
+
+        exclude_dirs = tuple(str(item) for item in manifest.get("exclude_dirs") or [])
+        existing_files = {
+            path.relative_to(output).as_posix(): path
+            for path in iter_markdown_files(output, exclude_dirs=exclude_dirs)
+        } if output.exists() else {}
+        for relative_path in status["extra_files"]:
+            current = existing_files.get(relative_path)
+            current_lines = current.read_text(encoding="utf-8").splitlines(keepends=True) if current else []
+            diff_lines = list(
+                difflib.unified_diff(
+                    current_lines,
+                    [],
+                    fromfile=f"current/{relative_path}",
+                    tofile=f"projection/{relative_path}",
+                    n=max(0, context),
+                )
+            )
+            diffs.append({"path": relative_path, "kind": "extra", "diff": diff_lines})
+
+        result = dict(status)
+        result.update({"diffs": diffs, "diff_count": len(diffs)})
+        return result
+
     def append_markdown_lines(self, title: str, lines: list[str]) -> dict[str, Any]:
         project = self._require_project()
         if not lines:
@@ -2026,6 +2083,87 @@ class SQLiteStore:
             "appended_lines": appended,
             "appended_line_count": len(appended),
             "edge_count": len(edge_rows),
+        }
+
+    def revert_markdown_append(self, page_id: str, inserted_lines: list[dict[str, Any]]) -> dict[str, Any]:
+        project = self._require_project()
+        if not self._markdown_manifest_for_project(project):
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+        if not inserted_lines:
+            raise ValueError("append event has no inserted lines")
+
+        expected = []
+        for item in inserted_lines:
+            if not isinstance(item, dict):
+                raise ValueError("inserted_lines items must be objects")
+            line_id = str(item.get("line_id") or "")
+            if not line_id:
+                raise ValueError("inserted line is missing line_id")
+            expected.append(
+                {
+                    "line_id": line_id,
+                    "line_index": int(item.get("line_index", -1)),
+                    "text": str(item.get("text", "")),
+                }
+            )
+
+        placeholders = ",".join("?" for _ in expected)
+        rows = self.connection.execute(
+            f"""
+            SELECT line_id, line_index, text
+            FROM lines
+            WHERE project = ? AND page_id = ? AND line_id IN ({placeholders})
+            ORDER BY line_index
+            """,
+            (project, page_id, *(item["line_id"] for item in expected)),
+        ).fetchall()
+        actual = [
+            {"line_id": row["line_id"], "line_index": row["line_index"], "text": row["text"]}
+            for row in rows
+        ]
+        if actual != expected:
+            raise ValueError("event lines no longer match the current page")
+
+        max_row = self.connection.execute(
+            "SELECT MAX(line_index) AS max_index FROM lines WHERE project = ? AND page_id = ?",
+            (project, page_id),
+        ).fetchone()
+        max_index = max_row["max_index"]
+        expected_indexes = [item["line_index"] for item in expected]
+        tail_start = int(max_index) - len(expected) + 1 if max_index is not None else 0
+        if expected_indexes != list(range(tail_start, int(max_index) + 1)):
+            raise ValueError("event is not at the page tail; refusing non-tail revert")
+
+        now = int(time.time())
+        line_ids = [item["line_id"] for item in expected]
+        placeholders = ",".join("?" for _ in line_ids)
+        with self.connection:
+            self.connection.execute(
+                f"DELETE FROM edges WHERE project = ? AND line_id IN ({placeholders})",
+                (project, *line_ids),
+            )
+            self.connection.execute(
+                f"DELETE FROM lines WHERE project = ? AND page_id = ? AND line_id IN ({placeholders})",
+                (project, page_id, *line_ids),
+            )
+            refresh_edge_resolutions(self.connection, project)
+            rebuild_unresolved_targets(self.connection, project)
+            self.connection.execute(
+                """
+                UPDATE pages
+                SET updated = ?,
+                    line_count = (SELECT COUNT(*) FROM lines WHERE project = ? AND page_id = ?)
+                WHERE project = ? AND id = ?
+                """,
+                (now, project, page_id, project, page_id),
+            )
+            _refresh_project_counts_sql(self.connection, project)
+        page = self._page_by_id(page_id)
+        return {
+            "project": project,
+            "page": page.to_summary() if page is not None else {"id": page_id},
+            "removed_lines": expected,
+            "removed_line_count": len(expected),
         }
 
     def page_lines_around(
