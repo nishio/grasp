@@ -71,4 +71,5 @@ grasp は現状リンクが**無型**（Cosense と同じく全 predicate が re
 - [[come-from-declared-gather]] — howm 由来の核（ページ＝投影 / come-from / リンク4仕事の分離）
 - [[ai-consumer-cost-and-trust]] — 消費者を AI に付け替える（howm の UI 束ねを解く先）
 - [[grasp-backlog]] — 引き入れ＝型付きリンク、come-from declare/render、write/identity
+- [[value-is-problem-solving-not-novelty]] — 3ツール合成を一段引いて見ると設計核の大半は既存研究（Memex/Halasz/Nelson/Trigg/Zettelkasten）の再導出。positioning の歯止め（価値は新規性でなく問題解決）
 - 親 llm-wiki: `型付きリンク` / `名前ではなくIDで識別する設計` / `書いてから整理する`
