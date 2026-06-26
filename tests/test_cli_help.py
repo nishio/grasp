@@ -2862,6 +2862,7 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(section_result["edge_count"], 1)
         self.assertEqual(section_result["projection"]["written_files"], ["A.md"])
         self.assertEqual(log_result["projection"]["written_files"], ["Log.md"])
+        self.assertEqual(write_result["source_path"], "A.md")
         self.assertEqual(write_result["edge_count"], 1)
         self.assertEqual(write_result["projection"]["written_files"], ["A.md"])
         self.assertEqual(status_result["journal_event_count"], 4)

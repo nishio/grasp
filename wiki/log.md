@@ -1005,3 +1005,8 @@
 - `export-markdown` projection now merges generated `id` / `title` / `aliases` into existing frontmatter instead of dropping arbitrary metadata such as `type`, `summary`, or `sources`.
 - Added regression coverage for stale identity fields being replaced while arbitrary frontmatter survives; bumped package version to `1.7.31`.
 - Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
+
+## [2026-06-26 21:36] implementation+test+file-back | expand git history replay corpus
+- Added an actual git history replay test for `3eaab75`, reproducing the source digest policy correction as six existing-page `write-page` updates and checking replay/direct re-import/projection exact match.
+- Fixed existing `write-page` update JSON to include `source_path`, matching the documented return contract and allowing replay tests to assert target files directly.
+- Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
