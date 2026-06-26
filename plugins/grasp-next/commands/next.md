@@ -52,6 +52,8 @@ $PYTHON_BIN -m grasp --store .grasp/file-back.sqlite --project grasp-wiki write-
 
 その後、表現できる変更は `append-section` / `write-page` / `append-log` を `--output wiki --journal wiki.grasp/events.jsonl` 付きで使う。任意 frontmatter merge、canonical docs、曖昧 handle、混在 hunk など grasp alpha が安全に扱えない場合だけ direct Markdown patch に fallback し、理由を `wiki/log.md` に残す。
 
+同じ `.grasp/file-back.sqlite` / `wiki.grasp/events.jsonl` への write 系 command は直列に実行する。並列 write で projection が stale になったら、対象 page を直列で `write-page --from-file` し直してから `write-status` / `export-markdown --check` / `replay-journal --check` を通す。
+
 - 実装済み/current behavior: `wiki/entities/grasp-v1-implemented.md` または関連 entity page。
 - 残作業: `wiki/grasp-backlog.md`。
 - 判断や rationale: `wiki/decisions/`。

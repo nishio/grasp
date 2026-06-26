@@ -1918,6 +1918,10 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(write_result["projection"]["written_files"], ["A.md"])
         self.assertEqual(status_result["journal_event_count"], 4)
         self.assertTrue(status_result["projection"]["ok"])
+        self.assertFalse(status_result["journal_log_stale"])
+        self.assertEqual(status_result["journal_log_changed_files"], [])
+        self.assertTrue(status_result["journal_log_projection"]["ok"])
+        self.assertEqual(status_result["journal_log_projection"]["regenerated_files"], ["Log.md"])
         self.assertTrue(diff_result["ok"])
         self.assertEqual(diff_result["diff_count"], 0)
         self.assertEqual(revert_result["target_event_type"], "log_append")
@@ -1927,6 +1931,194 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(revert_write_result["restored_line_count"], 4)
         self.assertTrue(replay_result["ok"])
         self.assertEqual(replay_result["file_count"], 2)
+
+    def test_write_status_reports_stale_log_after_direct_markdown_import(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-log",
+                    "--timestamp",
+                    "2026-06-26 02:00",
+                    "--op",
+                    "test",
+                    "--summary",
+                    "journal entry",
+                    "--line",
+                    "- journal line",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "Log.md").write_text(
+                "# Log\n\n## [2026-06-26 02:00] test | manual replacement\n- not in journal\n",
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            status_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        status_result = json.loads(status_completed.stdout)
+        self.assertTrue(status_result["projection"]["ok"])
+        self.assertTrue(status_result["journal_log_stale"])
+        self.assertEqual(status_result["journal_log_changed_files"], ["Log.md"])
+        self.assertFalse(status_result["journal_log_projection"]["ok"])
+        self.assertEqual(status_result["journal_log_projection"]["changed_files"], ["Log.md"])
+        self.assertEqual(status_result["journal_log_projection"]["regenerated_files"], ["Log.md"])
+
+    def test_write_status_does_not_mark_log_stale_for_non_log_projection_diff(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-log",
+                    "--timestamp",
+                    "2026-06-26 02:10",
+                    "--op",
+                    "test",
+                    "--summary",
+                    "journal entry",
+                    "--line",
+                    "- journal line",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "A.md").write_text("# A\n- direct non-log edit\n", encoding="utf-8")
+            status_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        status_result = json.loads(status_completed.stdout)
+        self.assertFalse(status_result["projection"]["ok"])
+        self.assertEqual(status_result["projection"]["changed_files"], ["A.md"])
+        self.assertFalse(status_result["journal_log_stale"])
+        self.assertEqual(status_result["journal_log_changed_files"], [])
+        self.assertFalse(status_result["journal_log_projection"]["ok"])
+        self.assertEqual(status_result["journal_log_projection"]["changed_files"], ["A.md"])
 
     def test_rename_page_preserves_old_handle_and_replays(self):
         with tempfile.TemporaryDirectory() as tmpdir:

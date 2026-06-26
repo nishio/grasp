@@ -946,3 +946,9 @@
 - user-level file-back skill / repo-local /next / AGENTS / CLAUDE に grasp write first を明記した。
 - wiki.grasp/events.jsonl を initial adoption journal として追加し、以後の file-back は .grasp/file-back.sqlite + project grasp-wiki + output wiki で journal に追記できる。
 - direct Markdown patch は任意 frontmatter merge / canonical docs / ambiguous handle / recovery failure など grasp alpha が安全に扱えない時だけ fallback とした。
+
+## [2026-06-26 16:14] implementation+dogfood+file-back | write-status に stale-log guard を追加
+- write-status が通常 projection check に加え、journal 由来の primary log projection を比較し journal_log_stale / journal_log_projection を返すようにした。
+- direct Markdown edit を import して通常 projection が clean になっても、journal に無い log 変更は journal_log_stale=true と changed_files で検出できる。
+- 同じ SQLite store / journal への並列 write は projection を一時的に stale にするため、repo 手順と file-back skill に直列実行の注意を追加した。
+- schema は v7 のまま。public compatibility version は 1.7.23。
