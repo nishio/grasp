@@ -33,6 +33,7 @@ COMMANDS = [
     "append-section",
     "append-log",
     "write-page",
+    "rename-page",
     "write-status",
     "write-diff",
     "revert-event",
@@ -1509,6 +1510,174 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(revert_write_result["restored_line_count"], 4)
         self.assertTrue(replay_result["ok"])
         self.assertEqual(replay_result["file_count"], 2)
+
+    def test_rename_page_preserves_old_handle_and_replays(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nlink [[Old]]\n", encoding="utf-8")
+            (root / "Old.md").write_text("# Old\nbody\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            rename_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "rename-page",
+                    "Old",
+                    "New",
+                    "--new-path",
+                    "New.md",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            rename_result = json.loads(rename_completed.stdout)
+            read_old_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "read",
+                    "Old",
+                    "--related-limit",
+                    "0",
+                    "--unresolved-limit",
+                    "0",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            replay_after_rename_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--project",
+                    "wiki",
+                    "replay-journal",
+                    "--journal",
+                    str(journal_path),
+                    "--output",
+                    str(root),
+                    "--check",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            new_text_during_rename = (root / "New.md").read_text(encoding="utf-8")
+            old_exists_during_rename = (root / "Old.md").exists()
+            revert_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "revert-event",
+                    rename_result["event_id"],
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            replay_after_revert_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--project",
+                    "wiki",
+                    "replay-journal",
+                    "--journal",
+                    str(journal_path),
+                    "--output",
+                    str(root),
+                    "--check",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            journal_events = [
+                json.loads(line)
+                for line in journal_path.read_text(encoding="utf-8").splitlines()
+            ]
+            old_exists_after_revert = (root / "Old.md").exists()
+            new_exists_after_revert = (root / "New.md").exists()
+
+        read_old_result = json.loads(read_old_completed.stdout)
+        replay_after_rename = json.loads(replay_after_rename_completed.stdout)
+        revert_result = json.loads(revert_completed.stdout)
+        replay_after_revert = json.loads(replay_after_revert_completed.stdout)
+        self.assertEqual(
+            [event["event_type"] for event in journal_events],
+            ["page_create", "page_create", "page_rename", "event_revert"],
+        )
+        self.assertEqual(rename_result["previous_title"], "Old")
+        self.assertEqual(rename_result["title"], "New")
+        self.assertEqual(rename_result["previous_source_path"], "Old.md")
+        self.assertEqual(rename_result["source_path"], "New.md")
+        self.assertTrue(rename_result["heading_updated"])
+        self.assertEqual(rename_result["projection"]["written_files"], ["New.md"])
+        self.assertEqual(rename_result["projection"]["removed_files"], ["Old.md"])
+        self.assertEqual(new_text_during_rename, "# New\nbody\n")
+        self.assertFalse(old_exists_during_rename)
+        self.assertEqual(read_old_result["page"]["title"], "New")
+        self.assertEqual(read_old_result["backlink_count_total"], 1)
+        self.assertTrue(replay_after_rename["ok"])
+        self.assertEqual(revert_result["target_event_type"], "page_rename")
+        self.assertEqual(revert_result["restored_line_count"], 2)
+        self.assertTrue(old_exists_after_revert)
+        self.assertFalse(new_exists_after_revert)
+        self.assertTrue(replay_after_revert["ok"])
 
     def test_read_markdown_page_by_source_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:

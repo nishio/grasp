@@ -35,7 +35,7 @@ v1 = **エクスポート済み Scrapbox / Cosense JSON、または Markdown mir
 
 v1 stable scope 外:
 
-- general local write / rename / transclude。Markdown-backed `append-section` / `append-log` は authoring fast path の alpha surface として存在するが、stable identity / rename / replay はまだ持たない。
+- general local write / transclude。Markdown-backed `append-section` / `append-log` / `write-page` / `rename-page` は authoring fast path の alpha surface として存在するが、frontmatter title 追従 / direct re-import 後の alias 永続化 / general revert はまだ持たない。
 - Obsidian block refs などの full Obsidian compatibility。
 - vector search。
 - Web UI / realtime multi-user collaboration / sharing and permissions。
@@ -52,7 +52,7 @@ v1 stable scope 外:
 
 ## store
 
-- current public compatibility version は `1.7.14`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.7.15`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -77,10 +77,11 @@ v1 stable scope 外:
 | `append-section <title>` | Markdown-backed project の unique handle page に `## <heading>` section と body lines を追記する authoring alpha。SQLite `lines` / outgoing `edges` / edge resolution / unresolved / counts を更新し、`section_append` journal event を append し、Markdown projection を export する。ambiguous handle には書かない |
 | `append-log` | Markdown-backed log page（default title `Log`）に `## [timestamp] op | summary` entry と body lines を追記する authoring alpha。SQLite index 更新、`log_append` journal event、Markdown projection export を行う |
 | `write-page <title>` | Markdown-backed project の unique handle page の本文行を全置換する authoring alpha。title / aliases / source path / page id は変えない。SQLite lines / outgoing edges / edge resolution / unresolved / counts を更新し、`page_update` journal event に before/after lines を記録し、Markdown projection を export する |
-| `write-status` | append-only authoring alpha の recovery surface。Markdown projection を `--check` し、journal path の存在、event count、last event を返す |
-| `write-diff` | append-only authoring alpha の recovery surface。filesystem 上の Markdown と stored projection を比較し、current filesystem -> stored projection の unified diff を返す。書き込みはしない |
-| `revert-event <event-id>` | `section_append` / `log_append` / `page_update` journal event を対象にする recovery surface。append/log は inserted lines が現在も target page 末尾に完全一致する時だけ削除する。page_update は current lines が一致する時だけ previous lines へ戻す。削除/復元後に `event_revert` を journal に append し、Markdown projection を export する |
-| `replay-journal` | authoring alpha の recovery surface。SQLite を読まず、JSONL journal の `page_create` / `page_update` / `section_append` / `log_append` / `event_revert` を strict replay して Markdown projection を reconstruct / compare / write する。multiple project journal では `--project` が必要 |
+| `rename-page <target> <new-title>`（alias: `rename`） | Markdown-backed project の page id を保ったまま title と optional source path を変更する authoring alpha。target は unique handle / page-id / path。旧 title と旧 file stem を alias handle に残し、incoming `[[旧名]]` の surface text は書き換えず edge resolution を更新する。first H1 が旧 title と一致する時だけ同じ line_id のまま `# <new-title>` に更新する。`page_rename` journal event、projection file rename、replay/revert に対応 |
+| `write-status` | authoring alpha の recovery surface。Markdown projection を `--check` し、journal path の存在、event count、last event を返す |
+| `write-diff` | authoring alpha の recovery surface。filesystem 上の Markdown と stored projection を比較し、current filesystem -> stored projection の unified diff を返す。書き込みはしない |
+| `revert-event <event-id>` | `section_append` / `log_append` / `page_update` / `page_rename` journal event を対象にする recovery surface。append/log は inserted lines が現在も target page 末尾に完全一致する時だけ削除する。page_update は current lines が一致する時だけ previous lines へ戻す。page_rename は current lines / title / source path が一致する時だけ previous title / path / lines へ戻す。削除/復元後に `event_revert` を journal に append し、Markdown projection を export する |
+| `replay-journal` | authoring alpha の recovery surface。SQLite を読まず、JSONL journal の `page_create` / `page_update` / `page_rename` / `section_append` / `log_append` / `event_revert` を strict replay して Markdown projection を reconstruct / compare / write する。multiple project journal では `--project` が必要 |
 | `import-forest <wikis.yaml>` | registry の top-level `wikis:` entries を読み、各 entry の `<path>/<wiki-dir>` を project `<name>` として Markdown import する。entry ごとの failure / missing / skipped は全体を止めず diagnostics に集約し、success/failure/missing/skipped counts、aggregate pages/lines/edges/unresolved、projects[]、post-import `ambiguities` summary を返す |
 | `stats` | store の schema / project list / metadata / count を表示。store missing 時は diagnostic と next actions を返す |
 | `read <title>` | existing page は本文 + backlinks + related + unresolved。missing linked target は link stats + backlinks + source pages。zero-hit 時は `recovery_hints` も返す。visible handle が複数 page identity に束縛される時は暗黙に片方を選ばず `ambiguity.type=handle_ambiguity` と候補 page_id / path / graph_role を返す。`read --page-id <id>` / `read --path <relative-path>` は identity を明示して読む。`--related-snippets` で related/source pages の snippet を同梱する。既定 `--related-snippet-mode lead` は先頭 N 行（default 5）、`edge` は related/source item を導いたリンク行を中心に `snippet_lines` / `snippet_window` を返す。`--around-line <line-id> --line-context N` で完全 line_id からページを解決し、中心行の前後 N 行だけを `lines[]` と `line_window` で返す |
@@ -171,7 +172,7 @@ parser が link から除外するもの:
 - `cross-project-refs` / `cross-project-acquire` は `lines.text LIKE '%[/%'` で候補行を絞ってから Cosense shorthand link を Python parser で分類する schema-compatible extraction/orchestration primitive。通常 internal link graph には cross-project refs を materialize しない。`cross_project_refs_to` / `top_internal_links` も既存 lines/edges から都度読む summary primitive で、store schema は変えない。
 - `cross-project-spread` / `cross-project-spreads` は既存 `page_handles` / `edges.target_handle_norm` / `unresolved_targets` から normalized title の project spread を都度計算する schema-compatible weak signal surface。first-class cross-project edge ではなく、page identity は project-scoped のまま保持する。`cross-project-spreads` は seed title が無い時の discovery surface で、wiki structural names や numeric-only handles は rank band で下げる。
 - `suggest` fuzzy mode は既存 `pages.norm_title` を Python 側で scan する schema-compatible title retrieval primitive。長文 title の exact recall を優先するための lexical layer であり、semantic embedding search は未実装。
-- `grasp.journal` は LLM Wiki infra fast path の event JSONL contract module。schema v1、event types `page_create` / `page_update` / `section_append` / `page_rename` / `log_append` / `projection_export` / `event_revert`、canonical JSONL encode / append / read validation を持つ。`adopt-markdown` は `page_create` events を append する。`append-section` / `append-log` は SQLite index 更新後に `section_append` / `log_append` events を append し、Markdown projection を export する。`write-page` は SQLite index 更新後に `page_update` event を append する。`revert-event` は append/log/page_update を取り消し `event_revert` を append する。`replay-journal` は `page_create` / `page_update` / append / revert の strict replay を行う。`page_rename` replay と general revert は未実装。
+- `grasp.journal` は LLM Wiki infra fast path の event JSONL contract module。schema v1、event types `page_create` / `page_update` / `section_append` / `page_rename` / `log_append` / `projection_export` / `event_revert`、canonical JSONL encode / append / read validation を持つ。`adopt-markdown` は `page_create` events を append する。`append-section` / `append-log` は SQLite index 更新後に `section_append` / `log_append` events を append し、Markdown projection を export する。`write-page` は SQLite index 更新後に `page_update` event を append する。`rename-page` は SQLite index 更新後に `page_rename` event を append する。`revert-event` は append/log/page_update/page_rename を取り消し `event_revert` を append する。`replay-journal` は `page_create` / `page_update` / `page_rename` / append / revert の strict replay を行う。general revert は未実装。
 - `path` は実験的 command で、現状は command ごとに pages ∪ unresolved targets の一時 adjacency を構築する。nishio store の dogfood（66092 nodes / 115075 undirected edges）では `path KJ法 弱い紐帯 --max-depth 4 --limit 1` が約2-5s。hot read path ではなく graph reasoning primitive として扱う。
 - 初回 import は 1 回だけ数秒から十数秒程度。
 

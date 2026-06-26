@@ -860,6 +860,39 @@ def build_parser() -> argparse.ArgumentParser:
     write_page_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
     write_page_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
 
+    rename_page_parser = add_command_parser(
+        subparsers,
+        "rename-page",
+        aliases=["rename"],
+        help="Rename a Markdown page identity through the alpha write path.",
+        description=(
+            "Rename an existing Markdown-backed page while preserving page id. "
+            "Incoming link surface text is not rewritten; the old title becomes an alias handle. "
+            "Optionally move the Markdown projection source path."
+        ),
+        returns=(
+            "project, page, journal, output, event_id, previous_title, title, previous_source_path, "
+            "source_path, previous_lines[], lines[], aliases[], heading_updated, edge_count, projection"
+        ),
+        examples=[
+            "grasp --project grasp-wiki rename-page old-title 'New Title' --new-path decisions/new-title.md --output wiki",
+            "grasp --project grasp-wiki --json rename --target page-id <page-id> 'New Title' --output wiki",
+        ],
+        notes=[
+            "Alpha write surface: Markdown-backed projects only.",
+            "The first H1 is updated only when it currently matches the old title.",
+            "References like [[old-title]] are preserved as text and resolve through the old-title alias.",
+        ],
+    )
+    rename_page_parser.add_argument("target", help="Target page handle by default, or page id/path with --target.")
+    rename_page_parser.add_argument("new_title", help="New page title.")
+    rename_page_parser.add_argument("--target", dest="target_kind", choices=["handle", "page-id", "path"], default="handle", help="How to interpret the target argument.")
+    rename_page_parser.add_argument("--new-path", default=None, help="Optional new Markdown projection path, relative to --output and ending in .md.")
+    rename_page_parser.add_argument("--no-heading-update", action="store_true", help="Do not update a matching first H1 line.")
+    rename_page_parser.add_argument("--message", default="", help="Optional rename message stored in the journal payload.")
+    rename_page_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
+    rename_page_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
+
     write_status_parser = add_command_parser(
         subparsers,
         "write-status",
@@ -874,7 +907,7 @@ def build_parser() -> argparse.ArgumentParser:
             "grasp --project grasp-wiki --json write-status --output wiki --journal wiki.grasp/events.jsonl",
         ],
         notes=[
-            "This is an alpha recovery surface for append-section / append-log dogfood.",
+            "This is an alpha recovery surface for Markdown-backed write dogfood.",
             "projection.ok=false means export-markdown --check would fail.",
         ],
     )
@@ -905,19 +938,19 @@ def build_parser() -> argparse.ArgumentParser:
     revert_event_parser = add_command_parser(
         subparsers,
         "revert-event",
-        help="Revert a tail append journal event.",
+        help="Revert a supported alpha write journal event.",
         description=(
-            "Revert a section_append or log_append journal event only when its inserted lines still form "
-            "the current tail of the target page, then append an event_revert journal entry and export projection."
+            "Revert a supported alpha write journal event when the current page still matches the target event, "
+            "then append an event_revert journal entry and export projection."
         ),
-        returns="project, journal, output, event_id, target_event_id, target_event_type, page, removed_lines[], removed_line_count, projection",
+        returns="project, journal, output, event_id, target_event_id, target_event_type, page, removed_lines[]|restored_lines[], removed_line_count|restored_line_count, projection",
         examples=[
             "grasp --project grasp-wiki revert-event <event-id> --output wiki",
             "grasp --project grasp-wiki --json revert-event <event-id> --output wiki --journal wiki.grasp/events.jsonl",
         ],
         notes=[
-            "Only section_append and log_append events are supported.",
-            "Non-tail events are refused so later edits are not silently damaged.",
+            "section_append/log_append require their inserted lines to remain at page tail.",
+            "page_update/page_rename require the current lines and path/title state to match the target event.",
         ],
     )
     revert_event_parser.add_argument("event_id", help="Journal event id to revert.")
@@ -930,7 +963,7 @@ def build_parser() -> argparse.ArgumentParser:
         "replay-journal",
         help="Replay an alpha write journal into a Markdown projection.",
         description=(
-            "Replay page_create, page_update, section_append, log_append, and event_revert records from a JSONL journal "
+            "Replay page_create, page_update, page_rename, section_append, log_append, and event_revert records from a JSONL journal "
             "to reconstruct a Markdown projection without reading SQLite."
         ),
         returns="project, journal, output, check, ok, event_count, applied_event_count, file_count, changed_files, missing_files, extra_files, written_files",
@@ -1252,6 +1285,66 @@ def write_page_replacement_lines(args: argparse.Namespace) -> list[str]:
     return list(args.line or [])
 
 
+def run_rename_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    journal = journal_path_for_output(args.output, args.journal)
+    rename_result = store.rename_markdown_page(
+        args.target,
+        args.new_title,
+        target_kind=args.target_kind,
+        new_source_path=args.new_path,
+        update_heading=not args.no_heading_update,
+    )
+    event = make_journal_event(
+        "page_rename",
+        project=rename_result["project"],
+        payload={
+            "page_id": rename_result["page"]["id"],
+            "previous_title": rename_result["previous_title"],
+            "title": rename_result["title"],
+            "previous_source_path": rename_result["previous_source_path"],
+            "source_path": rename_result["source_path"],
+            "previous_aliases": rename_result["previous_aliases"],
+            "aliases": rename_result["aliases"],
+            "previous_lines": rename_result["previous_lines"],
+            "lines": rename_result["lines"],
+            "heading_updated": rename_result["heading_updated"],
+            "message": args.message,
+        },
+    )
+    append_journal_event(journal, event)
+    removed_files = remove_previous_projection_file(
+        args.output,
+        rename_result["previous_source_path"],
+        rename_result["source_path"],
+    )
+    projection = store.export_markdown(args.output, check=False)
+    projection["removed_files"] = removed_files
+    projection["removed_count"] = len(removed_files)
+    result = dict(rename_result)
+    result.update(
+        {
+            "journal": str(journal),
+            "output": str(args.output),
+            "event_id": event["event_id"],
+            "projection": projection,
+        }
+    )
+    return result
+
+
+def remove_previous_projection_file(output: Path, previous_source_path: str, source_path: str) -> list[str]:
+    if previous_source_path == source_path:
+        return []
+    previous = _safe_replay_output_path(output, previous_source_path)
+    current = _safe_replay_output_path(output, source_path)
+    if previous == current or not previous.exists():
+        return []
+    if previous.is_dir():
+        raise ValueError(f"previous Markdown projection path is a directory: {previous_source_path}")
+    previous.unlink()
+    return [previous_source_path]
+
+
 def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = journal_path_for_output(args.output, args.journal)
     events = read_journal_events(journal)
@@ -1277,7 +1370,7 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     target = next((event for event in events if event["event_id"] == args.event_id), None)
     if target is None:
         raise ValueError(f"journal event not found: {args.event_id}")
-    if target["event_type"] not in {"section_append", "log_append", "page_update"}:
+    if target["event_type"] not in {"section_append", "log_append", "page_update", "page_rename"}:
         raise ValueError(f"cannot revert event_type with this alpha command: {target['event_type']}")
     selected_project = store._require_project()
     if target["project"] != selected_project:
@@ -1310,6 +1403,52 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
             "restored_lines": reverted["lines"],
             "reason": args.reason,
         }
+    elif target["event_type"] == "page_rename":
+        previous_lines = payload.get("previous_lines")
+        current_lines = payload.get("lines")
+        previous_aliases = payload.get("previous_aliases") or []
+        aliases = payload.get("aliases") or []
+        previous_title = str(payload.get("previous_title") or "")
+        title = str(payload.get("title") or "")
+        previous_source_path = str(payload.get("previous_source_path") or "")
+        source_path = str(payload.get("source_path") or "")
+        if (
+            not previous_title
+            or not title
+            or not previous_source_path
+            or not source_path
+            or not isinstance(previous_lines, list)
+            or not isinstance(current_lines, list)
+            or not isinstance(previous_aliases, list)
+            or not isinstance(aliases, list)
+        ):
+            raise ValueError("page_rename payload is incomplete")
+        reverted = store.revert_markdown_page_rename(
+            page_id,
+            previous_title=previous_title,
+            title=title,
+            previous_source_path=previous_source_path,
+            source_path=source_path,
+            previous_aliases=[str(alias) for alias in previous_aliases],
+            aliases=[str(alias) for alias in aliases],
+            previous_lines=previous_lines,
+            current_lines=current_lines,
+        )
+        revert_payload = {
+            "target_event_id": target["event_id"],
+            "target_event_type": target["event_type"],
+            "page_id": page_id,
+            "previous_title": previous_title,
+            "title": title,
+            "previous_source_path": previous_source_path,
+            "source_path": source_path,
+            "previous_aliases": previous_aliases,
+            "aliases": aliases,
+            "previous_lines": previous_lines,
+            "current_lines": current_lines,
+            "restored_lines": reverted["lines"],
+            "reason": args.reason,
+        }
     else:
         inserted_lines = payload.get("inserted_lines")
         if not isinstance(inserted_lines, list):
@@ -1329,7 +1468,12 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
         payload=revert_payload,
     )
     append_journal_event(journal, event)
+    removed_files = []
+    if target["event_type"] == "page_rename":
+        removed_files = remove_previous_projection_file(args.output, source_path, previous_source_path)
     projection = store.export_markdown(args.output, check=False)
+    projection["removed_files"] = removed_files
+    projection["removed_count"] = len(removed_files)
     result = dict(reverted)
     result.update(
         {
@@ -1405,6 +1549,28 @@ def replay_journal_projection(
                 raise ValueError(f"page_update previous_lines do not match current page in event {event['event_id']}")
             pages[page_id]["lines"] = [_journal_line_for_replay(line) for line in lines]
             applied_event_count += 1
+        elif event_type == "page_rename":
+            page_id = str(payload.get("page_id") or "")
+            previous_lines = payload.get("previous_lines")
+            lines = payload.get("lines")
+            previous_source_path = str(payload.get("previous_source_path") or "")
+            source_path = str(payload.get("source_path") or "")
+            title = str(payload.get("title") or "")
+            if page_id not in pages:
+                raise ValueError(f"page_rename references unknown page_id {page_id!r} in event {event['event_id']}")
+            if not isinstance(previous_lines, list) or not isinstance(lines, list):
+                raise ValueError(f"page_rename payload is missing previous_lines or lines in event {event['event_id']}")
+            if not previous_source_path or not source_path or not title:
+                raise ValueError(f"page_rename payload is missing title or source_path in event {event['event_id']}")
+            if pages[page_id]["source_path"] != _safe_replay_relative_path(previous_source_path):
+                raise ValueError(f"page_rename previous_source_path does not match current page in event {event['event_id']}")
+            expected_previous = [_journal_line_for_replay(line) for line in previous_lines]
+            if pages[page_id]["lines"] != expected_previous:
+                raise ValueError(f"page_rename previous_lines do not match current page in event {event['event_id']}")
+            pages[page_id]["title"] = title
+            pages[page_id]["source_path"] = _safe_replay_relative_path(source_path)
+            pages[page_id]["lines"] = [_journal_line_for_replay(line) for line in lines]
+            applied_event_count += 1
         elif event_type == "event_revert":
             page_id = str(payload.get("page_id") or "")
             target_event_type = payload.get("target_event_type")
@@ -1427,6 +1593,24 @@ def replay_journal_projection(
                 expected_current = [_journal_line_for_replay(line) for line in current_lines]
                 if pages[page_id]["lines"] != expected_current:
                     raise ValueError(f"event_revert current_lines do not match page in event {event['event_id']}")
+                pages[page_id]["lines"] = [_journal_line_for_replay(line) for line in previous_lines]
+            elif target_event_type == "page_rename":
+                previous_lines = payload.get("previous_lines")
+                current_lines = payload.get("current_lines")
+                previous_source_path = str(payload.get("previous_source_path") or "")
+                source_path = str(payload.get("source_path") or "")
+                previous_title = str(payload.get("previous_title") or "")
+                if not isinstance(previous_lines, list) or not isinstance(current_lines, list):
+                    raise ValueError(f"event_revert payload is missing page_rename lines in event {event['event_id']}")
+                if not previous_source_path or not source_path or not previous_title:
+                    raise ValueError(f"event_revert payload is missing page_rename title or source_path in event {event['event_id']}")
+                if pages[page_id]["source_path"] != _safe_replay_relative_path(source_path):
+                    raise ValueError(f"event_revert source_path does not match page in event {event['event_id']}")
+                expected_current = [_journal_line_for_replay(line) for line in current_lines]
+                if pages[page_id]["lines"] != expected_current:
+                    raise ValueError(f"event_revert current_lines do not match page in event {event['event_id']}")
+                pages[page_id]["title"] = previous_title
+                pages[page_id]["source_path"] = _safe_replay_relative_path(previous_source_path)
                 pages[page_id]["lines"] = [_journal_line_for_replay(line) for line in previous_lines]
             else:
                 raise ValueError(f"event_revert target_event_type is unsupported: {target_event_type!r}")
@@ -1926,6 +2110,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return run_append_log(store, args)
     if args.command == "write-page":
         return run_write_page(store, args)
+    if args.command in {"rename-page", "rename"}:
+        return run_rename_page(store, args)
     if args.command == "write-status":
         return run_write_status(store, args)
     if args.command == "write-diff":
@@ -2386,6 +2572,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_append_result(result)
     if command == "write-page":
         return format_write_page_result(result)
+    if command in {"rename-page", "rename"}:
+        return format_rename_page_result(result)
     if command == "write-status":
         return format_write_status(result)
     if command == "write-diff":
@@ -2483,6 +2671,25 @@ def format_write_page_result(result: dict[str, Any]) -> str:
         f"lines: {result['line_count']}\n"
         f"edges: {result['edge_count']}\n"
         f"projection_written: {projection.get('written_count', 0)}\n"
+    )
+
+
+def format_rename_page_result(result: dict[str, Any]) -> str:
+    projection = result.get("projection") or {}
+    return (
+        "# Rename Page\n"
+        f"project: {result['project']}\n"
+        f"page_id: {result['page']['id']}\n"
+        f"previous_title: {result['previous_title']}\n"
+        f"title: {result['title']}\n"
+        f"previous_source_path: {result['previous_source_path']}\n"
+        f"source_path: {result['source_path']}\n"
+        f"journal: {result['journal']}\n"
+        f"event_id: {result['event_id']}\n"
+        f"heading_updated: {str(result['heading_updated']).lower()}\n"
+        f"edges: {result['edge_count']}\n"
+        f"projection_written: {projection.get('written_count', 0)}\n"
+        f"projection_removed: {projection.get('removed_count', 0)}\n"
     )
 
 

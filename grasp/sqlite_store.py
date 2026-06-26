@@ -34,11 +34,13 @@ from .cosense import (
 from .markdown import (
     MarkdownMirror,
     MarkdownPageRecord,
+    is_code_fence,
     iter_markdown_files,
     markdown_graph_role_emits_edges,
     markdown_wikilink_target,
     parse_markdown_line_links,
     parse_markdown_links,
+    parse_markdown_h1_title,
 )
 
 
@@ -694,6 +696,28 @@ def _page_handle_rows_for_markdown_records(
     return rows
 
 
+def _page_handle_rows_for_markdown_page(
+    project: str,
+    *,
+    page_id: str,
+    title: str,
+    aliases: list[str],
+    source_path: str,
+    graph_role: str,
+) -> list[tuple[str, str, str, str, str, str, str]]:
+    rows: list[tuple[str, str, str, str, str, str, str]] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    handles = [("title", title), *(("alias", alias) for alias in aliases)]
+    for handle_source, handle in handles:
+        handle_norm = normalize_title(handle)
+        key = (project, handle_norm, page_id, handle_source, handle)
+        if not handle_norm or key in seen:
+            continue
+        rows.append((project, handle_norm, page_id, handle, handle_source, source_path, graph_role))
+        seen.add(key)
+    return rows
+
+
 def _insert_edges(connection: sqlite3.Connection, project: str, edges: list[Edge]) -> None:
     connection.executemany(
         """
@@ -980,16 +1004,75 @@ def _changed_markdown_paths(old_manifest: dict[str, Any] | None, new_manifest: d
 
 
 def _safe_markdown_output_path(output: Path, relative_path: str) -> Path:
-    path = Path(relative_path)
-    if path.is_absolute() or ".." in path.parts:
-        raise ValueError(f"unsafe Markdown projection path: {relative_path}")
+    path = Path(_safe_markdown_relative_path(relative_path))
     return output / path
+
+
+def _safe_markdown_relative_path(relative_path: str | Path) -> str:
+    path = Path(relative_path)
+    if path.is_absolute() or ".." in path.parts or not path.name:
+        raise ValueError(f"unsafe Markdown projection path: {relative_path}")
+    if path.suffix.casefold() != ".md":
+        raise ValueError(f"Markdown projection path must end with .md: {relative_path}")
+    return path.as_posix()
 
 
 def _markdown_lines_to_text(lines: list[str]) -> str:
     if not lines:
         return ""
     return "\n".join(lines) + "\n"
+
+
+def _markdown_rename_aliases(
+    *,
+    previous_title: str,
+    new_title: str,
+    previous_source_path: str,
+    new_source_path: str,
+    previous_aliases: list[str],
+) -> list[str]:
+    aliases: list[str] = []
+    for alias in [
+        *previous_aliases,
+        previous_title,
+        Path(previous_source_path).stem,
+        Path(new_source_path).stem,
+    ]:
+        alias = str(alias).strip()
+        if not alias:
+            continue
+        if normalize_title(alias) == normalize_title(new_title):
+            continue
+        if normalize_title(alias) in {normalize_title(existing) for existing in aliases}:
+            continue
+        aliases.append(alias)
+    return aliases
+
+
+def _matching_markdown_h1_line_index(lines: list[str], expected_title: str) -> int | None:
+    expected_norm = normalize_title(expected_title)
+    in_frontmatter = bool(lines and lines[0].strip() == "---")
+    in_code_fence = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if index == 0 and in_frontmatter:
+            continue
+        if in_frontmatter:
+            if stripped in {"---", "..."}:
+                in_frontmatter = False
+            continue
+        if is_code_fence(line.lstrip()):
+            in_code_fence = not in_code_fence
+            continue
+        if in_code_fence:
+            continue
+        title = parse_markdown_h1_title(line)
+        if title is None:
+            continue
+        if normalize_title(title) == expected_norm:
+            return index
+        return None
+    return None
 
 
 def _refresh_project_counts_sql(connection: sqlite3.Connection, project: str) -> None:
@@ -2144,6 +2227,159 @@ class SQLiteStore:
             "edge_count": edge_count,
         }
 
+    def rename_markdown_page(
+        self,
+        target: str,
+        new_title: str,
+        *,
+        target_kind: str = "handle",
+        new_source_path: str | None = None,
+        update_heading: bool = True,
+    ) -> dict[str, Any]:
+        project = self._require_project()
+        manifest = self._markdown_manifest_for_project(project)
+        files = manifest.get("files")
+        if not isinstance(files, dict) or not files:
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+
+        new_title = new_title.strip()
+        if not new_title:
+            raise ValueError("new title must not be empty")
+        new_norm_title = normalize_title(new_title)
+        if not new_norm_title:
+            raise ValueError("new title normalizes to empty")
+
+        page = self._resolve_markdown_rename_target(target, target_kind)
+        if page is None:
+            raise ValueError(f"page not found for rename target: {target}")
+        page_id = page.id
+        previous_source_path, item = self._markdown_manifest_entry_for_page(manifest, page_id)
+        graph_role = str(item.get("graph_role") or self._markdown_graph_role_for_page(project, page_id))
+        source_path = (
+            _safe_markdown_relative_path(new_source_path)
+            if new_source_path is not None
+            else previous_source_path
+        )
+        if source_path in files and str(files[source_path].get("page_id") or "") != page_id:
+            raise ValueError(f"Markdown source path already belongs to another page: {source_path}")
+        collision_rows = self.connection.execute(
+            """
+            SELECT DISTINCT page_id
+            FROM page_handles
+            WHERE project = ? AND handle_norm = ? AND page_id != ?
+            """,
+            (project, new_norm_title, page_id),
+        ).fetchall()
+        if collision_rows:
+            raise ValueError(f"new title handle already belongs to another page: {new_title}")
+
+        previous_lines = self._markdown_line_payloads(project, page_id)
+        next_lines = [dict(line) for line in previous_lines]
+        now = int(time.time())
+        heading_updated = False
+        if update_heading:
+            heading_index = _matching_markdown_h1_line_index(
+                [str(line.get("text", "")) for line in next_lines],
+                page.title,
+            )
+            if heading_index is not None:
+                next_lines[heading_index]["text"] = f"# {new_title}"
+                next_lines[heading_index]["updated"] = now
+                heading_updated = True
+
+        previous_aliases = [str(alias) for alias in item.get("aliases") or []]
+        aliases = _markdown_rename_aliases(
+            previous_title=page.title,
+            new_title=new_title,
+            previous_source_path=previous_source_path,
+            new_source_path=source_path,
+            previous_aliases=previous_aliases,
+        )
+        edge_count = self._apply_markdown_page_identity(
+            project,
+            page_id,
+            title=new_title,
+            source_path=source_path,
+            aliases=aliases,
+            lines=next_lines,
+            graph_role=graph_role,
+            updated=now,
+        )
+        renamed_page = self._page_by_id(page_id)
+        return {
+            "project": project,
+            "page": renamed_page.to_summary() if renamed_page is not None else {"id": page_id, "title": new_title},
+            "previous_title": page.title,
+            "title": new_title,
+            "previous_source_path": previous_source_path,
+            "source_path": source_path,
+            "previous_aliases": previous_aliases,
+            "aliases": aliases,
+            "previous_lines": previous_lines,
+            "lines": self._markdown_line_payloads(project, page_id),
+            "heading_updated": heading_updated,
+            "edge_count": edge_count,
+        }
+
+    def revert_markdown_page_rename(
+        self,
+        page_id: str,
+        *,
+        previous_title: str,
+        title: str,
+        previous_source_path: str,
+        source_path: str,
+        previous_aliases: list[str],
+        aliases: list[str],
+        previous_lines: list[dict[str, Any]],
+        current_lines: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        project = self._require_project()
+        if not self._markdown_manifest_for_project(project):
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+        page = self._page_by_id(page_id)
+        if page is None:
+            raise ValueError(f"page id not found: {page_id}")
+        expected_current = self._normalized_journal_lines(current_lines)
+        restored = self._normalized_journal_lines(previous_lines)
+        actual_current = self._line_compare_payloads(self._markdown_line_payloads(project, page_id))
+        if actual_current != self._line_compare_payloads(expected_current):
+            raise ValueError("page_rename current lines no longer match the current page")
+        if page.title != title:
+            raise ValueError("page_rename title no longer matches the current page")
+        current_source_path, item = self._markdown_manifest_entry_for_page(
+            self._markdown_manifest_for_project(project),
+            page_id,
+        )
+        if current_source_path != source_path:
+            raise ValueError("page_rename source path no longer matches the current page")
+        graph_role = str(item.get("graph_role") or self._markdown_graph_role_for_page(project, page_id))
+        now = int(time.time())
+        edge_count = self._apply_markdown_page_identity(
+            project,
+            page_id,
+            title=previous_title,
+            source_path=_safe_markdown_relative_path(previous_source_path),
+            aliases=[str(alias) for alias in previous_aliases],
+            lines=restored,
+            graph_role=graph_role,
+            updated=now,
+        )
+        restored_page = self._page_by_id(page_id)
+        return {
+            "project": project,
+            "page": restored_page.to_summary() if restored_page is not None else {"id": page_id, "title": previous_title},
+            "previous_title": previous_title,
+            "title": title,
+            "previous_source_path": previous_source_path,
+            "source_path": source_path,
+            "previous_aliases": previous_aliases,
+            "aliases": aliases,
+            "lines": self._markdown_line_payloads(project, page_id),
+            "restored_line_count": len(restored),
+            "edge_count": edge_count,
+        }
+
     def revert_markdown_append(self, page_id: str, inserted_lines: list[dict[str, Any]]) -> dict[str, Any]:
         project = self._require_project()
         if not self._markdown_manifest_for_project(project):
@@ -2266,6 +2502,33 @@ class SQLiteStore:
                     return str(item.get("graph_role") or "content")
         return "content"
 
+    def _resolve_markdown_rename_target(self, target: str, target_kind: str) -> Page | None:
+        if target_kind == "page-id":
+            return self._page_by_id(target)
+        if target_kind == "path":
+            return self._page_by_source_path(_safe_markdown_relative_path(target))
+        if target_kind != "handle":
+            raise ValueError("rename target kind must be one of: handle, page-id, path")
+        candidates = self.page_handle_candidates(target)
+        if len(candidates) > 1:
+            raise ValueError(f"page handle is ambiguous: {target}; use --target page-id or --target path")
+        if not candidates:
+            return None
+        return self._page_by_id(str(candidates[0]["page_id"]))
+
+    def _markdown_manifest_entry_for_page(
+        self,
+        manifest: dict[str, Any],
+        page_id: str,
+    ) -> tuple[str, dict[str, Any]]:
+        files = manifest.get("files")
+        if not isinstance(files, dict):
+            raise ValueError("Markdown manifest has no files")
+        for source_path, item in files.items():
+            if isinstance(item, dict) and str(item.get("page_id") or "") == page_id:
+                return str(source_path), dict(item)
+        raise ValueError(f"Markdown manifest has no source path for page_id: {page_id}")
+
     def _markdown_line_payloads(self, project: str, page_id: str) -> list[dict[str, Any]]:
         rows = self.connection.execute(
             """
@@ -2328,50 +2591,177 @@ class SQLiteStore:
         graph_role: str,
         updated: int,
     ) -> int:
+        with self.connection:
+            return self._replace_markdown_page_line_payloads_uncommitted(
+                project,
+                page_id,
+                lines,
+                graph_role=graph_role,
+                updated=updated,
+            )
+
+    def _replace_markdown_page_line_payloads_uncommitted(
+        self,
+        project: str,
+        page_id: str,
+        lines: list[dict[str, Any]],
+        *,
+        graph_role: str,
+        updated: int,
+    ) -> int:
         edge_rows = []
         emits_edges = markdown_graph_role_emits_edges(graph_role)
         in_code_fence = False
+        self.connection.execute(
+            "DELETE FROM edges WHERE project = ? AND source_page_id = ?",
+            (project, page_id),
+        )
+        self.connection.execute(
+            "DELETE FROM lines WHERE project = ? AND page_id = ?",
+            (project, page_id),
+        )
+        for line_index, item in enumerate(lines):
+            line_id = str(item.get("line_id") or f"line-{uuid4().hex}")
+            text = str(item.get("text", ""))
+            created = item.get("created")
+            line_updated = item.get("updated")
+            user_id = item.get("user_id")
+            self.connection.execute(
+                """
+                INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (project, line_id, page_id, line_index, text, created, line_updated, user_id),
+            )
+            if not emits_edges:
+                continue
+            targets, in_code_fence = parse_markdown_line_links(text, in_code_fence=in_code_fence)
+            for target_title in targets:
+                edge_rows.append((project, page_id, line_id, target_title, normalize_title(target_title)))
+        _insert_edge_rows(self.connection, edge_rows)
+        refresh_edge_resolutions(self.connection, project)
+        rebuild_unresolved_targets(self.connection, project)
+        self.connection.execute(
+            """
+            UPDATE pages
+            SET updated = ?,
+                line_count = (SELECT COUNT(*) FROM lines WHERE project = ? AND page_id = ?)
+            WHERE project = ? AND id = ?
+            """,
+            (updated, project, page_id, project, page_id),
+        )
+        _refresh_project_counts_sql(self.connection, project)
+        return len(edge_rows)
+
+    def _apply_markdown_page_identity(
+        self,
+        project: str,
+        page_id: str,
+        *,
+        title: str,
+        source_path: str,
+        aliases: list[str],
+        lines: list[dict[str, Any]],
+        graph_role: str,
+        updated: int,
+    ) -> int:
+        title = title.strip()
+        source_path = _safe_markdown_relative_path(source_path)
+        norm_title = normalize_title(title)
+        manifest = self._markdown_manifest_for_project(project)
+        files = manifest.get("files")
+        if not isinstance(files, dict):
+            raise ValueError("Markdown manifest has no files")
+        _, previous_item = self._markdown_manifest_entry_for_page(manifest, page_id)
+        new_files = {
+            str(path): dict(item)
+            for path, item in files.items()
+            if isinstance(item, dict) and str(item.get("page_id") or "") != page_id
+        }
+        if source_path in new_files:
+            raise ValueError(f"Markdown source path already belongs to another page: {source_path}")
+        manifest_item = dict(previous_item)
+        manifest_item.update(
+            {
+                "page_id": page_id,
+                "title": title,
+                "norm_title": norm_title,
+                "aliases": aliases,
+                "graph_role": graph_role,
+            }
+        )
+        new_files[source_path] = manifest_item
+        manifest = dict(manifest)
+        manifest["files"] = new_files
+
+        old_alias_norms = {
+            row["handle_norm"]
+            for row in self.connection.execute(
+                """
+                SELECT handle_norm
+                FROM page_handles
+                WHERE project = ? AND page_id = ? AND handle_source = 'alias'
+                """,
+                (project, page_id),
+            ).fetchall()
+        }
+        alias_map = dict(self.project_title_aliases(project))
+        for alias_norm in old_alias_norms:
+            alias_map.pop(str(alias_norm), None)
+        for alias in aliases:
+            alias_norm = normalize_title(alias)
+            if alias_norm and alias_norm != norm_title:
+                alias_map[alias_norm] = title
+        alias_map.pop(norm_title, None)
+
+        handle_rows = _page_handle_rows_for_markdown_page(
+            project,
+            page_id=page_id,
+            title=title,
+            aliases=aliases,
+            source_path=source_path,
+            graph_role=graph_role,
+        )
         with self.connection:
-            self.connection.execute(
-                "DELETE FROM edges WHERE project = ? AND source_page_id = ?",
-                (project, page_id),
-            )
-            self.connection.execute(
-                "DELETE FROM lines WHERE project = ? AND page_id = ?",
-                (project, page_id),
-            )
-            for line_index, item in enumerate(lines):
-                line_id = str(item.get("line_id") or f"line-{uuid4().hex}")
-                text = str(item.get("text", ""))
-                created = item.get("created")
-                line_updated = item.get("updated")
-                user_id = item.get("user_id")
-                self.connection.execute(
-                    """
-                    INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (project, line_id, page_id, line_index, text, created, line_updated, user_id),
-                )
-                if not emits_edges:
-                    continue
-                targets, in_code_fence = parse_markdown_line_links(text, in_code_fence=in_code_fence)
-                for target_title in targets:
-                    edge_rows.append((project, page_id, line_id, target_title, normalize_title(target_title)))
-            _insert_edge_rows(self.connection, edge_rows)
-            refresh_edge_resolutions(self.connection, project)
-            rebuild_unresolved_targets(self.connection, project)
             self.connection.execute(
                 """
                 UPDATE pages
-                SET updated = ?,
-                    line_count = (SELECT COUNT(*) FROM lines WHERE project = ? AND page_id = ?)
+                SET title = ?, norm_title = ?, updated = ?
                 WHERE project = ? AND id = ?
                 """,
-                (updated, project, page_id, project, page_id),
+                (title, norm_title, updated, project, page_id),
             )
+            edge_count = self._replace_markdown_page_line_payloads_uncommitted(
+                project,
+                page_id,
+                lines,
+                graph_role=graph_role,
+                updated=updated,
+            )
+            self.connection.execute(
+                "DELETE FROM page_handles WHERE project = ? AND page_id = ?",
+                (project, page_id),
+            )
+            _insert_page_handles(self.connection, handle_rows)
+            refresh_edge_resolutions(self.connection, project)
+            rebuild_unresolved_targets(self.connection, project)
             _refresh_project_counts_sql(self.connection, project)
-        return len(edge_rows)
+            _write_metadata(
+                self.connection,
+                {
+                    f"project.{project}.title_aliases": json.dumps(
+                        alias_map,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    f"project.{project}.markdown_manifest": json.dumps(
+                        manifest,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                },
+            )
+        return edge_count
 
     def page_lines_around(
         self,
