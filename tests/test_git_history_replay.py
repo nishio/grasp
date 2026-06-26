@@ -12,6 +12,7 @@ RENAME_COMMIT = "d4e4c39dbec278897137c9567765fcef3ed0668d"
 OLD_PATH = "decisions/why-design-B.md"
 NEW_PATH = "decisions/why-not-scrapbox-clone.md"
 NEW_TITLE = "Decision: Scrapbox を忠実 clone せず、identity-without-name を足した「あるべき姿」を作る"
+RENAME_EVENT_KEY = f"rename:{OLD_PATH}->{NEW_PATH}"
 RENAME_SUPPORT_PATHS = [
     "SPEC.md",
     "index.md",
@@ -77,6 +78,35 @@ EDGE_RESOLUTION_PATHS = [
     "log.md",
 ]
 CONTINUOUS_REPLAY_SEQUENCES = [
+    {
+        "name": "rename-then-revert-design-decision",
+        "support_paths": RENAME_SUPPORT_PATHS,
+        "steps": [
+            {
+                "commit": RENAME_COMMIT,
+                "rename_pages": [
+                    {
+                        "old_path": OLD_PATH,
+                        "new_path": NEW_PATH,
+                        "new_title": NEW_TITLE,
+                    }
+                ],
+                "revert_events": [
+                    {
+                        "event_key": RENAME_EVENT_KEY,
+                        "target_event_type": "page_rename",
+                    }
+                ],
+            },
+        ],
+        "read_handle": "why-design-B",
+        "expected_title": "Decision: design B — 単一 AI 所有の Scrapbox 型グラフストア",
+        "assert_path": OLD_PATH,
+        "assert_text": "# Decision: design B",
+        "absent_paths": [NEW_PATH],
+        "exact_projection_paths": [*RENAME_SUPPORT_PATHS, OLD_PATH],
+        "final_revision": RENAME_PARENT,
+    },
     {
         "name": "create-then-revert-fast-path-plan",
         "steps": [
@@ -838,7 +868,8 @@ class GitHistoryReplayTests(unittest.TestCase):
                         for step in steps
                     ]
                     exact_projection_paths = sequence.get("exact_projection_paths", sequence_paths)
-                    final_fixture = git_show_files(steps[-1]["commit"], exact_projection_paths)
+                    final_revision = sequence.get("final_revision", steps[-1]["commit"])
+                    final_fixture = git_show_files(final_revision, exact_projection_paths)
                 except (subprocess.CalledProcessError, FileNotFoundError) as exc:
                     raise unittest.SkipTest(f"git history fixture unavailable: {exc}") from exc
 
