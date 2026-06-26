@@ -983,3 +983,8 @@
 - `history <query>` and `log-records --subject` now match extracted subjects instead of free-text search, while `log-records --query` remains whitespace term AND text search.
 - Returned log records now include bounded same-subject `later_events[]`, `later_event_count`, and `later_events_omitted` so stale transition records are visible.
 - Dogfooded with `history grasp-v1-implemented --journal wiki.grasp/events.jsonl`; existing journal records produced subjects and later events without SQLite.
+
+## [2026-06-26 19:25] implementation+test+file-back | record-per-file log entries
+- Added record-per-file import for frontmatter `type: log-entry`; `adopt-markdown` and `import-log-records` now create one `log_entry_import` record per such file.
+- Frontmatter `date` / `timestamp`, `op`, `summary`, `subjects` / `pages`, and `sources` are read into the record. Explicit subjects win over body heuristics and are exposed separately from `heuristic_subjects[]`.
+- Updated [[grasp-v1-implemented]], [[history]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]]; added regression coverage for explicit subjects overriding body `[[Gamma]]` mentions.

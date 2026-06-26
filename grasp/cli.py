@@ -22,6 +22,8 @@ from .markdown import (
     iter_markdown_files,
     markdown_projection_text,
     markdown_wikilink_target,
+    parse_frontmatter_values,
+    split_markdown_frontmatter,
 )
 from .sqlite_store import (
     SCHEMA_VERSION,
@@ -167,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Adopt an existing Markdown wiki into the store and event journal.",
         description=(
             "Import a Markdown folder into the SQLite materialized index and append page_create events "
-            "to a durable JSONL journal. Log pages are also split into log_entry_import records. "
+            "to a durable JSONL journal. Log pages and type: log-entry files are also split into log_entry_import records. "
             "This is the Phase 1 bridge toward native authority + Markdown projection."
         ),
         returns=(
@@ -181,6 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "The default journal path is <markdown-folder-name>.grasp/events.jsonl beside the folder.",
             "Existing journals are not overwritten unless --replace-journal is supplied.",
+            "Log section subjects are inferred from body wikilinks and Markdown paths; type: log-entry files can use frontmatter subjects/pages.",
             "The journal event contract is fixed in grasp.journal; replay/write surfaces are added later.",
         ],
     )
@@ -201,7 +204,7 @@ def build_parser() -> argparse.ArgumentParser:
         "import-log-records",
         help="Import Markdown log sections into journal record events.",
         description=(
-            "Split Markdown log pages into first-class log_entry_import journal records. "
+            "Split Markdown log pages and type: log-entry files into first-class log_entry_import journal records. "
             "This does not rewrite Markdown projection; it only appends missing record events to an existing journal."
         ),
         returns=(
@@ -214,6 +217,7 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "The journal must already exist, normally from adopt-markdown.",
             "Records are deduplicated by stable record_id within the selected project.",
+            "type: log-entry files use frontmatter date/timestamp, op, summary, subjects/pages, and sources.",
         ],
     )
     import_log_records_parser.add_argument("folder", type=Path, help="Markdown folder containing log pages.")
@@ -1338,49 +1342,186 @@ def markdown_log_entry_payloads(records: tuple[Any, ...]) -> list[dict[str, Any]
         if record.graph_role != "log":
             continue
         log_lines = list(record.page.lines)
-        for index, line in enumerate(log_lines):
-            match = LOG_ENTRY_HEADING_RE.match(line.text)
-            if match is None:
-                continue
-            body = []
-            for body_line in log_lines[index + 1:]:
-                if LOG_ENTRY_HEADING_RE.match(body_line.text):
-                    break
-                body.append(body_line)
-            while body and not body[-1].text.strip():
-                body.pop()
-            timestamp = match.group("timestamp").strip()
-            op = match.group("op").strip()
-            summary = match.group("summary").strip()
-            body_text = "\n".join(body_line.text for body_line in body)
-            subjects = log_entry_subjects_from_lines([line, *body])
-            record_key = "\n".join(
-                [
-                    record.relative_path.as_posix(),
-                    timestamp,
-                    op,
-                    summary,
-                    body_text,
-                ]
-            )
-            record_id = hashlib.sha1(record_key.encode("utf-8")).hexdigest()[:24]
-            payloads.append(
-                {
-                    "record_id": record_id,
-                    "source_path": record.relative_path.as_posix(),
-                    "page_id": record.page.id,
-                    "heading": line.text,
-                    "heading_line": journal_line_payload(line),
-                    "heading_line_index": line.index,
-                    "timestamp": timestamp,
-                    "op": op,
-                    "summary": summary,
-                    "subjects": subjects,
-                    "body_lines": [journal_line_payload(body_line) for body_line in body],
-                    "body_line_count": len(body),
-                }
-            )
+        frontmatter_values = parse_frontmatter_values([line.text for line in log_lines])
+        if is_log_entry_file(frontmatter_values):
+            payload = markdown_log_entry_file_payload(record, frontmatter_values)
+            if payload is not None:
+                payloads.append(payload)
+            continue
+        payloads.extend(markdown_log_section_payloads(record, log_lines))
     return payloads
+
+
+def markdown_log_section_payloads(record: Any, log_lines: list[Any]) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for index, line in enumerate(log_lines):
+        match = LOG_ENTRY_HEADING_RE.match(line.text)
+        if match is None:
+            continue
+        body = []
+        for body_line in log_lines[index + 1:]:
+            if LOG_ENTRY_HEADING_RE.match(body_line.text):
+                break
+            body.append(body_line)
+        while body and not body[-1].text.strip():
+            body.pop()
+        timestamp = match.group("timestamp").strip()
+        op = match.group("op").strip()
+        summary = match.group("summary").strip()
+        heuristic_subjects = log_entry_subjects_from_lines([line, *body])
+        payloads.append(
+            build_log_entry_payload(
+                record,
+                timestamp=timestamp,
+                op=op,
+                summary=summary,
+                heading=line.text,
+                heading_line=line,
+                heading_line_index=line.index,
+                body=body,
+                record_format="section",
+                explicit_subjects=[],
+                heuristic_subjects=heuristic_subjects,
+                sources=[],
+            )
+        )
+    return payloads
+
+
+def markdown_log_entry_file_payload(
+    record: Any,
+    frontmatter_values: dict[str, list[tuple[str, int]]],
+) -> dict[str, Any] | None:
+    timestamp = first_log_frontmatter_value(frontmatter_values, ("date", "timestamp", "created_at", "created"))
+    if not timestamp:
+        return None
+    op = first_log_frontmatter_value(frontmatter_values, ("op", "operation")) or "log-entry"
+    summary = first_log_frontmatter_value(frontmatter_values, ("summary", "title")) or record.page.title
+    body = log_entry_file_body_lines(record)
+    explicit_subjects = log_entry_frontmatter_subjects(frontmatter_values)
+    heuristic_subjects = log_entry_subjects_from_lines(body)
+    sources = log_entry_frontmatter_values(frontmatter_values, ("sources", "source"))
+    return build_log_entry_payload(
+        record,
+        timestamp=timestamp,
+        op=op,
+        summary=summary,
+        heading=f"## [{timestamp}] {op} | {summary}",
+        heading_line=None,
+        heading_line_index=-1,
+        body=body,
+        record_format="file",
+        explicit_subjects=explicit_subjects,
+        heuristic_subjects=heuristic_subjects,
+        sources=sources,
+    )
+
+
+def build_log_entry_payload(
+    record: Any,
+    *,
+    timestamp: str,
+    op: str,
+    summary: str,
+    heading: str,
+    heading_line: Any | None,
+    heading_line_index: int,
+    body: list[Any],
+    record_format: str,
+    explicit_subjects: list[str],
+    heuristic_subjects: list[str],
+    sources: list[str],
+) -> dict[str, Any]:
+    body_text = "\n".join(body_line.text for body_line in body)
+    subjects = explicit_subjects or heuristic_subjects
+    record_key = "\n".join(
+        [
+            record.relative_path.as_posix(),
+            timestamp,
+            op,
+            summary,
+            body_text,
+        ]
+    )
+    record_id = hashlib.sha1(record_key.encode("utf-8")).hexdigest()[:24]
+    payload = {
+        "record_id": record_id,
+        "record_format": record_format,
+        "source_path": record.relative_path.as_posix(),
+        "page_id": record.page.id,
+        "heading": heading,
+        "heading_line": journal_line_payload(heading_line) if heading_line is not None else None,
+        "heading_line_index": heading_line_index,
+        "timestamp": timestamp,
+        "op": op,
+        "summary": summary,
+        "subjects": subjects,
+        "explicit_subjects": explicit_subjects,
+        "heuristic_subjects": heuristic_subjects,
+        "subject_source": "frontmatter" if explicit_subjects else "heuristic",
+        "sources": sources,
+        "body_lines": [journal_line_payload(body_line) for body_line in body],
+        "body_line_count": len(body),
+    }
+    return payload
+
+
+def is_log_entry_file(frontmatter_values: dict[str, list[tuple[str, int]]]) -> bool:
+    candidates = []
+    for key in ("type", "role", "graph_role", "layer"):
+        candidates.extend(value for value, _ in frontmatter_values.get(key, []))
+    return any(normalize_log_frontmatter_token(value) == "log_entry" for value in candidates)
+
+
+def normalize_log_frontmatter_token(value: str) -> str:
+    return value.strip().casefold().replace("-", "_")
+
+
+def first_log_frontmatter_value(
+    frontmatter_values: dict[str, list[tuple[str, int]]],
+    keys: tuple[str, ...],
+) -> str | None:
+    for value in log_entry_frontmatter_values(frontmatter_values, keys):
+        return value
+    return None
+
+
+def log_entry_frontmatter_values(
+    frontmatter_values: dict[str, list[tuple[str, int]]],
+    keys: tuple[str, ...],
+) -> list[str]:
+    values: list[str] = []
+    for key in keys:
+        values.extend(value for value, _ in frontmatter_values.get(key, []))
+    return list(dict.fromkeys(value for value in values if value))
+
+
+def log_entry_frontmatter_subjects(frontmatter_values: dict[str, list[tuple[str, int]]]) -> list[str]:
+    subjects: list[str] = []
+    seen: set[str] = set()
+    for raw_subject in log_entry_frontmatter_values(frontmatter_values, ("subjects", "subject", "pages", "page")):
+        add_log_entry_subject(subjects, seen, raw_subject)
+    return subjects
+
+
+def log_entry_file_body_lines(record: Any) -> list[Any]:
+    text_lines = [line.text for line in record.page.lines]
+    frontmatter_lines, _ = split_markdown_frontmatter(text_lines)
+    body = list(record.page.lines[len(frontmatter_lines):])
+    while body and not body[0].text.strip():
+        body.pop(0)
+    if body and is_log_entry_file_title_line(body[0], record.page.title):
+        body.pop(0)
+    while body and not body[0].text.strip():
+        body.pop(0)
+    while body and not body[-1].text.strip():
+        body.pop()
+    return body
+
+
+def is_log_entry_file_title_line(line: Any, title: str) -> bool:
+    stripped = str(line.text).strip()
+    return stripped.startswith("# ") and normalize_title(stripped[2:].strip()) == normalize_title(title)
 
 
 def log_entry_subjects_from_lines(lines: list[Any]) -> list[str]:
@@ -1593,12 +1734,17 @@ def log_entry_record_from_event(event: dict[str, Any], *, journal_index: int) ->
                 *body_lines,
             ]
         )
+    explicit_subjects = [str(subject) for subject in payload.get("explicit_subjects") or []]
+    heuristic_subjects = [str(subject) for subject in payload.get("heuristic_subjects") or []]
+    if not explicit_subjects and not heuristic_subjects and subjects:
+        heuristic_subjects = list(subjects)
     return {
         "journal_index": journal_index,
         "event_id": event["event_id"],
         "event_created_at": event["created_at"],
         "project": event["project"],
         "record_id": str(payload.get("record_id") or ""),
+        "record_format": str(payload.get("record_format") or "section"),
         "source_path": str(payload.get("source_path") or ""),
         "page_id": str(payload.get("page_id") or ""),
         "timestamp": str(payload.get("timestamp") or ""),
@@ -1607,6 +1753,10 @@ def log_entry_record_from_event(event: dict[str, Any], *, journal_index: int) ->
         "heading": str(payload.get("heading") or ""),
         "heading_line_index": int(payload.get("heading_line_index", -1)),
         "subjects": subjects,
+        "explicit_subjects": explicit_subjects,
+        "heuristic_subjects": heuristic_subjects,
+        "subject_source": str(payload.get("subject_source") or ("frontmatter" if explicit_subjects else "heuristic")),
+        "sources": [str(source) for source in payload.get("sources") or []],
         "body_lines": body_lines,
         "body_line_count": int(payload.get("body_line_count", len(body_lines))),
         "body_text": body_text,
@@ -3533,9 +3683,12 @@ def format_log_records(result: dict[str, Any]) -> str:
         parts.append(f"- [{record['timestamp']}] {record['op']} | {record['summary']}\n")
         parts.append(f"  record_id: {record['record_id']}\n")
         parts.append(f"  event_id: {record['event_id']}\n")
+        parts.append(f"  record_format: {record.get('record_format', 'section')}\n")
         parts.append(f"  source_path: {record['source_path']}:{record['heading_line_index']}\n")
         if record.get("subjects"):
-            parts.append(f"  subjects: {', '.join(record['subjects'])}\n")
+            parts.append(f"  subjects ({record.get('subject_source', 'heuristic')}): {', '.join(record['subjects'])}\n")
+        if record.get("sources"):
+            parts.append(f"  sources: {', '.join(record['sources'])}\n")
         later_event_count = int(record.get("later_event_count", 0))
         if later_event_count:
             parts.append(f"  later_events: {later_event_count}\n")
