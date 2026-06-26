@@ -316,8 +316,7 @@ def markdown_projection_text(
         return markdown_lines_to_text(lines)
     if markdown_frontmatter_matches(lines, fields):
         return markdown_lines_to_text(lines)
-    _, body_lines = split_markdown_frontmatter(lines)
-    return markdown_lines_to_text([*render_markdown_frontmatter(fields), *body_lines])
+    return markdown_lines_to_text(merge_markdown_projection_frontmatter(lines, fields))
 
 
 def markdown_projection_frontmatter_fields(
@@ -354,6 +353,46 @@ def markdown_frontmatter_matches(lines: list[str], fields: dict[str, Any]) -> bo
         and metadata.title == fields.get("title")
         and metadata.aliases == (fields.get("aliases") or [])
     )
+
+
+def merge_markdown_projection_frontmatter(lines: list[str], fields: dict[str, Any]) -> list[str]:
+    frontmatter, body_lines = split_markdown_frontmatter(lines)
+    if not frontmatter:
+        return [*render_markdown_frontmatter(fields), *body_lines]
+    replaced_keys = set(fields)
+    if "aliases" in fields:
+        replaced_keys.add("alias")
+    inner = frontmatter_without_keys(frontmatter[1:-1], replaced_keys)
+    return [frontmatter[0], *inner, *render_markdown_frontmatter(fields)[1:-1], frontmatter[-1], *body_lines]
+
+
+def frontmatter_without_keys(lines: list[str], keys: set[str]) -> list[str]:
+    filtered: list[str] = []
+    skipping_key = False
+    for line in lines:
+        stripped = line.strip()
+        is_continuation = bool(line[:1].isspace())
+        if is_continuation:
+            if not skipping_key:
+                filtered.append(line)
+            continue
+        if not stripped:
+            skipping_key = False
+            filtered.append(line)
+            continue
+        if stripped.startswith("#"):
+            skipping_key = False
+            filtered.append(line)
+            continue
+        if ":" not in line:
+            skipping_key = False
+            filtered.append(line)
+            continue
+        key, _ = line.split(":", 1)
+        skipping_key = normalize_frontmatter_key(key) in keys
+        if not skipping_key:
+            filtered.append(line)
+    return filtered
 
 
 def split_markdown_frontmatter(lines: list[str]) -> tuple[list[str], list[str]]:

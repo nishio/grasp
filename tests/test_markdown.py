@@ -162,6 +162,52 @@ class MarkdownParsingTests(unittest.TestCase):
             "\n".join([*existing, ""]),
         )
 
+    def test_projection_frontmatter_merges_identity_fields_into_existing_metadata(self):
+        self.assertEqual(
+            markdown_projection_text(
+                "Renamed.md",
+                page_id="old-stable-id",
+                title="Renamed",
+                aliases=["Old"],
+                lines=[
+                    "---",
+                    "type: decision",
+                    "summary: keep this",
+                    "sources:",
+                    "  - raw/session.md",
+                    "id: stale-id",
+                    "title: Stale",
+                    "alias: Stale Alias",
+                    "aliases:",
+                    "  - Another Stale Alias",
+                    "# preserve this comment",
+                    "",
+                    "---",
+                    "# Renamed",
+                    "body",
+                ],
+            ),
+            "\n".join(
+                [
+                    "---",
+                    "type: decision",
+                    "summary: keep this",
+                    "sources:",
+                    "  - raw/session.md",
+                    "# preserve this comment",
+                    "",
+                    "id: old-stable-id",
+                    "title: Renamed",
+                    "aliases:",
+                    "  - Old",
+                    "---",
+                    "# Renamed",
+                    "body",
+                    "",
+                ]
+            ),
+        )
+
 
 class MarkdownImportTests(unittest.TestCase):
     def test_import_markdown_folder_materializes_graph_without_cross_wiki_backticks(self):
