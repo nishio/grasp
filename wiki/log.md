@@ -924,3 +924,11 @@
 - これは `write-page --create` (`1.7.18`) の recovery 穴埋め。まだ semantic index-log regeneration / 任意 frontmatter merge / general revert / projection export 失敗時 rollback は未実装。
 - schema は v7 のまま。public compatibility version は `1.7.19`。
 - 検証: `python3 -m unittest discover -s tests`（87 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 14:20] implementation+dogfood+file back | projection export failure の自動 rollback を追加
+- `append-section` / `append-log` / `write-page` / `rename-page` が、target event を journal append した後に Markdown projection export へ失敗した場合、自動的に同じ safety check で store を戻し、`event_revert` を journal に追記するようにした。
+- 失敗した target event は消さない。journal は `target event` → `event_revert(reason="projection export failed: ...")` の形で、何を試して何が原因で戻したかを残す。command は exit 2 で失敗を返す。
+- dogfood: temp wiki で `A.md` を directory に置き換えて `append-section A` の projection export を失敗させた。journal は `page_create` / `section_append` / `event_revert`、store の `peek A` は元の1行、`replay-journal` は original `A.md` を再生成した。
+- これは [[llm-wiki-infra-fast-path-plan]] Phase 4 の recovery boundary。まだ semantic index-log regeneration / 任意 frontmatter merge / general revert は未実装。
+- schema は v7 のまま。public compatibility version は `1.7.20`。
+- 検証: `python3 -m unittest discover -s tests`（88 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。

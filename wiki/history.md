@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.7.20`（更新: 2026-06-26 14:20、store: schema `7`、compat: schema `7` compatible）: write 系 command の projection export failure rollback を追加。`append-section` / `append-log` / `write-page` / `rename-page` は target event を journal append した後に projection export が失敗した場合、同じ safety check で store を戻し、自動 `event_revert` を append して exit 2 にする。temp wiki test で `A.md` を directory にして `append-section A` の export を失敗させ、journal が `page_create` / `section_append` / `event_revert` になり、store `peek A` と `replay-journal` が original page に戻ることを確認。general revert は未実装、schema は不変
 - `1.7.19`（更新: 2026-06-26 13:43、store: schema `7`、compat: schema `7` compatible）: `revert-event` が `page_create` に対応。current lines / title / source path / aliases が created state と一致する場合だけ page を削除し、projection file も削除し、`event_revert` を append する。`replay-journal` も `event_revert(target_event_type=page_create)` で page を消す。temp wiki test で `write-page --create --path New.md` → `read New` → `replay-journal --check` → `revert-event` → `replay-journal --check` が clean。general revert と projection export 失敗時 rollback は未実装、schema は不変
 - `1.7.18`（更新: 2026-06-26 13:23、store: schema `7`、compat: schema `7` compatible）: `write-page --create --path <file.md>` を追加。Markdown-backed project に新規 page を作り、path-derived/frontmatter page id、file stem/frontmatter aliases、outgoing edges、handle table、manifest、counts を materialize し、`page_create` journal event と Markdown projection を出す。実 git history の `0db1449`（`llm-wiki-infra-fast-path-plan.md` 新規追加 + index/log/decision 更新）を fixture にし、`write-page --create` + 既存 `write-page` updates で commit 内容を再現、`replay-journal --check`、generated Markdown の direct re-import 後 read/backlinks を確認。page_create/general revert と任意 frontmatter merge は未実装、schema は不変
 - `1.7.17`（更新: 2026-06-26 13:07、store: schema `7`、compat: schema `7` compatible）: 実 git history の rename replay test を追加。`d4e4c39^` の `wiki/decisions/why-design-B.md` と旧参照 pages を fixture にし、`rename-page --target path decisions/why-design-B.md <new-title> --new-path decisions/why-not-scrapbox-clone.md` で redirect stub なし・旧 `[[why-design-B]]` surface text 書き換えなし・旧 handle read/backlinks・`replay-journal --check`・generated Markdown の direct re-import 後 read/backlinks を確認。aliases だけで通常 page を frontmatter 化しない no-op projection guard も追加。repo `wiki/` temp import → `export-markdown --check` は 36 files clean、schema は不変
@@ -119,6 +120,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.7.19`
+- Current public compatibility version: `1.7.20`
 - Current internal `SCHEMA_VERSION`: `7`
-- Current package metadata should match `1.7.19`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.7.20`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
