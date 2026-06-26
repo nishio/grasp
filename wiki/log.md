@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-27 11:35] file back+reconcile | parallel agent write branch を merge せず current main へ fresh grasp write
+- `codex/fileback-parallel-agent-writes` の SQLite store は `.grasp/` で gitignored なので merge 対象ではなかった。一方、branch の `wiki.grasp/events.jsonl` を Git merge するだけでは journal replay が clean にならないことを temp worktree で確認。
+- current `main` も direct patch 由来の page create / update が journal replay authority に未反映だったため、先に current projection を退避し、journal replay store へ current pages を `page_create` / `page_update` として再記録して `replay-journal --check` clean に戻した。
+- その後、[[llm-wiki-infra-fast-path-plan]] / [[grasp-backlog]] / `AGENTS.md` に parallel agent write / push guard を追加し、[[parallel-agent-write-incident-2026-06-26]] を新規 entity として作成。Git merge ではなく current main を基準に fresh `grasp write` で入れ直した。
+
 ## [2026-06-27 11:20] file back | [[ai-author-feedback-2026-06-26]] §Updates2 — rename-page を sandbox 実走、title==H1 page で alias durability が落ちる dogfood flag
 - 差別化核 rename-page を sandbox（throwaway store/journal、共有不触、実行後 rm -rf）で直接検証。**graph では参照保存が効く**: page_id 保持・旧/新 handle とも解決・backlinks 生存・H1 自動更新。回復 toolkit も実在: `revert-event` で単発 undo を in-tool に完結（前 Updates「回復は git に降りた」は単発 undo には不要だった）、`write-diff`=drift 検出、`replay-journal`=journal-authored page のみ再生成。
 - **だが alpha の穴を repro 特定**: `write-page --create` が `id/title/aliases` frontmatter を注入するのは **title≠H1 の時だけ**。実 wiki page は規約上 title==H1（grep で id/aliases frontmatter 皆無を確認）。∴ 通常 page を rename→`heading_updated` で title==H1 のまま→旧名が projection に残らず、fresh `import --markdown` で `[[旧名]]` が **red 化**・backlink 喪失。対照で title≠H1 page は `aliases:[旧名]` が残り解決。`export-markdown --check` は ok のまま（**silent**、fresh re-import でのみ顕在化＝read 面 absence-hallucination の write 版）。
