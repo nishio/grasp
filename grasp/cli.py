@@ -1202,8 +1202,12 @@ def run_append_section(store: SQLiteStore, args: argparse.Namespace) -> dict[str
             "inserted_lines": append_result["appended_lines"],
         },
     )
-    append_journal_event(journal, event)
-    projection = store.export_markdown(args.output, check=False)
+    projection = append_event_and_export_projection(
+        store,
+        journal,
+        event,
+        lambda: store.export_markdown(args.output, check=False),
+    )
     result = dict(append_result)
     result.update(
         {
@@ -1235,8 +1239,12 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
             "inserted_lines": append_result["appended_lines"],
         },
     )
-    append_journal_event(journal, event)
-    projection = store.export_markdown(args.output, check=False)
+    projection = append_event_and_export_projection(
+        store,
+        journal,
+        event,
+        lambda: store.export_markdown(args.output, check=False),
+    )
     result = dict(append_result)
     result.update(
         {
@@ -1290,8 +1298,12 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
         project=update_result["project"],
         payload=payload,
     )
-    append_journal_event(journal, event)
-    projection = store.export_markdown(args.output, check=False)
+    projection = append_event_and_export_projection(
+        store,
+        journal,
+        event,
+        lambda: store.export_markdown(args.output, check=False),
+    )
     result = dict(update_result)
     result.update(
         {
@@ -1341,15 +1353,18 @@ def run_rename_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, A
             "message": args.message,
         },
     )
-    append_journal_event(journal, event)
-    removed_files = remove_previous_projection_file(
-        args.output,
-        rename_result["previous_source_path"],
-        rename_result["source_path"],
-    )
-    projection = store.export_markdown(args.output, check=False)
-    projection["removed_files"] = removed_files
-    projection["removed_count"] = len(removed_files)
+    def project_rename() -> dict[str, Any]:
+        removed_files = remove_previous_projection_file(
+            args.output,
+            rename_result["previous_source_path"],
+            rename_result["source_path"],
+        )
+        projection = store.export_markdown(args.output, check=False)
+        projection["removed_files"] = removed_files
+        projection["removed_count"] = len(removed_files)
+        return projection
+
+    projection = append_event_and_export_projection(store, journal, event, project_rename)
     result = dict(rename_result)
     result.update(
         {
@@ -1383,6 +1398,46 @@ def remove_projection_file(output: Path, source_path: str) -> list[str]:
         raise ValueError(f"Markdown projection path is a directory: {source_path}")
     target.unlink()
     return [source_path]
+
+
+def append_event_and_export_projection(
+    store: SQLiteStore,
+    journal: Path,
+    event: dict[str, Any],
+    export_projection: Any,
+) -> dict[str, Any]:
+    append_journal_event(journal, event)
+    try:
+        return export_projection()
+    except Exception as error:
+        rollback = rollback_journal_event_after_projection_failure(store, journal, event, error)
+        raise ValueError(
+            "projection export failed after journal append; "
+            f"store was reverted with event {rollback['event_id']}: {error}"
+        ) from error
+
+
+def rollback_journal_event_after_projection_failure(
+    store: SQLiteStore,
+    journal: Path,
+    target: dict[str, Any],
+    error: Exception,
+) -> dict[str, Any]:
+    reason = f"projection export failed: {type(error).__name__}: {error}"
+    try:
+        rollback = revert_journal_event_in_store(store, target, reason=reason)
+        event = make_journal_event(
+            "event_revert",
+            project=rollback["reverted"]["project"],
+            payload=rollback["payload"],
+        )
+        append_journal_event(journal, event)
+        return event
+    except Exception as rollback_error:
+        raise ValueError(
+            "projection export failed and automatic store rollback failed; "
+            f"original error: {error}; rollback error: {rollback_error}"
+        ) from rollback_error
 
 
 def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
@@ -1423,11 +1478,51 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
         for event in events
     ):
         raise ValueError(f"journal event is already reverted: {args.event_id}")
+    rollback = revert_journal_event_in_store(store, target, reason=args.reason)
+    reverted = rollback["reverted"]
+    revert_payload = rollback["payload"]
+    source_path = rollback["source_path"]
+    previous_source_path = rollback["previous_source_path"]
+    event = make_journal_event(
+        "event_revert",
+        project=reverted["project"],
+        payload=revert_payload,
+    )
+    append_journal_event(journal, event)
+    removed_files = []
+    if target["event_type"] == "page_rename":
+        removed_files = remove_previous_projection_file(args.output, source_path, previous_source_path)
+    elif target["event_type"] == "page_create":
+        removed_files = remove_projection_file(args.output, source_path)
+    projection = store.export_markdown(args.output, check=False)
+    projection["removed_files"] = removed_files
+    projection["removed_count"] = len(removed_files)
+    result = dict(reverted)
+    result.update(
+        {
+            "journal": str(journal),
+            "output": str(args.output),
+            "event_id": event["event_id"],
+            "target_event_id": target["event_id"],
+            "target_event_type": target["event_type"],
+            "projection": projection,
+        }
+    )
+    return result
+
+
+def revert_journal_event_in_store(
+    store: SQLiteStore,
+    target: dict[str, Any],
+    *,
+    reason: str,
+) -> dict[str, Any]:
     payload = target["payload"]
     page_id = str(payload.get("page_id") or "")
     if not page_id:
         raise ValueError("target event payload is missing page_id")
     source_path = ""
+    previous_source_path = ""
     if target["event_type"] == "page_create":
         current_lines = payload.get("lines")
         title = str(payload.get("title") or "")
@@ -1451,7 +1546,7 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
             "aliases": aliases,
             "current_lines": current_lines,
             "removed_lines": reverted["removed_lines"],
-            "reason": args.reason,
+            "reason": reason,
         }
     elif target["event_type"] == "page_update":
         previous_lines = payload.get("previous_lines")
@@ -1467,7 +1562,7 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
             "previous_lines": previous_lines,
             "current_lines": current_lines,
             "restored_lines": reverted["lines"],
-            "reason": args.reason,
+            "reason": reason,
         }
     elif target["event_type"] == "page_rename":
         previous_lines = payload.get("previous_lines")
@@ -1513,7 +1608,7 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
             "previous_lines": previous_lines,
             "current_lines": current_lines,
             "restored_lines": reverted["lines"],
-            "reason": args.reason,
+            "reason": reason,
         }
     else:
         inserted_lines = payload.get("inserted_lines")
@@ -1526,34 +1621,14 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
             "page_id": page_id,
             "title": payload.get("title") or reverted["page"].get("title"),
             "removed_lines": reverted["removed_lines"],
-            "reason": args.reason,
+            "reason": reason,
         }
-    event = make_journal_event(
-        "event_revert",
-        project=reverted["project"],
-        payload=revert_payload,
-    )
-    append_journal_event(journal, event)
-    removed_files = []
-    if target["event_type"] == "page_rename":
-        removed_files = remove_previous_projection_file(args.output, source_path, previous_source_path)
-    elif target["event_type"] == "page_create":
-        removed_files = remove_projection_file(args.output, source_path)
-    projection = store.export_markdown(args.output, check=False)
-    projection["removed_files"] = removed_files
-    projection["removed_count"] = len(removed_files)
-    result = dict(reverted)
-    result.update(
-        {
-            "journal": str(journal),
-            "output": str(args.output),
-            "event_id": event["event_id"],
-            "target_event_id": target["event_id"],
-            "target_event_type": target["event_type"],
-            "projection": projection,
-        }
-    )
-    return result
+    return {
+        "reverted": reverted,
+        "payload": revert_payload,
+        "source_path": source_path,
+        "previous_source_path": previous_source_path,
+    }
 
 
 def replay_journal_projection(

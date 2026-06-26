@@ -1424,6 +1424,113 @@ class CliHelpTests(unittest.TestCase):
         self.assertFalse(new_exists_after_revert)
         self.assertTrue(replay_after_revert["ok"])
 
+    def test_projection_export_failure_appends_revert_and_restores_store(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "A.md").unlink()
+            (root / "A.md").mkdir()
+            failed_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-section",
+                    "A",
+                    "--heading",
+                    "Broken export",
+                    "--line",
+                    "- should rollback",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                text=True,
+                capture_output=True,
+            )
+            peek_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            replay_root = Path(tmpdir) / "replay"
+            replay_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--project",
+                    "wiki",
+                    "replay-journal",
+                    "--journal",
+                    str(journal_path),
+                    "--output",
+                    str(replay_root),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            journal_events = [
+                json.loads(line)
+                for line in journal_path.read_text(encoding="utf-8").splitlines()
+            ]
+            replay_text = (replay_root / "A.md").read_text(encoding="utf-8")
+
+        peek_result = json.loads(peek_completed.stdout)
+        replay_result = json.loads(replay_completed.stdout)
+        self.assertEqual(failed_completed.returncode, 2)
+        self.assertIn("store was reverted with event", failed_completed.stderr)
+        self.assertEqual([event["event_type"] for event in journal_events], ["page_create", "section_append", "event_revert"])
+        self.assertEqual(journal_events[-1]["payload"]["target_event_id"], journal_events[1]["event_id"])
+        self.assertEqual(journal_events[-1]["payload"]["target_event_type"], "section_append")
+        self.assertIn("projection export failed", journal_events[-1]["payload"]["reason"])
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
+        self.assertEqual(replay_text, "# A\n")
+        self.assertEqual(replay_result["written_files"], ["A.md"])
+
     def test_append_section_and_log_update_store_journal_and_projection(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
