@@ -3343,6 +3343,7 @@ class CliHelpTests(unittest.TestCase):
         )
         self.assertEqual(rename_result["previous_title"], "Old")
         self.assertEqual(rename_result["title"], "New")
+        self.assertEqual(rename_result["event_type"], "page_rename")
         self.assertEqual(rename_result["previous_source_path"], "Old.md")
         self.assertEqual(rename_result["source_path"], "New.md")
         self.assertTrue(rename_result["heading_updated"])

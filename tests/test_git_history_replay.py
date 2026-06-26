@@ -8,9 +8,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RENAME_PARENT = "d4e4c39dbec278897137c9567765fcef3ed0668d^"
+RENAME_COMMIT = "d4e4c39dbec278897137c9567765fcef3ed0668d"
 OLD_PATH = "decisions/why-design-B.md"
 NEW_PATH = "decisions/why-not-scrapbox-clone.md"
 NEW_TITLE = "Decision: Scrapbox を忠実 clone せず、identity-without-name を足した「あるべき姿」を作る"
+RENAME_SUPPORT_PATHS = [
+    "SPEC.md",
+    "index.md",
+    "log.md",
+    "decisions/persistence-custom-format.md",
+]
 PAGE_CREATE_COMMIT = "0db144926a27591eb80a72ed1cc3f696dcf96afd"
 PLAN_PATH = "llm-wiki-infra-fast-path-plan.md"
 PLAN_TITLE = "LLM Wiki infra fast-path plan"
@@ -69,6 +76,28 @@ EDGE_RESOLUTION_PATHS = [
     "log.md",
 ]
 CONTINUOUS_REPLAY_SEQUENCES = [
+    {
+        "name": "rename-design-decision",
+        "support_paths": RENAME_SUPPORT_PATHS,
+        "steps": [
+            {
+                "commit": RENAME_COMMIT,
+                "rename_pages": [
+                    {
+                        "old_path": OLD_PATH,
+                        "new_path": NEW_PATH,
+                        "new_title": NEW_TITLE,
+                    }
+                ],
+            },
+        ],
+        "read_handle": "why-design-B",
+        "expected_title": NEW_TITLE,
+        "assert_path": NEW_PATH,
+        "assert_text": "  - why-design-B",
+        "absent_paths": [OLD_PATH],
+        "exact_projection_paths": [],
+    },
     {
         "name": "create-then-update-fast-path-plan",
         "steps": [
@@ -136,7 +165,8 @@ def git_show_files(revision: str, paths: list[str]) -> dict[str, str]:
 
 def replay_step_paths(step: dict) -> list[str]:
     create_paths = [path for path, _ in step.get("create_pages", [])]
-    return [*create_paths, *step.get("update_paths", [])]
+    rename_paths = [rename["new_path"] for rename in step.get("rename_pages", [])]
+    return [*create_paths, *rename_paths, *step.get("update_paths", [])]
 
 
 def replay_sequence_paths(sequence: dict) -> list[str]:
@@ -151,9 +181,38 @@ def replay_sequence_create_paths(sequence: dict) -> set[str]:
     }
 
 
+def replay_sequence_rename_old_paths(sequence: dict) -> list[str]:
+    return [
+        rename["old_path"]
+        for step in sequence["steps"]
+        for rename in step.get("rename_pages", [])
+    ]
+
+
+def replay_sequence_rename_new_paths(sequence: dict) -> set[str]:
+    return {
+        rename["new_path"]
+        for step in sequence["steps"]
+        for rename in step.get("rename_pages", [])
+    }
+
+
 def replay_sequence_initial_paths(sequence: dict) -> list[str]:
     create_paths = replay_sequence_create_paths(sequence)
-    return [path for path in replay_sequence_paths(sequence) if path not in create_paths]
+    rename_new_paths = replay_sequence_rename_new_paths(sequence)
+    return list(
+        dict.fromkeys(
+            [
+                *sequence.get("support_paths", []),
+                *replay_sequence_rename_old_paths(sequence),
+                *(
+                    path
+                    for path in replay_sequence_paths(sequence)
+                    if path not in create_paths and path not in rename_new_paths
+                ),
+            ]
+        )
+    )
 
 
 def write_fixture_files(root: Path, fixture: dict[str, str]) -> None:
@@ -751,7 +810,8 @@ class GitHistoryReplayTests(unittest.TestCase):
                         (step, git_show_files(step["commit"], replay_step_paths(step)))
                         for step in steps
                     ]
-                    final_fixture = git_show_files(steps[-1]["commit"], sequence_paths)
+                    exact_projection_paths = sequence.get("exact_projection_paths", sequence_paths)
+                    final_fixture = git_show_files(steps[-1]["commit"], exact_projection_paths)
                 except (subprocess.CalledProcessError, FileNotFoundError) as exc:
                     raise unittest.SkipTest(f"git history fixture unavailable: {exc}") from exc
 
@@ -774,6 +834,7 @@ class GitHistoryReplayTests(unittest.TestCase):
                         journal_path,
                     )
                     created_source_paths_by_commit = []
+                    renamed_source_paths_by_commit = []
                     update_source_paths_by_commit = []
                     replay_results = []
                     for step, fixture in step_fixtures:
@@ -803,6 +864,30 @@ class GitHistoryReplayTests(unittest.TestCase):
                             self.assertEqual(result["event_type"], "page_create")
                             commit_created_paths.append(result["source_path"])
                         created_source_paths_by_commit.append(commit_created_paths)
+                        commit_renamed_paths = []
+                        for rename in step.get("rename_pages", []):
+                            result = run_grasp_json(
+                                "--store",
+                                store_path,
+                                "--project",
+                                "wiki",
+                                "rename-page",
+                                "--target",
+                                "path",
+                                rename["old_path"],
+                                rename["new_title"],
+                                "--new-path",
+                                rename["new_path"],
+                                "--output",
+                                root,
+                                "--journal",
+                                journal_path,
+                            )
+                            self.assertEqual(result["event_type"], "page_rename")
+                            commit_renamed_paths.append(
+                                (result["previous_source_path"], result["source_path"])
+                            )
+                        renamed_source_paths_by_commit.append(commit_renamed_paths)
                         commit_source_paths = []
                         for relative_path in step.get("update_paths", []):
                             result = run_grasp_json(
@@ -864,6 +949,14 @@ class GitHistoryReplayTests(unittest.TestCase):
                         path: (root / path).read_text(encoding="utf-8")
                         for path in sequence_paths
                     }
+                    exact_projected_texts = {
+                        path: (root / path).read_text(encoding="utf-8")
+                        for path in exact_projection_paths
+                    }
+                    absent_path_exists = {
+                        path: (root / path).exists()
+                        for path in sequence.get("absent_paths", [])
+                    }
 
                 projection_event_types = [
                     event["event_type"]
@@ -874,6 +967,9 @@ class GitHistoryReplayTests(unittest.TestCase):
                 for step in steps:
                     expected_projection_event_types.extend(
                         ["page_create"] * len(step.get("create_pages", []))
+                    )
+                    expected_projection_event_types.extend(
+                        ["page_rename"] * len(step.get("rename_pages", []))
                     )
                     expected_projection_event_types.extend(
                         ["page_update"] * len(step.get("update_paths", []))
@@ -890,11 +986,22 @@ class GitHistoryReplayTests(unittest.TestCase):
                     ],
                 )
                 self.assertEqual(
+                    renamed_source_paths_by_commit,
+                    [
+                        [
+                            (rename["old_path"], rename["new_path"])
+                            for rename in step.get("rename_pages", [])
+                        ]
+                        for step in steps
+                    ],
+                )
+                self.assertEqual(
                     update_source_paths_by_commit,
                     [step.get("update_paths", []) for step in steps],
                 )
                 self.assertTrue(all(result["ok"] for result in replay_results))
-                self.assertEqual(projected_texts, final_fixture)
+                self.assertEqual(exact_projected_texts, final_fixture)
+                self.assertFalse(any(absent_path_exists.values()))
                 self.assertEqual(reimport_read["page"]["title"], sequence["expected_title"])
                 self.assertIn(
                     sequence["assert_text"],
