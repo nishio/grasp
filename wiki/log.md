@@ -902,3 +902,11 @@
 - これは [[llm-wiki-infra-fast-path-plan]] Phase 5 の rename slice の穴埋め。まだ semantic index-log regeneration / 任意 frontmatter merge / general revert / projection export 失敗時 rollback は未実装。
 - schema は v7 のまま。public compatibility version は `1.7.16`。
 - 検証: `python3 -m unittest discover -s tests`（84 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 13:07] implementation+dogfood+file back | 実 git history の rename replay test を追加
+- `tests/test_git_history_replay.py` を追加。`d4e4c39^` の `wiki/decisions/why-design-B.md` と旧参照 pages を fixture にし、`rename-page --target path decisions/why-design-B.md ... --new-path decisions/why-not-scrapbox-clone.md` で実履歴 rename を再現する。
+- test は redirect stub が残らないこと、旧 `[[why-design-B]]` surface text が書き換えられないこと、旧 handle `why-design-B` で read/backlinks が新 page title に解決すること、`replay-journal --check` と generated Markdown の direct re-import 後 read/backlinks が通ることを確認する。
+- projection frontmatter は aliases だけでは生成しないよう条件を絞った。通常 page の file-stem alias だけで no-op projection が崩れないよう、repo `wiki/` temp import → `export-markdown --check` 36 files clean を確認。
+- これは [[llm-wiki-infra-fast-path-plan]] Phase 5 の done check を実データに寄せる test。まだ semantic index-log regeneration / 任意 frontmatter merge / general revert / projection export 失敗時 rollback は未実装。
+- schema は v7 のまま。public compatibility version は `1.7.17`。
+- 検証: `python3 -m unittest discover -s tests`（85 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check`, repo `wiki/` temp import → `export-markdown --check` は通過。
