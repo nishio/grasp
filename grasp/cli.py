@@ -218,6 +218,51 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory basename to skip when scanning Markdown logs. Repeat for multiple names.",
     )
 
+    log_records_parser = add_command_parser(
+        subparsers,
+        "log-records",
+        help="Query first-class log entry records from a journal.",
+        description=(
+            "Read log_entry_import records from a JSONL journal without opening SQLite. "
+            "This is the event-stream surface for log records; it does not read current page projection."
+        ),
+        returns=(
+            "project, journal, total_records, matched_records, returned_records, offset, limit, order, filters, records[]"
+        ),
+        examples=[
+            "grasp --project grasp-wiki log-records --journal wiki.grasp/events.jsonl --limit 5",
+            "grasp --project grasp-wiki log-records --journal wiki.grasp/events.jsonl --query replay --op fix",
+        ],
+        notes=[
+            "Default order is newest first by timestamp, then journal order.",
+            "Until subject extraction exists, --query is whitespace-term AND search over heading, summary, op, source_path, and body lines.",
+        ],
+    )
+    add_log_record_query_arguments(log_records_parser, include_positional_query=False)
+
+    history_parser = add_command_parser(
+        subparsers,
+        "history",
+        help="Search the log event stream for a page or topic.",
+        description=(
+            "Search log_entry_import records for a page/topic string without reading current page projection. "
+            "This is a lightweight alias of log-records --query until subject extraction is implemented."
+        ),
+        returns=(
+            "project, journal, query, total_records, matched_records, returned_records, offset, limit, order, filters, records[]"
+        ),
+        examples=[
+            "grasp --project grasp-wiki history grasp-v1-implemented --journal wiki.grasp/events.jsonl",
+            "grasp --project grasp-wiki history replay --journal wiki.grasp/events.jsonl --limit 10",
+        ],
+        notes=[
+            "This command deliberately differs from read <page>: read returns current projection; history returns event-stream records.",
+            "Matching is whitespace-term AND search until log entry subject extraction is implemented.",
+        ],
+    )
+    history_parser.add_argument("query", help="Page/topic string to search for in log records.")
+    add_log_record_query_arguments(history_parser, include_positional_query=True)
+
     import_forest_parser = add_command_parser(
         subparsers,
         "import-forest",
@@ -1162,6 +1207,21 @@ def add_command_parser(
     return command_parser
 
 
+def add_log_record_query_arguments(command_parser: argparse.ArgumentParser, *, include_positional_query: bool) -> None:
+    command_parser.add_argument("--journal", type=Path, required=True, help="JSONL journal path containing log_entry_import records.")
+    if not include_positional_query:
+        command_parser.add_argument("--query", default=None, help="Text query matched against record id, source, timestamp, op, summary, heading, and body lines.")
+    command_parser.add_argument("--source-path", default=None, help="Only return records imported from this Markdown source path.")
+    command_parser.add_argument("--op", action="append", default=[], help="Only return records with this op. Repeat for multiple ops.")
+    command_parser.add_argument("--record-id", default=None, help="Only return a specific log record id.")
+    command_parser.add_argument("--since", default=None, help="Only return records with timestamp >= this value. Lexical YYYY-MM-DD HH:MM comparison.")
+    command_parser.add_argument("--until", default=None, help="Only return records with timestamp <= this value. Lexical YYYY-MM-DD HH:MM comparison.")
+    command_parser.add_argument("--limit", type=int, default=20, help="Maximum records to return.")
+    command_parser.add_argument("--offset", type=int, default=0, help="Number of matching records to skip after ordering.")
+    command_parser.add_argument("--oldest-first", action="store_true", help="Return oldest matching records first instead of newest first.")
+    command_parser.add_argument("--body-lines", type=int, default=3, help="Body lines to show in text output. JSON always returns full body_lines.")
+
+
 def default_journal_path(folder: Path) -> Path:
     return folder.parent / f"{folder.name}.grasp" / "events.jsonl"
 
@@ -1349,6 +1409,139 @@ def run_import_log_records(store: SQLiteStore, args: argparse.Namespace) -> dict
         "record_ids": imported_record_ids,
         "skipped_record_ids": skipped_record_ids,
     }
+
+
+def run_log_records(args: argparse.Namespace) -> dict[str, Any]:
+    events = read_journal_events(args.journal)
+    selected_project = select_journal_project(events, args.project)
+    query = getattr(args, "query", None)
+    records = [
+        log_entry_record_from_event(event, journal_index=index)
+        for index, event in enumerate(events)
+        if (selected_project is None or event["project"] == selected_project)
+        and event["event_type"] == "log_entry_import"
+    ]
+    ordered_records = sorted(
+        records,
+        key=lambda record: (record["timestamp"], record["journal_index"]),
+        reverse=not args.oldest_first,
+    )
+    filters = {
+        "query": query,
+        "source_path": args.source_path,
+        "op": list(args.op or []),
+        "record_id": args.record_id,
+        "since": args.since,
+        "until": args.until,
+    }
+    matched = [
+        record
+        for record in ordered_records
+        if log_entry_record_matches(record, filters)
+    ]
+    if args.offset < 0:
+        raise ValueError("--offset must be >= 0")
+    if args.limit < 1:
+        raise ValueError("--limit must be >= 1")
+    limit_end = args.offset + args.limit
+    returned = matched[args.offset:limit_end]
+    return {
+        "project": selected_project,
+        "journal": str(args.journal),
+        "query": query,
+        "total_records": len(records),
+        "matched_records": len(matched),
+        "returned_records": len(returned),
+        "offset": args.offset,
+        "limit": args.limit,
+        "order": "oldest-first" if args.oldest_first else "newest-first",
+        "filters": filters,
+        "records": returned,
+        "body_lines": args.body_lines,
+    }
+
+
+def select_journal_project(events: list[dict[str, Any]], project: str | None) -> str | None:
+    event_projects = {event["project"] for event in events}
+    if project is None and len(event_projects) > 1:
+        available = ", ".join(sorted(event_projects))
+        raise ValueError(f"journal contains multiple projects; specify --project <name> (available: {available})")
+    if project is not None and event_projects and project not in event_projects:
+        available = ", ".join(sorted(event_projects))
+        raise ValueError(f"project {project!r} is not present in journal (available: {available})")
+    return project or (next(iter(event_projects)) if event_projects else None)
+
+
+def log_entry_record_from_event(event: dict[str, Any], *, journal_index: int) -> dict[str, Any]:
+    payload = event.get("payload") or {}
+    body_lines = [
+        line
+        for line in payload.get("body_lines") or []
+        if isinstance(line, dict)
+    ]
+    body_text = "\n".join(str(line.get("text", "")) for line in body_lines)
+    return {
+        "journal_index": journal_index,
+        "event_id": event["event_id"],
+        "event_created_at": event["created_at"],
+        "project": event["project"],
+        "record_id": str(payload.get("record_id") or ""),
+        "source_path": str(payload.get("source_path") or ""),
+        "page_id": str(payload.get("page_id") or ""),
+        "timestamp": str(payload.get("timestamp") or ""),
+        "op": str(payload.get("op") or ""),
+        "summary": str(payload.get("summary") or ""),
+        "heading": str(payload.get("heading") or ""),
+        "heading_line_index": int(payload.get("heading_line_index", -1)),
+        "body_lines": body_lines,
+        "body_line_count": int(payload.get("body_line_count", len(body_lines))),
+        "body_text": body_text,
+    }
+
+
+def log_entry_record_matches(record: dict[str, Any], filters: dict[str, Any]) -> bool:
+    query = filters.get("query")
+    if query and not log_entry_record_query_matches(record, str(query)):
+        return False
+    source_path = filters.get("source_path")
+    if source_path and record["source_path"] != str(source_path):
+        return False
+    ops = filters.get("op") or []
+    if ops and record["op"] not in {str(op) for op in ops}:
+        return False
+    record_id = filters.get("record_id")
+    if record_id and record["record_id"] != str(record_id):
+        return False
+    since = filters.get("since")
+    if since and record["timestamp"] < str(since):
+        return False
+    until = filters.get("until")
+    if until and record["timestamp"] > str(until):
+        return False
+    return True
+
+
+def log_entry_record_query_matches(record: dict[str, Any], query: str) -> bool:
+    terms = [term for term in query.casefold().split() if term]
+    if not terms:
+        return True
+    search_text = log_entry_record_search_text(record).casefold()
+    return all(term in search_text for term in terms)
+
+
+def log_entry_record_search_text(record: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            record.get("record_id", ""),
+            record.get("source_path", ""),
+            record.get("page_id", ""),
+            record.get("timestamp", ""),
+            record.get("op", ""),
+            record.get("summary", ""),
+            record.get("heading", ""),
+            record.get("body_text", ""),
+        ]
+    )
 
 
 def run_export_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
@@ -2251,6 +2444,14 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0
 
+    if args.command in {"log-records", "history"}:
+        try:
+            result = run_log_records(args)
+        except ValueError as error:
+            parser.error(str(error))
+        emit_result(args, result)
+        return 0
+
     if args.command == "acquire" and not args.store.exists():
         ensure_store_schema(args.store)
 
@@ -3013,6 +3214,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_export_markdown(result)
     if command == "import-log-records":
         return format_import_log_records(result)
+    if command in {"log-records", "history"}:
+        return format_log_records(result)
     if command in {"append-section", "append-log"}:
         return format_append_result(result)
     if command == "write-page":
@@ -3102,6 +3305,37 @@ def format_import_log_records(result: dict[str, Any]) -> str:
         f"imported_records: {result['imported_records']}\n"
         f"skipped_records: {result['skipped_records']}\n"
     )
+
+
+def format_log_records(result: dict[str, Any]) -> str:
+    body_line_limit = int(result.get("body_lines", 3))
+    parts = [
+        "# Log Records\n",
+        f"project: {result.get('project') or ''}\n",
+        f"journal: {result['journal']}\n",
+        f"query: {result.get('query') or ''}\n",
+        f"total_records: {result['total_records']}\n",
+        f"matched_records: {result['matched_records']}\n",
+        f"returned_records: {result['returned_records']}\n",
+        f"order: {result['order']}\n",
+    ]
+    records = result.get("records") or []
+    if records:
+        parts.append("records:\n")
+    for record in records:
+        parts.append(f"- [{record['timestamp']}] {record['op']} | {record['summary']}\n")
+        parts.append(f"  record_id: {record['record_id']}\n")
+        parts.append(f"  event_id: {record['event_id']}\n")
+        parts.append(f"  source_path: {record['source_path']}:{record['heading_line_index']}\n")
+        body_lines = record.get("body_lines") or []
+        if body_line_limit > 0 and body_lines:
+            parts.append("  body:\n")
+            for line in body_lines[:body_line_limit]:
+                parts.append(f"    {line.get('text', '')}\n")
+            omitted = len(body_lines) - body_line_limit
+            if omitted > 0:
+                parts.append(f"    ... {omitted} more lines\n")
+    return "".join(parts)
 
 
 def format_append_result(result: dict[str, Any]) -> str:
