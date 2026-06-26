@@ -35,6 +35,7 @@ COMMANDS = [
     "write-status",
     "write-diff",
     "revert-event",
+    "replay-journal",
     "sync",
     "acquire",
     "unresolved",
@@ -1397,6 +1398,25 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
+            replay_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--project",
+                    "wiki",
+                    "replay-journal",
+                    "--journal",
+                    str(journal_path),
+                    "--output",
+                    str(root),
+                    "--check",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
             journal_events = [
                 json.loads(line)
                 for line in journal_path.read_text(encoding="utf-8").splitlines()
@@ -1408,6 +1428,7 @@ class CliHelpTests(unittest.TestCase):
         status_result = json.loads(status_completed.stdout)
         diff_result = json.loads(diff_completed.stdout)
         revert_result = json.loads(revert_completed.stdout)
+        replay_result = json.loads(replay_completed.stdout)
         self.assertEqual(
             [event["event_type"] for event in journal_events],
             ["page_create", "page_create", "section_append", "log_append", "event_revert"],
@@ -1424,6 +1445,8 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(revert_result["target_event_type"], "log_append")
         self.assertEqual(revert_result["projection"]["written_files"], ["Log.md"])
         self.assertEqual(revert_result["removed_line_count"], 3)
+        self.assertTrue(replay_result["ok"])
+        self.assertEqual(replay_result["file_count"], 2)
 
     def test_read_markdown_page_by_source_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:

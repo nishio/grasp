@@ -168,6 +168,7 @@ grasp read "<ページタイトル>"
 | `write-status` | alpha write 用に journal 件数・last event・Markdown projection check を返す |
 | `write-diff` | filesystem 上の Markdown と stored projection の unified diff を返す |
 | `revert-event <event-id>` | tail に残っている `section_append` / `log_append` event だけを取り消し、`event_revert` を journal に記録する |
+| `replay-journal` | JSONL journal だけから Markdown projection を再構築・check する alpha recovery surface |
 | `import-forest <wikis.yaml>` | registry の複数 Markdown wiki を 1 store の複数 project namespace に一括 import。entry ごとの diagnostics と forest-level ambiguity summary を返す |
 | `acquire <project-url>` | 管理者 export なしで hosted Cosense から読めるページを partial corpus として取得（要 `cosense` CLI） |
 | `sync <project-url>` | hosted Cosense の最近更新ページを差分取り込み（保守用・要 `cosense` CLI install + 認証） |
@@ -200,7 +201,7 @@ grasp read "<ページタイトル>"
 ## Roadmap
 
 - **Markdown / Obsidian 互換性の拡張** — 最小の read-only mirror と content-only 差分 index、first H1 title resolution は実装済み。Obsidian block refs / より細かい alias-aware incremental rebuild などは今後の拡張。
-- **書き込み層（`write` / `rename`）** — append-only alpha（`append-section` / `append-log`）と、その recovery surface（`write-status` / `write-diff` / tail-only `revert-event`）は入りましたが、stable identity / rename / replay / 汎用 revert は未実装です。Scrapbox / Cosenseを使っている人がAIから hosted に書くときはcosense-cliで書くことを想定しています。grasp の write 層は将来的にCosenseユーザでない人 or オンラインのCosenseに書くのではなくローカルに閉じて欲しいケース をサポートする目的です。
+- **書き込み層（`write` / `rename`）** — append-only alpha（`append-section` / `append-log`）と、その recovery surface（`write-status` / `write-diff` / tail-only `revert-event` / `replay-journal`）は入りましたが、stable identity / rename / 汎用 page update replay / 汎用 revert は未実装です。Scrapbox / Cosenseを使っている人がAIから hosted に書くときはcosense-cliで書くことを想定しています。grasp の write 層は将来的にCosenseユーザでない人 or オンラインのCosenseに書くのではなくローカルに閉じて欲しいケース をサポートする目的です。
 - **ベクトル検索** — 文字列一致だけでなく、意味の近さで関連を辿る。
 
 スコープ外: リアルタイム多人数編集・同期・共有/権限・Web UI。単一ユーザ＋AI には不要で、これらを削ぎ落とすのが grasp の核です。

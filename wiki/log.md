@@ -869,3 +869,11 @@
 - これは [[llm-wiki-infra-fast-path-plan]] Phase 4 の最小 recovery slice。まだ `write page` / replay / rename / general revert / projection export 失敗時 rollback は未実装。
 - schema は v7 のまま。public compatibility version は `1.7.12`。
 - 検証: `python3 -m unittest discover -s tests`（82 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 10:31] implementation+dogfood+file back | `replay-journal` で append/revert journal を再生
+- `replay-journal --journal <events.jsonl> --output <folder> [--check]` command を追加。SQLite store を読まず、JSONL journal の `page_create` / `section_append` / `log_append` / `event_revert` を strict replay して Markdown projection を reconstruct / compare / write する。
+- replay は multiple project journal では `--project` を要求する。`event_revert` は replay 上でも removed lines が page tail に一致する場合だけ適用する。`page_update` / `page_rename` replay はまだ未実装。
+- dogfood: temp copy の repo `wiki/` で adopt→append-section→revert-event 後、`replay-journal --check` が existing projection と clean。空 folder へ replay write すると 36 files written、その folder への replay check も clean。
+- これは [[llm-wiki-infra-fast-path-plan]] Phase 4 の recovery を journal authority 側へ寄せる前処理。
+- schema は v7 のまま。public compatibility version は `1.7.13`。
+- 検証: `python3 -m unittest discover -s tests`（82 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。

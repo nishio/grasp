@@ -13,7 +13,7 @@ from typing import Any
 from .cosense_cli import CosenseCliClient, acquire_from_cosense, sync_from_cosense
 from .forest import import_forest_from_registry
 from .journal import append_journal_event, make_journal_event, read_journal_events
-from .markdown import MarkdownCollisionError, MarkdownMirror
+from .markdown import MarkdownCollisionError, MarkdownMirror, iter_markdown_files
 from .sqlite_store import (
     SCHEMA_VERSION,
     SQLiteStore,
@@ -896,6 +896,28 @@ def build_parser() -> argparse.ArgumentParser:
     revert_event_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
     revert_event_parser.add_argument("--reason", default="", help="Optional reason stored in the revert event payload.")
 
+    replay_journal_parser = add_command_parser(
+        subparsers,
+        "replay-journal",
+        help="Replay an alpha write journal into a Markdown projection.",
+        description=(
+            "Replay page_create, section_append, log_append, and event_revert records from a JSONL journal "
+            "to reconstruct a Markdown projection without reading SQLite."
+        ),
+        returns="project, journal, output, check, ok, event_count, applied_event_count, file_count, changed_files, missing_files, extra_files, written_files",
+        examples=[
+            "grasp replay-journal --journal wiki.grasp/events.jsonl --output wiki --project grasp-wiki --check",
+            "grasp --json replay-journal --journal wiki.grasp/events.jsonl --output /tmp/wiki-replay --project grasp-wiki",
+        ],
+        notes=[
+            "If the journal contains multiple projects, pass --project to select one.",
+            "Replay is strict: reverted lines must be the current page tail in replay order.",
+        ],
+    )
+    replay_journal_parser.add_argument("--journal", type=Path, required=True, help="JSONL journal path to replay.")
+    replay_journal_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder.")
+    replay_journal_parser.add_argument("--check", action="store_true", help="Only compare replay output; do not write files.")
+
     sync_parser = add_command_parser(
         subparsers,
         "sync",
@@ -1236,6 +1258,174 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     return result
 
 
+def replay_journal_projection(
+    journal: Path,
+    output: Path,
+    *,
+    project: str | None,
+    check: bool,
+) -> dict[str, Any]:
+    events = read_journal_events(journal)
+    event_projects = {event["project"] for event in events}
+    if project is None and len(event_projects) > 1:
+        available = ", ".join(sorted(event_projects))
+        raise ValueError(f"journal contains multiple projects; specify --project <name> (available: {available})")
+    if project is not None and event_projects and project not in event_projects:
+        available = ", ".join(sorted(event_projects))
+        raise ValueError(f"project {project!r} is not present in journal (available: {available})")
+    selected_project = project or (next(iter(event_projects)) if event_projects else None)
+    pages: dict[str, dict[str, Any]] = {}
+    applied_event_count = 0
+    skipped_event_count = 0
+
+    for event in events:
+        if selected_project is not None and event["project"] != selected_project:
+            skipped_event_count += 1
+            continue
+        payload = event["payload"]
+        event_type = event["event_type"]
+        if event_type == "page_create":
+            page_id = str(payload.get("page_id") or "")
+            source_path = str(payload.get("source_path") or "")
+            lines = payload.get("lines")
+            if not page_id or not source_path or not isinstance(lines, list):
+                raise ValueError(f"invalid page_create payload in event {event['event_id']}")
+            pages[page_id] = {
+                "page_id": page_id,
+                "title": str(payload.get("title") or ""),
+                "source_path": _safe_replay_relative_path(source_path),
+                "lines": [_journal_line_for_replay(line) for line in lines],
+            }
+            applied_event_count += 1
+        elif event_type in {"section_append", "log_append"}:
+            page_id = str(payload.get("page_id") or "")
+            inserted_lines = payload.get("inserted_lines")
+            if page_id not in pages:
+                raise ValueError(f"{event_type} references unknown page_id {page_id!r} in event {event['event_id']}")
+            if not isinstance(inserted_lines, list):
+                raise ValueError(f"{event_type} payload is missing inserted_lines in event {event['event_id']}")
+            pages[page_id]["lines"].extend(_journal_line_for_replay(line) for line in inserted_lines)
+            applied_event_count += 1
+        elif event_type == "event_revert":
+            page_id = str(payload.get("page_id") or "")
+            removed_lines = payload.get("removed_lines")
+            if page_id not in pages:
+                raise ValueError(f"event_revert references unknown page_id {page_id!r} in event {event['event_id']}")
+            if not isinstance(removed_lines, list) or not removed_lines:
+                raise ValueError(f"event_revert payload is missing removed_lines in event {event['event_id']}")
+            expected_tail = [_journal_line_for_replay(line) for line in removed_lines]
+            current_lines = pages[page_id]["lines"]
+            if current_lines[-len(expected_tail):] != expected_tail:
+                raise ValueError(f"event_revert does not match page tail in event {event['event_id']}")
+            del current_lines[-len(expected_tail):]
+            applied_event_count += 1
+        elif event_type == "projection_export":
+            applied_event_count += 1
+        else:
+            raise ValueError(f"replay-journal does not support event_type yet: {event_type}")
+
+    projections = {
+        page["source_path"]: _markdown_text_from_replay_lines(page["lines"])
+        for page in pages.values()
+    }
+    return _compare_or_write_replay_projection(
+        projections,
+        output,
+        journal=journal,
+        project=selected_project,
+        check=check,
+        event_count=len(events),
+        applied_event_count=applied_event_count,
+        skipped_event_count=skipped_event_count,
+    )
+
+
+def _journal_line_for_replay(line: Any) -> dict[str, Any]:
+    if not isinstance(line, dict):
+        raise ValueError("journal line payload must be an object")
+    line_id = str(line.get("line_id") or "")
+    if not line_id:
+        raise ValueError("journal line payload is missing line_id")
+    return {
+        "line_id": line_id,
+        "line_index": int(line.get("line_index", -1)),
+        "text": str(line.get("text", "")),
+    }
+
+
+def _markdown_text_from_replay_lines(lines: list[dict[str, Any]]) -> str:
+    if not lines:
+        return ""
+    return "\n".join(str(line["text"]) for line in lines) + "\n"
+
+
+def _safe_replay_relative_path(relative_path: str) -> str:
+    path = Path(relative_path)
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"unsafe journal source_path: {relative_path}")
+    return path.as_posix()
+
+
+def _safe_replay_output_path(output: Path, relative_path: str) -> Path:
+    relative = Path(_safe_replay_relative_path(relative_path))
+    return output / relative
+
+
+def _compare_or_write_replay_projection(
+    projections: dict[str, str],
+    output: Path,
+    *,
+    journal: Path,
+    project: str | None,
+    check: bool,
+    event_count: int,
+    applied_event_count: int,
+    skipped_event_count: int,
+) -> dict[str, Any]:
+    changed_files: list[str] = []
+    missing_files: list[str] = []
+    written_files: list[str] = []
+    for relative_path, text in sorted(projections.items()):
+        target = _safe_replay_output_path(output, relative_path)
+        if not target.exists():
+            missing_files.append(relative_path)
+            if not check:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text, encoding="utf-8")
+                written_files.append(relative_path)
+            continue
+        current = target.read_text(encoding="utf-8")
+        if current != text:
+            changed_files.append(relative_path)
+            if not check:
+                target.write_text(text, encoding="utf-8")
+                written_files.append(relative_path)
+
+    existing_files = {
+        path.relative_to(output).as_posix()
+        for path in iter_markdown_files(output)
+    } if output.exists() else set()
+    extra_files = sorted(existing_files - set(projections))
+    ok = not changed_files and not missing_files and not extra_files
+    return {
+        "project": project,
+        "journal": str(journal),
+        "output": str(output),
+        "check": check,
+        "ok": ok,
+        "event_count": event_count,
+        "applied_event_count": applied_event_count,
+        "skipped_event_count": skipped_event_count,
+        "file_count": len(projections),
+        "checked_files": len(projections) if check else 0,
+        "written_files": written_files,
+        "written_count": len(written_files),
+        "changed_files": sorted(changed_files),
+        "missing_files": sorted(missing_files),
+        "extra_files": extra_files,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -1309,6 +1499,21 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError as error:
             parser.error(str(error))
         emit_result(args, result)
+        return 0
+
+    if args.command == "replay-journal":
+        try:
+            result = replay_journal_projection(
+                args.journal,
+                args.output,
+                project=args.project,
+                check=args.check,
+            )
+        except ValueError as error:
+            parser.error(str(error))
+        emit_result(args, result)
+        if args.check and not result.get("ok"):
+            return 1
         return 0
 
     if args.command == "acquire" and not args.store.exists():
@@ -2071,6 +2276,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_write_diff(result)
     if command == "revert-event":
         return format_revert_event(result)
+    if command == "replay-journal":
+        return format_replay_journal(result)
     if command == "unresolved":
         return with_alias_legend(format_unresolved_targets(result["unresolved_targets"], aliases=aliases), aliases)
     if command == "sync":
@@ -2193,6 +2400,31 @@ def format_revert_event(result: dict[str, Any]) -> str:
         f"removed_lines: {result['removed_line_count']}\n"
         f"projection_written: {projection.get('written_count', 0)}\n"
     )
+
+
+def format_replay_journal(result: dict[str, Any]) -> str:
+    parts = [
+        "# Replay Journal\n",
+        f"project: {result['project'] or ''}\n",
+        f"journal: {result['journal']}\n",
+        f"output: {result['output']}\n",
+        f"check: {str(result['check']).lower()}\n",
+        f"ok: {str(result['ok']).lower()}\n",
+        f"events: {result['applied_event_count']}/{result['event_count']}\n",
+        f"files: {result['file_count']}\n",
+        f"written: {result['written_count']}\n",
+    ]
+    for key, label in (
+        ("changed_files", "changed"),
+        ("missing_files", "missing"),
+        ("extra_files", "extra"),
+        ("written_files", "written_files"),
+    ):
+        files = result.get(key) or []
+        if files:
+            parts.append(f"{label}:\n")
+            parts.extend(f"- {path}\n" for path in files)
+    return "".join(parts)
 
 
 def format_import_forest(result: dict[str, Any]) -> str:
