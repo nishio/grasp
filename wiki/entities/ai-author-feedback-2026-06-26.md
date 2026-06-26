@@ -51,6 +51,22 @@ sources:
 - friction 1（構造化 arg）は API として正しい設計（log schema 強制・identity 注入）であり、必要なのは「markdown 意図 → 構造化 arg」を畳む薄い高位層か、それとも AI 側が学べばよいだけか。
 - confidence 獲得コストを下げる最小手は dry-run / preview か、atomic file-back command か。実測（次の write-path 実走で round-trip 数を数える）で決める。
 
+## Updates
+
+### 2026-06-27 (live, 共有 journal 実走): sandbox が原理的に出せない並行下の failure mode
+
+本ページ本文は **sandbox（throwaway store /tmp、共有 journal を触らない）**実走に基づく。一方、本ページが friction 1 gotcha / friction 5 で引く「並行 session が共有 log/journal を dirty にした」**その並行 session が私**で、私は **共有 `wiki.grasp/events.jsonl` と本番 `wiki/` に live で write**した（`come-from` / `positioning` の §Updates、log 23:07）。sandbox が隔離ゆえ構造的に出せない並行下 failure mode を一次体験として足す:
+
+- **stale store × export 副作用 ＝ 蘇生 / clobber。** 私の `.grasp/file-back.sqlite` は import 時点（22:54）で固定され、その後 並行 session が `wiki/` を変えた。`append-log` の `export-markdown` 副作用が **stale store の page を `wiki/` に再 materialize** し、私が作っていない `value-is-problem-solving-not-novelty.md` が untracked で出現した。write op の export が安全なのは **store == wiki/ の時だけ**で、並行 writer 下では store が黙って stale 化する。sandbox（隔離 store）はこの面を出せない。CLAUDE.md「write-page は全 projection を export」警告の実害形。
+
+- **write-status は divergence を検出するが「誰の変更か」を言わない。** `append-log` 後に write-status が `projection_ok:false / strict_ok:false / journal_log_stale:true` に転じたが、これは **私のミスでなく並行 writer が `wiki/` を触った**ため。AI は `strict_ok:false` を見ても「自分由来」か「他 writer 由来」かを **in-band で区別できない**。trust 信号が、最も要る並行下でちょうど劣化する（read 面「沈黙＝偽陰性」の write 版＝「赤信号の出所不明」）。
+
+- **append-log の placement gotcha（2つ目の "成功だが意味的に誤り"）。** append-section の二重 heading（friction 1）に加え、`append-log` は **newest-first の log なのに entry を末尾寄り（~1040 行下）に置いた**。成功を返すが、top から最近を読む人/AI に埋もれる。手で正位置へ reorder したが、その Edit で隣の entry heading を一度落として復元した（手編集 reorder 自体が誤りを生む）。
+
+- **回復は grasp でなく git 層で行うしかなかった。** grasp-write に並行 primitive が無いので AI の安全策は git に降りた: 自分の確定ファイルだけの **pathspec commit**（`git commit -m … -- <paths>`、他 session の staged を巻き込まない）／**`git checkout HEAD -- events.jsonl`** で自分の journal events を撤回／reorder の誤りを **amend**。それでも私の log 23:07 entry は 並行 session の commit が staged `log.md` ごと **取り込んで**しまった。→ friction 5 の解は「lock」だけでなく **変更の attribution（誰の hunk か）** が要る、と尖る。
+
+- **meta 確認 ＋ 追補。** 本ページの結論「不確実下の AI の安全な既定＝共有 write path を使わない」は live で裏付いた: 私は使うと決めて入ったのに、共有 journal が私を direct-patch + git 手術へ押し戻した。追補: confidence コストは **upfront（--help を読む）だけでなく ongoing** — 並行可能性がある限り **各 write op の後に git レベル検証**が要り、これが per-op 固定費になる。∴ atomic file-back command / journal lock に加え、**「自分の store が `wiki/` に対し stale か」を write 前に出す staleness check**（friction 5 の前段）が、AI が共有 write を安全に既定化できる最小条件。
+
 ## 関連
 
 - [[ai-consumer-cost-and-trust]] — read 面の cost-and-trust。本ページは write 面の対（confidence コスト + 並行安全性）
