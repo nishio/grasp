@@ -37,6 +37,7 @@ from .markdown import (
     is_code_fence,
     iter_markdown_files,
     markdown_graph_role_emits_edges,
+    markdown_projection_text,
     markdown_wikilink_target,
     parse_markdown_line_links,
     parse_markdown_links,
@@ -2046,7 +2047,13 @@ class SQLiteStore:
                 """,
                 (project, page_id),
             ).fetchall()
-            projections[relative_path] = _markdown_lines_to_text([row["text"] for row in lines])
+            projections[relative_path] = markdown_projection_text(
+                relative_path,
+                page_id=page_id,
+                title=str(item.get("title") or ""),
+                aliases=[str(alias) for alias in item.get("aliases") or []],
+                lines=[row["text"] for row in lines],
+            )
         return projections
 
     def markdown_projection_diff(self, output_folder: str | Path, *, context: int = 3) -> dict[str, Any]:

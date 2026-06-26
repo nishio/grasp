@@ -297,6 +297,98 @@ def markdown_file_manifest(records: list[MarkdownPageRecord], *, exclude_dirs: t
     }
 
 
+def markdown_projection_text(
+    relative_path: str | Path,
+    *,
+    page_id: str,
+    title: str,
+    aliases: list[str],
+    lines: list[str],
+) -> str:
+    fields = markdown_projection_frontmatter_fields(
+        relative_path,
+        page_id=page_id,
+        title=title,
+        aliases=aliases,
+        lines=lines,
+    )
+    if not fields:
+        return markdown_lines_to_text(lines)
+    if markdown_frontmatter_matches(lines, fields):
+        return markdown_lines_to_text(lines)
+    _, body_lines = split_markdown_frontmatter(lines)
+    return markdown_lines_to_text([*render_markdown_frontmatter(fields), *body_lines])
+
+
+def markdown_projection_frontmatter_fields(
+    relative_path: str | Path,
+    *,
+    page_id: str,
+    title: str,
+    aliases: list[str],
+    lines: list[str],
+) -> dict[str, Any]:
+    aliases = list(dict.fromkeys(str(alias) for alias in aliases if str(alias).strip()))
+    _, body_lines = split_markdown_frontmatter(lines)
+    h1_title = first_markdown_h1_title(body_lines)
+    page_id = str(page_id)
+    title = str(title)
+    identity_needs_frontmatter = page_id != markdown_page_id(Path(relative_path))
+    title_needs_frontmatter = bool(title) and normalize_title(title) != normalize_title(h1_title or "")
+    if not aliases and not identity_needs_frontmatter and not title_needs_frontmatter:
+        return {}
+    return {
+        "id": page_id,
+        "title": title,
+        "aliases": aliases,
+    }
+
+
+def markdown_frontmatter_matches(lines: list[str], fields: dict[str, Any]) -> bool:
+    frontmatter, _ = split_markdown_frontmatter(lines)
+    if not frontmatter:
+        return False
+    metadata = parse_frontmatter(lines)
+    return (
+        metadata.page_id == fields.get("id")
+        and metadata.title == fields.get("title")
+        and metadata.aliases == (fields.get("aliases") or [])
+    )
+
+
+def split_markdown_frontmatter(lines: list[str]) -> tuple[list[str], list[str]]:
+    if not lines or lines[0].strip() != "---":
+        return [], list(lines)
+    for index in range(1, len(lines)):
+        if lines[index].strip() in {"---", "..."}:
+            return list(lines[: index + 1]), list(lines[index + 1 :])
+    return [], list(lines)
+
+
+def render_markdown_frontmatter(fields: dict[str, Any]) -> list[str]:
+    rendered = [
+        "---",
+        f"id: {frontmatter_scalar(fields['id'])}",
+        f"title: {frontmatter_scalar(fields['title'])}",
+    ]
+    aliases = fields.get("aliases") or []
+    if aliases:
+        rendered.append("aliases:")
+        rendered.extend(f"  - {frontmatter_scalar(alias)}" for alias in aliases)
+    rendered.append("---")
+    return rendered
+
+
+def frontmatter_scalar(value: Any) -> str:
+    return str(value).replace("\n", " ").strip()
+
+
+def markdown_lines_to_text(lines: list[str]) -> str:
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
+
+
 def parse_frontmatter(lines: list[str]) -> MarkdownMetadata:
     if not lines or lines[0].strip() != "---":
         return MarkdownMetadata(title=None, page_id=None, aliases=[], tags=[], graph_role="content")

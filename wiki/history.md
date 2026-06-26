@@ -33,7 +33,7 @@ v1 系では public version を `1.x.y` とする。
 - `2` = **authoring line**。read line に加えて write/identity（id-link write・rename で参照不壊・transclude・come-from declare/render）を持つ line（`2.x.y`）。read-only(`1`) → read+write は本プロジェクト最大の概念変化（[[development-arc-retrieval-ahead-of-authoring]]）なのでメジャーで標す。
 - `x` / `y` の意味は major を跨いでも同じ（`x`=store generation、`y`=store-compatible）。
 
-**alpha は version に載せない**: write が alpha かどうかは version 番号でなく **write 系 verb に付く SLA ラベル**で表す（read=stable / write=alpha を別 SLA、[[write-layer-alpha-and-replay-test]] 決定1）。`2.0.0-alpha.N` の prerelease に逃げず、alpha→stable はラベルを外す SLA 変更として version bump と独立に扱う。なお `append-section` / `append-log` / `write-page` / `rename-page` のような Markdown-backed fast-path helper は、native authority cutover や direct re-import 後の alias 永続化をまだ持たないため `2.x` authoring line の境界ではなく、`1.x` compatible な authoring alpha として扱う。
+**alpha は version に載せない**: write が alpha かどうかは version 番号でなく **write 系 verb に付く SLA ラベル**で表す（read=stable / write=alpha を別 SLA、[[write-layer-alpha-and-replay-test]] 決定1）。`2.0.0-alpha.N` の prerelease に逃げず、alpha→stable はラベルを外す SLA 変更として version bump と独立に扱う。なお `append-section` / `append-log` / `write-page` / `rename-page` のような Markdown-backed fast-path helper は、native authority cutover をまだ持たないため `2.x` authoring line の境界ではなく、`1.x` compatible な authoring alpha として扱う。
 
 **`2.0.0` 境界（cadence A）**: 最高リスクのスライス（stable identity + re-import diff、次いで rename）が replay test（この repo の過去 wiki 編集の再現、[[write-layer-alpha-and-replay-test]] 決定2）を通った時点で main に merge し、そこを `2.0.0` とする。write系完了を待つ big-bang merge はしない（[[development-arc-retrieval-ahead-of-authoring]] の tight dogfood loop を失わないため）。以降 write / transclude / come-from は `2.x.y`。store generation `x` は `2.0.0` で 1 から再採番せず、`SCHEMA_VERSION`（内部整数）は単調増加を維持する。
 
@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.7.16`（更新: 2026-06-26 12:40、store: schema `7`、compat: schema `7` compatible）: rename identity projection frontmatter を追加。`export-markdown` / `replay-journal` は path-derived id / first H1 / aliases だけでは identity が失われる page に限り、`id` / `title` / `aliases` frontmatter を生成する。`rename-page Old New --new-path New.md` 後の generated `New.md` を新 store へ direct `import --markdown` しても page id と旧名 alias が残り、`read Old` が title `New` に解決することを temp wiki test で確認。任意 frontmatter の merge は未実装、schema は不変
 - `1.7.15`（更新: 2026-06-26 11:17、store: schema `7`、compat: schema `7` compatible）: `rename-page <target> <new-title>`（alias `rename`）を追加。Markdown-backed project の page id を保ったまま title と optional source path を変更し、旧 title / old file stem を alias handle に残して incoming `[[旧名]]` の surface text は書き換えない。first H1 が旧 title と一致する時だけ同じ line_id のまま `# <new-title>` に更新する。`page_rename` event の replay/revert に対応。temp wiki dogfood で Old→New rename、旧 handle read/backlink、replay check、revert、replay check clean。frontmatter title 追従 / direct re-import 後の alias 永続化 / general revert は未実装、schema は不変
 - `1.7.14`（更新: 2026-06-26 11:03、store: schema `7`、compat: schema `7` compatible）: `write-page <title>` を追加。Markdown-backed project の unique handle page の本文行を全置換し、SQLite lines/edges/unresolved/counts を更新し、`page_update` event に before/after lines を記録し、projection を export する。`revert-event` と `replay-journal` が `page_update` に対応。temp copy dogfood で `write-page --from-file`→revert→replay check→export check clean。rename/source-path変更/general revert は未実装、schema は不変
 - `1.7.13`（更新: 2026-06-26 10:31、store: schema `7`、compat: schema `7` compatible）: `replay-journal --journal <events.jsonl> --output <folder> [--check]` を追加。SQLite を読まず、`page_create` / `section_append` / `log_append` / `event_revert` を JSONL journal から strict replay して Markdown projection を reconstruct / compare / write する。temp copy dogfood で append→revert 後の journal が existing wiki projection に clean、空 folder へ 36 files replay write 後も clean。`page_update` / `page_rename` replay は未実装、schema は不変
@@ -115,6 +116,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.7.15`
+- Current public compatibility version: `1.7.16`
 - Current internal `SCHEMA_VERSION`: `7`
-- Current package metadata should match `1.7.15`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.7.16`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

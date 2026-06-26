@@ -35,7 +35,7 @@ v1 = **エクスポート済み Scrapbox / Cosense JSON、または Markdown mir
 
 v1 stable scope 外:
 
-- general local write / transclude。Markdown-backed `append-section` / `append-log` / `write-page` / `rename-page` は authoring fast path の alpha surface として存在するが、frontmatter title 追従 / direct re-import 後の alias 永続化 / general revert はまだ持たない。
+- general local write / transclude。Markdown-backed `append-section` / `append-log` / `write-page` / `rename-page` は authoring fast path の alpha surface として存在するが、任意 frontmatter の merge / general revert はまだ持たない。
 - Obsidian block refs などの full Obsidian compatibility。
 - vector search。
 - Web UI / realtime multi-user collaboration / sharing and permissions。
@@ -52,7 +52,7 @@ v1 stable scope 外:
 
 ## store
 
-- current public compatibility version は `1.7.15`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.7.16`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -77,7 +77,7 @@ v1 stable scope 外:
 | `append-section <title>` | Markdown-backed project の unique handle page に `## <heading>` section と body lines を追記する authoring alpha。SQLite `lines` / outgoing `edges` / edge resolution / unresolved / counts を更新し、`section_append` journal event を append し、Markdown projection を export する。ambiguous handle には書かない |
 | `append-log` | Markdown-backed log page（default title `Log`）に `## [timestamp] op | summary` entry と body lines を追記する authoring alpha。SQLite index 更新、`log_append` journal event、Markdown projection export を行う |
 | `write-page <title>` | Markdown-backed project の unique handle page の本文行を全置換する authoring alpha。title / aliases / source path / page id は変えない。SQLite lines / outgoing edges / edge resolution / unresolved / counts を更新し、`page_update` journal event に before/after lines を記録し、Markdown projection を export する |
-| `rename-page <target> <new-title>`（alias: `rename`） | Markdown-backed project の page id を保ったまま title と optional source path を変更する authoring alpha。target は unique handle / page-id / path。旧 title と旧 file stem を alias handle に残し、incoming `[[旧名]]` の surface text は書き換えず edge resolution を更新する。first H1 が旧 title と一致する時だけ同じ line_id のまま `# <new-title>` に更新する。`page_rename` journal event、projection file rename、replay/revert に対応 |
+| `rename-page <target> <new-title>`（alias: `rename`） | Markdown-backed project の page id を保ったまま title と optional source path を変更する authoring alpha。target は unique handle / page-id / path。旧 title と旧 file stem を alias handle に残し、incoming `[[旧名]]` の surface text は書き換えず edge resolution を更新する。first H1 が旧 title と一致する時だけ同じ line_id のまま `# <new-title>` に更新する。path-derived id / first H1 / aliases だけでは identity が失われる場合、projection に `id` / `title` / `aliases` frontmatter を生成するため direct re-import 後も page id と旧名 alias が残る。`page_rename` journal event、projection file rename、replay/revert に対応 |
 | `write-status` | authoring alpha の recovery surface。Markdown projection を `--check` し、journal path の存在、event count、last event を返す |
 | `write-diff` | authoring alpha の recovery surface。filesystem 上の Markdown と stored projection を比較し、current filesystem -> stored projection の unified diff を返す。書き込みはしない |
 | `revert-event <event-id>` | `section_append` / `log_append` / `page_update` / `page_rename` journal event を対象にする recovery surface。append/log は inserted lines が現在も target page 末尾に完全一致する時だけ削除する。page_update は current lines が一致する時だけ previous lines へ戻す。page_rename は current lines / title / source path が一致する時だけ previous title / path / lines へ戻す。削除/復元後に `event_revert` を journal に append し、Markdown projection を export する |

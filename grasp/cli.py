@@ -13,7 +13,7 @@ from typing import Any
 from .cosense_cli import CosenseCliClient, acquire_from_cosense, sync_from_cosense
 from .forest import import_forest_from_registry
 from .journal import append_journal_event, make_journal_event, read_journal_events
-from .markdown import MarkdownCollisionError, MarkdownMirror, iter_markdown_files
+from .markdown import MarkdownCollisionError, MarkdownMirror, iter_markdown_files, markdown_projection_text
 from .sqlite_store import (
     SCHEMA_VERSION,
     SQLiteStore,
@@ -1523,6 +1523,7 @@ def replay_journal_projection(
             pages[page_id] = {
                 "page_id": page_id,
                 "title": str(payload.get("title") or ""),
+                "aliases": [str(alias) for alias in payload.get("aliases") or []],
                 "source_path": _safe_replay_relative_path(source_path),
                 "lines": [_journal_line_for_replay(line) for line in lines],
             }
@@ -1568,6 +1569,7 @@ def replay_journal_projection(
             if pages[page_id]["lines"] != expected_previous:
                 raise ValueError(f"page_rename previous_lines do not match current page in event {event['event_id']}")
             pages[page_id]["title"] = title
+            pages[page_id]["aliases"] = [str(alias) for alias in payload.get("aliases") or []]
             pages[page_id]["source_path"] = _safe_replay_relative_path(source_path)
             pages[page_id]["lines"] = [_journal_line_for_replay(line) for line in lines]
             applied_event_count += 1
@@ -1610,6 +1612,7 @@ def replay_journal_projection(
                 if pages[page_id]["lines"] != expected_current:
                     raise ValueError(f"event_revert current_lines do not match page in event {event['event_id']}")
                 pages[page_id]["title"] = previous_title
+                pages[page_id]["aliases"] = [str(alias) for alias in payload.get("previous_aliases") or []]
                 pages[page_id]["source_path"] = _safe_replay_relative_path(previous_source_path)
                 pages[page_id]["lines"] = [_journal_line_for_replay(line) for line in previous_lines]
             else:
@@ -1621,7 +1624,7 @@ def replay_journal_projection(
             raise ValueError(f"replay-journal does not support event_type yet: {event_type}")
 
     projections = {
-        page["source_path"]: _markdown_text_from_replay_lines(page["lines"])
+        page["source_path"]: _markdown_text_from_replay_page(page)
         for page in pages.values()
     }
     return _compare_or_write_replay_projection(
@@ -1649,10 +1652,14 @@ def _journal_line_for_replay(line: Any) -> dict[str, Any]:
     }
 
 
-def _markdown_text_from_replay_lines(lines: list[dict[str, Any]]) -> str:
-    if not lines:
-        return ""
-    return "\n".join(str(line["text"]) for line in lines) + "\n"
+def _markdown_text_from_replay_page(page: dict[str, Any]) -> str:
+    return markdown_projection_text(
+        page["source_path"],
+        page_id=str(page["page_id"]),
+        title=str(page.get("title") or ""),
+        aliases=[str(alias) for alias in page.get("aliases") or []],
+        lines=[str(line["text"]) for line in page["lines"]],
+    )
 
 
 def _safe_replay_relative_path(relative_path: str) -> str:
