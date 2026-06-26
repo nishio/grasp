@@ -885,3 +885,12 @@
 - これは [[llm-wiki-infra-fast-path-plan]] Phase 3 の `write page` 最小実装。まだ rename / source-path 変更 / semantic index-log regeneration / general revert は未実装。
 - schema は v7 のまま。public compatibility version は `1.7.14`。
 - 検証: `python3 -m unittest discover -s tests`（82 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 11:17] implementation+dogfood+file back | `rename-page` と `page_rename` replay/revert を追加
+- `rename-page <target> <new-title>` command（alias `rename`）を追加。Markdown-backed project の page id を保ったまま title と optional source path を変更し、旧 title / old file stem を alias handle に残す。incoming `[[旧名]]` の surface text は書き換えず、edge resolution を新 handle table で再計算する。
+- first H1 が旧 title と一致する場合だけ、同じ line_id のまま `# <new-title>` に更新する。frontmatter `title:` 追従はまだ未実装。
+- `page_rename` journal event を append し、`replay-journal` と `revert-event` が `page_rename` に対応。revert は current lines / title / source path が target event の after state と一致する時だけ previous state へ戻す。
+- dogfood: temp wiki で `Old.md`（`# Old`）と `A.md`（`[[Old]]`）を adopt し、`rename-page Old New --new-path New.md` → `read Old` → `replay-journal --check` → `revert-event` → `replay-journal --check` を実行。`read Old` は title `New` に解決し backlink count 1、rename/revert 後の projection と replay は clean。
+- これは [[llm-wiki-infra-fast-path-plan]] Phase 5 の最小 rename slice。まだ semantic index-log regeneration / direct re-import 後の alias 永続化 / general revert / projection export 失敗時 rollback は未実装。
+- schema は v7 のまま。public compatibility version は `1.7.15`。
+- 検証: `python3 -m unittest discover -s tests`（83 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
