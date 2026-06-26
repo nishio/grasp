@@ -62,6 +62,8 @@ Non-goals for this fast path:
 
 2026-06-26 update: `1.7.37` で同 harness に `revert_events` step を追加し、`0db1449` の fast-path plan page create を `event_revert` で取り消し、既存3 page update は残す sequence を replay clean にした。created page の absent invariant と残存 page exact projection を同時に見る。
 
+2026-06-27 update: 並行エージェント書き込みはこの fast path の初期計画で明示未規定だった。Phase 0-3 は同一 session 内の write command 直列化を仮定しており、複数 agent が同じ `wiki.grasp/events.jsonl` / `wiki/` projection / `main` を同時に進める時の ownership boundary を扱っていなかった。今回の観測では、path 指定 staging だけでは不十分で、local `main` が他 agent commit で `origin/main` より ahead の場合、`git push origin main` はその commit も送る。さらに `write-page` は全 Markdown projection を export するため、store / journal に未反映の別 agent direct patch を上書きしうる。fast path の前提に **single writer or isolated worktree** を加え、共有 `main` では unknown ahead / unexpected dirty wiki path を preflight で止める必要がある。
+
 ## Risk register
 
 | Risk | Why it matters | Fast-path mitigation |
@@ -69,6 +71,7 @@ Non-goals for this fast path:
 | journal と SQLite の authority が曖昧 | 壊れた時にどちらを信じるか分からない | Phase 0 で仮決め。alpha では journal replayable を優先し、SQLite は materialized index に寄せる案を検証 |
 | generated Markdown diff が大きすぎる | git review 不能になる | 既存 formatting をなるべく保存。no-op export を hard gate |
 | direct Markdown edit が混ざる | projection と authority が diverge する | cutover 前は adopt で吸収、cutover 後は `export-markdown --check` で検出し emergency adopt only |
+| parallel agent write / push が混ざる | git の staging ownership と wiki authority ownership は別物。unknown local ahead commit は push に混ざり、`write-page` の全 projection export は別 agent の unjournaled Markdown patch を消しうる | lock / guard 実装までは isolated worktree を使う。共有 `main` では file-back / push 前に `git fetch origin main`、`git log --left-right --cherry-pick origin/main...main`、`git status --short` を確認し、unknown ahead または dirty wiki/journal path があれば止める |
 | line identity が揺れる | transclude /引用 / replay test が腐る | Phase 1 で minted id manifest を固定し、content-only re-run で揺れないことを先に確認 |
 | write alpha が怖くて使われない | dogfood loop が生えない | status / diff / revert を Phase 4 までに入れる。完璧な write より回復可能性を優先 |
 
