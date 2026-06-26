@@ -941,3 +941,8 @@
 - これは [[llm-wiki-infra-fast-path-plan]] Phase 2 の semantic projection 最小 slice。まだ record 化 log importer / stale-log guard / 本格 index policy / 任意 frontmatter merge / general revert は未実装。
 - schema は v7 のまま。public compatibility version は `1.7.21`。
 - 検証: `python3 -m unittest discover -s tests`（89 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 16:01] implementation+dogfood+file-back | file-back を grasp write first に切替
+- user-level file-back skill / repo-local /next / AGENTS / CLAUDE に grasp write first を明記した。
+- wiki.grasp/events.jsonl を initial adoption journal として追加し、以後の file-back は .grasp/file-back.sqlite + project grasp-wiki + output wiki で journal に追記できる。
+- direct Markdown patch は任意 frontmatter merge / canonical docs / ambiguous handle / recovery failure など grasp alpha が安全に扱えない時だけ fallback とした。
