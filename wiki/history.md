@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.7.13`（更新: 2026-06-26 10:31、store: schema `7`、compat: schema `7` compatible）: `replay-journal --journal <events.jsonl> --output <folder> [--check]` を追加。SQLite を読まず、`page_create` / `section_append` / `log_append` / `event_revert` を JSONL journal から strict replay して Markdown projection を reconstruct / compare / write する。temp copy dogfood で append→revert 後の journal が existing wiki projection に clean、空 folder へ 36 files replay write 後も clean。`page_update` / `page_rename` replay は未実装、schema は不変
 - `1.7.12`（更新: 2026-06-26 10:24、store: schema `7`、compat: schema `7` compatible）: append-only authoring alpha の recovery surface として `write-status`, `write-diff`, `revert-event <event-id>` を追加。`write-status` は journal 件数 / last event / projection check、`write-diff` は current filesystem -> stored projection の unified diff、`revert-event` は `section_append` / `log_append` の inserted lines が現在も page tail にある時だけ削除し `event_revert` を journal に append する。temp copy dogfood で append→status/diff→revert→check clean。replay/rename/general write は未実装、schema は不変
 - `1.7.11`（更新: 2026-06-26 10:00、store: schema `7`、compat: schema `7` compatible）: Markdown-backed project 用の authoring alpha として `append-section <title>` と `append-log` を追加。unique handle の page に lines を追記し、SQLite lines/edges/unresolved/counts を更新し、JSONL journal に `section_append` / `log_append` event を append し、Markdown projection を export する。temp copy dogfood で append 後の `export-markdown --check` が 36 files clean。replay/status/revert/rename は未実装、schema は不変
 - `1.7.10`（更新: 2026-06-26 08:25、store: schema `7`、compat: schema `7` compatible）: `adopt-markdown <folder>` と `export-markdown --output <folder> --check` を追加。既存 Markdown wiki を SQLite materialized index + JSONL journal に採用し、stored lines から Markdown projection の no-op check を行える。repo `wiki/` dogfood で 36 files clean。write/replay/rename は未実装、schema は不変
@@ -112,6 +113,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.7.12`
+- Current public compatibility version: `1.7.13`
 - Current internal `SCHEMA_VERSION`: `7`
-- Current package metadata should match `1.7.12`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.7.13`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
