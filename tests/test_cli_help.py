@@ -2130,6 +2130,152 @@ class CliHelpTests(unittest.TestCase):
         self.assertIn("| [Digest](source/Digest.md) | Source summary |", index_text)
         self.assertEqual(log_text, "# Log\n\n## [2026-06-26 15:00] test | generated log\n- ok\n")
 
+    def test_export_markdown_regenerates_log_from_latest_record_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            log_dir = root / "log"
+            log_dir.mkdir(parents=True)
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            (root / "Alpha.md").write_text("# Alpha\n", encoding="utf-8")
+            (root / "Beta.md").write_text("# Beta\n", encoding="utf-8")
+            (log_dir / "entry.md").write_text(
+                "---\n"
+                "type: log-entry\n"
+                "date: 2026-06-26 03:00\n"
+                "op: decision\n"
+                "summary: projected record\n"
+                "subjects:\n"
+                "  - Alpha\n"
+                "---\n"
+                "# projected record\n\n"
+                "- first body [[Alpha]]\n",
+                encoding="utf-8",
+            )
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            journal_events = [
+                json.loads(line)
+                for line in journal_path.read_text(encoding="utf-8").splitlines()
+            ]
+            record_event = next(event for event in journal_events if event["event_type"] == "log_entry_import")
+            updated_event = json.loads(json.dumps(record_event))
+            updated_event["event_id"] = "log-entry-updated"
+            updated_event["created_at"] = "2026-06-26T04:00:00+00:00"
+            updated_event["payload"]["summary"] = "projected record updated"
+            updated_event["payload"]["subjects"] = ["Beta"]
+            updated_event["payload"]["explicit_subjects"] = ["Beta"]
+            updated_event["payload"]["content_fingerprint"] = "updated-fingerprint"
+            updated_event["payload"]["body_lines"][0]["text"] = "- second body [[Beta]]"
+            journal_events.append(updated_event)
+            journal_path.write_text(
+                "\n".join(
+                    json.dumps(event, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                    for event in journal_events
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            dirty_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--regenerate-log",
+                    "--journal",
+                    str(journal_path),
+                    "--check",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            write_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--regenerate-log",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            status_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                    "--strict",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            log_text = (root / "Log.md").read_text(encoding="utf-8")
+
+        dirty_result = json.loads(dirty_completed.stdout)
+        write_result = json.loads(write_completed.stdout)
+        status_result = json.loads(status_completed.stdout)
+        self.assertEqual(dirty_completed.returncode, 1)
+        self.assertEqual(dirty_result["changed_files"], ["Log.md"])
+        self.assertEqual(write_result["written_files"], ["Log.md"])
+        self.assertEqual(write_result["regenerated_files"], ["Log.md"])
+        self.assertTrue(status_result["strict_ok"])
+        self.assertEqual(
+            log_text,
+            "# Log\n\n"
+            "## [2026-06-26 03:00] decision | projected record updated\n"
+            "- second body [[Beta]]\n",
+        )
+        self.assertNotIn("first body", log_text)
+
     def test_write_page_create_writes_page_create_journal_and_projection(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"

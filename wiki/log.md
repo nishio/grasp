@@ -994,3 +994,9 @@
 - import-log-records now appends a new version when the same record_id has changed frontmatter/body content, and skips unchanged fingerprints.
 - log-records/history hide superseded versions by default and expose record_version, record_version_count, superseded_by/supersedes, plus --include-superseded for audits.
 - Updated [[grasp-v1-implemented]], [[history]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]].
+
+## [2026-06-26 20:55] implementation+test+file-back | project record-file logs into Log
+- export-markdown --regenerate-log now appends latest record_format=file log_entry_import records to the primary log page projection.
+- write-status --strict treats a clean journal-regenerated log projection as satisfying the log-page guard, even when stored log lines differ from generated log output.
+- Added regression coverage for record-file projection using the latest version only.
+- Updated [[grasp-v1-implemented]], [[history]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]].

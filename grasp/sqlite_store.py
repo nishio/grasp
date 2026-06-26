@@ -1096,6 +1096,81 @@ def _journal_lines_to_text(lines: Any) -> list[str]:
     return texts
 
 
+def _journal_record_file_log_projection_lines(project: str, events: list[dict[str, Any]]) -> list[str]:
+    records = _latest_record_file_log_payloads(project, events)
+    if not records:
+        return []
+    lines: list[str] = []
+    for index, record in enumerate(sorted(records, key=_record_file_log_sort_key)):
+        if index > 0:
+            lines.append("")
+        timestamp = str(record.get("timestamp") or "")
+        op = str(record.get("op") or "log-entry")
+        summary = str(record.get("summary") or "")
+        lines.append(f"## [{timestamp}] {op} | {summary}".rstrip())
+        lines.extend(_journal_lines_to_text(record.get("body_lines") or []))
+    return lines
+
+
+def _latest_record_file_log_payloads(project: str, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    key_to_group: dict[str, int] = {}
+    for index, event in enumerate(events):
+        if event.get("project") != project or event.get("event_type") != "log_entry_import":
+            continue
+        payload = event.get("payload") or {}
+        if str(payload.get("record_format") or "section") != "file":
+            continue
+        keys = _record_file_identity_keys(payload)
+        if not keys:
+            continue
+        matched_group_ids = sorted({key_to_group[key] for key in keys if key in key_to_group})
+        if matched_group_ids:
+            group_id = matched_group_ids[0]
+            for other_group_id in reversed(matched_group_ids[1:]):
+                if other_group_id == group_id:
+                    continue
+                groups[group_id]["keys"].update(groups[other_group_id]["keys"])
+                if int(groups[other_group_id]["index"]) > int(groups[group_id]["index"]):
+                    groups[group_id]["index"] = groups[other_group_id]["index"]
+                    groups[group_id]["payload"] = groups[other_group_id]["payload"]
+                groups[other_group_id]["deleted"] = True
+        else:
+            group_id = len(groups)
+            groups.append({"keys": set(), "index": -1, "payload": {}, "deleted": False})
+        groups[group_id]["keys"].update(keys)
+        if index > int(groups[group_id]["index"]):
+            groups[group_id]["index"] = index
+            groups[group_id]["payload"] = payload
+        for key in groups[group_id]["keys"]:
+            key_to_group[str(key)] = group_id
+    return [
+        group["payload"]
+        for group in sorted(groups, key=lambda item: int(item["index"]))
+        if not group.get("deleted") and group.get("payload")
+    ]
+
+
+def _record_file_identity_keys(payload: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    for key in ("record_id", "legacy_record_id"):
+        value = str(payload.get(key) or "")
+        if value:
+            keys.append(value)
+    for value in payload.get("supersedes_record_ids") or []:
+        if value:
+            keys.append(str(value))
+    return list(dict.fromkeys(keys))
+
+
+def _record_file_log_sort_key(payload: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(payload.get("timestamp") or ""),
+        str(payload.get("source_path") or ""),
+        str(payload.get("record_id") or ""),
+    )
+
+
 def _markdown_lines_to_text(lines: list[str]) -> str:
     if not lines:
         return ""
@@ -2262,6 +2337,13 @@ class SQLiteStore:
                     lines = _journal_lines_to_text(payload.get("previous_lines"))
         if lines is None:
             raise ValueError(f"journal does not contain a page_create event for log page: {log_page_id}")
+        record_file_lines = _journal_record_file_log_projection_lines(project, events)
+        if record_file_lines:
+            if lines and lines[-1].strip():
+                lines.append("")
+            while lines and len(lines) >= 2 and not lines[-1].strip() and not lines[-2].strip():
+                lines.pop()
+            lines.extend(record_file_lines)
         return markdown_projection_text(
             log_path,
             page_id=log_page_id,
