@@ -849,3 +849,8 @@
 - これは [[llm-wiki-infra-fast-path-plan]] Phase 1-2 の最小 no-op gate。まだ replay / write CLI / semantic index-log regeneration は未実装。
 - schema は v7 のまま。public compatibility version は `1.7.10`。
 - 検証: `python3 -m unittest discover -s tests`（81 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 08:35] docs+lint | history を箇条書きへ変更し commit 時刻を分まで表示
+- [[history]] の Version history を表から箇条書きへ変更。各 entry は version / 更新 commit 時刻（JST, 分まで）/ store / compat / changes を一行で持つ。
+- version / schema / compatibility の内容は変えず、`Date` だけを `git blame --line-porcelain wiki/history.md` 由来の committer time に置き換えた。
+- 検証: `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
