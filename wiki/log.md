@@ -988,3 +988,9 @@
 - Added record-per-file import for frontmatter `type: log-entry`; `adopt-markdown` and `import-log-records` now create one `log_entry_import` record per such file.
 - Frontmatter `date` / `timestamp`, `op`, `summary`, `subjects` / `pages`, and `sources` are read into the record. Explicit subjects win over body heuristics and are exposed separately from `heuristic_subjects[]`.
 - Updated [[grasp-v1-implemented]], [[history]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]]; added regression coverage for explicit subjects overriding body `[[Gamma]]` mentions.
+
+## [2026-06-26 19:44] implementation+test+file-back | log record versioning
+- Added content_fingerprint to log_entry_import payloads and made record-per-file entries use page identity as record_id.
+- import-log-records now appends a new version when the same record_id has changed frontmatter/body content, and skips unchanged fingerprints.
+- log-records/history hide superseded versions by default and expose record_version, record_version_count, superseded_by/supersedes, plus --include-superseded for audits.
+- Updated [[grasp-v1-implemented]], [[history]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]].
