@@ -71,3 +71,4 @@ sources:
 - [[come-from-declared-gather]] — authoring 側の未実装機構（come-from declare/render）
 - [[positioning-two-personas]] — persona1 差別化＝id-link authoring がまだ未着手
 - [[grasp-v1-implemented]] — retrieval 側の current facts
+- [[ai-author-feedback-2026-06-26]] — §3 の「authoring は未着手の差別化核」を update: alpha write path は**実装済みで sandbox 実走でも clean に動く**。残る山は capability でなく**採用**（AI が write path を避ける決定因は correctness でなく confidence 獲得コスト + 共有 journal の並行安全性）
