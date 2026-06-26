@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-27 02:06] file back | sqlite-write-concurrency — SQLite レイヤーの並行書き込み設計を考察・保存（3層 authority / DB ロックは store 1層のみ / 対策候補）
+- write path 3層: journal jsonl=authority / store sqlite=派生キャッシュ（--store ごと別ファイル・非共有）/ projection md=authority。lock/busy_timeout/WAL は package 全体に皆無
+- 「SQLite は write でロック取るのでは？」→ DB 全体ロックで直列化はするが store 1層だけ。authority は SQLite 外・整合単位は import→export の論理 RMW・cross-store atomicity 無しで不十分
+- Co-（多人数）を削いでも multi-process single-owner の並行は残る。2026-06-26 incident が実例。対策候補=write.lock / compare-and-append journal / staleness check / journal+store を1 SQLite に畳む
+
 ## [2026-06-27 11:35] file back+reconcile | parallel agent write branch を merge せず current main へ fresh grasp write
 - `codex/fileback-parallel-agent-writes` の SQLite store は `.grasp/` で gitignored なので merge 対象ではなかった。一方、branch の `wiki.grasp/events.jsonl` を Git merge するだけでは journal replay が clean にならないことを temp worktree で確認。
 - current `main` も direct patch 由来の page create / update が journal replay authority に未反映だったため、先に current projection を退避し、journal replay store へ current pages を `page_create` / `page_update` として再記録して `replay-journal --check` clean に戻した。

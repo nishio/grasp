@@ -46,3 +46,6 @@ sources:
 - `grasp write` は `wiki.grasp/events.jsonl` と projection export に file lock を取るべきか。
 - repo-local `/next` / ship loop は unknown ahead commit を見たら push を拒否すべきか、それとも branch push / PR に自動退避すべきか。
 - 並行 agent の commit ownership を機械的に識別する metadata を commit message / journal event に入れるべきか。
+
+## 関連分析
+- [[sqlite-write-concurrency]] — 本 incident を実例にした SQLite/store レイヤーの並行書き込み設計の考察（authority は SQLite 外・整合単位は import→export の論理 RMW・対策候補）
