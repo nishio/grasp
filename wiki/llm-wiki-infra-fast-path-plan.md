@@ -60,6 +60,8 @@ Non-goals for this fast path:
 
 2026-06-26 update: `1.7.36` で同 harness に `rename_pages` step を追加し、`d4e4c39` の `why-design-B` → `why-not-scrapbox-clone` rename を continuous table 上で検証した。rename projection は identity frontmatter を足すため git final file との exact match ではなく、old path stub 不在・旧 handle alias read・旧名 alias preservation を invariant とする。
 
+2026-06-26 update: `1.7.37` で同 harness に `revert_events` step を追加し、`0db1449` の fast-path plan page create を `event_revert` で取り消し、既存3 page update は残す sequence を replay clean にした。created page の absent invariant と残存 page exact projection を同時に見る。
+
 ## Risk register
 
 | Risk | Why it matters | Fast-path mitigation |

@@ -21,6 +21,7 @@ RENAME_SUPPORT_PATHS = [
 PAGE_CREATE_COMMIT = "0db144926a27591eb80a72ed1cc3f696dcf96afd"
 PLAN_PATH = "llm-wiki-infra-fast-path-plan.md"
 PLAN_TITLE = "LLM Wiki infra fast-path plan"
+PLAN_CREATE_EVENT_KEY = f"create:{PLAN_PATH}"
 PAGE_CREATE_EXISTING_PATHS = [
     "decisions/native-authority-markdown-projection.md",
     "index.md",
@@ -76,6 +77,28 @@ EDGE_RESOLUTION_PATHS = [
     "log.md",
 ]
 CONTINUOUS_REPLAY_SEQUENCES = [
+    {
+        "name": "create-then-revert-fast-path-plan",
+        "steps": [
+            {
+                "commit": PAGE_CREATE_COMMIT,
+                "create_pages": [(PLAN_PATH, PLAN_TITLE)],
+                "update_paths": PAGE_CREATE_EXISTING_PATHS,
+                "revert_events": [
+                    {
+                        "event_key": PLAN_CREATE_EVENT_KEY,
+                        "target_event_type": "page_create",
+                    }
+                ],
+            },
+        ],
+        "read_handle": "native-authority-markdown-projection",
+        "expected_title": "Decision: native authority + Markdown projection で LLM Wiki を移行する",
+        "assert_path": "log.md",
+        "assert_text": "LLM Wiki infra fast-path plan",
+        "absent_paths": [PLAN_PATH],
+        "exact_projection_paths": PAGE_CREATE_EXISTING_PATHS,
+    },
     {
         "name": "rename-design-decision",
         "support_paths": RENAME_SUPPORT_PATHS,
@@ -213,6 +236,10 @@ def replay_sequence_initial_paths(sequence: dict) -> list[str]:
             ]
         )
     )
+
+
+def replay_sequence_projection_read_paths(sequence: dict, exact_projection_paths: list[str]) -> list[str]:
+    return list(dict.fromkeys([*exact_projection_paths, sequence["assert_path"]]))
 
 
 def write_fixture_files(root: Path, fixture: dict[str, str]) -> None:
@@ -836,6 +863,8 @@ class GitHistoryReplayTests(unittest.TestCase):
                     created_source_paths_by_commit = []
                     renamed_source_paths_by_commit = []
                     update_source_paths_by_commit = []
+                    reverted_event_keys_by_commit = []
+                    event_ids_by_key = {}
                     replay_results = []
                     for step, fixture in step_fixtures:
                         commit = step["commit"]
@@ -863,6 +892,7 @@ class GitHistoryReplayTests(unittest.TestCase):
                             )
                             self.assertEqual(result["event_type"], "page_create")
                             commit_created_paths.append(result["source_path"])
+                            event_ids_by_key[f"create:{relative_path}"] = result["event_id"]
                         created_source_paths_by_commit.append(commit_created_paths)
                         commit_renamed_paths = []
                         for rename in step.get("rename_pages", []):
@@ -887,6 +917,9 @@ class GitHistoryReplayTests(unittest.TestCase):
                             commit_renamed_paths.append(
                                 (result["previous_source_path"], result["source_path"])
                             )
+                            event_ids_by_key[
+                                f"rename:{rename['old_path']}->{rename['new_path']}"
+                            ] = result["event_id"]
                         renamed_source_paths_by_commit.append(commit_renamed_paths)
                         commit_source_paths = []
                         for relative_path in step.get("update_paths", []):
@@ -906,7 +939,26 @@ class GitHistoryReplayTests(unittest.TestCase):
                             )
                             self.assertEqual(result["event_type"], "page_update")
                             commit_source_paths.append(result["source_path"])
+                            event_ids_by_key[f"update:{commit}:{relative_path}"] = result["event_id"]
                         update_source_paths_by_commit.append(commit_source_paths)
+                        commit_reverted_event_keys = []
+                        for revert in step.get("revert_events", []):
+                            target_event_id = event_ids_by_key[revert["event_key"]]
+                            result = run_grasp_json(
+                                "--store",
+                                store_path,
+                                "--project",
+                                "wiki",
+                                "revert-event",
+                                target_event_id,
+                                "--output",
+                                root,
+                                "--journal",
+                                journal_path,
+                            )
+                            self.assertEqual(result["target_event_type"], revert["target_event_type"])
+                            commit_reverted_event_keys.append(revert["event_key"])
+                        reverted_event_keys_by_commit.append(commit_reverted_event_keys)
                         replay_results.append(
                             run_grasp_json(
                                 "--project",
@@ -945,13 +997,17 @@ class GitHistoryReplayTests(unittest.TestCase):
                         json.loads(line)
                         for line in journal_path.read_text(encoding="utf-8").splitlines()
                     ]
-                    projected_texts = {
-                        path: (root / path).read_text(encoding="utf-8")
-                        for path in sequence_paths
-                    }
+                    projection_read_paths = replay_sequence_projection_read_paths(
+                        sequence,
+                        exact_projection_paths,
+                    )
                     exact_projected_texts = {
                         path: (root / path).read_text(encoding="utf-8")
                         for path in exact_projection_paths
+                    }
+                    projected_texts = {
+                        path: (root / path).read_text(encoding="utf-8")
+                        for path in projection_read_paths
                     }
                     absent_path_exists = {
                         path: (root / path).exists()
@@ -973,6 +1029,9 @@ class GitHistoryReplayTests(unittest.TestCase):
                     )
                     expected_projection_event_types.extend(
                         ["page_update"] * len(step.get("update_paths", []))
+                    )
+                    expected_projection_event_types.extend(
+                        ["event_revert"] * len(step.get("revert_events", []))
                     )
                 self.assertEqual(
                     projection_event_types,
@@ -998,6 +1057,13 @@ class GitHistoryReplayTests(unittest.TestCase):
                 self.assertEqual(
                     update_source_paths_by_commit,
                     [step.get("update_paths", []) for step in steps],
+                )
+                self.assertEqual(
+                    reverted_event_keys_by_commit,
+                    [
+                        [revert["event_key"] for revert in step.get("revert_events", [])]
+                        for step in steps
+                    ],
                 )
                 self.assertTrue(all(result["ok"] for result in replay_results))
                 self.assertEqual(exact_projected_texts, final_fixture)
