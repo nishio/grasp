@@ -1456,6 +1456,113 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(second_import_result["skipped_records"], 2)
         self.assertEqual(len(log_events), 2)
 
+    def test_record_per_file_log_entry_uses_explicit_subjects(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            log_dir = root / "log"
+            log_dir.mkdir(parents=True)
+            (root / "Alpha.md").write_text("# Alpha\n", encoding="utf-8")
+            (root / "Beta.md").write_text("# Beta\n", encoding="utf-8")
+            (root / "Gamma.md").write_text("# Gamma\n", encoding="utf-8")
+            (log_dir / "entry.md").write_text(
+                "---\n"
+                "type: log-entry\n"
+                "date: 2026-06-26 03:00\n"
+                "op: decision\n"
+                "summary: explicit entry\n"
+                "subjects:\n"
+                "  - Alpha\n"
+                "pages: [Beta]\n"
+                "sources:\n"
+                "  - raw/session.txt\n"
+                "---\n"
+                "# explicit entry\n\n"
+                "- body mentions [[Gamma]] and notes/Delta.md\n",
+                encoding="utf-8",
+            )
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            history_alpha_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(Path(tmpdir) / "missing.sqlite"),
+                    "--project",
+                    "wiki",
+                    "history",
+                    "Alpha",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            history_gamma_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(Path(tmpdir) / "missing.sqlite"),
+                    "--project",
+                    "wiki",
+                    "history",
+                    "Gamma",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            journal_events = [
+                json.loads(line)
+                for line in journal_path.read_text(encoding="utf-8").splitlines()
+            ]
+
+        log_events = [event for event in journal_events if event["event_type"] == "log_entry_import"]
+        payload = log_events[0]["payload"]
+        history_alpha = json.loads(history_alpha_completed.stdout)
+        history_gamma = json.loads(history_gamma_completed.stdout)
+        self.assertEqual(len(log_events), 1)
+        self.assertEqual(payload["record_format"], "file")
+        self.assertEqual(payload["timestamp"], "2026-06-26 03:00")
+        self.assertEqual(payload["op"], "decision")
+        self.assertEqual(payload["summary"], "explicit entry")
+        self.assertEqual(payload["subjects"], ["Alpha", "Beta"])
+        self.assertEqual(payload["explicit_subjects"], ["Alpha", "Beta"])
+        self.assertEqual(payload["heuristic_subjects"], ["Gamma", "Delta"])
+        self.assertEqual(payload["subject_source"], "frontmatter")
+        self.assertEqual(payload["sources"], ["raw/session.txt"])
+        self.assertEqual(payload["body_line_count"], 1)
+        self.assertEqual(history_alpha["matched_records"], 1)
+        self.assertEqual(history_alpha["records"][0]["subjects"], ["Alpha", "Beta"])
+        self.assertEqual(history_gamma["matched_records"], 0)
+
     def test_log_records_and_history_query_journal_without_store(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"

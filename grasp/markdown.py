@@ -390,8 +390,32 @@ def markdown_lines_to_text(lines: list[str]) -> str:
 
 
 def parse_frontmatter(lines: list[str]) -> MarkdownMetadata:
-    if not lines or lines[0].strip() != "---":
+    values = parse_frontmatter_values(lines)
+    if not values:
         return MarkdownMetadata(title=None, page_id=None, aliases=[], tags=[], graph_role="content")
+
+    title = first_frontmatter_value(values, "title")
+    page_id = first_frontmatter_value(values, "id")
+    graph_role = frontmatter_graph_role(values)
+    aliases = [value for value, _ in values.get("aliases", [])]
+    aliases.extend(value for value, _ in values.get("alias", []))
+    tags = [
+        (normalize_frontmatter_tag(value), line_index)
+        for key in ("tags", "tag")
+        for value, line_index in values.get(key, [])
+    ]
+    return MarkdownMetadata(
+        title=title,
+        page_id=page_id,
+        aliases=list(dict.fromkeys(alias for alias in aliases if alias)),
+        tags=list(dict.fromkeys((tag, line_index) for tag, line_index in tags if tag)),
+        graph_role=graph_role,
+    )
+
+
+def parse_frontmatter_values(lines: list[str]) -> dict[str, list[tuple[str, int]]]:
+    if not lines or lines[0].strip() != "---":
+        return {}
 
     end = None
     for index in range(1, len(lines)):
@@ -399,7 +423,7 @@ def parse_frontmatter(lines: list[str]) -> MarkdownMetadata:
             end = index
             break
     if end is None:
-        return MarkdownMetadata(title=None, page_id=None, aliases=[], tags=[], graph_role="content")
+        return {}
 
     values: dict[str, list[tuple[str, int]]] = defaultdict(list)
     current_key: str | None = None
@@ -422,24 +446,7 @@ def parse_frontmatter(lines: list[str]) -> MarkdownMetadata:
         if raw_value:
             for value in parse_frontmatter_value(raw_value):
                 values[current_key].append((value, offset))
-
-    title = first_frontmatter_value(values, "title")
-    page_id = first_frontmatter_value(values, "id")
-    graph_role = frontmatter_graph_role(values)
-    aliases = [value for value, _ in values.get("aliases", [])]
-    aliases.extend(value for value, _ in values.get("alias", []))
-    tags = [
-        (normalize_frontmatter_tag(value), line_index)
-        for key in ("tags", "tag")
-        for value, line_index in values.get(key, [])
-    ]
-    return MarkdownMetadata(
-        title=title,
-        page_id=page_id,
-        aliases=list(dict.fromkeys(alias for alias in aliases if alias)),
-        tags=list(dict.fromkeys((tag, line_index) for tag, line_index in tags if tag)),
-        graph_role=graph_role,
-    )
+    return dict(values)
 
 
 def parse_frontmatter_value(raw_value: str) -> list[str]:
