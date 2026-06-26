@@ -834,28 +834,33 @@ def build_parser() -> argparse.ArgumentParser:
     write_page_parser = add_command_parser(
         subparsers,
         "write-page",
-        help="Replace a Markdown page body through the alpha write path.",
+        help="Create or replace a Markdown page through the alpha write path.",
         description=(
-            "Replace all stored lines of an existing Markdown-backed page, append a page_update journal event, "
-            "update the SQLite materialized index, and export the Markdown projection. "
-            "Title, aliases, source path, and page id are not changed."
+            "Create a new Markdown-backed page with --create, or replace all stored lines of an existing page. "
+            "The command appends a page_create/page_update journal event, updates the SQLite materialized index, "
+            "and exports the Markdown projection."
         ),
         returns=(
-            "project, page, journal, output, event_id, previous_lines[], lines[], previous_line_count, line_count, edge_count, projection"
+            "project, page, journal, output, event_id, event_type, source_path, previous_lines[], lines[], "
+            "previous_line_count, line_count, edge_count, projection"
         ),
         examples=[
+            "grasp --project grasp-wiki write-page 'New page' --create --path new-page.md --from-file /tmp/new-page.md --output wiki",
             "grasp --project grasp-wiki write-page scratch --from-file /tmp/scratch.md --output wiki",
             "grasp --project grasp-wiki --json write-page scratch --line '# scratch' --line '- updated' --output wiki",
         ],
         notes=[
             "Alpha write surface: Markdown-backed projects and unique handles only.",
-            "This is full-page replacement; rename and source-path changes are deliberately out of scope.",
+            "--path is required with --create and deliberately ignored for existing-page updates.",
+            "Rename and source-path changes for existing pages are handled by rename-page.",
         ],
     )
     write_page_parser.add_argument("title", help="Target page title or unique handle.")
     input_group = write_page_parser.add_mutually_exclusive_group(required=True)
     input_group.add_argument("--from-file", type=Path, default=None, help="Read replacement Markdown page body from this file.")
     input_group.add_argument("--line", action="append", default=None, help="Replacement body line. Repeat for multiple lines.")
+    write_page_parser.add_argument("--create", action="store_true", help="Create a new Markdown-backed page instead of replacing an existing page.")
+    write_page_parser.add_argument("--path", dest="source_path", default=None, help="New Markdown projection path for --create, relative to --output and ending in .md.")
     write_page_parser.add_argument("--message", default="", help="Optional update message stored in the journal payload.")
     write_page_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
     write_page_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
@@ -1249,17 +1254,40 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
 def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = journal_path_for_output(args.output, args.journal)
     replacement_lines = write_page_replacement_lines(args)
-    update_result = store.replace_markdown_page_lines(args.title, replacement_lines)
-    event = make_journal_event(
-        "page_update",
-        project=update_result["project"],
-        payload={
+    if args.create:
+        if not args.source_path:
+            raise ValueError("write-page --create requires --path")
+        update_result = store.create_markdown_page(
+            args.title,
+            source_path=args.source_path,
+            lines=replacement_lines,
+        )
+        event_type = "page_create"
+        payload = {
+            "page_id": update_result["page"]["id"],
+            "title": update_result["page"]["title"],
+            "source_path": update_result["source_path"],
+            "aliases": update_result["aliases"],
+            "graph_role": update_result["graph_role"],
+            "message": args.message,
+            "lines": update_result["lines"],
+        }
+    else:
+        if args.source_path:
+            raise ValueError("write-page --path is only valid with --create")
+        update_result = store.replace_markdown_page_lines(args.title, replacement_lines)
+        event_type = "page_update"
+        payload = {
             "page_id": update_result["page"]["id"],
             "title": update_result["page"]["title"],
             "message": args.message,
             "previous_lines": update_result["previous_lines"],
             "lines": update_result["lines"],
-        },
+        }
+    event = make_journal_event(
+        event_type,
+        project=update_result["project"],
+        payload=payload,
     )
     append_journal_event(journal, event)
     projection = store.export_markdown(args.output, check=False)
@@ -1269,6 +1297,7 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
             "journal": str(journal),
             "output": str(args.output),
             "event_id": event["event_id"],
+            "event_type": event_type,
             "projection": projection,
         }
     )
@@ -2674,6 +2703,8 @@ def format_write_page_result(result: dict[str, Any]) -> str:
         f"page: {result['page']['title']}\n"
         f"journal: {result['journal']}\n"
         f"event_id: {result['event_id']}\n"
+        f"event_type: {result.get('event_type', '')}\n"
+        f"source_path: {result.get('source_path', '')}\n"
         f"previous_lines: {result['previous_line_count']}\n"
         f"lines: {result['line_count']}\n"
         f"edges: {result['edge_count']}\n"
