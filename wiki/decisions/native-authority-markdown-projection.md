@@ -60,3 +60,7 @@ LLM Wiki の file-back dogfood に必要な面から始める:
 - cutover 後に人間が Markdown projection を直接編集した場合、reject / adopt / merge のどれにするか。
 - generated Markdown の header / formatting / line wrapping をどこまで stable にし、git diff を読みやすく保つか。
 - file-back skill をいつ `grasp write` first に切り替えるか。alpha 中は Markdown direct patch fallback を残すか。
+
+## Updates 2026-06-27
+- 2026-06-26 の並行 agent write incident（[[parallel-agent-write-incident-2026-06-26]]）が、この decision に **concurrency という新しい決定理由**を与えた。authority を SQLite に寄せる際、**journal も git-diffable jsonl のままにせず SQLite 内（events テーブル）へ**入れる方向（[[sqlite-write-concurrency]] option D）。理由: detailed event log は人間 review 対象でなく、git-diff 価値 < 並行 conflict コスト（incident で最も揉めた2ファイルが events.jsonl と log.md ＝ ともに append-only ログ）。
+- write が単一 SQLite tx になり DB の write serialization が並行を source で防ぐ。Markdown は publish/review projection として残す（必要時 export）。tradeoff: incident を救った「素の git ファイルを人間が手 reconcile」の脱出口を失うので、grasp-native recovery（history / write-diff / revert-event）で置換するのが cutover 条件。
