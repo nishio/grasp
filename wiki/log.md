@@ -1,5 +1,9 @@
 # Log
 
+## [2026-06-27 02:31] file back | sqlite-write-concurrency §Updates + native-authority §Updates — SQLite を本体/SSoT に・journal も SQLite 内へ（nishio 方向）
+- 方向: SQLite=SSoT、journal も SQLite 内（events テーブル）、Markdown は必要時に吐く projection（= option D）。DB の write serialization が並行を source で防ぐ唯一の形
+- git-diff 喪失は受容（event journal は詳細すぎて人間 review 対象でない）。但し incident を救った『素の git ファイルを手 reconcile』脱出口を失うので grasp-native recovery で置換が cutover 条件
+
 ## [2026-06-27 02:06] file back | sqlite-write-concurrency — SQLite レイヤーの並行書き込み設計を考察・保存（3層 authority / DB ロックは store 1層のみ / 対策候補）
 - write path 3層: journal jsonl=authority / store sqlite=派生キャッシュ（--store ごと別ファイル・非共有）/ projection md=authority。lock/busy_timeout/WAL は package 全体に皆無
 - 「SQLite は write でロック取るのでは？」→ DB 全体ロックで直列化はするが store 1層だけ。authority は SQLite 外・整合単位は import→export の論理 RMW・cross-store atomicity 無しで不十分
