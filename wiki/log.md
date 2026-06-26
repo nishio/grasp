@@ -963,3 +963,12 @@
 - write-page は target page だけでなく全 Markdown projection を export するため、複数 wiki page を direct patch してから順に write-page すると、まだ store に入っていない別 page の patch が上書きされる。
 - direct patch fallback を journal に戻す時は、1 page patch → write-page --from-file → 次 page の順にする。
 - AGENTS / CLAUDE / repo-local /next / user-level file-back skill にこの直列手順を追加した。
+
+## [2026-06-26 16:58] implementation+dogfood+file-back | log entries as journal records
+- Added `log_entry_import` journal events and `import-log-records`, so Markdown `log.md` sections can become stable record events without changing projection.
+- `adopt-markdown` now emits log entry records during adoption; `write-status` reports `journal_log_record_count`; `replay-journal` treats record imports as non-projection events.
+- Dogfooded on this wiki by importing existing `wiki/log.md` entries into `wiki.grasp/events.jsonl`.
+
+## [2026-06-26 17:07] fix+dogfood+file-back | replay tolerates line-id drift
+- `replay-journal` now compares page guard lines by `line_index` + `text`, so projection replay does not fail only because direct Markdown re-import reset line IDs.
+- This surfaced while dogfooding `log_entry_import` on `wiki.grasp/events.jsonl`; full journal replay now stays clean.

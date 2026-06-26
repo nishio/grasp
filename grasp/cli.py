@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import sys
 from textwrap import dedent
@@ -22,6 +24,9 @@ from .sqlite_store import (
     import_markdown_folder_to_sqlite,
     recover_store_from_import_cache,
 )
+
+
+LOG_ENTRY_HEADING_RE = re.compile(r"^## \[(?P<timestamp>[^\]]+)\]\s+(?P<op>[^|]+?)\s*\|\s*(?P<summary>.*)$")
 
 
 class GraspHelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
@@ -154,10 +159,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Adopt an existing Markdown wiki into the store and event journal.",
         description=(
             "Import a Markdown folder into the SQLite materialized index and append page_create events "
-            "to a durable JSONL journal. This is the Phase 1 bridge toward native authority + Markdown projection."
+            "to a durable JSONL journal. Log pages are also split into log_entry_import records. "
+            "This is the Phase 1 bridge toward native authority + Markdown projection."
         ),
         returns=(
-            "store, project, journal, journal_events, adopted_pages, pages, lines, edges, unresolved_targets, markdown_import"
+            "store, project, journal, journal_events, adopted_pages, log_entry_records, "
+            "pages, lines, edges, unresolved_targets, markdown_import"
         ),
         examples=[
             "grasp adopt-markdown wiki --project grasp-wiki --journal wiki.grasp/events.jsonl",
@@ -179,6 +186,36 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="NAME",
         help="Directory basename to skip when adopting the Markdown mirror. Repeat for multiple names.",
+    )
+
+    import_log_records_parser = add_command_parser(
+        subparsers,
+        "import-log-records",
+        help="Import Markdown log sections into journal record events.",
+        description=(
+            "Split Markdown log pages into first-class log_entry_import journal records. "
+            "This does not rewrite Markdown projection; it only appends missing record events to an existing journal."
+        ),
+        returns=(
+            "project, folder, journal, log_pages, scanned_records, imported_records, skipped_records, record_ids[]"
+        ),
+        examples=[
+            "grasp --project grasp-wiki import-log-records wiki --journal wiki.grasp/events.jsonl",
+            "grasp --project grasp-wiki --json import-log-records wiki --journal wiki.grasp/events.jsonl",
+        ],
+        notes=[
+            "The journal must already exist, normally from adopt-markdown.",
+            "Records are deduplicated by stable record_id within the selected project.",
+        ],
+    )
+    import_log_records_parser.add_argument("folder", type=Path, help="Markdown folder containing log pages.")
+    import_log_records_parser.add_argument("--journal", type=Path, default=None, help="Existing JSONL journal path. Defaults to <folder>.grasp/events.jsonl beside the Markdown folder.")
+    import_log_records_parser.add_argument(
+        "--markdown-exclude-dir",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Directory basename to skip when scanning Markdown logs. Repeat for multiple names.",
     )
 
     import_forest_parser = add_command_parser(
@@ -915,7 +952,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "project, output, journal, journal_exists, journal_event_count, last_event|null, "
-            "projection, journal_log_stale, journal_log_changed_files, "
+            "projection, journal_log_record_count, journal_log_stale, journal_log_changed_files, "
             "journal_log_projection|null, journal_log_error|null, strict_ok, strict_failures[]"
         ),
         examples=[
@@ -984,7 +1021,7 @@ def build_parser() -> argparse.ArgumentParser:
         "replay-journal",
         help="Replay an alpha write journal into a Markdown projection.",
         description=(
-            "Replay page_create, page_update, page_rename, section_append, log_append, and event_revert records from a JSONL journal "
+            "Replay page_create, page_update, page_rename, section_append, log_append, log_entry_import, and event_revert records from a JSONL journal "
             "to reconstruct a Markdown projection without reading SQLite."
         ),
         returns="project, journal, output, check, ok, event_count, applied_event_count, file_count, changed_files, missing_files, extra_files, written_files",
@@ -1155,7 +1192,7 @@ def adopt_markdown(
         exclude_dirs=exclude_dirs,
     )
     adopted_project = str(stats["project"])
-    events = [
+    page_events = [
         make_journal_event(
             "page_create",
             project=adopted_project,
@@ -1163,6 +1200,8 @@ def adopt_markdown(
         )
         for record in mirror.records
     ]
+    log_entry_events = markdown_log_entry_import_events(mirror.records, project=adopted_project)
+    events = [*page_events, *log_entry_events]
     if replace_journal:
         journal.parent.mkdir(parents=True, exist_ok=True)
         journal.write_text("", encoding="utf-8")
@@ -1174,7 +1213,8 @@ def adopt_markdown(
         {
             "journal": str(journal),
             "journal_events": len(events),
-            "adopted_pages": len(events),
+            "adopted_pages": len(page_events),
+            "log_entry_records": len(log_entry_events),
         }
     )
     return result
@@ -1188,17 +1228,126 @@ def adopt_markdown_record_payload(record: Any) -> dict[str, Any]:
         "aliases": record.aliases,
         "graph_role": record.graph_role,
         "source_hash": record.source_hash,
-        "lines": [
-            {
-                "line_id": line.line_id,
-                "line_index": line.index,
-                "text": line.text,
-                "created": line.created,
-                "updated": line.updated,
-                "user_id": line.user_id,
-            }
-            for line in record.page.lines
-        ],
+        "lines": [journal_line_payload(line) for line in record.page.lines],
+    }
+
+
+def journal_line_payload(line: Any) -> dict[str, Any]:
+    return {
+        "line_id": line.line_id,
+        "line_index": line.index,
+        "text": line.text,
+        "created": line.created,
+        "updated": line.updated,
+        "user_id": line.user_id,
+    }
+
+
+def markdown_log_entry_import_events(records: tuple[Any, ...], *, project: str) -> list[dict[str, Any]]:
+    events = []
+    for payload in markdown_log_entry_payloads(records):
+        events.append(
+            make_journal_event(
+                "log_entry_import",
+                project=project,
+                event_id=f"log-entry-{payload['record_id']}",
+                payload=payload,
+            )
+        )
+    return events
+
+
+def markdown_log_entry_payloads(records: tuple[Any, ...]) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for record in records:
+        if record.graph_role != "log":
+            continue
+        log_lines = list(record.page.lines)
+        for index, line in enumerate(log_lines):
+            match = LOG_ENTRY_HEADING_RE.match(line.text)
+            if match is None:
+                continue
+            body = []
+            for body_line in log_lines[index + 1:]:
+                if LOG_ENTRY_HEADING_RE.match(body_line.text):
+                    break
+                body.append(body_line)
+            while body and not body[-1].text.strip():
+                body.pop()
+            timestamp = match.group("timestamp").strip()
+            op = match.group("op").strip()
+            summary = match.group("summary").strip()
+            body_text = "\n".join(body_line.text for body_line in body)
+            record_key = "\n".join(
+                [
+                    record.relative_path.as_posix(),
+                    timestamp,
+                    op,
+                    summary,
+                    body_text,
+                ]
+            )
+            record_id = hashlib.sha1(record_key.encode("utf-8")).hexdigest()[:24]
+            payloads.append(
+                {
+                    "record_id": record_id,
+                    "source_path": record.relative_path.as_posix(),
+                    "page_id": record.page.id,
+                    "heading": line.text,
+                    "heading_line": journal_line_payload(line),
+                    "heading_line_index": line.index,
+                    "timestamp": timestamp,
+                    "op": op,
+                    "summary": summary,
+                    "body_lines": [journal_line_payload(body_line) for body_line in body],
+                    "body_line_count": len(body),
+                }
+            )
+    return payloads
+
+
+def run_import_log_records(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    journal = journal_path_for_output(args.folder, args.journal)
+    if not journal.exists():
+        raise ValueError(f"journal does not exist: {journal}; run adopt-markdown first")
+    project = store._require_project()
+    events = read_journal_events(journal)
+    existing_record_ids = {
+        str((event.get("payload") or {}).get("record_id") or "")
+        for event in events
+        if event.get("project") == project and event.get("event_type") == "log_entry_import"
+    }
+    mirror = MarkdownMirror.from_folder(
+        args.folder,
+        exclude_dirs=tuple(args.markdown_exclude_dir),
+    )
+    candidate_events = markdown_log_entry_import_events(mirror.records, project=project)
+    imported_record_ids = []
+    skipped_record_ids = []
+    log_pages = {
+        record.relative_path.as_posix()
+        for record in mirror.records
+        if record.graph_role == "log"
+    }
+    for event in candidate_events:
+        record_id = str((event.get("payload") or {}).get("record_id") or "")
+        if record_id in existing_record_ids:
+            skipped_record_ids.append(record_id)
+            continue
+        append_journal_event(journal, event)
+        existing_record_ids.add(record_id)
+        imported_record_ids.append(record_id)
+    return {
+        "project": project,
+        "folder": str(args.folder),
+        "journal": str(journal),
+        "log_pages": sorted(log_pages),
+        "log_page_count": len(log_pages),
+        "scanned_records": len(candidate_events),
+        "imported_records": len(imported_record_ids),
+        "skipped_records": len(skipped_record_ids),
+        "record_ids": imported_record_ids,
+        "skipped_record_ids": skipped_record_ids,
     }
 
 
@@ -1497,6 +1646,7 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
         "journal": str(journal),
         "journal_exists": journal.exists(),
         "journal_event_count": len(events),
+        "journal_log_record_count": journal_log_record_count(events, project=projection["project"]),
         "last_event": events[-1] if events else None,
         "projection": projection,
         "journal_log_stale": bool(journal_log_changed_files),
@@ -1506,6 +1656,14 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
         "strict_ok": not strict_failures,
         "strict_failures": strict_failures,
     }
+
+
+def journal_log_record_count(events: list[dict[str, Any]], *, project: str) -> int:
+    return sum(
+        1
+        for event in events
+        if event.get("project") == project and event.get("event_type") == "log_entry_import"
+    )
 
 
 def write_status_strict_failures(
@@ -1786,7 +1944,7 @@ def replay_journal_projection(
             if not isinstance(previous_lines, list) or not isinstance(lines, list):
                 raise ValueError(f"page_update payload is missing previous_lines or lines in event {event['event_id']}")
             expected_previous = [_journal_line_for_replay(line) for line in previous_lines]
-            if pages[page_id]["lines"] != expected_previous:
+            if not _journal_lines_match_for_replay(pages[page_id]["lines"], expected_previous):
                 raise ValueError(f"page_update previous_lines do not match current page in event {event['event_id']}")
             pages[page_id]["lines"] = [_journal_line_for_replay(line) for line in lines]
             applied_event_count += 1
@@ -1806,7 +1964,7 @@ def replay_journal_projection(
             if pages[page_id]["source_path"] != _safe_replay_relative_path(previous_source_path):
                 raise ValueError(f"page_rename previous_source_path does not match current page in event {event['event_id']}")
             expected_previous = [_journal_line_for_replay(line) for line in previous_lines]
-            if pages[page_id]["lines"] != expected_previous:
+            if not _journal_lines_match_for_replay(pages[page_id]["lines"], expected_previous):
                 raise ValueError(f"page_rename previous_lines do not match current page in event {event['event_id']}")
             pages[page_id]["title"] = title
             pages[page_id]["aliases"] = [str(alias) for alias in payload.get("aliases") or []]
@@ -1834,7 +1992,7 @@ def replay_journal_projection(
                 if pages[page_id]["aliases"] != aliases:
                     raise ValueError(f"event_revert aliases do not match page in event {event['event_id']}")
                 expected_current = [_journal_line_for_replay(line) for line in current_lines]
-                if pages[page_id]["lines"] != expected_current:
+                if not _journal_lines_match_for_replay(pages[page_id]["lines"], expected_current):
                     raise ValueError(f"event_revert current_lines do not match page in event {event['event_id']}")
                 del pages[page_id]
             elif target_event_type in {"section_append", "log_append"}:
@@ -1843,7 +2001,7 @@ def replay_journal_projection(
                     raise ValueError(f"event_revert payload is missing removed_lines in event {event['event_id']}")
                 expected_tail = [_journal_line_for_replay(line) for line in removed_lines]
                 current_lines = pages[page_id]["lines"]
-                if current_lines[-len(expected_tail):] != expected_tail:
+                if not _journal_lines_match_for_replay(current_lines[-len(expected_tail):], expected_tail):
                     raise ValueError(f"event_revert does not match page tail in event {event['event_id']}")
                 del current_lines[-len(expected_tail):]
             elif target_event_type == "page_update":
@@ -1852,7 +2010,7 @@ def replay_journal_projection(
                 if not isinstance(previous_lines, list) or not isinstance(current_lines, list):
                     raise ValueError(f"event_revert payload is missing page_update lines in event {event['event_id']}")
                 expected_current = [_journal_line_for_replay(line) for line in current_lines]
-                if pages[page_id]["lines"] != expected_current:
+                if not _journal_lines_match_for_replay(pages[page_id]["lines"], expected_current):
                     raise ValueError(f"event_revert current_lines do not match page in event {event['event_id']}")
                 pages[page_id]["lines"] = [_journal_line_for_replay(line) for line in previous_lines]
             elif target_event_type == "page_rename":
@@ -1868,7 +2026,7 @@ def replay_journal_projection(
                 if pages[page_id]["source_path"] != _safe_replay_relative_path(source_path):
                     raise ValueError(f"event_revert source_path does not match page in event {event['event_id']}")
                 expected_current = [_journal_line_for_replay(line) for line in current_lines]
-                if pages[page_id]["lines"] != expected_current:
+                if not _journal_lines_match_for_replay(pages[page_id]["lines"], expected_current):
                     raise ValueError(f"event_revert current_lines do not match page in event {event['event_id']}")
                 pages[page_id]["title"] = previous_title
                 pages[page_id]["aliases"] = [str(alias) for alias in payload.get("previous_aliases") or []]
@@ -1878,6 +2036,8 @@ def replay_journal_projection(
                 raise ValueError(f"event_revert target_event_type is unsupported: {target_event_type!r}")
             applied_event_count += 1
         elif event_type == "projection_export":
+            applied_event_count += 1
+        elif event_type == "log_entry_import":
             applied_event_count += 1
         else:
             raise ValueError(f"replay-journal does not support event_type yet: {event_type}")
@@ -1909,6 +2069,16 @@ def _journal_line_for_replay(line: Any) -> dict[str, Any]:
         "line_index": int(line.get("line_index", -1)),
         "text": str(line.get("text", "")),
     }
+
+
+def _journal_lines_match_for_replay(actual: list[dict[str, Any]], expected: list[dict[str, Any]]) -> bool:
+    if len(actual) != len(expected):
+        return False
+    return all(
+        (int(left.get("line_index", -1)), str(left.get("text", "")))
+        == (int(right.get("line_index", -1)), str(right.get("text", "")))
+        for left, right in zip(actual, expected)
+    )
 
 
 def _markdown_text_from_replay_page(page: dict[str, Any]) -> str:
@@ -2047,6 +2217,9 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(error))
         emit_result(args, result)
         return 0
+
+    if args.command == "import-log-records" and not args.store.exists():
+        parser.error(store_missing_error(args.store))
 
     if args.command == "import-forest":
         try:
@@ -2372,6 +2545,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return result
     if args.command == "export-markdown":
         return run_export_markdown(store, args)
+    if args.command == "import-log-records":
+        return run_import_log_records(store, args)
     if args.command == "append-section":
         return run_append_section(store, args)
     if args.command == "append-log":
@@ -2836,6 +3011,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_export_ai(result)
     if command == "export-markdown":
         return format_export_markdown(result)
+    if command == "import-log-records":
+        return format_import_log_records(result)
     if command in {"append-section", "append-log"}:
         return format_append_result(result)
     if command == "write-page":
@@ -2914,6 +3091,19 @@ def format_export_markdown(result: dict[str, Any]) -> str:
     return "".join(parts)
 
 
+def format_import_log_records(result: dict[str, Any]) -> str:
+    return (
+        "# Log Records Import\n"
+        f"project: {result['project']}\n"
+        f"folder: {result['folder']}\n"
+        f"journal: {result['journal']}\n"
+        f"log_pages: {result['log_page_count']}\n"
+        f"scanned_records: {result['scanned_records']}\n"
+        f"imported_records: {result['imported_records']}\n"
+        f"skipped_records: {result['skipped_records']}\n"
+    )
+
+
 def format_append_result(result: dict[str, Any]) -> str:
     projection = result.get("projection") or {}
     return (
@@ -2975,6 +3165,7 @@ def format_write_status(result: dict[str, Any]) -> str:
         f"journal: {result['journal']}\n"
         f"journal_exists: {str(result['journal_exists']).lower()}\n"
         f"journal_events: {result['journal_event_count']}\n"
+        f"journal_log_records: {result.get('journal_log_record_count', 0)}\n"
         f"last_event: {last_event.get('event_type', '')} {last_event.get('event_id', '')}\n"
         f"projection_ok: {str(projection['ok']).lower()}\n"
         f"changed: {len(projection.get('changed_files') or [])}\n"

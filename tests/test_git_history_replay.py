@@ -392,8 +392,18 @@ class GitHistoryReplayTests(unittest.TestCase):
         create_result = json.loads(create_completed.stdout)
         replay_result = json.loads(replay_completed.stdout)
         reimport_plan = json.loads(reimport_plan_completed.stdout)
+        projection_event_types = [
+            event["event_type"]
+            for event in journal_events
+            if event["event_type"] != "log_entry_import"
+        ]
+        log_entry_events = [
+            event
+            for event in journal_events
+            if event["event_type"] == "log_entry_import"
+        ]
         self.assertEqual(
-            [event["event_type"] for event in journal_events],
+            projection_event_types,
             [
                 "page_create",
                 "page_create",
@@ -403,6 +413,10 @@ class GitHistoryReplayTests(unittest.TestCase):
                 "page_update",
                 "page_update",
             ],
+        )
+        self.assertGreater(len(log_entry_events), 0)
+        self.assertTrue(
+            all(event["payload"]["source_path"] == "log.md" for event in log_entry_events)
         )
         self.assertEqual(create_result["event_type"], "page_create")
         self.assertEqual(create_result["source_path"], PLAN_PATH)

@@ -30,6 +30,7 @@ COMMANDS = [
     "gather",
     "export-ai",
     "export-markdown",
+    "import-log-records",
     "append-section",
     "append-log",
     "write-page",
@@ -1260,6 +1261,199 @@ class CliHelpTests(unittest.TestCase):
         self.assertFalse(dirty_result["ok"])
         self.assertEqual(dirty_result["changed_files"], ["A.md"])
 
+    def test_adopt_markdown_imports_log_entry_records(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "Log.md").write_text(
+                "# Log\n\n"
+                "## [2026-06-26 01:00] implementation | first entry\n"
+                "- touched [[A]]\n\n"
+                "## [2026-06-26 02:00] lint | second entry\n"
+                "- clean\n",
+                encoding="utf-8",
+            )
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            adopt_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            replay_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--project",
+                    "wiki",
+                    "replay-journal",
+                    "--journal",
+                    str(journal_path),
+                    "--output",
+                    str(root),
+                    "--check",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            status_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                    "--strict",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            journal_events = [
+                json.loads(line)
+                for line in journal_path.read_text(encoding="utf-8").splitlines()
+            ]
+
+        adopt_result = json.loads(adopt_completed.stdout)
+        replay_result = json.loads(replay_completed.stdout)
+        status_result = json.loads(status_completed.stdout)
+        log_events = [event for event in journal_events if event["event_type"] == "log_entry_import"]
+        self.assertEqual(adopt_result["adopted_pages"], 2)
+        self.assertEqual(adopt_result["log_entry_records"], 2)
+        self.assertEqual(adopt_result["journal_events"], 4)
+        self.assertEqual(
+            [event["event_type"] for event in journal_events],
+            ["page_create", "page_create", "log_entry_import", "log_entry_import"],
+        )
+        self.assertEqual(log_events[0]["payload"]["timestamp"], "2026-06-26 01:00")
+        self.assertEqual(log_events[0]["payload"]["op"], "implementation")
+        self.assertEqual(log_events[0]["payload"]["summary"], "first entry")
+        self.assertEqual(log_events[0]["payload"]["source_path"], "Log.md")
+        self.assertEqual(log_events[0]["payload"]["body_line_count"], 1)
+        self.assertEqual(len(log_events[0]["payload"]["record_id"]), 24)
+        self.assertTrue(log_events[0]["event_id"].startswith("log-entry-"))
+        self.assertTrue(replay_result["ok"])
+        self.assertEqual(status_result["journal_log_record_count"], 2)
+
+    def test_import_log_records_appends_only_missing_records(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            log_path = root / "Log.md"
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            log_path.write_text(
+                "# Log\n\n"
+                "## [2026-06-26 01:00] implementation | first entry\n"
+                "- touched [[A]]\n",
+                encoding="utf-8",
+            )
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            log_path.write_text(
+                log_path.read_text(encoding="utf-8")
+                + "\n## [2026-06-26 02:00] implementation | second entry\n"
+                + "- new record\n",
+                encoding="utf-8",
+            )
+            import_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "import-log-records",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            second_import_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "import-log-records",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            journal_events = [
+                json.loads(line)
+                for line in journal_path.read_text(encoding="utf-8").splitlines()
+            ]
+
+        import_result = json.loads(import_completed.stdout)
+        second_import_result = json.loads(second_import_completed.stdout)
+        log_events = [event for event in journal_events if event["event_type"] == "log_entry_import"]
+        self.assertEqual(import_result["scanned_records"], 2)
+        self.assertEqual(import_result["imported_records"], 1)
+        self.assertEqual(import_result["skipped_records"], 1)
+        self.assertEqual(second_import_result["imported_records"], 0)
+        self.assertEqual(second_import_result["skipped_records"], 2)
+        self.assertEqual(len(log_events), 2)
+
     def test_export_markdown_can_regenerate_index_and_log_projection(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
@@ -1569,6 +1763,83 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(revert_result["projection"]["removed_files"], ["New.md"])
         self.assertFalse(new_exists_after_revert)
         self.assertTrue(replay_after_revert["ok"])
+
+    def test_replay_journal_page_update_tolerates_line_id_drift_when_text_matches(self):
+        def event(event_type, event_id, payload):
+            return {
+                "schema_version": 1,
+                "event_id": event_id,
+                "event_type": event_type,
+                "project": "wiki",
+                "created_at": "2026-06-26T00:00:00+00:00",
+                "payload": payload,
+            }
+
+        def line(line_id, line_index, text):
+            return {
+                "line_id": line_id,
+                "line_index": line_index,
+                "text": text,
+                "created": None,
+                "updated": None,
+                "user_id": None,
+            }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nnew\n", encoding="utf-8")
+            journal_path = Path(tmpdir) / "events.jsonl"
+            events = [
+                event(
+                    "page_create",
+                    "create-a",
+                    {
+                        "page_id": "6114958182d722e68f0f5687",
+                        "title": "A",
+                        "source_path": "A.md",
+                        "aliases": ["A"],
+                        "lines": [line("created-0", 0, "# A"), line("created-1", 1, "old")],
+                    },
+                ),
+                event(
+                    "page_update",
+                    "update-a",
+                    {
+                        "page_id": "6114958182d722e68f0f5687",
+                        "title": "A",
+                        "previous_lines": [line("reimported-0", 0, "# A"), line("reimported-1", 1, "old")],
+                        "lines": [line("updated-0", 0, "# A"), line("updated-1", 1, "new")],
+                    },
+                ),
+            ]
+            journal_path.write_text(
+                "".join(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in events),
+                encoding="utf-8",
+            )
+
+            replay_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--project",
+                    "wiki",
+                    "replay-journal",
+                    "--journal",
+                    str(journal_path),
+                    "--output",
+                    str(root),
+                    "--check",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        replay_result = json.loads(replay_completed.stdout)
+        self.assertTrue(replay_result["ok"])
 
     def test_projection_export_failure_appends_revert_and_restores_store(self):
         with tempfile.TemporaryDirectory() as tmpdir:
