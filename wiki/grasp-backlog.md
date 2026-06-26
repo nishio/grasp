@@ -206,9 +206,12 @@ line-id のローカル別名（text で `P1:0`、`--json` / `--full-ids` で完
 
 `grasp sync` の basic upsert は実装済み（[[incremental-sync]]）。未実装:
 
-- hosted 側で削除された page の tombstone / local delete detection。
-- rename detection。
-- last-sync cursor の運用精度。
+- **full manifest reconcile**: `listPages` pagination で remote `id/title/updated/linesCount/linked/views` manifest を取り、local page id set と比較する。recent updated window だけでは拾えない古い missing page / delete / rename を拾う。
+- **hosted 側で削除された page の tombstone / local delete detection**: remote manifest から消えた local `id` を tombstone 化し、physical delete とは分ける。認証済み path では `/api/deleted-pages/:project/:pageId` と `/api/stream/:project` の `page.delete` event を補助に使えるか検証する。
+- **rename detection**: same page `id` / changed title を rename と見なし、旧 title を alias history に残す。`followRename=true` は fetch 時 workaround であり、rename history 取得ではない。認証済み path では `/api/commits/:project/:pageId` の `TitleChange` で履歴を補えるか検証する。
+- **hosted REST metadata enrichment**: `readPage` / `/api/pages/:project/:title` で得られる `commitId`、stable `lines[].id`、`links` / `projectLinks` / `icons`、`linked`、`pageRank`、`accessed`、`relatedPages` をどこまで store に保存するか決める。JSON export seed には無いので optional source-specific columns として扱う。
+- **stable hosted line-id policy**: 現行 sync は hosted `lines[].id` を捨て `page.id:line-index` を維持する。hosted edit / line fragment 連携を考えるなら `external_line_id` と local stable `line_id` を別列にする。
+- **last-sync cursor の運用精度**: pinned pages / updated ties / clock skew / partial failure の扱い。
 
 ## Cross-project graph を first-class edge に + whole-store retrieval
 
