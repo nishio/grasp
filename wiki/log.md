@@ -1015,3 +1015,8 @@
 - Added a consecutive git history replay test for `3eaab75` -> `3605e05`, applying both commits as page_update events in one temp store/journal.
 - The test checks replay after each step, final projection exact match, and direct re-import of the final projected wiki.
 - Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
+
+## [2026-06-26 21:52] implementation+test+file-back | table-drive continuous replay sequences
+- Converted the consecutive git history replay test to a `CONTINUOUS_REPLAY_SEQUENCES` table with per-sequence commit/path lists and final assertions.
+- Added the `7360053` -> `8278069` handle ambiguity sequence alongside the existing source role sequence, both replayed in the same harness with final projection exact match and direct re-import.
+- Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
