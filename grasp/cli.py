@@ -984,7 +984,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Optionally move the Markdown projection source path."
         ),
         returns=(
-            "project, page, journal, output, event_id, previous_title, title, previous_source_path, "
+            "project, page, journal, output, event_id, event_type, previous_title, title, previous_source_path, "
             "source_path, previous_lines[], lines[], aliases[], heading_updated, edge_count, projection"
         ),
         examples=[
@@ -2311,6 +2311,7 @@ def run_rename_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, A
             "journal": str(journal),
             "output": str(args.output),
             "event_id": event["event_id"],
+            "event_type": event["event_type"],
             "projection": projection,
         }
     )

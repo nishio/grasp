@@ -1025,3 +1025,9 @@
 Extended the continuous git history replay table to support create_pages plus update_paths per step.
 Added 0db1449 -> a07f1af as a create-then-update sequence for llm-wiki-infra-fast-path-plan.
 Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
+
+## [2026-06-26 22:30] implementation+test+file-back | rename operation continuous replay
+Added rename_pages support to the continuous git history replay table.
+Moved the d4e4c39 why-design-B -> why-not-scrapbox-clone rename invariant into the table-driven continuous replay harness.
+Made rename-page JSON results include event_type=page_rename, matching write-page result shape.
+Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.

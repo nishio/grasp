@@ -58,6 +58,8 @@ Non-goals for this fast path:
 
 2026-06-26 update: `1.7.35` で連続 replay harness を `create_pages` + `update_paths` の mixed operation table に拡張し、`0db1449` → `a07f1af` の fast-path plan create + later update sequence も同じ journal 上で replay / direct re-import / final projection exact match することを確認した。
 
+2026-06-26 update: `1.7.36` で同 harness に `rename_pages` step を追加し、`d4e4c39` の `why-design-B` → `why-not-scrapbox-clone` rename を continuous table 上で検証した。rename projection は identity frontmatter を足すため git final file との exact match ではなく、old path stub 不在・旧 handle alias read・旧名 alias preservation を invariant とする。
+
 ## Risk register
 
 | Risk | Why it matters | Fast-path mitigation |
