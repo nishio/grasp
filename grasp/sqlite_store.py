@@ -2658,6 +2658,7 @@ class SQLiteStore:
         if len(candidates) > 1:
             raise ValueError(f"page handle is ambiguous: {title}; use a unique title for write-page alpha")
         page_id = str(candidates[0]["page_id"])
+        source_path, _ = self._markdown_manifest_entry_for_page(manifest, page_id)
         graph_role = self._markdown_graph_role_for_page(project, page_id)
         previous_lines = self._markdown_line_payloads(project, page_id)
         previous_by_index = {line["line_index"]: line for line in previous_lines}
@@ -2690,6 +2691,7 @@ class SQLiteStore:
         return {
             "project": project,
             "page": page.to_summary() if page is not None else {"id": page_id, "title": title},
+            "source_path": source_path,
             "previous_lines": previous_lines,
             "lines": self._markdown_line_payloads(project, page_id),
             "previous_line_count": len(previous_lines),

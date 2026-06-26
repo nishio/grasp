@@ -19,6 +19,15 @@ PAGE_CREATE_EXISTING_PATHS = [
     "index.md",
     "log.md",
 ]
+SOURCE_DIGEST_POLICY_COMMIT = "3eaab7516378dde8c26e75329fda7edca49558db"
+SOURCE_DIGEST_POLICY_PATHS = [
+    "decisions/markdown-identity-name-collision-policy.md",
+    "decisions/markdown-obsidian-indexed-mirror.md",
+    "entities/wiki-forest-markdown-import-dogfood-2026-06-25.md",
+    "grasp-backlog.md",
+    "index.md",
+    "log.md",
+]
 HISTORY_FIXTURE_PATHS = [
     "SPEC.md",
     "index.md",
@@ -426,3 +435,180 @@ class GitHistoryReplayTests(unittest.TestCase):
         self.assertEqual(projected_texts, after_fixture)
         self.assertEqual(reimport_plan["page"]["title"], PLAN_TITLE)
         self.assertGreaterEqual(reimport_plan["backlink_count_total"], 1)
+
+    def test_actual_source_digest_policy_multi_page_update_replays_cleanly(self):
+        try:
+            before_fixture = {
+                path: git_show_file(f"{SOURCE_DIGEST_POLICY_COMMIT}^", path)
+                for path in SOURCE_DIGEST_POLICY_PATHS
+            }
+            after_fixture = {
+                path: git_show_file(SOURCE_DIGEST_POLICY_COMMIT, path)
+                for path in SOURCE_DIGEST_POLICY_PATHS
+            }
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            raise unittest.SkipTest(f"git history fixture unavailable: {exc}") from exc
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            after_root = Path(tmpdir) / "after"
+            after_root.mkdir()
+            for relative_path, text in before_fixture.items():
+                target = root / relative_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text, encoding="utf-8")
+            for relative_path, text in after_fixture.items():
+                target = after_root / relative_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text, encoding="utf-8")
+
+            store_path = Path(tmpdir) / "store.sqlite"
+            reimport_store_path = Path(tmpdir) / "reimport.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                cwd=REPO_ROOT,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            update_results = []
+            for relative_path in SOURCE_DIGEST_POLICY_PATHS:
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "write-page",
+                        Path(relative_path).stem,
+                        "--from-file",
+                        str(after_root / relative_path),
+                        "--output",
+                        str(root),
+                        "--journal",
+                        str(journal_path),
+                    ],
+                    cwd=REPO_ROOT,
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                update_results.append(json.loads(completed.stdout))
+
+            replay_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--project",
+                    "wiki",
+                    "replay-journal",
+                    "--journal",
+                    str(journal_path),
+                    "--output",
+                    str(root),
+                    "--check",
+                ],
+                cwd=REPO_ROOT,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(reimport_store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                cwd=REPO_ROOT,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            reimport_source_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(reimport_store_path),
+                    "--project",
+                    "wiki",
+                    "read",
+                    "wiki-forest-markdown-import-dogfood-2026-06-25",
+                    "--related-limit",
+                    "0",
+                    "--unresolved-limit",
+                    "0",
+                ],
+                cwd=REPO_ROOT,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            journal_events = [
+                json.loads(line)
+                for line in journal_path.read_text(encoding="utf-8").splitlines()
+            ]
+            projected_texts = {
+                path: (root / path).read_text(encoding="utf-8")
+                for path in SOURCE_DIGEST_POLICY_PATHS
+            }
+
+        replay_result = json.loads(replay_completed.stdout)
+        reimport_source = json.loads(reimport_source_completed.stdout)
+        projection_event_types = [
+            event["event_type"]
+            for event in journal_events
+            if event["event_type"] != "log_entry_import"
+        ]
+        self.assertEqual(
+            projection_event_types,
+            ["page_create"] * len(SOURCE_DIGEST_POLICY_PATHS)
+            + ["page_update"] * len(SOURCE_DIGEST_POLICY_PATHS),
+        )
+        self.assertEqual(
+            [result["source_path"] for result in update_results],
+            SOURCE_DIGEST_POLICY_PATHS,
+        )
+        self.assertTrue(all(result["event_type"] == "page_update" for result in update_results))
+        self.assertTrue(replay_result["ok"])
+        self.assertEqual(projected_texts, after_fixture)
+        self.assertEqual(
+            reimport_source["page"]["title"],
+            "wiki森 Markdown import dogfood 2026-06-25",
+        )
+        self.assertIn(
+            "`source/` は `raw/` と同列に扱わない",
+            projected_texts["entities/wiki-forest-markdown-import-dogfood-2026-06-25.md"],
+        )
