@@ -28,6 +28,24 @@ SOURCE_DIGEST_POLICY_PATHS = [
     "index.md",
     "log.md",
 ]
+SOURCE_ROLE_COMMIT = "3605e05005e227cf525255b5cd3b70c3349c71e4"
+SOURCE_ROLE_PATHS = [
+    "decisions/markdown-identity-name-collision-policy.md",
+    "decisions/markdown-obsidian-indexed-mirror.md",
+    "entities/grasp-v1-implemented.md",
+    "entities/wiki-forest-markdown-import-dogfood-2026-06-25.md",
+    "grasp-backlog.md",
+    "history.md",
+    "index.md",
+    "log.md",
+]
+CONTINUOUS_REPLAY_COMMITS = [
+    (SOURCE_DIGEST_POLICY_COMMIT, SOURCE_DIGEST_POLICY_PATHS),
+    (SOURCE_ROLE_COMMIT, SOURCE_ROLE_PATHS),
+]
+CONTINUOUS_REPLAY_PATHS = list(
+    dict.fromkeys(path for _, paths in CONTINUOUS_REPLAY_COMMITS for path in paths)
+)
 HISTORY_FIXTURE_PATHS = [
     "SPEC.md",
     "index.md",
@@ -46,6 +64,28 @@ def git_show_file(revision: str, path: str) -> str:
         capture_output=True,
     )
     return completed.stdout
+
+
+def git_show_files(revision: str, paths: list[str]) -> dict[str, str]:
+    return {path: git_show_file(revision, path) for path in paths}
+
+
+def write_fixture_files(root: Path, fixture: dict[str, str]) -> None:
+    for relative_path, text in fixture.items():
+        target = root / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+
+
+def run_grasp_json(*args: str | Path) -> dict:
+    completed = subprocess.run(
+        [sys.executable, "-m", "grasp", "--json", *(str(arg) for arg in args)],
+        cwd=REPO_ROOT,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return json.loads(completed.stdout)
 
 
 @unittest.skipUnless((REPO_ROOT / ".git").exists(), "git history fixture requires a git checkout")
@@ -611,4 +651,126 @@ class GitHistoryReplayTests(unittest.TestCase):
         self.assertIn(
             "`source/` は `raw/` と同列に扱わない",
             projected_texts["entities/wiki-forest-markdown-import-dogfood-2026-06-25.md"],
+        )
+
+    def test_actual_consecutive_wiki_updates_replay_cleanly(self):
+        try:
+            before_fixture = git_show_files(f"{SOURCE_DIGEST_POLICY_COMMIT}^", CONTINUOUS_REPLAY_PATHS)
+            step_fixtures = [
+                (commit, paths, git_show_files(commit, paths))
+                for commit, paths in CONTINUOUS_REPLAY_COMMITS
+            ]
+            final_fixture = git_show_files(SOURCE_ROLE_COMMIT, CONTINUOUS_REPLAY_PATHS)
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            raise unittest.SkipTest(f"git history fixture unavailable: {exc}") from exc
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            write_fixture_files(root, before_fixture)
+            store_path = Path(tmpdir) / "store.sqlite"
+            reimport_store_path = Path(tmpdir) / "reimport.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            run_grasp_json(
+                "--store",
+                store_path,
+                "adopt-markdown",
+                root,
+                "--project",
+                "wiki",
+                "--journal",
+                journal_path,
+            )
+            update_source_paths_by_commit = []
+            replay_results = []
+            for commit, paths, fixture in step_fixtures:
+                step_root = Path(tmpdir) / commit[:7]
+                step_root.mkdir()
+                write_fixture_files(step_root, fixture)
+                commit_source_paths = []
+                for relative_path in paths:
+                    result = run_grasp_json(
+                        "--store",
+                        store_path,
+                        "--project",
+                        "wiki",
+                        "write-page",
+                        Path(relative_path).stem,
+                        "--from-file",
+                        step_root / relative_path,
+                        "--output",
+                        root,
+                        "--journal",
+                        journal_path,
+                    )
+                    self.assertEqual(result["event_type"], "page_update")
+                    commit_source_paths.append(result["source_path"])
+                update_source_paths_by_commit.append(commit_source_paths)
+                replay_results.append(
+                    run_grasp_json(
+                        "--project",
+                        "wiki",
+                        "replay-journal",
+                        "--journal",
+                        journal_path,
+                        "--output",
+                        root,
+                        "--check",
+                    )
+                )
+
+            run_grasp_json(
+                "--store",
+                reimport_store_path,
+                "import",
+                "--markdown",
+                root,
+                "--project",
+                "wiki",
+            )
+            reimport_implemented = run_grasp_json(
+                "--store",
+                reimport_store_path,
+                "--project",
+                "wiki",
+                "read",
+                "grasp-v1-implemented",
+                "--related-limit",
+                "0",
+                "--unresolved-limit",
+                "0",
+            )
+            journal_events = [
+                json.loads(line)
+                for line in journal_path.read_text(encoding="utf-8").splitlines()
+            ]
+            projected_texts = {
+                path: (root / path).read_text(encoding="utf-8")
+                for path in CONTINUOUS_REPLAY_PATHS
+            }
+
+        projection_event_types = [
+            event["event_type"]
+            for event in journal_events
+            if event["event_type"] != "log_entry_import"
+        ]
+        self.assertEqual(
+            projection_event_types,
+            ["page_create"] * len(CONTINUOUS_REPLAY_PATHS)
+            + ["page_update"] * sum(len(paths) for _, paths in CONTINUOUS_REPLAY_COMMITS),
+        )
+        self.assertEqual(
+            update_source_paths_by_commit,
+            [paths for _, paths in CONTINUOUS_REPLAY_COMMITS],
+        )
+        self.assertTrue(all(result["ok"] for result in replay_results))
+        self.assertEqual(projected_texts, final_fixture)
+        self.assertEqual(
+            reimport_implemented["page"]["title"],
+            "entity: grasp v1 implemented surface",
+        )
+        self.assertIn(
+            "`source/` / `sources/`",
+            projected_texts["entities/grasp-v1-implemented.md"],
         )

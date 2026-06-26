@@ -1010,3 +1010,8 @@
 - Added an actual git history replay test for `3eaab75`, reproducing the source digest policy correction as six existing-page `write-page` updates and checking replay/direct re-import/projection exact match.
 - Fixed existing `write-page` update JSON to include `source_path`, matching the documented return contract and allowing replay tests to assert target files directly.
 - Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
+
+## [2026-06-26 21:44] implementation+test+file-back | add consecutive git history replay
+- Added a consecutive git history replay test for `3eaab75` -> `3605e05`, applying both commits as page_update events in one temp store/journal.
+- The test checks replay after each step, final projection exact match, and direct re-import of the final projected wiki.
+- Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
