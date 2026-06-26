@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-27 00:00] file back | [[ai-author-feedback-2026-06-26]] §Updates — 共有 journal を live 実走した並行下 failure mode（sandbox 実走の対）
+- 既存ページ本文は sandbox（隔離 store、共有 journal 不可触）だが、そこが friction 1/5 で引く「並行 session」が私。私は共有 `wiki.grasp/events.jsonl` と本番 `wiki/` に live で write した一次体験を §Updates に追加。
+- sandbox が隔離ゆえ原理的に出せない並行下 failure mode 4点: ①**stale store × export 副作用**で他 session の page が untracked 蘇生（22:54 固定 store の `append-log` export が `value-is-problem-solving-not-novelty.md` を再 materialize）②**write-status は divergence を出すが出所を言わない**（`strict_ok:false` が自分由来か他 writer 由来か in-band 不可分＝trust 信号が並行下で劣化）③**append-log placement gotcha**（newest-first log の末尾寄りに entry、成功だが意味的に誤り）④**回復は grasp でなく git 層**（pathspec commit / `checkout HEAD -- events.jsonl` / amend）。
+- meta: 本ページ結論「不確実下の AI は共有 write path を避ける」が live で裏付き。追補＝confidence コストは upfront（--help）だけでなく **ongoing**（並行可能性下は各 write op 後に git 検証が固定費化）。最小解候補に **write 前の store-vs-wiki staleness check** を追加。
+- write 方式: 本ページ自身の規約どおり direct Markdown patch（race は収束していたが、ページの結論と一貫させ共有 journal を再び触らない）。
+
 ## [2026-06-26 23:40] file back | [[ai-author-feedback-2026-06-26]] — AI が write 面（alpha write path）を sandbox 実走した体験
 - 前 session の fallback 理由「新規 page+frontmatter+index 表は alpha write が表現できない」を sandbox（throwaway store/journal）実走で検証 → **ほぼ誤り**だった: `write-page --create` は frontmatter を verbatim 保持し `id/title/aliases` を注入（identity-without-name を file に materialize）、body の `[[positioning-two-personas]]` を edge 化（direct Markdown では得られない value）、`append-section`/`append-log` 込み3 write op を通して `export-markdown --check` は ok:true。capability は在った。
 - 真の friction（capability でなく ergonomics）: ①構造化 arg ⇄ markdown blob mismatch（append-section=heading+line / append-log=op+summary、`--from-file` 不可。並行 file-back の発見: append-section は既存同名 heading に merge せず EOF 二重作成）②arg 必須 surprise（write-status は `--output`）③title/H1/filename が別物 ④index 行に `write-index` 無く write-page と direct 編集が混在（cutover 未完）⑤共有 journal が lock-free で並行 writer 下は serial-execution を安全に満たせない。
