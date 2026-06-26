@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.7.27`（更新: 2026-06-26 18:02、store: schema `7`、compat: schema `7` compatible）: `log_entry_import` records に `subjects[]` を追加し、body の `[[wikilink]]` と Markdown path から subject を推定する。既存 journal の `subjects` なし record も read 時に同じ推定を行う。`log-records --subject <subject>` と `history <query>` は text search ではなく extracted subjects に exact normalized match する。返却 record は `subjects[]`、同 subject の後続 record summary `later_events[]`、`later_event_count`、`later_events_omitted` を持つ。`log-records --query` は従来通り heading/body/source 等への空白 term AND search。schema は不変
 - `1.7.26`（更新: 2026-06-26 17:31、store: schema `7`、compat: schema `7` compatible）: `log-records` と `history <query>` を追加。どちらも SQLite store を開かず JSONL journal の `log_entry_import` records を読む event-stream surface。`log-records` は `--query` / `--op` / `--source-path` / `--record-id` / `--since` / `--until` / `--limit` / `--offset` を持ち、既定は timestamp + journal order の newest first。`--query` / `history <query>` は heading/body/source 等への空白 term AND search。`history <query>` は `read <page>` と分離した薄い surface で、subject extraction が入るまでは text search。schema は不変
 - `1.7.25`（更新: 2026-06-26 17:10、store: schema `7`、compat: schema `7` compatible）: `log_entry_import` journal event と `import-log-records <folder>` を追加。`adopt-markdown` は Markdown log pages の `## [YYYY-MM-DD HH:MM] op | summary` sections を `source_path + timestamp + op + summary + body_text` 由来の stable `record_id` 付き records に split して journal へ append する。`import-log-records` は既存 journal に missing records だけを追記し、projection は書き換えない。`replay-journal` は `log_entry_import` を projection を変えない record event として適用し、`write-status` は `journal_log_record_count` を返す。さらに `page_update` / `page_rename` / revert の replay guard は `line_index` + `text` 一致を要求しつつ、direct Markdown re-import 由来の line_id drift では止めない。schema は不変
 - `1.7.24`（更新: 2026-06-26 16:38、store: schema `7`、compat: schema `7` compatible）: `write-status --strict` を追加。通常 status の JSON/text 出力に `strict_ok` / `strict_failures[]` を追加し、`--strict` 指定時は projection dirty、journal missing、journal log stale、journal log regeneration error のいずれかで exit 1 にする。ship loop や file-back skill は `write-status --strict` を gate として使える。schema は不変
@@ -126,6 +127,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.7.26`
+- Current public compatibility version: `1.7.27`
 - Current internal `SCHEMA_VERSION`: `7`
-- Current package metadata should match `1.7.26`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.7.27`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

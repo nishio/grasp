@@ -1464,9 +1464,9 @@ class CliHelpTests(unittest.TestCase):
             (root / "Log.md").write_text(
                 "# Log\n\n"
                 "## [2026-06-26 01:00] implementation | first entry\n"
-                "- touched [[Alpha]]\n\n"
+                "- PR #1 touched [[Alpha]]\n\n"
                 "## [2026-06-26 02:00] fix | second entry\n"
-                "- unrelated\n",
+                "- refined [[Alpha]]\n",
                 encoding="utf-8",
             )
             store_path = Path(tmpdir) / "store.sqlite"
@@ -1546,9 +1546,12 @@ class CliHelpTests(unittest.TestCase):
                     "--project",
                     "wiki",
                     "history",
-                    "Alpha touched",
+                    "Alpha",
                     "--journal",
                     str(journal_path),
+                    "--oldest-first",
+                    "--limit",
+                    "1",
                 ],
                 check=True,
                 text=True,
@@ -1581,12 +1584,18 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(newest_result["total_records"], 2)
         self.assertEqual(newest_result["returned_records"], 1)
         self.assertEqual(newest_result["records"][0]["summary"], "second entry")
+        self.assertEqual(newest_result["records"][0]["subjects"], ["Alpha"])
         self.assertEqual(filtered_result["matched_records"], 1)
         self.assertEqual(filtered_result["records"][0]["summary"], "first entry")
-        self.assertEqual(filtered_result["records"][0]["body_text"], "- touched [[Alpha]]")
-        self.assertEqual(history_result["query"], "Alpha touched")
-        self.assertEqual(history_result["matched_records"], 1)
+        self.assertEqual(filtered_result["records"][0]["body_text"], "- PR #1 touched [[Alpha]]")
+        self.assertEqual(filtered_result["records"][0]["subjects"], ["Alpha"])
+        self.assertEqual(history_result["query"], "Alpha")
+        self.assertEqual(history_result["matched_records"], 2)
         self.assertEqual(history_result["records"][0]["op"], "implementation")
+        self.assertEqual(history_result["records"][0]["subjects"], ["Alpha"])
+        self.assertEqual(history_result["records"][0]["later_event_count"], 1)
+        self.assertEqual(history_result["records"][0]["later_events"][0]["summary"], "second entry")
+        self.assertEqual(history_result["records"][0]["later_events"][0]["shared_subjects"], ["Alpha"])
         self.assertNotEqual(bad_limit_completed.returncode, 0)
         self.assertIn("--limit must be >= 1", bad_limit_completed.stderr)
 
