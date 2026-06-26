@@ -34,11 +34,16 @@ from .cosense import (
 from .markdown import (
     MarkdownMirror,
     MarkdownPageRecord,
+    first_markdown_h1_title,
     is_code_fence,
     iter_markdown_files,
+    markdown_graph_role,
     markdown_graph_role_emits_edges,
+    markdown_page_id,
     markdown_projection_text,
+    markdown_title,
     markdown_wikilink_target,
+    parse_frontmatter,
     parse_markdown_line_links,
     parse_markdown_links,
     parse_markdown_h1_title,
@@ -2180,6 +2185,173 @@ class SQLiteStore:
             "start_index": start_index,
             "appended_lines": appended,
             "appended_line_count": len(appended),
+            "edge_count": len(edge_rows),
+        }
+
+    def create_markdown_page(
+        self,
+        title: str,
+        *,
+        source_path: str | Path,
+        lines: list[str],
+    ) -> dict[str, Any]:
+        project = self._require_project()
+        manifest = self._markdown_manifest_for_project(project)
+        files = manifest.get("files")
+        if not isinstance(files, dict):
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+
+        source_path = _safe_markdown_relative_path(source_path)
+        if source_path in files:
+            raise ValueError(f"Markdown source path already belongs to another page: {source_path}")
+
+        metadata = parse_frontmatter(lines)
+        file_title = markdown_title(Path(source_path))
+        title = (title or metadata.title or first_markdown_h1_title(lines) or file_title).strip()
+        if not title:
+            raise ValueError("new page title must not be empty")
+        norm_title = normalize_title(title)
+        if not norm_title:
+            raise ValueError("new page title normalizes to empty")
+
+        collision = self.connection.execute(
+            """
+            SELECT page_id
+            FROM page_handles
+            WHERE project = ? AND handle_norm = ?
+            LIMIT 1
+            """,
+            (project, norm_title),
+        ).fetchone()
+        if collision is not None:
+            raise ValueError(f"page handle already belongs to another page: {title}")
+
+        page_id = metadata.page_id or markdown_page_id(Path(source_path))
+        if self._page_by_id(page_id) is not None:
+            raise ValueError(f"page id already exists: {page_id}")
+
+        aliases = []
+        for alias in [file_title, *metadata.aliases]:
+            alias = str(alias).strip()
+            if not alias or normalize_title(alias) == norm_title:
+                continue
+            if normalize_title(alias) in {normalize_title(existing) for existing in aliases}:
+                continue
+            aliases.append(alias)
+
+        graph_role = markdown_graph_role(Path(source_path), metadata)
+        now = int(time.time())
+        line_payloads = [
+            {
+                "line_id": f"line-{uuid4().hex}",
+                "line_index": line_index,
+                "text": text,
+                "created": now,
+                "updated": now,
+                "user_id": "grasp",
+            }
+            for line_index, text in enumerate(lines)
+        ]
+        edge_rows = []
+        emits_edges = markdown_graph_role_emits_edges(graph_role)
+        in_code_fence = False
+        if emits_edges:
+            for line in line_payloads:
+                targets, in_code_fence = parse_markdown_line_links(
+                    str(line["text"]),
+                    in_code_fence=in_code_fence,
+                )
+                for target_title in targets:
+                    edge_rows.append((project, page_id, line["line_id"], target_title, normalize_title(target_title)))
+
+        new_files = {str(path): dict(item) for path, item in files.items() if isinstance(item, dict)}
+        new_files[source_path] = {
+            "page_id": page_id,
+            "title": title,
+            "norm_title": norm_title,
+            "aliases": aliases,
+            "graph_role": graph_role,
+            "hash": "",
+            "mtime_ns": 0,
+        }
+        manifest = dict(manifest)
+        manifest["files"] = new_files
+
+        alias_map = dict(self.project_title_aliases(project))
+        for alias in aliases:
+            alias_norm = normalize_title(alias)
+            if alias_norm and alias_norm != norm_title:
+                alias_map[alias_norm] = title
+
+        with self.connection:
+            self.connection.execute(
+                """
+                INSERT INTO pages (project, id, title, norm_title, created, updated, views, line_count)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+                """,
+                (project, page_id, title, norm_title, now, now, len(line_payloads)),
+            )
+            self.connection.executemany(
+                """
+                INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (
+                        project,
+                        line["line_id"],
+                        page_id,
+                        line["line_index"],
+                        line["text"],
+                        line["created"],
+                        line["updated"],
+                        line["user_id"],
+                    )
+                    for line in line_payloads
+                ),
+            )
+            _insert_edge_rows(self.connection, edge_rows)
+            _insert_page_handles(
+                self.connection,
+                _page_handle_rows_for_markdown_page(
+                    project,
+                    page_id=page_id,
+                    title=title,
+                    aliases=aliases,
+                    source_path=source_path,
+                    graph_role=graph_role,
+                ),
+            )
+            refresh_edge_resolutions(self.connection, project)
+            rebuild_unresolved_targets(self.connection, project)
+            _refresh_project_counts_sql(self.connection, project)
+            _write_metadata(
+                self.connection,
+                {
+                    f"project.{project}.title_aliases": json.dumps(
+                        alias_map,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    f"project.{project}.markdown_manifest": json.dumps(
+                        manifest,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                },
+            )
+
+        page = self._page_by_id(page_id)
+        return {
+            "project": project,
+            "page": page.to_summary() if page is not None else {"id": page_id, "title": title},
+            "source_path": source_path,
+            "aliases": aliases,
+            "graph_role": graph_role,
+            "previous_lines": [],
+            "lines": self._markdown_line_payloads(project, page_id),
+            "previous_line_count": 0,
+            "line_count": len(line_payloads),
             "edge_count": len(edge_rows),
         }
 

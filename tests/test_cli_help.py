@@ -1260,6 +1260,122 @@ class CliHelpTests(unittest.TestCase):
         self.assertFalse(dirty_result["ok"])
         self.assertEqual(dirty_result["changed_files"], ["A.md"])
 
+    def test_write_page_create_writes_page_create_journal_and_projection(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nlink [[New]]\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            create_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    "New",
+                    "--create",
+                    "--path",
+                    "New.md",
+                    "--line",
+                    "# New",
+                    "--line",
+                    "body [[A]]",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            read_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "read",
+                    "New",
+                    "--related-limit",
+                    "0",
+                    "--unresolved-limit",
+                    "0",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            replay_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--project",
+                    "wiki",
+                    "replay-journal",
+                    "--journal",
+                    str(journal_path),
+                    "--output",
+                    str(root),
+                    "--check",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            journal_events = [
+                json.loads(line)
+                for line in journal_path.read_text(encoding="utf-8").splitlines()
+            ]
+            new_text = (root / "New.md").read_text(encoding="utf-8")
+
+        create_result = json.loads(create_completed.stdout)
+        read_result = json.loads(read_completed.stdout)
+        replay_result = json.loads(replay_completed.stdout)
+        self.assertEqual([event["event_type"] for event in journal_events], ["page_create", "page_create"])
+        self.assertEqual(create_result["event_type"], "page_create")
+        self.assertEqual(create_result["source_path"], "New.md")
+        self.assertEqual(create_result["previous_line_count"], 0)
+        self.assertEqual(create_result["line_count"], 2)
+        self.assertEqual(create_result["edge_count"], 1)
+        self.assertEqual(create_result["projection"]["written_files"], ["New.md"])
+        self.assertEqual(new_text, "# New\nbody [[A]]\n")
+        self.assertEqual(read_result["page"]["title"], "New")
+        self.assertEqual(read_result["backlink_count_total"], 1)
+        self.assertTrue(replay_result["ok"])
+
     def test_append_section_and_log_update_store_journal_and_projection(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
