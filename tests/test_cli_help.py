@@ -31,6 +31,8 @@ COMMANDS = [
     "export-ai",
     "export-markdown",
     "import-log-records",
+    "log-records",
+    "history",
     "append-section",
     "append-log",
     "write-page",
@@ -1453,6 +1455,140 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(second_import_result["imported_records"], 0)
         self.assertEqual(second_import_result["skipped_records"], 2)
         self.assertEqual(len(log_events), 2)
+
+    def test_log_records_and_history_query_journal_without_store(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "Alpha.md").write_text("# Alpha\n", encoding="utf-8")
+            (root / "Log.md").write_text(
+                "# Log\n\n"
+                "## [2026-06-26 01:00] implementation | first entry\n"
+                "- touched [[Alpha]]\n\n"
+                "## [2026-06-26 02:00] fix | second entry\n"
+                "- unrelated\n",
+                encoding="utf-8",
+            )
+            store_path = Path(tmpdir) / "store.sqlite"
+            missing_store_path = Path(tmpdir) / "missing.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            newest_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(missing_store_path),
+                    "--project",
+                    "wiki",
+                    "log-records",
+                    "--journal",
+                    str(journal_path),
+                    "--limit",
+                    "1",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            filtered_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(missing_store_path),
+                    "--project",
+                    "wiki",
+                    "log-records",
+                    "--journal",
+                    str(journal_path),
+                    "--query",
+                    "touched [[Alpha]]",
+                    "--source-path",
+                    "Log.md",
+                    "--op",
+                    "implementation",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            history_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(missing_store_path),
+                    "--project",
+                    "wiki",
+                    "history",
+                    "Alpha touched",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            bad_limit_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(missing_store_path),
+                    "--project",
+                    "wiki",
+                    "log-records",
+                    "--journal",
+                    str(journal_path),
+                    "--limit",
+                    "0",
+                ],
+                check=False,
+                text=True,
+                capture_output=True,
+            )
+
+        newest_result = json.loads(newest_completed.stdout)
+        filtered_result = json.loads(filtered_completed.stdout)
+        history_result = json.loads(history_completed.stdout)
+        self.assertEqual(newest_result["total_records"], 2)
+        self.assertEqual(newest_result["returned_records"], 1)
+        self.assertEqual(newest_result["records"][0]["summary"], "second entry")
+        self.assertEqual(filtered_result["matched_records"], 1)
+        self.assertEqual(filtered_result["records"][0]["summary"], "first entry")
+        self.assertEqual(filtered_result["records"][0]["body_text"], "- touched [[Alpha]]")
+        self.assertEqual(history_result["query"], "Alpha touched")
+        self.assertEqual(history_result["matched_records"], 1)
+        self.assertEqual(history_result["records"][0]["op"], "implementation")
+        self.assertNotEqual(bad_limit_completed.returncode, 0)
+        self.assertIn("--limit must be >= 1", bad_limit_completed.stderr)
 
     def test_export_markdown_can_regenerate_index_and_log_projection(self):
         with tempfile.TemporaryDirectory() as tmpdir:

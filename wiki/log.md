@@ -972,3 +972,8 @@
 ## [2026-06-26 17:07] fix+dogfood+file-back | replay tolerates line-id drift
 - `replay-journal` now compares page guard lines by `line_index` + `text`, so projection replay does not fail only because direct Markdown re-import reset line IDs.
 - This surfaced while dogfooding `log_entry_import` on `wiki.grasp/events.jsonl`; full journal replay now stays clean.
+
+## [2026-06-26 17:25] implementation+dogfood+file-back | query log records from journal
+- Added `log-records` to list/filter `log_entry_import` journal records without opening SQLite; filters include query, op, source path, record id, since/until, limit, and offset.
+- Added `history <query>` as the event-stream counterpart to `read <page>`; until subject extraction exists it is text search over heading/body/source fields.
+- Dogfooded against `wiki.grasp/events.jsonl` with `log-records --query line-id drift`.
