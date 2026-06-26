@@ -876,12 +876,13 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "This initial projection preserves stored lines and paths; formatting synthesis comes later.",
             "--check is the no-op gate for adopting an existing Markdown wiki before write dogfood.",
+            "--regenerate-log replays log page events and appends latest record-per-file log_entry_import records.",
         ],
     )
     export_markdown_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder.")
     export_markdown_parser.add_argument("--check", action="store_true", help="Only compare projection output; do not write files.")
     export_markdown_parser.add_argument("--regenerate-index", action="store_true", help="Regenerate the primary navigation index page from the Markdown store catalog.")
-    export_markdown_parser.add_argument("--regenerate-log", action="store_true", help="Regenerate the primary log page by replaying log page events from the journal.")
+    export_markdown_parser.add_argument("--regenerate-log", action="store_true", help="Regenerate the primary log page by replaying log page events and latest record-per-file records from the journal.")
     export_markdown_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path for --regenerate-log. Defaults to <output>.grasp/events.jsonl beside the output folder.")
 
     append_section_parser = add_command_parser(
@@ -1013,7 +1014,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Check whether the Markdown projection is clean for a Markdown-backed project and summarize "
             "the journal used by the alpha write path. When a journal is available, also compare the "
             "primary log page against the journal-regenerated projection so direct Markdown log edits "
-            "can be reported as stale. With --strict, return exit status 1 when any write guard fails."
+            "can be reported as stale. With --strict, return exit status 1 when any write guard fails; "
+            "a clean journal-regenerated log projection satisfies the log-page guard even if stored lines differ."
         ),
         returns=(
             "project, output, journal, journal_exists, journal_event_count, last_event|null, "
@@ -2398,6 +2400,7 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     strict_failures = write_status_strict_failures(
         projection=projection,
         journal_exists=journal.exists(),
+        journal_log_projection=journal_log_projection,
         journal_log_changed_files=journal_log_changed_files,
         journal_log_error=journal_log_error,
     )
@@ -2431,17 +2434,28 @@ def write_status_strict_failures(
     *,
     projection: dict[str, Any],
     journal_exists: bool,
+    journal_log_projection: dict[str, Any] | None,
     journal_log_changed_files: list[str],
     journal_log_error: str | None,
 ) -> list[dict[str, Any]]:
     failures: list[dict[str, Any]] = []
-    if not projection.get("ok"):
+    projection_changed_files = list(projection.get("changed_files") or [])
+    projection_missing_files = list(projection.get("missing_files") or [])
+    projection_extra_files = list(projection.get("extra_files") or [])
+    if journal_log_projection and journal_log_projection.get("ok"):
+        regenerated = set(journal_log_projection.get("regenerated_files") or [])
+        projection_changed_files = [
+            path
+            for path in projection_changed_files
+            if path not in regenerated
+        ]
+    if projection_changed_files or projection_missing_files or projection_extra_files:
         failures.append(
             {
                 "type": "projection_dirty",
-                "changed_files": list(projection.get("changed_files") or []),
-                "missing_files": list(projection.get("missing_files") or []),
-                "extra_files": list(projection.get("extra_files") or []),
+                "changed_files": projection_changed_files,
+                "missing_files": projection_missing_files,
+                "extra_files": projection_extra_files,
             }
         )
     if not journal_exists:
