@@ -952,3 +952,14 @@
 - direct Markdown edit を import して通常 projection が clean になっても、journal に無い log 変更は journal_log_stale=true と changed_files で検出できる。
 - 同じ SQLite store / journal への並列 write は projection を一時的に stale にするため、repo 手順と file-back skill に直列実行の注意を追加した。
 - schema は v7 のまま。public compatibility version は 1.7.23。
+
+## [2026-06-26 16:38] implementation+dogfood+file-back | write-status strict gate を追加
+- write-status に --strict を追加し、projection dirty / journal missing / journal log stale / log regeneration error で exit 1 にするようにした。
+- status output に strict_ok / strict_failures[] を追加し、ship loop と file-back skill は write-status --strict を gate として使うようにした。
+- clean / stale log / non-log projection dirty / missing journal の strict behavior を tests で固定した。
+- schema は v7 のまま。public compatibility version は 1.7.24。
+
+## [2026-06-26 16:42] dogfood+gotcha+file-back | write-page projection は未反映 direct patch を上書きする
+- write-page は target page だけでなく全 Markdown projection を export するため、複数 wiki page を direct patch してから順に write-page すると、まだ store に入っていない別 page の patch が上書きされる。
+- direct patch fallback を journal に戻す時は、1 page patch → write-page --from-file → 次 page の順にする。
+- AGENTS / CLAUDE / repo-local /next / user-level file-back skill にこの直列手順を追加した。

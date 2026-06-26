@@ -1773,6 +1773,7 @@ class CliHelpTests(unittest.TestCase):
                     str(root),
                     "--journal",
                     str(journal_path),
+                    "--strict",
                 ],
                 check=True,
                 text=True,
@@ -1918,6 +1919,8 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(write_result["projection"]["written_files"], ["A.md"])
         self.assertEqual(status_result["journal_event_count"], 4)
         self.assertTrue(status_result["projection"]["ok"])
+        self.assertTrue(status_result["strict_ok"])
+        self.assertEqual(status_result["strict_failures"], [])
         self.assertFalse(status_result["journal_log_stale"])
         self.assertEqual(status_result["journal_log_changed_files"], [])
         self.assertTrue(status_result["journal_log_projection"]["ok"])
@@ -2022,14 +2025,17 @@ class CliHelpTests(unittest.TestCase):
                     str(root),
                     "--journal",
                     str(journal_path),
+                    "--strict",
                 ],
-                check=True,
                 text=True,
                 capture_output=True,
             )
 
         status_result = json.loads(status_completed.stdout)
+        self.assertEqual(status_completed.returncode, 1)
         self.assertTrue(status_result["projection"]["ok"])
+        self.assertFalse(status_result["strict_ok"])
+        self.assertEqual([failure["type"] for failure in status_result["strict_failures"]], ["journal_log_stale"])
         self.assertTrue(status_result["journal_log_stale"])
         self.assertEqual(status_result["journal_log_changed_files"], ["Log.md"])
         self.assertFalse(status_result["journal_log_projection"]["ok"])
@@ -2106,19 +2112,75 @@ class CliHelpTests(unittest.TestCase):
                     str(root),
                     "--journal",
                     str(journal_path),
+                    "--strict",
                 ],
-                check=True,
                 text=True,
                 capture_output=True,
             )
 
         status_result = json.loads(status_completed.stdout)
+        self.assertEqual(status_completed.returncode, 1)
         self.assertFalse(status_result["projection"]["ok"])
         self.assertEqual(status_result["projection"]["changed_files"], ["A.md"])
+        self.assertFalse(status_result["strict_ok"])
+        self.assertEqual([failure["type"] for failure in status_result["strict_failures"]], ["projection_dirty"])
         self.assertFalse(status_result["journal_log_stale"])
         self.assertEqual(status_result["journal_log_changed_files"], [])
         self.assertFalse(status_result["journal_log_projection"]["ok"])
         self.assertEqual(status_result["journal_log_projection"]["changed_files"], ["A.md"])
+
+    def test_write_status_strict_fails_when_journal_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            missing_journal_path = Path(tmpdir) / "wiki.grasp" / "missing.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            status_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(missing_journal_path),
+                    "--strict",
+                ],
+                text=True,
+                capture_output=True,
+            )
+
+        status_result = json.loads(status_completed.stdout)
+        self.assertEqual(status_completed.returncode, 1)
+        self.assertTrue(status_result["projection"]["ok"])
+        self.assertFalse(status_result["journal_exists"])
+        self.assertFalse(status_result["strict_ok"])
+        self.assertEqual([failure["type"] for failure in status_result["strict_failures"]], ["journal_missing"])
 
     def test_rename_page_preserves_old_handle_and_replays(self):
         with tempfile.TemporaryDirectory() as tmpdir:

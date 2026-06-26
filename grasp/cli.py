@@ -911,25 +911,28 @@ def build_parser() -> argparse.ArgumentParser:
             "Check whether the Markdown projection is clean for a Markdown-backed project and summarize "
             "the journal used by the alpha write path. When a journal is available, also compare the "
             "primary log page against the journal-regenerated projection so direct Markdown log edits "
-            "can be reported as stale."
+            "can be reported as stale. With --strict, return exit status 1 when any write guard fails."
         ),
         returns=(
             "project, output, journal, journal_exists, journal_event_count, last_event|null, "
             "projection, journal_log_stale, journal_log_changed_files, "
-            "journal_log_projection|null, journal_log_error|null"
+            "journal_log_projection|null, journal_log_error|null, strict_ok, strict_failures[]"
         ),
         examples=[
             "grasp --project grasp-wiki write-status --output wiki",
+            "grasp --project grasp-wiki write-status --output wiki --journal wiki.grasp/events.jsonl --strict",
             "grasp --project grasp-wiki --json write-status --output wiki --journal wiki.grasp/events.jsonl",
         ],
         notes=[
             "This is an alpha recovery surface for Markdown-backed write dogfood.",
             "projection.ok=false means export-markdown --check would fail.",
             "journal_log_stale=true means the log page no longer matches the replayed journal log projection.",
+            "--strict is intended for ship loops and CI-style gates.",
         ],
     )
     write_status_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to check.")
     write_status_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
+    write_status_parser.add_argument("--strict", action="store_true", help="Exit 1 if projection, journal, or journal-derived log guards are not clean.")
 
     write_diff_parser = add_command_parser(
         subparsers,
@@ -1482,6 +1485,12 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
             journal_log_changed_files = regenerated_projection_dirty_files(journal_log_projection)
         except ValueError as error:
             journal_log_error = str(error)
+    strict_failures = write_status_strict_failures(
+        projection=projection,
+        journal_exists=journal.exists(),
+        journal_log_changed_files=journal_log_changed_files,
+        journal_log_error=journal_log_error,
+    )
     return {
         "project": projection["project"],
         "output": str(args.output),
@@ -1494,7 +1503,45 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
         "journal_log_changed_files": journal_log_changed_files,
         "journal_log_projection": journal_log_projection,
         "journal_log_error": journal_log_error,
+        "strict_ok": not strict_failures,
+        "strict_failures": strict_failures,
     }
+
+
+def write_status_strict_failures(
+    *,
+    projection: dict[str, Any],
+    journal_exists: bool,
+    journal_log_changed_files: list[str],
+    journal_log_error: str | None,
+) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    if not projection.get("ok"):
+        failures.append(
+            {
+                "type": "projection_dirty",
+                "changed_files": list(projection.get("changed_files") or []),
+                "missing_files": list(projection.get("missing_files") or []),
+                "extra_files": list(projection.get("extra_files") or []),
+            }
+        )
+    if not journal_exists:
+        failures.append({"type": "journal_missing"})
+    if journal_log_changed_files:
+        failures.append(
+            {
+                "type": "journal_log_stale",
+                "changed_files": journal_log_changed_files,
+            }
+        )
+    if journal_log_error:
+        failures.append(
+            {
+                "type": "journal_log_error",
+                "message": journal_log_error,
+            }
+        )
+    return failures
 
 
 def regenerated_projection_dirty_files(projection: dict[str, Any]) -> list[str]:
@@ -2061,6 +2108,8 @@ def main(argv: list[str] | None = None) -> int:
             store.close()
     emit_result(args, result)
     if args.command == "export-markdown" and args.check and not result.get("ok"):
+        return 1
+    if args.command == "write-status" and args.strict and not result.get("strict_ok"):
         return 1
     return 0
 
@@ -2931,6 +2980,7 @@ def format_write_status(result: dict[str, Any]) -> str:
         f"changed: {len(projection.get('changed_files') or [])}\n"
         f"missing: {len(projection.get('missing_files') or [])}\n"
         f"extra: {len(projection.get('extra_files') or [])}\n"
+        f"strict_ok: {str(result.get('strict_ok', False)).lower()}\n"
     )
     if journal_log_projection:
         text += (
@@ -2939,6 +2989,10 @@ def format_write_status(result: dict[str, Any]) -> str:
         )
     elif result.get("journal_log_error"):
         text += f"journal_log_error: {result['journal_log_error']}\n"
+    failures = result.get("strict_failures") or []
+    if failures:
+        text += "strict_failures:\n"
+        text += "".join(f"- {failure.get('type', '')}\n" for failure in failures)
     return text
 
 

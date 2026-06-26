@@ -59,7 +59,8 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
-- `1.7.23`（更新: 2026-06-26 16:14、store: schema `7`、compat: schema `7` compatible）: `write-status` に stale-log guard の最小版を追加。通常の Markdown projection check に加え、journal がある場合は primary log page を journal 由来 projection と比較し、direct Markdown edit を `import --markdown` して通常 projection が clean になっていても `journal_log_stale=true` / `journal_log_projection.changed_files=["Log.md"]` として検出できる。status command の exit code はまだ変えない。strict guard exit / record 化 log importer は未実装、schema は不変
+- `1.7.24`（更新: 2026-06-26 16:38、store: schema `7`、compat: schema `7` compatible）: `write-status --strict` を追加。通常 status の JSON/text 出力に `strict_ok` / `strict_failures[]` を追加し、`--strict` 指定時は projection dirty、journal missing、journal log stale、journal log regeneration error のいずれかで exit 1 にする。ship loop や file-back skill は `write-status --strict` を gate として使える。schema は不変
+- `1.7.23`（更新: 2026-06-26 16:14、store: schema `7`、compat: schema `7` compatible）: `write-status` に stale-log guard の最小版を追加。通常の Markdown projection check に加え、journal がある場合は primary log page を journal 由来 projection と比較し、direct Markdown edit を `import --markdown` して通常 projection が clean になっていても `journal_log_stale=true` / `journal_log_changed_files=["Log.md"]` として検出できる。status command の exit code はまだ変えない。strict guard exit / record 化 log importer は未実装、schema は不変
 - `1.7.22`（更新: 2026-06-26 15:54、store: schema `7`、compat: schema `7` compatible）: file-back integration を grasp write first に寄せた。user-level `file-back` skill は `wiki.grasp/events.jsonl` がある grasp-backed LLM Wiki repository では direct Markdown patch より先に `.grasp/file-back.sqlite` + project `grasp-wiki` + `append-section` / `write-page` / `append-log` を試す。repo-local `/next` command と AGENTS/CLAUDE も同じ運用を明記。`wiki.grasp/events.jsonl` を初期 adoption journal として追加し、今後の file-back は journal に追記できる。CLI / store schema は不変
 - `1.7.21`（更新: 2026-06-26 14:58、store: schema `7`、compat: schema `7` compatible）: `export-markdown` に明示 alpha overlay `--regenerate-index` / `--regenerate-log` を追加。`--regenerate-index` は primary navigation `index.md` を store catalog（content/source pages と frontmatter `summary`）から再生成する。`--regenerate-log --journal <events.jsonl>` は primary log page を journal の log page events から再生成する。既定の `export-markdown` は stored lines preserving のまま。temp wiki test で hand-written `index.md` + `Log.md` + content/source pages を adopt し、`append-log` 後に regeneration check が `index.md` 差分を検出、write 後の check が clean になることを確認。record 化 log importer / stale-log guard / 本格 index policy は未実装、schema は不変
 - `1.7.20`（更新: 2026-06-26 14:20、store: schema `7`、compat: schema `7` compatible）: write 系 command の projection export failure rollback を追加。`append-section` / `append-log` / `write-page` / `rename-page` は target event を journal append した後に projection export が失敗した場合、同じ safety check で store を戻し、自動 `event_revert` を append して exit 2 にする。temp wiki test で `A.md` を directory にして `append-section A` の export を失敗させ、journal が `page_create` / `section_append` / `event_revert` になり、store `peek A` と `replay-journal` が original page に戻ることを確認。general revert は未実装、schema は不変
@@ -123,6 +124,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.7.23`
+- Current public compatibility version: `1.7.24`
 - Current internal `SCHEMA_VERSION`: `7`
-- Current package metadata should match `1.7.23`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.7.24`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
