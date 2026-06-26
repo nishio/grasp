@@ -19,6 +19,14 @@ PAGE_CREATE_EXISTING_PATHS = [
     "index.md",
     "log.md",
 ]
+STORED_LINE_IDS_COMMIT = "a07f1afb9af88bce6e47592f01a1425e0765e6c5"
+STORED_LINE_IDS_PATHS = [
+    "entities/grasp-v1-implemented.md",
+    "grasp-backlog.md",
+    "history.md",
+    PLAN_PATH,
+    "log.md",
+]
 SOURCE_DIGEST_POLICY_COMMIT = "3eaab7516378dde8c26e75329fda7edca49558db"
 SOURCE_DIGEST_POLICY_PATHS = [
     "decisions/markdown-identity-name-collision-policy.md",
@@ -62,10 +70,28 @@ EDGE_RESOLUTION_PATHS = [
 ]
 CONTINUOUS_REPLAY_SEQUENCES = [
     {
+        "name": "create-then-update-fast-path-plan",
+        "steps": [
+            {
+                "commit": PAGE_CREATE_COMMIT,
+                "create_pages": [(PLAN_PATH, PLAN_TITLE)],
+                "update_paths": PAGE_CREATE_EXISTING_PATHS,
+            },
+            {
+                "commit": STORED_LINE_IDS_COMMIT,
+                "update_paths": STORED_LINE_IDS_PATHS,
+            },
+        ],
+        "read_handle": "llm-wiki-infra-fast-path-plan",
+        "expected_title": PLAN_TITLE,
+        "assert_path": PLAN_PATH,
+        "assert_text": "authoring dogfood loop",
+    },
+    {
         "name": "source-role",
-        "commits": [
-            (SOURCE_DIGEST_POLICY_COMMIT, SOURCE_DIGEST_POLICY_PATHS),
-            (SOURCE_ROLE_COMMIT, SOURCE_ROLE_PATHS),
+        "steps": [
+            {"commit": SOURCE_DIGEST_POLICY_COMMIT, "update_paths": SOURCE_DIGEST_POLICY_PATHS},
+            {"commit": SOURCE_ROLE_COMMIT, "update_paths": SOURCE_ROLE_PATHS},
         ],
         "read_handle": "grasp-v1-implemented",
         "expected_title": "entity: grasp v1 implemented surface",
@@ -74,9 +100,9 @@ CONTINUOUS_REPLAY_SEQUENCES = [
     },
     {
         "name": "handle-ambiguity",
-        "commits": [
-            (HANDLE_BINDING_COMMIT, HANDLE_BINDING_PATHS),
-            (EDGE_RESOLUTION_COMMIT, EDGE_RESOLUTION_PATHS),
+        "steps": [
+            {"commit": HANDLE_BINDING_COMMIT, "update_paths": HANDLE_BINDING_PATHS},
+            {"commit": EDGE_RESOLUTION_COMMIT, "update_paths": EDGE_RESOLUTION_PATHS},
         ],
         "read_handle": "grasp-v1-implemented",
         "expected_title": "entity: grasp v1 implemented surface",
@@ -108,8 +134,26 @@ def git_show_files(revision: str, paths: list[str]) -> dict[str, str]:
     return {path: git_show_file(revision, path) for path in paths}
 
 
+def replay_step_paths(step: dict) -> list[str]:
+    create_paths = [path for path, _ in step.get("create_pages", [])]
+    return [*create_paths, *step.get("update_paths", [])]
+
+
 def replay_sequence_paths(sequence: dict) -> list[str]:
-    return list(dict.fromkeys(path for _, paths in sequence["commits"] for path in paths))
+    return list(dict.fromkeys(path for step in sequence["steps"] for path in replay_step_paths(step)))
+
+
+def replay_sequence_create_paths(sequence: dict) -> set[str]:
+    return {
+        path
+        for step in sequence["steps"]
+        for path, _ in step.get("create_pages", [])
+    }
+
+
+def replay_sequence_initial_paths(sequence: dict) -> list[str]:
+    create_paths = replay_sequence_create_paths(sequence)
+    return [path for path in replay_sequence_paths(sequence) if path not in create_paths]
 
 
 def write_fixture_files(root: Path, fixture: dict[str, str]) -> None:
@@ -695,18 +739,19 @@ class GitHistoryReplayTests(unittest.TestCase):
             projected_texts["entities/wiki-forest-markdown-import-dogfood-2026-06-25.md"],
         )
 
-    def test_actual_consecutive_wiki_updates_replay_cleanly(self):
+    def test_actual_consecutive_wiki_history_replay_cleanly(self):
         for sequence in CONTINUOUS_REPLAY_SEQUENCES:
             with self.subTest(sequence=sequence["name"]):
-                commits = sequence["commits"]
+                steps = sequence["steps"]
                 sequence_paths = replay_sequence_paths(sequence)
+                initial_paths = replay_sequence_initial_paths(sequence)
                 try:
-                    before_fixture = git_show_files(f"{commits[0][0]}^", sequence_paths)
+                    before_fixture = git_show_files(f"{steps[0]['commit']}^", initial_paths)
                     step_fixtures = [
-                        (commit, paths, git_show_files(commit, paths))
-                        for commit, paths in commits
+                        (step, git_show_files(step["commit"], replay_step_paths(step)))
+                        for step in steps
                     ]
-                    final_fixture = git_show_files(commits[-1][0], sequence_paths)
+                    final_fixture = git_show_files(steps[-1]["commit"], sequence_paths)
                 except (subprocess.CalledProcessError, FileNotFoundError) as exc:
                     raise unittest.SkipTest(f"git history fixture unavailable: {exc}") from exc
 
@@ -728,14 +773,38 @@ class GitHistoryReplayTests(unittest.TestCase):
                         "--journal",
                         journal_path,
                     )
+                    created_source_paths_by_commit = []
                     update_source_paths_by_commit = []
                     replay_results = []
-                    for commit, paths, fixture in step_fixtures:
+                    for step, fixture in step_fixtures:
+                        commit = step["commit"]
                         step_root = Path(tmpdir) / commit[:7]
                         step_root.mkdir()
                         write_fixture_files(step_root, fixture)
+                        commit_created_paths = []
+                        for relative_path, title in step.get("create_pages", []):
+                            result = run_grasp_json(
+                                "--store",
+                                store_path,
+                                "--project",
+                                "wiki",
+                                "write-page",
+                                title,
+                                "--create",
+                                "--path",
+                                relative_path,
+                                "--from-file",
+                                step_root / relative_path,
+                                "--output",
+                                root,
+                                "--journal",
+                                journal_path,
+                            )
+                            self.assertEqual(result["event_type"], "page_create")
+                            commit_created_paths.append(result["source_path"])
+                        created_source_paths_by_commit.append(commit_created_paths)
                         commit_source_paths = []
-                        for relative_path in paths:
+                        for relative_path in step.get("update_paths", []):
                             result = run_grasp_json(
                                 "--store",
                                 store_path,
@@ -801,14 +870,28 @@ class GitHistoryReplayTests(unittest.TestCase):
                     for event in journal_events
                     if event["event_type"] != "log_entry_import"
                 ]
+                expected_projection_event_types = ["page_create"] * len(initial_paths)
+                for step in steps:
+                    expected_projection_event_types.extend(
+                        ["page_create"] * len(step.get("create_pages", []))
+                    )
+                    expected_projection_event_types.extend(
+                        ["page_update"] * len(step.get("update_paths", []))
+                    )
                 self.assertEqual(
                     projection_event_types,
-                    ["page_create"] * len(sequence_paths)
-                    + ["page_update"] * sum(len(paths) for _, paths in commits),
+                    expected_projection_event_types,
+                )
+                self.assertEqual(
+                    created_source_paths_by_commit,
+                    [
+                        [path for path, _ in step.get("create_pages", [])]
+                        for step in steps
+                    ],
                 )
                 self.assertEqual(
                     update_source_paths_by_commit,
-                    [paths for _, paths in commits],
+                    [step.get("update_paths", []) for step in steps],
                 )
                 self.assertTrue(all(result["ok"] for result in replay_results))
                 self.assertEqual(projected_texts, final_fixture)
