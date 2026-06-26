@@ -1456,6 +1456,94 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(second_import_result["skipped_records"], 2)
         self.assertEqual(len(log_events), 2)
 
+    def test_import_log_records_does_not_duplicate_legacy_payloads(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "Alpha.md").write_text("# Alpha\n", encoding="utf-8")
+            (root / "Log.md").write_text(
+                "# Log\n\n"
+                "## [2026-06-26 01:00] implementation | first entry\n"
+                "- touched [[Alpha]]\n",
+                encoding="utf-8",
+            )
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            journal_events = [
+                json.loads(line)
+                for line in journal_path.read_text(encoding="utf-8").splitlines()
+            ]
+            for event in journal_events:
+                if event["event_type"] != "log_entry_import":
+                    continue
+                payload = event["payload"]
+                for key in (
+                    "content_fingerprint",
+                    "record_identity",
+                    "subjects",
+                    "explicit_subjects",
+                    "heuristic_subjects",
+                    "subject_source",
+                    "sources",
+                ):
+                    payload.pop(key, None)
+            journal_path.write_text(
+                "\n".join(
+                    json.dumps(event, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                    for event in journal_events
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            import_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "import-log-records",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            updated_journal_events = [
+                json.loads(line)
+                for line in journal_path.read_text(encoding="utf-8").splitlines()
+            ]
+
+        import_result = json.loads(import_completed.stdout)
+        log_events = [event for event in updated_journal_events if event["event_type"] == "log_entry_import"]
+        self.assertEqual(import_result["imported_records"], 0)
+        self.assertEqual(import_result["skipped_records"], 1)
+        self.assertEqual(len(log_events), 1)
+
     def test_record_per_file_log_entry_uses_explicit_subjects(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
@@ -1562,6 +1650,196 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(history_alpha["matched_records"], 1)
         self.assertEqual(history_alpha["records"][0]["subjects"], ["Alpha", "Beta"])
         self.assertEqual(history_gamma["matched_records"], 0)
+
+    def test_record_per_file_log_entry_update_appends_new_version(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            log_dir = root / "log"
+            log_dir.mkdir(parents=True)
+            (root / "Alpha.md").write_text("# Alpha\n", encoding="utf-8")
+            (root / "Beta.md").write_text("# Beta\n", encoding="utf-8")
+            entry_path = log_dir / "entry.md"
+            entry_path.write_text(
+                "---\n"
+                "type: log-entry\n"
+                "date: 2026-06-26 03:00\n"
+                "op: decision\n"
+                "summary: explicit entry\n"
+                "subjects:\n"
+                "  - Alpha\n"
+                "sources:\n"
+                "  - raw/a.txt\n"
+                "---\n"
+                "# explicit entry\n\n"
+                "- first body\n",
+                encoding="utf-8",
+            )
+            store_path = Path(tmpdir) / "store.sqlite"
+            missing_store_path = Path(tmpdir) / "missing.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            entry_path.write_text(
+                "---\n"
+                "type: log-entry\n"
+                "date: 2026-06-26 03:00\n"
+                "op: decision\n"
+                "summary: explicit entry\n"
+                "subjects:\n"
+                "  - Beta\n"
+                "sources:\n"
+                "  - raw/b.txt\n"
+                "---\n"
+                "# explicit entry\n\n"
+                "- second body\n",
+                encoding="utf-8",
+            )
+            import_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "import-log-records",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            second_import_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "import-log-records",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            history_alpha_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(missing_store_path),
+                    "--project",
+                    "wiki",
+                    "history",
+                    "Alpha",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            history_beta_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(missing_store_path),
+                    "--project",
+                    "wiki",
+                    "history",
+                    "Beta",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            all_versions_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(missing_store_path),
+                    "--project",
+                    "wiki",
+                    "log-records",
+                    "--journal",
+                    str(journal_path),
+                    "--include-superseded",
+                    "--oldest-first",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            journal_events = [
+                json.loads(line)
+                for line in journal_path.read_text(encoding="utf-8").splitlines()
+            ]
+
+        import_result = json.loads(import_completed.stdout)
+        second_import_result = json.loads(second_import_completed.stdout)
+        history_alpha = json.loads(history_alpha_completed.stdout)
+        history_beta = json.loads(history_beta_completed.stdout)
+        all_versions = json.loads(all_versions_completed.stdout)
+        log_events = [event for event in journal_events if event["event_type"] == "log_entry_import"]
+        first_payload = log_events[0]["payload"]
+        second_payload = log_events[1]["payload"]
+        self.assertEqual(import_result["imported_records"], 1)
+        self.assertEqual(import_result["updated_records"], 1)
+        self.assertEqual(import_result["new_records"], 0)
+        self.assertEqual(second_import_result["imported_records"], 0)
+        self.assertEqual(second_import_result["skipped_records"], 1)
+        self.assertEqual(len(log_events), 2)
+        self.assertEqual(first_payload["record_id"], second_payload["record_id"])
+        self.assertNotEqual(first_payload["content_fingerprint"], second_payload["content_fingerprint"])
+        self.assertEqual(history_alpha["matched_records"], 0)
+        self.assertEqual(history_beta["matched_records"], 1)
+        self.assertEqual(history_beta["total_records"], 1)
+        self.assertEqual(history_beta["total_record_events"], 2)
+        self.assertEqual(history_beta["superseded_record_events"], 1)
+        self.assertEqual(history_beta["records"][0]["record_version"], 2)
+        self.assertEqual(history_beta["records"][0]["record_version_count"], 2)
+        self.assertIsNone(history_beta["records"][0]["superseded_by"])
+        self.assertEqual(all_versions["returned_records"], 2)
+        self.assertEqual(all_versions["records"][0]["record_version"], 1)
+        self.assertEqual(all_versions["records"][0]["superseded_by"]["event_id"], log_events[1]["event_id"])
+        self.assertEqual(all_versions["records"][1]["record_version"], 2)
 
     def test_log_records_and_history_query_journal_without_store(self):
         with tempfile.TemporaryDirectory() as tmpdir:

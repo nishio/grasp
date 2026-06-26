@@ -208,7 +208,7 @@ def build_parser() -> argparse.ArgumentParser:
             "This does not rewrite Markdown projection; it only appends missing record events to an existing journal."
         ),
         returns=(
-            "project, folder, journal, log_pages, scanned_records, imported_records, skipped_records, record_ids[]"
+            "project, folder, journal, log_pages, scanned_records, imported_records, updated_records, skipped_records, record_ids[]"
         ),
         examples=[
             "grasp --project grasp-wiki import-log-records wiki --journal wiki.grasp/events.jsonl",
@@ -216,7 +216,8 @@ def build_parser() -> argparse.ArgumentParser:
         ],
         notes=[
             "The journal must already exist, normally from adopt-markdown.",
-            "Records are deduplicated by stable record_id within the selected project.",
+            "Records are deduplicated by stable record_id and content_fingerprint within the selected project.",
+            "If an existing record_id has a new content_fingerprint, a new version event is appended.",
             "type: log-entry files use frontmatter date/timestamp, op, summary, subjects/pages, and sources.",
         ],
     )
@@ -240,7 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "project, journal, total_records, matched_records, returned_records, offset, limit, order, filters, records[]. "
-            "Records include subjects[], later_event_count, later_events[]"
+            "Records include subjects[], content_fingerprint, record_version, superseded_by, later_event_count, later_events[]"
         ),
         examples=[
             "grasp --project grasp-wiki log-records --journal wiki.grasp/events.jsonl --limit 5",
@@ -249,6 +250,7 @@ def build_parser() -> argparse.ArgumentParser:
         ],
         notes=[
             "Default order is newest first by timestamp, then journal order.",
+            "Superseded record versions are hidden by default; use --include-superseded to inspect them.",
             "--query is whitespace-term AND search over heading, summary, op, source_path, subjects, and body lines.",
             "--subject matches extracted log subjects from wikilinks and mentioned Markdown paths.",
         ],
@@ -265,7 +267,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "project, journal, query, total_records, matched_records, returned_records, offset, limit, order, filters, records[]. "
-            "Records include subjects[], later_event_count, later_events[]"
+            "Records include subjects[], content_fingerprint, record_version, superseded_by, later_event_count, later_events[]"
         ),
         examples=[
             "grasp --project grasp-wiki history grasp-v1-implemented --journal wiki.grasp/events.jsonl",
@@ -274,6 +276,7 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "This command deliberately differs from read <page>: read returns current projection; history returns event-stream records.",
             "Matching uses extracted subjects from wikilinks and mentioned Markdown paths, not free text search.",
+            "Superseded record versions are hidden by default; use --include-superseded to inspect them.",
             "Returned records include later events for the same subject so stale transitions are visible.",
         ],
     )
@@ -1239,6 +1242,7 @@ def add_log_record_query_arguments(command_parser: argparse.ArgumentParser, *, i
     command_parser.add_argument("--oldest-first", action="store_true", help="Return oldest matching records first instead of newest first.")
     command_parser.add_argument("--body-lines", type=int, default=3, help="Body lines to show in text output. JSON always returns full body_lines.")
     command_parser.add_argument("--later-limit", type=int, default=5, help="Maximum later same-subject event summaries to attach per returned record. Use 0 to return counts only.")
+    command_parser.add_argument("--include-superseded", action="store_true", help="Include older versions of the same log record_id. Hidden by default.")
 
 
 def default_journal_path(folder: Path) -> Path:
@@ -1329,11 +1333,18 @@ def markdown_log_entry_import_events(records: tuple[Any, ...], *, project: str) 
             make_journal_event(
                 "log_entry_import",
                 project=project,
-                event_id=f"log-entry-{payload['record_id']}",
+                event_id=log_entry_import_event_id(payload),
                 payload=payload,
             )
         )
     return events
+
+
+def log_entry_import_event_id(payload: dict[str, Any]) -> str:
+    fingerprint = str(payload.get("content_fingerprint") or "")
+    if fingerprint:
+        return f"log-entry-{payload['record_id']}-{fingerprint[:12]}"
+    return f"log-entry-{payload['record_id']}"
 
 
 def markdown_log_entry_payloads(records: tuple[Any, ...]) -> list[dict[str, Any]]:
@@ -1380,6 +1391,7 @@ def markdown_log_section_payloads(record: Any, log_lines: list[Any]) -> list[dic
                 heading_line_index=line.index,
                 body=body,
                 record_format="section",
+                record_identity="section_content",
                 explicit_subjects=[],
                 heuristic_subjects=heuristic_subjects,
                 sources=[],
@@ -1411,6 +1423,7 @@ def markdown_log_entry_file_payload(
         heading_line_index=-1,
         body=body,
         record_format="file",
+        record_identity="file_page",
         explicit_subjects=explicit_subjects,
         heuristic_subjects=heuristic_subjects,
         sources=sources,
@@ -1428,6 +1441,7 @@ def build_log_entry_payload(
     heading_line_index: int,
     body: list[Any],
     record_format: str,
+    record_identity: str,
     explicit_subjects: list[str],
     heuristic_subjects: list[str],
     sources: list[str],
@@ -1443,9 +1457,15 @@ def build_log_entry_payload(
             body_text,
         ]
     )
-    record_id = hashlib.sha1(record_key.encode("utf-8")).hexdigest()[:24]
+    content_record_id = hashlib.sha1(record_key.encode("utf-8")).hexdigest()[:24]
+    if record_identity == "file_page":
+        identity_key = "\n".join(["log-file", record.page.id])
+        record_id = hashlib.sha1(identity_key.encode("utf-8")).hexdigest()[:24]
+    else:
+        record_id = content_record_id
     payload = {
         "record_id": record_id,
+        "record_identity": record_identity,
         "record_format": record_format,
         "source_path": record.relative_path.as_posix(),
         "page_id": record.page.id,
@@ -1463,7 +1483,51 @@ def build_log_entry_payload(
         "body_lines": [journal_line_payload(body_line) for body_line in body],
         "body_line_count": len(body),
     }
+    if content_record_id != record_id:
+        payload["legacy_record_id"] = content_record_id
+    payload["content_fingerprint"] = log_entry_content_fingerprint(payload)
     return payload
+
+
+def log_entry_content_fingerprint(payload: dict[str, Any]) -> str:
+    body_lines = [
+        line
+        for line in payload.get("body_lines") or []
+        if isinstance(line, dict)
+    ]
+    body_text = "\n".join(str(line.get("text", "")) for line in body_lines)
+    record_format = str(payload.get("record_format") or "section")
+    record_identity = str(payload.get("record_identity") or ("file_page" if record_format == "file" else "section_content"))
+    subjects = [str(subject) for subject in payload.get("subjects") or []]
+    if not subjects:
+        subjects = log_entry_subjects_from_lines(
+            [
+                {"text": str(payload.get("heading") or "")},
+                *body_lines,
+            ]
+        )
+    explicit_subjects = [str(subject) for subject in payload.get("explicit_subjects") or []]
+    heuristic_subjects = [str(subject) for subject in payload.get("heuristic_subjects") or []]
+    if not explicit_subjects and not heuristic_subjects and subjects:
+        heuristic_subjects = list(subjects)
+    fingerprint_payload = {
+        "record_identity": record_identity,
+        "record_format": record_format,
+        "source_path": str(payload.get("source_path") or ""),
+        "page_id": str(payload.get("page_id") or ""),
+        "timestamp": str(payload.get("timestamp") or ""),
+        "op": str(payload.get("op") or ""),
+        "summary": str(payload.get("summary") or ""),
+        "heading": str(payload.get("heading") or ""),
+        "subjects": subjects,
+        "explicit_subjects": explicit_subjects,
+        "heuristic_subjects": heuristic_subjects,
+        "subject_source": str(payload.get("subject_source") or ("frontmatter" if explicit_subjects else "heuristic")),
+        "sources": [str(source) for source in payload.get("sources") or []],
+        "body_text": body_text,
+    }
+    stable_json = json.dumps(fingerprint_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha1(stable_json.encode("utf-8")).hexdigest()[:24]
 
 
 def is_log_entry_file(frontmatter_values: dict[str, list[tuple[str, int]]]) -> bool:
@@ -1602,17 +1666,14 @@ def run_import_log_records(store: SQLiteStore, args: argparse.Namespace) -> dict
         raise ValueError(f"journal does not exist: {journal}; run adopt-markdown first")
     project = store._require_project()
     events = read_journal_events(journal)
-    existing_record_ids = {
-        str((event.get("payload") or {}).get("record_id") or "")
-        for event in events
-        if event.get("project") == project and event.get("event_type") == "log_entry_import"
-    }
+    existing_records = latest_log_entry_payloads_by_identity_key(events, project=project)
     mirror = MarkdownMirror.from_folder(
         args.folder,
         exclude_dirs=tuple(args.markdown_exclude_dir),
     )
     candidate_events = markdown_log_entry_import_events(mirror.records, project=project)
     imported_record_ids = []
+    updated_record_ids = []
     skipped_record_ids = []
     log_pages = {
         record.relative_path.as_posix()
@@ -1620,13 +1681,22 @@ def run_import_log_records(store: SQLiteStore, args: argparse.Namespace) -> dict
         if record.graph_role == "log"
     }
     for event in candidate_events:
-        record_id = str((event.get("payload") or {}).get("record_id") or "")
-        if record_id in existing_record_ids:
+        payload = event.get("payload") or {}
+        record_id = str(payload.get("record_id") or "")
+        existing_payload = first_existing_log_entry_payload(payload, existing_records)
+        if existing_payload is not None and log_entry_payload_content_fingerprint(existing_payload) == log_entry_payload_content_fingerprint(payload):
             skipped_record_ids.append(record_id)
             continue
+        if existing_payload is not None:
+            superseded_record_id = str(existing_payload.get("record_id") or "")
+            if superseded_record_id and superseded_record_id != record_id:
+                payload["supersedes_record_ids"] = [superseded_record_id]
+            updated_record_ids.append(record_id)
+        else:
+            imported_record_ids.append(record_id)
         append_journal_event(journal, event)
-        existing_record_ids.add(record_id)
-        imported_record_ids.append(record_id)
+        for key in log_entry_payload_identity_keys(payload):
+            existing_records[key] = payload
     return {
         "project": project,
         "folder": str(args.folder),
@@ -1634,11 +1704,56 @@ def run_import_log_records(store: SQLiteStore, args: argparse.Namespace) -> dict
         "log_pages": sorted(log_pages),
         "log_page_count": len(log_pages),
         "scanned_records": len(candidate_events),
-        "imported_records": len(imported_record_ids),
+        "imported_records": len(imported_record_ids) + len(updated_record_ids),
+        "new_records": len(imported_record_ids),
+        "updated_records": len(updated_record_ids),
         "skipped_records": len(skipped_record_ids),
-        "record_ids": imported_record_ids,
+        "record_ids": [*imported_record_ids, *updated_record_ids],
+        "new_record_ids": imported_record_ids,
+        "updated_record_ids": updated_record_ids,
         "skipped_record_ids": skipped_record_ids,
     }
+
+
+def latest_log_entry_payloads_by_identity_key(
+    events: list[dict[str, Any]],
+    *,
+    project: str,
+) -> dict[str, dict[str, Any]]:
+    existing: dict[str, dict[str, Any]] = {}
+    for event in events:
+        if event.get("project") != project or event.get("event_type") != "log_entry_import":
+            continue
+        payload = event.get("payload") or {}
+        for key in log_entry_payload_identity_keys(payload):
+            existing[key] = payload
+    return existing
+
+
+def first_existing_log_entry_payload(
+    payload: dict[str, Any],
+    existing_records: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    for key in log_entry_payload_identity_keys(payload):
+        if key in existing_records:
+            return existing_records[key]
+    return None
+
+
+def log_entry_payload_identity_keys(payload: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    for key in ("record_id", "legacy_record_id"):
+        value = str(payload.get(key) or "")
+        if value:
+            keys.append(value)
+    for value in payload.get("supersedes_record_ids") or []:
+        if value:
+            keys.append(str(value))
+    return list(dict.fromkeys(keys))
+
+
+def log_entry_payload_content_fingerprint(payload: dict[str, Any]) -> str:
+    return str(payload.get("content_fingerprint") or log_entry_content_fingerprint(payload))
 
 
 def run_log_records(args: argparse.Namespace) -> dict[str, Any]:
@@ -1655,8 +1770,14 @@ def run_log_records(args: argparse.Namespace) -> dict[str, Any]:
         if (selected_project is None or event["project"] == selected_project)
         and event["event_type"] == "log_entry_import"
     ]
+    versioned_records = annotate_log_entry_record_versions(records)
+    visible_records = versioned_records if args.include_superseded else [
+        record
+        for record in versioned_records
+        if record.get("superseded_by") is None
+    ]
     ordered_records = sorted(
-        records,
+        visible_records,
         key=lambda record: (record["timestamp"], record["journal_index"]),
         reverse=not args.oldest_first,
     )
@@ -1683,14 +1804,17 @@ def run_log_records(args: argparse.Namespace) -> dict[str, Any]:
     limit_end = args.offset + args.limit
     returned = attach_later_log_events(
         matched[args.offset:limit_end],
-        records,
+        visible_records,
         later_limit=args.later_limit,
     )
     return {
         "project": selected_project,
         "journal": str(args.journal),
         "query": query,
-        "total_records": len(records),
+        "total_records": len(visible_records),
+        "total_record_events": len(versioned_records),
+        "superseded_record_events": sum(1 for record in versioned_records if record.get("superseded_by") is not None),
+        "include_superseded": bool(args.include_superseded),
         "matched_records": len(matched),
         "returned_records": len(returned),
         "offset": args.offset,
@@ -1744,7 +1868,11 @@ def log_entry_record_from_event(event: dict[str, Any], *, journal_index: int) ->
         "event_created_at": event["created_at"],
         "project": event["project"],
         "record_id": str(payload.get("record_id") or ""),
+        "legacy_record_id": str(payload.get("legacy_record_id") or ""),
+        "supersedes_record_ids": [str(record_id) for record_id in payload.get("supersedes_record_ids") or []],
+        "record_identity": str(payload.get("record_identity") or ("file_page" if str(payload.get("record_format") or "section") == "file" else "section_content")),
         "record_format": str(payload.get("record_format") or "section"),
+        "content_fingerprint": log_entry_payload_content_fingerprint(payload),
         "source_path": str(payload.get("source_path") or ""),
         "page_id": str(payload.get("page_id") or ""),
         "timestamp": str(payload.get("timestamp") or ""),
@@ -1760,6 +1888,86 @@ def log_entry_record_from_event(event: dict[str, Any], *, journal_index: int) ->
         "body_lines": body_lines,
         "body_line_count": int(payload.get("body_line_count", len(body_lines))),
         "body_text": body_text,
+    }
+
+
+def annotate_log_entry_record_versions(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not records:
+        return []
+
+    parent: dict[str, str] = {}
+
+    def find(value: str) -> str:
+        parent.setdefault(value, value)
+        if parent[value] != value:
+            parent[value] = find(parent[value])
+        return parent[value]
+
+    def union(left: str, right: str) -> None:
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    for record in records:
+        identity_keys = log_entry_record_identity_keys(record)
+        if not identity_keys:
+            continue
+        first_key = identity_keys[0]
+        for key in identity_keys[1:]:
+            union(first_key, key)
+        find(first_key)
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        identity_keys = log_entry_record_identity_keys(record)
+        group_key = find(identity_keys[0]) if identity_keys else f"journal:{record['journal_index']}"
+        grouped.setdefault(group_key, []).append(record)
+
+    annotated_by_index: dict[int, dict[str, Any]] = {}
+    for group_records in grouped.values():
+        ordered = sorted(group_records, key=lambda record: record["journal_index"])
+        latest = ordered[-1]
+        latest_summary = log_entry_version_summary(latest)
+        for version_index, record in enumerate(ordered, start=1):
+            annotated = dict(record)
+            annotated["record_version"] = version_index
+            annotated["record_version_count"] = len(ordered)
+            annotated["superseded_by"] = None if record is latest else latest_summary
+            if version_index > 1:
+                annotated["supersedes"] = log_entry_version_summary(ordered[version_index - 2])
+            else:
+                annotated["supersedes"] = None
+            annotated_by_index[int(record["journal_index"])] = annotated
+
+    return [
+        annotated_by_index[int(record["journal_index"])]
+        for record in records
+    ]
+
+
+def log_entry_record_identity_keys(record: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    for key in ("record_id", "legacy_record_id"):
+        value = str(record.get(key) or "")
+        if value:
+            keys.append(value)
+    for value in record.get("supersedes_record_ids") or []:
+        if value:
+            keys.append(str(value))
+    return list(dict.fromkeys(keys))
+
+
+def log_entry_version_summary(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "record_id": record["record_id"],
+        "event_id": record["event_id"],
+        "journal_index": record["journal_index"],
+        "timestamp": record["timestamp"],
+        "op": record["op"],
+        "summary": record["summary"],
+        "source_path": record["source_path"],
+        "content_fingerprint": record["content_fingerprint"],
     }
 
 
@@ -1815,6 +2023,8 @@ def log_entry_record_search_text(record: dict[str, Any]) -> str:
     return "\n".join(
         [
             record.get("record_id", ""),
+            record.get("content_fingerprint", ""),
+            record.get("record_identity", ""),
             record.get("source_path", ""),
             record.get("page_id", ""),
             record.get("timestamp", ""),
@@ -1822,6 +2032,7 @@ def log_entry_record_search_text(record: dict[str, Any]) -> str:
             record.get("summary", ""),
             record.get("heading", ""),
             "\n".join(record.get("subjects", [])),
+            "\n".join(record.get("sources", [])),
             record.get("body_text", ""),
         ]
     )
@@ -3660,6 +3871,8 @@ def format_import_log_records(result: dict[str, Any]) -> str:
         f"log_pages: {result['log_page_count']}\n"
         f"scanned_records: {result['scanned_records']}\n"
         f"imported_records: {result['imported_records']}\n"
+        f"new_records: {result.get('new_records', result['imported_records'])}\n"
+        f"updated_records: {result.get('updated_records', 0)}\n"
         f"skipped_records: {result['skipped_records']}\n"
     )
 
@@ -3672,6 +3885,8 @@ def format_log_records(result: dict[str, Any]) -> str:
         f"journal: {result['journal']}\n",
         f"query: {result.get('query') or ''}\n",
         f"total_records: {result['total_records']}\n",
+        f"total_record_events: {result.get('total_record_events', result['total_records'])}\n",
+        f"superseded_record_events: {result.get('superseded_record_events', 0)}\n",
         f"matched_records: {result['matched_records']}\n",
         f"returned_records: {result['returned_records']}\n",
         f"order: {result['order']}\n",
@@ -3683,7 +3898,13 @@ def format_log_records(result: dict[str, Any]) -> str:
         parts.append(f"- [{record['timestamp']}] {record['op']} | {record['summary']}\n")
         parts.append(f"  record_id: {record['record_id']}\n")
         parts.append(f"  event_id: {record['event_id']}\n")
+        parts.append(f"  content_fingerprint: {record.get('content_fingerprint', '')}\n")
         parts.append(f"  record_format: {record.get('record_format', 'section')}\n")
+        if int(record.get("record_version_count", 1)) > 1:
+            parts.append(f"  record_version: {record.get('record_version', 1)}/{record.get('record_version_count', 1)}\n")
+        if record.get("superseded_by"):
+            superseded_by = record["superseded_by"]
+            parts.append(f"  superseded_by: {superseded_by.get('event_id', '')}\n")
         parts.append(f"  source_path: {record['source_path']}:{record['heading_line_index']}\n")
         if record.get("subjects"):
             parts.append(f"  subjects ({record.get('subject_source', 'heuristic')}): {', '.join(record['subjects'])}\n")
