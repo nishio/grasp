@@ -76,6 +76,13 @@ villagepump `複数のprojectを透過的に扱う` に、daiiz が cross-projec
 
 ## Open Questions
 
+- 2026-06-26 の実コード再読:
+  - ScrapBubble 本体は `@cosense/std@0.31/rest` の `getPage` / `getProject` / `listProjects` を使う。`getPage.toRequest(project, title, {followRename: true, projects: [...]})` は `/api/pages/:project/:title?followRename=true&projects=<id>...` を作る。`cacheFirstFetch` は Cache API / Scrapbox cache / network を cache-first に扱い、network fetch は最大3並列、`Date` header + maxAge で短期 freshness を見る。
+  - `convert()` は hosted REST の `page.links` / `projectLinks` / `relatedPages.links1hop` / `links2hop` / `projectLinks1hop` を使い、text parse ではなくサーバ側の解決済み link metadata から bubble 用 graph を作る。`page.links` の各 target に dummy bubble を作り、`links1hop` / `links2hop` から逆リンク相当を埋める。
+  - 公開 API 実測（`https://scrapbox.io/api/pages/takker/takker99%2FScrapBubble?followRename=true`）では REST page は `id` / `commitId` / `persistent` / stable `lines[].id` / `links` / `projectLinks` / `relatedPages` / `linked` / `pageRank` を返す。JSON export では `commitId`、line id、resolved link metadata、related pages が落ちる。
+  - `@helpfeel/cosense-cli` 1.4.4 の `readPage` は `/api/pages/v2/:project/:title` を叩き、`lines[].id` / `commitId` を返すが、現行 `grasp sync` は hosted line id を捨てて `page.id:line-index` を維持する。これは既存方針だが、stable line identity を実装する時は再検討材料。
+  - `/api/deleted-pages/:project/:pageId`、`/api/page-snapshots/:project/:pageId`、`/api/commits/:project/:pageId` は `@cosense/types@0.11` に型がある。公開 project への未ログイン実測では 401。`/api/stream/:project` は公開で recent page bodies を返したが、delete events は観測窓依存。rename/delete 同期の主軸は listPages full manifest + id 比較、補助に authenticated commits/deleted/stream が妥当。
+
 - ScrapBubble の `links2hops` 先回り prefetch（ページ内全リンクの空判定を一度に行う）は、grasp の whole-store `unresolved` 再構築の bulk 化に転用できるか。grasp は per-target 走査だが、ScrapBubble は「ページ内全リンクを一括 2-hop 取得」している。
 - ScrapBubble が「実装したい」と挙げる**リンク同一判定のカスタム化**（`/villagepump/yyyy/MM/dd` ⇄ `yyyy-MM-dd`）は、grasp の赤 node normalize-title 統合（[[whole-store-graph-and-cross-project-edges]] point 7）や正規化 search と**同じ問題**。両者の normalize 規則を揃える価値があるか（日付・表記ゆれ）。
 - ScrapBubble の card 並び替え「Most related + project 順」は、grasp の `related` ranking（whole-store で project 相対 views は比較不能、[[whole-store-graph-and-cross-project-edges]]）と同じ cross-project ranking 問題に当たっている。先行知見を借りられるか。
