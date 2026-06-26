@@ -47,12 +47,13 @@ v1 stable scope 外:
 - license = MIT（`LICENSE` / `pyproject.toml`、2026-06-24 追加）。inajob の「土台にするのでライセンス明記してほしい」要望に対応したもので、persona2 GTM（HN/Reddit, [[positioning-two-personas]]）でも前提になる。
 - `README.md` は「主たるユーザは人間 CLI operator ではなく AI agent」という前提に更新済み。
 - `skills/grasp/SKILL.md` が「いつ使うか」を持ち、CLI mechanics は `grasp <cmd> --help` に寄せる。
+- user-level `file-back` skill は grasp-backed LLM Wiki repository で `wiki.grasp/events.jsonl` がある場合、direct Markdown patch より先に grasp write path を試す。repo-local `/next` command と AGENTS/CLAUDE も、`.grasp/file-back.sqlite`（gitignored store） + project `grasp-wiki` + `wiki.grasp/events.jsonl` + output `wiki` を既定の file-back dogfood path として扱う（`1.7.22`）。
 - `--store` / `--project` は root option として command 前に置く。`--json` / `--full-ids` は agent が末尾へ置くミスを回復するため、command 後にも hidden alias として受ける。
 - text 出力の line-id は既定で実行内ローカル別名（`P1:0` など）に短縮し、先頭付近に `line-id aliases: P1=<page-id>` legend を出す。JSON は stored full `line_id` を返す。現行 Cosense / Markdown import はまだ `page.id:line-index` 由来の line id を mint するが、window metadata は `page.id:line-index` を合成せず stored id を返す。text で完全 ID が必要な時は `--full-ids`。
 
 ## store
 
-- current public compatibility version は `1.7.21`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.7.22`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
