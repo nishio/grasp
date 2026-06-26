@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.7.25`（更新: 2026-06-26 17:10、store: schema `7`、compat: schema `7` compatible）: `log_entry_import` journal event と `import-log-records <folder>` を追加。`adopt-markdown` は Markdown log pages の `## [YYYY-MM-DD HH:MM] op | summary` sections を `source_path + timestamp + op + summary + body_text` 由来の stable `record_id` 付き records に split して journal へ append する。`import-log-records` は既存 journal に missing records だけを追記し、projection は書き換えない。`replay-journal` は `log_entry_import` を projection を変えない record event として適用し、`write-status` は `journal_log_record_count` を返す。さらに `page_update` / `page_rename` / revert の replay guard は `line_index` + `text` 一致を要求しつつ、direct Markdown re-import 由来の line_id drift では止めない。schema は不変
 - `1.7.24`（更新: 2026-06-26 16:38、store: schema `7`、compat: schema `7` compatible）: `write-status --strict` を追加。通常 status の JSON/text 出力に `strict_ok` / `strict_failures[]` を追加し、`--strict` 指定時は projection dirty、journal missing、journal log stale、journal log regeneration error のいずれかで exit 1 にする。ship loop や file-back skill は `write-status --strict` を gate として使える。schema は不変
 - `1.7.23`（更新: 2026-06-26 16:14、store: schema `7`、compat: schema `7` compatible）: `write-status` に stale-log guard の最小版を追加。通常の Markdown projection check に加え、journal がある場合は primary log page を journal 由来 projection と比較し、direct Markdown edit を `import --markdown` して通常 projection が clean になっていても `journal_log_stale=true` / `journal_log_changed_files=["Log.md"]` として検出できる。status command の exit code はまだ変えない。strict guard exit / record 化 log importer は未実装、schema は不変
 - `1.7.22`（更新: 2026-06-26 15:54、store: schema `7`、compat: schema `7` compatible）: file-back integration を grasp write first に寄せた。user-level `file-back` skill は `wiki.grasp/events.jsonl` がある grasp-backed LLM Wiki repository では direct Markdown patch より先に `.grasp/file-back.sqlite` + project `grasp-wiki` + `append-section` / `write-page` / `append-log` を試す。repo-local `/next` command と AGENTS/CLAUDE も同じ運用を明記。`wiki.grasp/events.jsonl` を初期 adoption journal として追加し、今後の file-back は journal に追記できる。CLI / store schema は不変
@@ -124,6 +125,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.7.24`
+- Current public compatibility version: `1.7.25`
 - Current internal `SCHEMA_VERSION`: `7`
-- Current package metadata should match `1.7.24`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.7.25`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
