@@ -1023,6 +1023,79 @@ def _safe_markdown_relative_path(relative_path: str | Path) -> str:
     return path.as_posix()
 
 
+def _markdown_primary_role_path(files: dict[str, Any], graph_role: str, preferred_name: str) -> str | None:
+    candidates = [
+        str(relative_path)
+        for relative_path, item in files.items()
+        if isinstance(item, dict) and str(item.get("graph_role") or "content") == graph_role
+    ]
+    if not candidates:
+        return None
+    preferred = preferred_name.casefold()
+    for relative_path in sorted(candidates):
+        path = Path(relative_path)
+        if len(path.parts) == 1 and path.name.casefold() == preferred:
+            return relative_path
+    for relative_path in sorted(candidates):
+        if Path(relative_path).name.casefold() == preferred:
+            return relative_path
+    return sorted(candidates)[0]
+
+
+def _markdown_index_group(relative_path: str) -> str:
+    path = Path(relative_path)
+    if len(path.parts) <= 1:
+        return "root"
+    return path.parts[0] + "/"
+
+
+def _markdown_table_cell(value: str) -> str:
+    return str(value).replace("|", "\\|").replace("\n", " ").strip()
+
+
+def _markdown_link_path(relative_path: str) -> str:
+    return quote(Path(relative_path).as_posix(), safe="/#.-_")
+
+
+def _markdown_frontmatter_summary(lines: list[str]) -> str:
+    if not lines or lines[0].strip() != "---":
+        return ""
+    in_summary_list = False
+    summary_parts: list[str] = []
+    for line in lines[1:]:
+        stripped = line.strip()
+        if stripped in {"---", "..."}:
+            break
+        if in_summary_list:
+            if stripped.startswith("- "):
+                summary_parts.append(stripped[2:].strip())
+                continue
+            if line.startswith((" ", "\t")):
+                continue
+            in_summary_list = False
+        if ":" not in line:
+            continue
+        key, raw_value = line.split(":", 1)
+        if key.strip().casefold() != "summary":
+            continue
+        value = raw_value.strip().strip('"').strip("'")
+        if value:
+            return value
+        in_summary_list = True
+    return " ".join(part for part in summary_parts if part)
+
+
+def _journal_lines_to_text(lines: Any) -> list[str]:
+    if not isinstance(lines, list):
+        raise ValueError("journal line payload must be a list")
+    texts: list[str] = []
+    for line in lines:
+        if not isinstance(line, dict):
+            raise ValueError("journal line payload entries must be objects")
+        texts.append(str(line.get("text", "")))
+    return texts
+
+
 def _markdown_lines_to_text(lines: list[str]) -> str:
     if not lines:
         return ""
@@ -1978,7 +2051,14 @@ class SQLiteStore:
         ).fetchall()
         return [self._line_from_row(row) for row in rows], offset + len(rows) < page.line_count
 
-    def export_markdown(self, output_folder: str | Path, *, check: bool = False) -> dict[str, Any]:
+    def export_markdown(
+        self,
+        output_folder: str | Path,
+        *,
+        check: bool = False,
+        regenerate_index: bool = False,
+        log_journal_events: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         project = self._require_project()
         output = Path(output_folder)
         manifest = self._markdown_manifest_for_project(project)
@@ -1987,6 +2067,24 @@ class SQLiteStore:
             raise ValueError(f"project is not a Markdown mirror project or has no Markdown manifest: {project}")
 
         projections = self._markdown_projection_files(project, files)
+        regenerated_files: list[str] = []
+        if regenerate_index:
+            index_path = _markdown_primary_role_path(files, "navigation", "index.md")
+            if index_path is None:
+                raise ValueError(f"project has no navigation index page to regenerate: {project}")
+            projections[index_path] = self._markdown_index_projection_text(project, files)
+            regenerated_files.append(index_path)
+        if log_journal_events is not None:
+            log_path = _markdown_primary_role_path(files, "log", "log.md")
+            if log_path is None:
+                raise ValueError(f"project has no log page to regenerate: {project}")
+            projections[log_path] = self._markdown_log_projection_text_from_journal(
+                project,
+                log_path,
+                files,
+                log_journal_events,
+            )
+            regenerated_files.append(log_path)
         changed_files: list[str] = []
         missing_files: list[str] = []
         written_files: list[str] = []
@@ -2022,6 +2120,8 @@ class SQLiteStore:
             "checked_files": len(projections) if check else 0,
             "written_files": written_files,
             "written_count": len(written_files),
+            "regenerated_files": sorted(regenerated_files),
+            "regenerated_count": len(regenerated_files),
             "changed_files": sorted(changed_files),
             "missing_files": sorted(missing_files),
             "extra_files": extra_files,
@@ -2060,6 +2160,115 @@ class SQLiteStore:
                 lines=[row["text"] for row in lines],
             )
         return projections
+
+    def _markdown_index_projection_text(self, project: str, files: dict[str, Any]) -> str:
+        groups: dict[str, list[tuple[str, str, str]]] = {}
+        for relative_path in sorted(str(path) for path in files):
+            item = files.get(relative_path)
+            if not isinstance(item, dict):
+                continue
+            graph_role = str(item.get("graph_role") or "content")
+            if graph_role not in {"content", "source"}:
+                continue
+            page_id = str(item.get("page_id") or "")
+            if not page_id:
+                continue
+            title = str(item.get("title") or Path(relative_path).stem)
+            group = _markdown_index_group(relative_path)
+            summary = self._markdown_page_summary(project, page_id)
+            groups.setdefault(group, []).append((title, relative_path, summary))
+
+        lines = ["# Index", ""]
+        for group in sorted(groups):
+            lines.extend([f"## {group}", "", "| Page | Summary |", "|---|---|"])
+            for title, relative_path, summary in sorted(groups[group], key=lambda row: (normalize_title(row[0]), row[1])):
+                lines.append(
+                    f"| [{_markdown_table_cell(title)}]({_markdown_link_path(relative_path)}) | "
+                    f"{_markdown_table_cell(summary)} |"
+                )
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _markdown_page_summary(self, project: str, page_id: str) -> str:
+        rows = self.connection.execute(
+            """
+            SELECT text
+            FROM lines
+            WHERE project = ? AND page_id = ?
+            ORDER BY line_index
+            """,
+            (project, page_id),
+        ).fetchall()
+        return _markdown_frontmatter_summary([row["text"] for row in rows])
+
+    def _markdown_log_projection_text_from_journal(
+        self,
+        project: str,
+        log_path: str,
+        files: dict[str, Any],
+        events: list[dict[str, Any]],
+    ) -> str:
+        item = files.get(log_path)
+        if not isinstance(item, dict):
+            raise ValueError(f"Markdown manifest has no log page entry: {log_path}")
+        log_page_id = str(item.get("page_id") or "")
+        if not log_page_id:
+            raise ValueError(f"Markdown log page entry is missing page_id: {log_path}")
+
+        lines: list[str] | None = None
+        for event in events:
+            if event.get("project") != project:
+                continue
+            payload = event.get("payload") or {}
+            event_type = event.get("event_type")
+            if event_type == "page_create" and str(payload.get("page_id") or "") == log_page_id:
+                lines = _journal_lines_to_text(payload.get("lines"))
+            elif event_type == "page_update" and str(payload.get("page_id") or "") == log_page_id:
+                if lines is None:
+                    raise ValueError(f"page_update references log page before page_create in event {event.get('event_id')}")
+                lines = _journal_lines_to_text(payload.get("lines"))
+            elif event_type == "page_rename" and str(payload.get("page_id") or "") == log_page_id:
+                if lines is None:
+                    raise ValueError(f"page_rename references log page before page_create in event {event.get('event_id')}")
+                source_path = str(payload.get("source_path") or "")
+                if source_path and _safe_markdown_relative_path(source_path) != log_path:
+                    continue
+                lines = _journal_lines_to_text(payload.get("lines"))
+            elif event_type == "log_append" and str(payload.get("page_id") or "") == log_page_id:
+                if lines is None:
+                    raise ValueError(f"log_append references log page before page_create in event {event.get('event_id')}")
+                lines.extend(_journal_lines_to_text(payload.get("inserted_lines")))
+            elif event_type == "event_revert" and str(payload.get("page_id") or "") == log_page_id:
+                if lines is None:
+                    raise ValueError(f"event_revert references log page before page_create in event {event.get('event_id')}")
+                target_event_type = payload.get("target_event_type")
+                if target_event_type == "log_append":
+                    removed = _journal_lines_to_text(payload.get("removed_lines"))
+                    if not removed or lines[-len(removed):] != removed:
+                        raise ValueError(f"event_revert does not match log page tail in event {event.get('event_id')}")
+                    del lines[-len(removed):]
+                elif target_event_type == "page_update":
+                    current = _journal_lines_to_text(payload.get("current_lines"))
+                    if lines != current:
+                        raise ValueError(f"event_revert current_lines do not match log page in event {event.get('event_id')}")
+                    lines = _journal_lines_to_text(payload.get("previous_lines"))
+                elif target_event_type == "page_rename":
+                    current = _journal_lines_to_text(payload.get("current_lines"))
+                    previous_source_path = str(payload.get("previous_source_path") or "")
+                    if lines != current:
+                        raise ValueError(f"event_revert current_lines do not match log page in event {event.get('event_id')}")
+                    if previous_source_path and _safe_markdown_relative_path(previous_source_path) != log_path:
+                        continue
+                    lines = _journal_lines_to_text(payload.get("previous_lines"))
+        if lines is None:
+            raise ValueError(f"journal does not contain a page_create event for log page: {log_page_id}")
+        return markdown_projection_text(
+            log_path,
+            page_id=log_page_id,
+            title=str(item.get("title") or ""),
+            aliases=[str(alias) for alias in item.get("aliases") or []],
+            lines=lines,
+        )
 
     def markdown_projection_diff(self, output_folder: str | Path, *, context: int = 3) -> dict[str, Any]:
         project = self._require_project()

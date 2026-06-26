@@ -932,3 +932,12 @@
 - これは [[llm-wiki-infra-fast-path-plan]] Phase 4 の recovery boundary。まだ semantic index-log regeneration / 任意 frontmatter merge / general revert は未実装。
 - schema は v7 のまま。public compatibility version は `1.7.20`。
 - 検証: `python3 -m unittest discover -s tests`（88 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
+
+## [2026-06-26 14:58] implementation+dogfood+file back | `export-markdown` に index/log regeneration overlay を追加
+- `export-markdown` に明示 alpha overlay として `--regenerate-index` / `--regenerate-log --journal <events.jsonl>` を追加した。既定 projection は stored lines preserving のまま。
+- `--regenerate-index` は primary navigation `index.md` を store catalog から生成する。対象は content/source pages、summary は frontmatter `summary` を使う。
+- `--regenerate-log` は primary log page を journal の log page events から再生成する。adoption 時の `page_create` を seed にし、`log_append` / log page update / supported `event_revert` を反映する。
+- dogfood: temp wiki で hand-written `index.md` / `Log.md` / `concepts/A.md` / `source/Digest.md` を adopt し、`append-log` 後に `export-markdown --regenerate-index --regenerate-log --check` が `index.md` 差分を検出。write 後の同 check は clean になった。
+- これは [[llm-wiki-infra-fast-path-plan]] Phase 2 の semantic projection 最小 slice。まだ record 化 log importer / stale-log guard / 本格 index policy / 任意 frontmatter merge / general revert は未実装。
+- schema は v7 のまま。public compatibility version は `1.7.21`。
+- 検証: `python3 -m unittest discover -s tests`（89 tests）, `python3 -m compileall -q grasp`, `python3 scripts/lint_wiki.py`, `git diff --check` は通過。
