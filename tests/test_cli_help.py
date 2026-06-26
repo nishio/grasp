@@ -1260,6 +1260,152 @@ class CliHelpTests(unittest.TestCase):
         self.assertFalse(dirty_result["ok"])
         self.assertEqual(dirty_result["changed_files"], ["A.md"])
 
+    def test_export_markdown_can_regenerate_index_and_log_projection(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            (root / "concepts").mkdir(parents=True)
+            (root / "source").mkdir()
+            (root / "index.md").write_text("# Hand index\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            (root / "concepts" / "A.md").write_text(
+                "---\ntype: concept\nsummary: Alpha summary\n---\n# A\n",
+                encoding="utf-8",
+            )
+            (root / "source" / "Digest.md").write_text(
+                "---\ntype: source\nsummary: Source summary\n---\n# Digest\n",
+                encoding="utf-8",
+            )
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-log",
+                    "--timestamp",
+                    "2026-06-26 15:00",
+                    "--op",
+                    "test",
+                    "--summary",
+                    "generated log",
+                    "--line",
+                    "- ok",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            dirty_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--regenerate-index",
+                    "--regenerate-log",
+                    "--journal",
+                    str(journal_path),
+                    "--check",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            write_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--regenerate-index",
+                    "--regenerate-log",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            clean_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--regenerate-index",
+                    "--regenerate-log",
+                    "--journal",
+                    str(journal_path),
+                    "--check",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            index_text = (root / "index.md").read_text(encoding="utf-8")
+            log_text = (root / "Log.md").read_text(encoding="utf-8")
+
+        dirty_result = json.loads(dirty_completed.stdout)
+        write_result = json.loads(write_completed.stdout)
+        clean_result = json.loads(clean_completed.stdout)
+        self.assertEqual(dirty_completed.returncode, 1)
+        self.assertEqual(dirty_result["regenerated_files"], ["Log.md", "index.md"])
+        self.assertEqual(dirty_result["changed_files"], ["index.md"])
+        self.assertEqual(write_result["written_files"], ["index.md"])
+        self.assertEqual(write_result["regenerated_files"], ["Log.md", "index.md"])
+        self.assertTrue(clean_result["ok"])
+        self.assertIn("| [A](concepts/A.md) | Alpha summary |", index_text)
+        self.assertIn("| [Digest](source/Digest.md) | Source summary |", index_text)
+        self.assertEqual(log_text, "# Log\n\n## [2026-06-26 15:00] test | generated log\n- ok\n")
+
     def test_write_page_create_writes_page_create_journal_and_projection(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"

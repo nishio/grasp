@@ -52,7 +52,7 @@ v1 stable scope 外:
 
 ## store
 
-- current public compatibility version は `1.7.20`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.7.21`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
 - `grasp import --cosense <json>` は export JSON の `name` を project namespace として使い、同名 project だけを置き換える。`grasp import --project <name> --cosense <json>` で明示 override できる。
@@ -73,7 +73,7 @@ v1 stable scope 外:
 | `import --cosense <json>` | Cosense JSON export を project namespace に構築・置換。他 project は保持。line は metadata dict と plain string の両方を許容する |
 | `import --markdown <folder>` | Markdown folder を read-only mirror として project namespace に構築・置換。他 project は保持。frontmatter `title` / first H1 / file stem で title を決め、frontmatter `id` / `aliases` / `tags` を読み、`[[wikilink]]` / `#tag` を edge にする。duplicate title / alias は import 全体を止めず ambiguous handle として materialize する。duplicate `id` は hard error。`--markdown-exclude-dir <name>` で heavy raw/generated directory を除外できる |
 | `adopt-markdown <folder>` | 既存 Markdown wiki を SQLite materialized index に import し、各 page を `page_create` event として JSONL journal に記録する。既存 journal は `--replace-journal` なしでは上書きしない。これは native authority への adoption surface であり、write/replay はまだ無い |
-| `export-markdown --output <folder> --check` | Markdown-backed project の stored lines を元 source path へ projection し、filesystem と比較する no-op gate。差分があれば `ok=false` で exit 1。現段階は stored lines preserving projection であり、index/log の semantic regeneration はまだ無い |
+| `export-markdown --output <folder> --check` | Markdown-backed project の stored lines を元 source path へ projection し、filesystem と比較する no-op gate。差分があれば `ok=false` で exit 1。既定は stored lines preserving projection。明示 alpha overlay として `--regenerate-index` は primary navigation `index.md` を store catalog（content/source pages と frontmatter summary）から再生成し、`--regenerate-log --journal <events.jsonl>` は primary log page を journal の log page events から再生成する |
 | `append-section <title>` | Markdown-backed project の unique handle page に `## <heading>` section と body lines を追記する authoring alpha。SQLite `lines` / outgoing `edges` / edge resolution / unresolved / counts を更新し、`section_append` journal event を append し、Markdown projection を export する。ambiguous handle には書かない |
 | `append-log` | Markdown-backed log page（default title `Log`）に `## [timestamp] op | summary` entry と body lines を追記する authoring alpha。SQLite index 更新、`log_append` journal event、Markdown projection export を行う |
 | `write-page <title>` | Markdown-backed project の page を作成/全置換する authoring alpha。既存 page は unique handle に限り、title / aliases / source path / page id を変えず本文行だけを全置換し、`page_update` journal event に before/after lines を記録する。`--create --path <file.md>` では新規 page id / aliases / lines / outgoing edges を materialize し、`page_create` journal event を append する。どちらも SQLite lines / outgoing edges / edge resolution / unresolved / counts を更新し、Markdown projection を export する |

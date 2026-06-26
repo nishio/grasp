@@ -758,15 +758,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Export a Markdown projection from a Markdown-backed project.",
         description=(
             "Project stored Markdown lines back to a folder. With --check, compare projection output to existing files "
-            "without writing and return a non-zero exit status if the projection is not clean."
+            "without writing and return a non-zero exit status if the projection is not clean. "
+            "Regeneration flags are explicit alpha overlays for generated navigation/log artifacts."
         ),
         returns=(
             "project, output, check, ok, file_count, checked_files, written_files, written_count, "
-            "changed_files, missing_files, extra_files"
+            "regenerated_files, changed_files, missing_files, extra_files"
         ),
         examples=[
             "grasp --project grasp-wiki export-markdown --output wiki --check",
             "grasp --project grasp-wiki --json export-markdown --output wiki --check",
+            "grasp --project grasp-wiki export-markdown --output wiki --regenerate-index --regenerate-log --journal wiki.grasp/events.jsonl --check",
             "grasp --project grasp-wiki export-markdown --output wiki",
         ],
         notes=[
@@ -776,6 +778,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export_markdown_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder.")
     export_markdown_parser.add_argument("--check", action="store_true", help="Only compare projection output; do not write files.")
+    export_markdown_parser.add_argument("--regenerate-index", action="store_true", help="Regenerate the primary navigation index page from the Markdown store catalog.")
+    export_markdown_parser.add_argument("--regenerate-log", action="store_true", help="Regenerate the primary log page by replaying log page events from the journal.")
+    export_markdown_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path for --regenerate-log. Defaults to <output>.grasp/events.jsonl beside the output folder.")
 
     append_section_parser = add_command_parser(
         subparsers,
@@ -1185,6 +1190,19 @@ def adopt_markdown_record_payload(record: Any) -> dict[str, Any]:
             for line in record.page.lines
         ],
     }
+
+
+def run_export_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    log_journal_events = None
+    if args.regenerate_log:
+        journal = journal_path_for_output(args.output, args.journal)
+        log_journal_events = read_journal_events(journal)
+    return store.export_markdown(
+        args.output,
+        check=args.check,
+        regenerate_index=args.regenerate_index,
+        log_journal_events=log_journal_events,
+    )
 
 
 def run_append_section(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
@@ -2272,7 +2290,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             result["output"] = str(args.output)
         return result
     if args.command == "export-markdown":
-        return store.export_markdown(args.output, check=args.check)
+        return run_export_markdown(store, args)
     if args.command == "append-section":
         return run_append_section(store, args)
     if args.command == "append-log":
@@ -2802,6 +2820,7 @@ def format_export_markdown(result: dict[str, Any]) -> str:
         f"written: {result['written_count']}\n",
     ]
     for key, label in (
+        ("regenerated_files", "regenerated"),
         ("changed_files", "changed"),
         ("missing_files", "missing"),
         ("extra_files", "extra"),
