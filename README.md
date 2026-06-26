@@ -165,6 +165,7 @@ grasp read "<ページタイトル>"
 | `export-markdown --output <folder> --check` | Markdown-backed project の stored lines を Markdown projection として比較する no-op gate。差分があれば exit 1 |
 | `append-section <title>` | Markdown-backed page に section を追記し、SQLite index / JSONL journal / Markdown projection を更新する alpha write surface |
 | `append-log` | Markdown-backed log page に dated entry を追記し、SQLite index / JSONL journal / Markdown projection を更新する alpha write surface |
+| `write-page <title>` | Markdown-backed page の本文行を全置換し、`page_update` event と projection を更新する alpha write surface |
 | `write-status` | alpha write 用に journal 件数・last event・Markdown projection check を返す |
 | `write-diff` | filesystem 上の Markdown と stored projection の unified diff を返す |
 | `revert-event <event-id>` | tail に残っている `section_append` / `log_append` event だけを取り消し、`event_revert` を journal に記録する |
@@ -201,7 +202,7 @@ grasp read "<ページタイトル>"
 ## Roadmap
 
 - **Markdown / Obsidian 互換性の拡張** — 最小の read-only mirror と content-only 差分 index、first H1 title resolution は実装済み。Obsidian block refs / より細かい alias-aware incremental rebuild などは今後の拡張。
-- **書き込み層（`write` / `rename`）** — append-only alpha（`append-section` / `append-log`）と、その recovery surface（`write-status` / `write-diff` / tail-only `revert-event` / `replay-journal`）は入りましたが、stable identity / rename / 汎用 page update replay / 汎用 revert は未実装です。Scrapbox / Cosenseを使っている人がAIから hosted に書くときはcosense-cliで書くことを想定しています。grasp の write 層は将来的にCosenseユーザでない人 or オンラインのCosenseに書くのではなくローカルに閉じて欲しいケース をサポートする目的です。
+- **書き込み層（`write` / `rename`）** — alpha の `append-section` / `append-log` / `write-page` と、その recovery surface（`write-status` / `write-diff` / `revert-event` / `replay-journal`）は入りましたが、stable identity / rename / source-path 変更 / 汎用 revert は未実装です。Scrapbox / Cosenseを使っている人がAIから hosted に書くときはcosense-cliで書くことを想定しています。grasp の write 層は将来的にCosenseユーザでない人 or オンラインのCosenseに書くのではなくローカルに閉じて欲しいケース をサポートする目的です。
 - **ベクトル検索** — 文字列一致だけでなく、意味の近さで関連を辿る。
 
 スコープ外: リアルタイム多人数編集・同期・共有/権限・Web UI。単一ユーザ＋AI には不要で、これらを削ぎ落とすのが grasp の核です。

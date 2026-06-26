@@ -89,15 +89,15 @@ v1 stable surface は read line。Markdown-backed `append-section` / `append-log
 未実装:
 
 - `write` authority contract: cutover 後は人間 / Codex が Markdown を直接 patch せず、`grasp write` が native store（＋ durable journal）を更新し、`grasp export-markdown` が `wiki/` projection を再生成する。
-- general `write`: page 作成 / 任意更新と edge 自動更新（felt-sense と come-from で別経路）。append-only alpha の `append-section` / `append-log` は実装済み。
+- general `write`: page 作成 / 任意更新と edge 自動更新（felt-sense と come-from で別経路）。append-only alpha の `append-section` / `append-log` と full-page replacement alpha の `write-page` は実装済み。
 - `rename`: stable id を保った rename（Scrapbox の参照書き換え / redirect stub の二択を避ける）。
 - `transclude`: line-id を使った行参照。
 - `export-markdown`: stored lines preserving projection と `--check` no-op gate は実装済み（`1.7.10`）。`append-section` / `append-log` 後の projection export も実装済み（`1.7.11`）。`write-diff` は current filesystem -> stored projection の unified diff を返す（`1.7.12`）。未実装は native events からの semantic projection（page files / index projection / log event stream projection）。
-- status / diff / rollback or revert event: append-only alpha 用の `write-status` / `write-diff` / tail-only `revert-event` は実装済み（`1.7.12`）。未実装は replayable authority 上の general revert / rollback、projection export 失敗時の transaction boundary。
+- status / diff / rollback or revert event: append/log/page_update alpha 用の `write-status` / `write-diff` / `revert-event` は実装済み（`1.7.12`-`1.7.14`）。未実装は replayable authority 上の general revert / rollback、projection export 失敗時の transaction boundary。
 - aliases / page-id policy（page id を「いつ・誰が・どの意味判断で」振るか）。
 - stable line-id policy（下記 stable line identity 参照）。
 - durable journal policy: SQLite が primary で journal が audit log なのか、append-only journal が replayable source of truth で SQLite が materialized index なのかを決める。
-- journal JSONL event type contract は `grasp.journal` で固定済み（`1.7.9`）。`adopt-markdown` は `page_create` events を append する（`1.7.10`）。`append-section` / `append-log` は `section_append` / `log_append` events を append する（`1.7.11`）。`revert-event` は `event_revert` を append する（`1.7.12`）。`replay-journal` は `page_create` / append / revert events から Markdown projection を strict replay する（`1.7.13`）。未実装は `page_update` / `page_rename` replay、failure 時 rollback。
+- journal JSONL event type contract は `grasp.journal` で固定済み（`1.7.9`）。`adopt-markdown` は `page_create` events を append する（`1.7.10`）。`append-section` / `append-log` は `section_append` / `log_append` events を append する（`1.7.11`）。`revert-event` は `event_revert` を append する（`1.7.12`）。`replay-journal` は `page_create` / `page_update` / append / revert events から Markdown projection を strict replay する（`1.7.13`-`1.7.14`）。未実装は `page_rename` replay、failure 時 rollback。
 - **rename を跨ぐ stable page-id**（identity-without-name の consumer 側の本体）: AI は根拠をページ単位で引用するので write/rename で title が動くと過去セッションの引用が腐る。`read --json` が安定 page-id を返すこと自体が consumer 価値。read 出力 field は既済、stable identity 化が未済（[[ai-consumer-feedback-2026-06-23]] Tier 4 / [[why-not-scrapbox-clone]]）。
 
 補足: hosted Cosense に AI から書く用途は [[cosense-cli]] の `previewEdit` / `submitEdit` が担う。grasp の write 層は local-only store / 非 Cosense ユーザ向けの別目的。
