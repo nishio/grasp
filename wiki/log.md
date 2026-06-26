@@ -1,5 +1,11 @@
 # Log
 
+## [2026-06-27 11:20] file back | [[ai-author-feedback-2026-06-26]] §Updates2 — rename-page を sandbox 実走、title==H1 page で alias durability が落ちる dogfood flag
+- 差別化核 rename-page を sandbox（throwaway store/journal、共有不触、実行後 rm -rf）で直接検証。**graph では参照保存が効く**: page_id 保持・旧/新 handle とも解決・backlinks 生存・H1 自動更新。回復 toolkit も実在: `revert-event` で単発 undo を in-tool に完結（前 Updates「回復は git に降りた」は単発 undo には不要だった）、`write-diff`=drift 検出、`replay-journal`=journal-authored page のみ再生成。
+- **だが alpha の穴を repro 特定**: `write-page --create` が `id/title/aliases` frontmatter を注入するのは **title≠H1 の時だけ**。実 wiki page は規約上 title==H1（grep で id/aliases frontmatter 皆無を確認）。∴ 通常 page を rename→`heading_updated` で title==H1 のまま→旧名が projection に残らず、fresh `import --markdown` で `[[旧名]]` が **red 化**・backlink 喪失。対照で title≠H1 page は `aliases:[旧名]` が残り解決。`export-markdown --check` は ok のまま（**silent**、fresh re-import でのみ顕在化＝read 面 absence-hallucination の write 版）。
+- backlog L87 の「1.7.16-17/1.7.36 で direct re-import でも alias 保持」と食い違う → **断定でなく Codex への調査 flag**（境界仮説: harness が test するのは replay-journal path で、本 repro の失敗は import-markdown path / default H1 更新）。自分が前 log で書いた「reconcile は import-markdown」手順が rename 跨ぎで silent に壊す点も訂正、identity authority は journal へ（[[native-authority-markdown-projection]] を強化）。
+- 統合: [[ai-author-feedback-2026-06-26]] §Updates2 追記 + [[grasp-backlog]] rename bullet に flag + index 行に Updates 注記。tree clean 確認済み、自分の hunk のみ commit。
+
 ## [2026-06-27 00:00] file back | [[ai-author-feedback-2026-06-26]] §Updates — 共有 journal を live 実走した並行下 failure mode（sandbox 実走の対）
 - 既存ページ本文は sandbox（隔離 store、共有 journal 不可触）だが、そこが friction 1/5 で引く「並行 session」が私。私は共有 `wiki.grasp/events.jsonl` と本番 `wiki/` に live で write した一次体験を §Updates に追加。
 - sandbox が隔離ゆえ原理的に出せない並行下 failure mode 4点: ①**stale store × export 副作用**で他 session の page が untracked 蘇生（22:54 固定 store の `append-log` export が `value-is-problem-solving-not-novelty.md` を再 materialize）②**write-status は divergence を出すが出所を言わない**（`strict_ok:false` が自分由来か他 writer 由来か in-band 不可分＝trust 信号が並行下で劣化）③**append-log placement gotcha**（newest-first log の末尾寄りに entry、成功だが意味的に誤り）④**回復は grasp でなく git 層**（pathspec commit / `checkout HEAD -- events.jsonl` / amend）。
