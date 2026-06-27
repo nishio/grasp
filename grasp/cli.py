@@ -285,7 +285,8 @@ def build_parser() -> argparse.ArgumentParser:
             "This is the event-stream surface for log records; it does not read current page projection."
         ),
         returns=(
-            "project, store, journal, event_source, result_mode, current_state, current_state_hint|null, staleness_signals[], "
+            "project, store, journal, event_source, result_mode, current_state, current_state_hint|null, "
+            "current_state_target|null, staleness_signals[], "
             "total_records, matched_records, returned_records, offset, limit, order, filters, records[]. "
             "Records include subjects[], content_fingerprint, record_version, superseded_by, later_event_count, later_events[]"
         ),
@@ -314,7 +315,7 @@ def build_parser() -> argparse.ArgumentParser:
             "This is the event-stream counterpart to read <page>."
         ),
         returns=(
-            "project, store, journal, event_source, result_mode, current_state, current_state_hint, query, "
+            "project, store, journal, event_source, result_mode, current_state, current_state_hint, current_state_target, query, "
             "total_records, matched_records, returned_records, offset, limit, order, filters, records[]. "
             "Records include subjects[], content_fingerprint, record_version, superseded_by, later_event_count, later_events[]"
         ),
@@ -1977,6 +1978,91 @@ def log_entry_payload_content_fingerprint(payload: dict[str, Any]) -> str:
     return str(payload.get("content_fingerprint") or log_entry_content_fingerprint(payload))
 
 
+def read_command(args: list[str]) -> str:
+    return shlex.join(args)
+
+
+def history_current_state_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    result = dict(candidate)
+    read_args = ["read", "--page-id", str(candidate["page_id"])]
+    result["read_args"] = read_args
+    result["read_command"] = read_command(read_args)
+    path = candidate.get("path")
+    if path:
+        path_args = ["read", "--path", str(path)]
+        result["path_read_args"] = path_args
+        result["path_read_command"] = read_command(path_args)
+    return result
+
+
+def history_current_state_target(
+    query: str | None,
+    store: SQLiteStore | None,
+    *,
+    command: str,
+) -> dict[str, Any] | None:
+    if command != "history" or not query:
+        return None
+    fallback_args = ["read", query]
+    base: dict[str, Any] = {
+        "query": query,
+        "handle_norm": normalize_title(query),
+    }
+    if store is None:
+        return {
+            **base,
+            "status": "unavailable",
+            "reason": "store_unavailable",
+            "read_args": fallback_args,
+            "read_command": read_command(fallback_args),
+        }
+    try:
+        candidates = store.page_handle_candidates(query)
+    except ValueError as error:
+        return {
+            **base,
+            "status": "unavailable",
+            "reason": str(error),
+            "read_args": fallback_args,
+            "read_command": read_command(fallback_args),
+        }
+    if len(candidates) == 1:
+        candidate = history_current_state_candidate(candidates[0])
+        return {
+            **base,
+            "status": "resolved_unique",
+            "page": candidate,
+            "read_args": candidate["read_args"],
+            "read_command": candidate["read_command"],
+        }
+    if len(candidates) > 1:
+        resolved_candidates = [history_current_state_candidate(candidate) for candidate in candidates]
+        return {
+            **base,
+            "status": "ambiguous",
+            "candidate_count": len(resolved_candidates),
+            "candidates": resolved_candidates,
+            "hint": "choose a candidate with read --page-id or read --path",
+        }
+    return {
+        **base,
+        "status": "unresolved",
+        "read_args": fallback_args,
+        "read_command": read_command(fallback_args),
+    }
+
+
+def history_current_state_hint(target: dict[str, Any] | None) -> str | None:
+    if target is None:
+        return None
+    status = target.get("status")
+    if status in {"resolved_unique", "unresolved", "unavailable"}:
+        return str(target.get("read_command") or "") or None
+    if status == "ambiguous":
+        return "choose from current_state_target.candidates[].read_args"
+    return None
+
+
 def run_log_records(args: argparse.Namespace, store: SQLiteStore | None = None) -> dict[str, Any]:
     events, selected_project, event_source, sqlite_event_count = log_record_source_events(args, store)
     query = getattr(args, "query", None)
@@ -2027,7 +2113,8 @@ def run_log_records(args: argparse.Namespace, store: SQLiteStore | None = None) 
         visible_records,
         later_limit=args.later_limit,
     )
-    current_state_hint = f"read {query}" if args.command == "history" and query else None
+    current_state_target = history_current_state_target(query, store, command=args.command)
+    current_state_hint = history_current_state_hint(current_state_target)
     return {
         "project": selected_project,
         "store": str(store.path) if store is not None else None,
@@ -2036,6 +2123,7 @@ def run_log_records(args: argparse.Namespace, store: SQLiteStore | None = None) 
         "result_mode": "event-stream",
         "current_state": False,
         "current_state_hint": current_state_hint,
+        "current_state_target": current_state_target,
         "staleness_signals": ["superseded_by", "later_events"],
         "sqlite_event_count": sqlite_event_count,
         "query": query,
@@ -6960,6 +7048,7 @@ def format_import_log_records(result: dict[str, Any]) -> str:
 
 def format_log_records(result: dict[str, Any]) -> str:
     body_line_limit = int(result.get("body_lines", 3))
+    current_state_target = result.get("current_state_target")
     parts = [
         "# Log Records\n",
         f"project: {result.get('project') or ''}\n",
@@ -6969,6 +7058,24 @@ def format_log_records(result: dict[str, Any]) -> str:
         f"result_mode: {result.get('result_mode', 'event-stream')}\n",
         f"current_state: {str(result.get('current_state', False)).lower()}\n",
         f"current_state_hint: {result.get('current_state_hint') or ''}\n",
+    ]
+    if current_state_target:
+        parts.append(f"current_state_target: {current_state_target.get('status') or ''}\n")
+        if current_state_target.get("reason"):
+            parts.append(f"current_state_reason: {current_state_target.get('reason')}\n")
+        if current_state_target.get("read_command"):
+            parts.append(f"current_state_read: {current_state_target.get('read_command')}\n")
+        candidates = current_state_target.get("candidates") or []
+        if candidates:
+            parts.append(f"current_state_candidates: {len(candidates)}\n")
+            for candidate in candidates[:5]:
+                path = candidate.get("path")
+                path_text = f" path={path}" if path else ""
+                parts.append(
+                    f"  - {candidate.get('title')} id={candidate.get('page_id')}"
+                    f"{path_text} read={candidate.get('read_command')}\n"
+                )
+    parts.extend([
         f"query: {result.get('query') or ''}\n",
         f"total_records: {result['total_records']}\n",
         f"total_record_events: {result.get('total_record_events', result['total_records'])}\n",
@@ -6976,7 +7083,7 @@ def format_log_records(result: dict[str, Any]) -> str:
         f"matched_records: {result['matched_records']}\n",
         f"returned_records: {result['returned_records']}\n",
         f"order: {result['order']}\n",
-    ]
+    ])
     records = result.get("records") or []
     if records:
         parts.append("records:\n")
