@@ -1285,3 +1285,8 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 - implemented: revert-plan <event-id> --scope same-page-dependents infers anchor + later active same-page reversible rollback candidates without requiring log-batch boundaries.
 - tests: covered a later append blocking a plain revert-event dry-run while same-page-dependents returns a two-event read-only plan.
 - docs: bumped compatibility version to 1.8.27 and narrowed the remaining revert-planning backlog to multi-page histories without log-batch or same-page boundaries.
+
+## [2026-06-27 23:05] implementation | add event-window revert planning
+- implemented: revert-plan <event-id> --scope event-window --before/--after returns a bounded multi-page event_sequence rollback candidate set without log-batch boundaries.
+- tests: covered two page_update events across different pages with no log entry and verified plan output without store/projection mutation.
+- docs: bumped compatibility version to 1.8.28 and narrowed remaining revert planning to semantic multi-page work-unit inference beyond log-batch, same-page, or explicit event-window boundaries.
