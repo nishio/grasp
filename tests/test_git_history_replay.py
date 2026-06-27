@@ -45,6 +45,9 @@ SOURCE_DIGEST_POLICY_PATHS = [
     "index.md",
     "log.md",
 ]
+SOURCE_DIGEST_POLICY_BACKLOG_UPDATE_EVENT_KEY = (
+    f"update:{SOURCE_DIGEST_POLICY_COMMIT}:grasp-backlog.md"
+)
 SOURCE_ROLE_COMMIT = "3605e05005e227cf525255b5cd3b70c3349c71e4"
 SOURCE_ROLE_PATHS = [
     "decisions/markdown-identity-name-collision-policy.md",
@@ -202,6 +205,29 @@ CONTINUOUS_REPLAY_SEQUENCES = [
         "assert_text": "`source/` / `sources/`",
     },
     {
+        "name": "multi-page-update-then-revert-one-page",
+        "steps": [
+            {
+                "commit": SOURCE_DIGEST_POLICY_COMMIT,
+                "update_paths": SOURCE_DIGEST_POLICY_PATHS,
+                "revert_events": [
+                    {
+                        "event_key": SOURCE_DIGEST_POLICY_BACKLOG_UPDATE_EVENT_KEY,
+                        "target_event_type": "page_update",
+                    }
+                ],
+            },
+        ],
+        "read_handle": "grasp-backlog",
+        "expected_title": "grasp backlog",
+        "assert_path": "grasp-backlog.md",
+        "assert_text": "`drafts/` / `source/` artifact 除外",
+        "exact_projection_paths": SOURCE_DIGEST_POLICY_PATHS,
+        "final_path_revisions": {
+            "grasp-backlog.md": f"{SOURCE_DIGEST_POLICY_COMMIT}^",
+        },
+    },
+    {
         "name": "handle-ambiguity",
         "steps": [
             {"commit": HANDLE_BINDING_COMMIT, "update_paths": HANDLE_BINDING_PATHS},
@@ -298,6 +324,18 @@ def write_fixture_files(root: Path, fixture: dict[str, str]) -> None:
         target = root / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
+
+
+def replay_sequence_final_fixture(
+    sequence: dict,
+    final_revision: str,
+    exact_projection_paths: list[str],
+) -> dict[str, str]:
+    path_revisions = sequence.get("final_path_revisions", {})
+    return {
+        path: git_show_file(path_revisions.get(path, final_revision), path)
+        for path in exact_projection_paths
+    }
 
 
 def run_grasp_json(*args: str | Path) -> dict:
@@ -1297,7 +1335,11 @@ class GitHistoryReplayTests(unittest.TestCase):
                     ]
                     exact_projection_paths = sequence.get("exact_projection_paths", sequence_paths)
                     final_revision = sequence.get("final_revision", steps[-1]["commit"])
-                    final_fixture = git_show_files(final_revision, exact_projection_paths)
+                    final_fixture = replay_sequence_final_fixture(
+                        sequence,
+                        final_revision,
+                        exact_projection_paths,
+                    )
                 except (subprocess.CalledProcessError, FileNotFoundError) as exc:
                     raise unittest.SkipTest(f"git history fixture unavailable: {exc}") from exc
 
