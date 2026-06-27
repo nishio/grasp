@@ -51,6 +51,8 @@ grasp/
 
 `wiki.grasp/events.jsonl` がある場合、file back は **grasp write first**。`events.jsonl` は transition 中の互換/audit journal で、通常編集の authority は SQLite store 側に置く。まず `git fetch origin main` 後に `python3 scripts/check_file_back_preflight.py` を走らせ、remote 分岐なし / wiki・journal dirty なし / `write-status --strict` / SQLite authority projection を確認してから、`append-section` / `write-page` / `append-log` を `--journal wiki.grasp/events.jsonl --output wiki` 付きで使う。write 後に `python3 scripts/check_file_back_postwrite.py` が通らない時、または任意 frontmatter merge / canonical docs など grasp alpha が表現できない時だけ direct Markdown patch に fallback し、理由を log に残す。
 
+`--no-journal` cutover を検証する時は、同じ checker を `python3 scripts/check_file_back_preflight.py --no-journal` / `python3 scripts/check_file_back_postwrite.py --no-journal` で使う。この mode は `write-status --no-journal --strict` を呼び、dirty path default も `wiki` のみにする。repo の通常 file-back は明示 cutover まで上記の compatibility journal あり path を使う。
+
 同じ SQLite store / `wiki.grasp/events.jsonl` に対する write 系 command は **直列実行**する。並列に `write-page` などを投げると compatibility journal append と store update の順序が interleave し、projection が一時的に stale になる。起きた場合は対象 page を直列で再 `write-page --from-file` し、`python3 scripts/check_file_back_postwrite.py` / `replay-journal --check` で clean に戻す。
 
 複数 wiki page を direct patch fallback してから `write-page` で journal に戻す場合も、**1 page patch → 直列 `write-page --from-file` → 次 page** の順にする。`write-page` は全 Markdown projection を export するため、まだ store に入っていない別 page の direct patch は projection に上書きされる。

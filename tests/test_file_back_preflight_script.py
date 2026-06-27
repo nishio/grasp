@@ -63,6 +63,52 @@ class FileBackPreflightScriptTests(unittest.TestCase):
         self.assertIn("event_streams_match", "\n".join(errors))
         self.assertIn("journal_log_stale", "\n".join(errors))
 
+    def test_write_status_errors_no_journal_ignores_journal_guards(self):
+        errors = preflight.write_status_errors(
+            {
+                "strict_ok": True,
+                "projection": {"ok": True},
+                "journal_exists": False,
+                "event_streams_match": False,
+                "journal_log_stale": True,
+            },
+            require_journal=False,
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_write_status_command_selects_journal_or_no_journal_mode(self):
+        journal_command = preflight.write_status_command(
+            store=".grasp/file-back.sqlite",
+            project="grasp-wiki",
+            journal="wiki.grasp/events.jsonl",
+            output="wiki",
+            require_journal=True,
+        )
+        no_journal_command = preflight.write_status_command(
+            store=".grasp/file-back.sqlite",
+            project="grasp-wiki",
+            journal=None,
+            output="wiki",
+            require_journal=False,
+        )
+
+        self.assertIn("--journal", journal_command)
+        self.assertIn("wiki.grasp/events.jsonl", journal_command)
+        self.assertNotIn("--no-journal", journal_command)
+        self.assertIn("--no-journal", no_journal_command)
+        self.assertNotIn("--journal", no_journal_command)
+
+    def test_write_status_command_requires_journal_path_in_journal_mode(self):
+        with self.assertRaisesRegex(ValueError, "journal path is required"):
+            preflight.write_status_command(
+                store=".grasp/file-back.sqlite",
+                project="grasp-wiki",
+                journal=None,
+                output="wiki",
+                require_journal=True,
+            )
+
     def test_parse_json_output_rejects_non_object(self):
         value, error = preflight.parse_json_output("[]", "command")
 
@@ -108,6 +154,68 @@ class FileBackPreflightScriptTests(unittest.TestCase):
         self.assertNotIn(None, errors)
         self.assertIn("strict_ok", "\n".join(errors))
         self.assertIn("event_streams_match", "\n".join(errors))
+
+    def test_run_grasp_preflight_no_journal_uses_no_journal_write_status(self):
+        original_run_command = preflight.run_command
+        seen_write_status_args = None
+
+        def fake_run_command(args, *, cwd):
+            nonlocal seen_write_status_args
+            if "import" in args:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if "write-status" in args:
+                seen_write_status_args = args
+                return subprocess.CompletedProcess(
+                    args,
+                    0,
+                    json.dumps(
+                        {
+                            "strict_ok": True,
+                            "projection": {"ok": True},
+                            "journal_exists": False,
+                            "event_streams_match": False,
+                            "journal_log_stale": True,
+                        }
+                    ),
+                    "",
+                )
+            if "export-markdown" in args:
+                return subprocess.CompletedProcess(
+                    args,
+                    0,
+                    json.dumps(
+                        {
+                            "ok": True,
+                            "projection_policy": {
+                                "authority": "sqlite",
+                                "base": "stored_markdown_lines",
+                                "output_role": "git_tracked_projection",
+                                "write_mode": "check",
+                                "generated_overlays": [],
+                            },
+                        }
+                    ),
+                    "",
+                )
+            self.fail(f"unexpected command: {args}")
+
+        try:
+            preflight.run_command = fake_run_command
+            errors = preflight.run_grasp_preflight(
+                Path("."),
+                store=".grasp/file-back.sqlite",
+                project="grasp-wiki",
+                journal=None,
+                output="wiki",
+                require_journal=False,
+            )
+        finally:
+            preflight.run_command = original_run_command
+
+        self.assertEqual(errors, [])
+        self.assertIsNotNone(seen_write_status_args)
+        self.assertIn("--no-journal", seen_write_status_args)
+        self.assertNotIn("--journal", seen_write_status_args)
 
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ def clean_projection():
 
 
 class FileBackPostwriteScriptTests(unittest.TestCase):
-    def run_with_fake_commands(self, fake_run_command):
+    def run_with_fake_commands(self, fake_run_command, *, require_journal=True):
         original_run_command = postwrite.run_command
         try:
             postwrite.run_command = fake_run_command
@@ -38,8 +38,9 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
                 Path("."),
                 store=".grasp/file-back.sqlite",
                 project="grasp-wiki",
-                journal="wiki.grasp/events.jsonl",
+                journal="wiki.grasp/events.jsonl" if require_journal else None,
                 output="wiki",
+                require_journal=require_journal,
                 lint=True,
                 diff_check=True,
             )
@@ -57,6 +58,31 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
             self.fail(f"unexpected command: {args}")
 
         self.assertEqual(self.run_with_fake_commands(fake_run_command), [])
+
+    def test_postwrite_no_journal_uses_no_journal_status_and_skips_journal_guards(self):
+        seen_write_status_args = None
+
+        def fake_run_command(args, *, cwd):
+            nonlocal seen_write_status_args
+            if "write-status" in args:
+                seen_write_status_args = args
+                payload = clean_write_status()
+                payload["journal_exists"] = False
+                payload["event_streams_match"] = False
+                payload["journal_log_stale"] = True
+                return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+            if "export-markdown" in args:
+                return subprocess.CompletedProcess(args, 0, json.dumps(clean_projection()), "")
+            if args[-1] in {"scripts/lint_wiki.py", "--check"}:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            self.fail(f"unexpected command: {args}")
+
+        errors = self.run_with_fake_commands(fake_run_command, require_journal=False)
+
+        self.assertEqual(errors, [])
+        self.assertIsNotNone(seen_write_status_args)
+        self.assertIn("--no-journal", seen_write_status_args)
+        self.assertNotIn("--journal", seen_write_status_args)
 
     def test_postwrite_rejects_dirty_projection_policy(self):
         def fake_run_command(args, *, cwd):

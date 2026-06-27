@@ -128,6 +128,7 @@ Alpha:
 - SQLite store を authority とする `export-markdown --check` の projection freshness gate
 - `write-status` / `revert-event` / `replay-journal` による recovery surface
 - write/status は移行用の compatibility JSONL journal を使えるほか、`--no-journal` で SQLite events + Markdown projection だけの path も検証できる
+- repo-local file-back guard scripts は journal あり mode と `--no-journal` mode の両方を検査できる
 
 スコープ外:
 
