@@ -1375,3 +1375,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: `scripts/check_file_back_preflight.py` / `scripts/check_file_back_write_start.py` / `scripts/check_file_back_postwrite.py` が repo default store/output pair（`.grasp/file-back.sqlite` + `wiki`）と temp store + temp output の混在を failure にするようにした。
 - docs/tests: preflight/write-start/postwrite unit tests、runbook checker、AGENTS/CLAUDE、`/next`、`/ship-next`、repo skill、README、history、current facts、backlog、write plan を store/output pair guard に更新した。
 - rationale: temp dogfood を real store + temp output で走らせると、temp log event が real SQLite events に残り、SQLite events 由来 semantic log projection を stale にする。public compatibility version は `1.8.45`、schema は v8 のまま。
+
+## [2026-06-28 04:41] implementation+file back | package version metadata drift guard を追加
+- code: `grasp.__version__` と `pyproject.toml` の `[project] version` を `1.8.46` に揃え、`tests/test_version_metadata.py` が一致を検査するようにした。
+- finding: `1.8.45` 時点で package metadata は進んでいたが `grasp.__version__` は `1.8.42` のままで、runtime から見る version と release ledger がずれていた。
+- docs: [[history]] の current state と [[grasp-v1-implemented]] の current facts を更新した。public compatibility version は `1.8.46`、schema は v8 のまま。
