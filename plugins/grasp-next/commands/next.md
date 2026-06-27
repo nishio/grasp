@@ -47,14 +47,14 @@ file back は grasp write first で行う。まず gitignored store を更新す
 
 ```bash
 git fetch origin main
-$PYTHON_BIN scripts/check_file_back_preflight.py --no-journal
+$PYTHON_BIN scripts/check_file_back_preflight.py
 ```
 
-この preflight は `.grasp/file-back.sqlite` を import/update し、remote 分岐なし、wiki dirty なし、`write-status --no-journal --strict`、projection policy check を確認する。`wiki.grasp/events.jsonl` は transition 中の互換/audit artifact で、通常編集の active path からは外す。その後、表現できる変更は `append-section` / `write-page` / `append-log` を `--output wiki --no-journal` 付きで使う。任意 frontmatter merge、canonical docs、曖昧 handle、混在 hunk など grasp alpha が安全に扱えない場合だけ direct Markdown patch に fallback し、理由を `wiki/log.md` に残す。
+この preflight は no-journal default で `.grasp/file-back.sqlite` を import/update し、remote 分岐なし、wiki dirty なし、`write-status --no-journal --strict`、projection policy check を確認する。`wiki.grasp/events.jsonl` は transition 中の互換/audit artifact で、通常編集の active path からは外す。その後、表現できる変更は `append-section` / `write-page` / `append-log` を `--output wiki --no-journal` 付きで使う。任意 frontmatter merge、canonical docs、曖昧 handle、混在 hunk など grasp alpha が安全に扱えない場合だけ direct Markdown patch に fallback し、理由を `wiki/log.md` に残す。
 
-互換/audit journal も明示的に更新する必要がある時だけ、`scripts/check_file_back_preflight.py` / `scripts/check_file_back_postwrite.py` と `--journal wiki.grasp/events.jsonl` 付き write commands を使う。
+互換/audit journal も明示的に更新する必要がある時だけ、`scripts/check_file_back_preflight.py --with-journal` / `scripts/check_file_back_postwrite.py --with-journal` と `--journal wiki.grasp/events.jsonl --output wiki` 付き write commands を使う。
 
-同じ `.grasp/file-back.sqlite` への write 系 command は直列に実行する。並列 write で projection が stale になったら、対象 page を直列で `write-page --from-file --no-journal` し直してから `scripts/check_file_back_postwrite.py --no-journal` を通す。
+同じ `.grasp/file-back.sqlite` への write 系 command は直列に実行する。並列 write で projection が stale になったら、対象 page を直列で `write-page --from-file --no-journal` し直してから `scripts/check_file_back_postwrite.py` を通す。
 
 複数 wiki page を direct patch fallback してから store に戻す場合も、1 page patch → `write-page --from-file --no-journal` → 次 page の順で行う。`write-page` の projection export は全 page を書くため、未反映の direct patch は上書きされる。
 
@@ -76,7 +76,7 @@ python3 scripts/check_file_back_runbook.py
 git diff --check
 ```
 
-変更内容に関係する時は、小さな dogfood command を 1 つ走らせる。file-back / projection 周りを触った時は、`scripts/check_file_back_postwrite.py --no-journal` を必須にし、重要な観測があれば file back する。
+変更内容に関係する時は、小さな dogfood command を 1 つ走らせる。file-back / projection 周りを触った時は、`scripts/check_file_back_postwrite.py`（no-journal default）を必須にし、重要な観測があれば file back する。
 
 ### 4. Commit And Push
 
@@ -96,7 +96,7 @@ git diff --check
 - wiki lint が通っている。
 - file-back runbook checker が通っている。
 - `git diff --check` が通っている。
-- file-back / projection 周りを触った時は `scripts/check_file_back_postwrite.py --no-journal` が通っている。
+- file-back / projection 周りを触った時は `scripts/check_file_back_postwrite.py`（no-journal default）が通っている。
 - commit と push が成功している、または clean tree のため commit 不要と判断している。
 - 失敗時は commit/push していない。
 

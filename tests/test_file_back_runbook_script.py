@@ -40,6 +40,17 @@ class FileBackRunbookScriptTests(unittest.TestCase):
     def test_default_runbook_rules_match_current_repo_docs(self):
         self.assertEqual(runbook.check_runbooks(Path(".")), [])
 
+    def test_default_rules_reject_stale_guard_flag_spelling(self):
+        stale_text = """
+python3 scripts/check_file_back_preflight.py --no-journal
+python3 scripts/check_file_back_postwrite.py --no-journal
+"""
+
+        errors = runbook.check_text(stale_text, runbook.DEFAULT_RULES[0])
+
+        self.assertTrue(any("check_file_back_preflight.py --no-journal" in error for error in errors))
+        self.assertTrue(any("check_file_back_postwrite.py --no-journal" in error for error in errors))
+
 
 if __name__ == "__main__":
     unittest.main()
