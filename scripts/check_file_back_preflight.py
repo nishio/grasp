@@ -31,6 +31,8 @@ DEFAULT_DIRTY_PATHS = ("wiki", "wiki.grasp/events.jsonl")
 DEFAULT_NO_JOURNAL_DIRTY_PATHS = ("wiki", "wiki.grasp/events.jsonl")
 DEFAULT_BASE = "auto"
 FALLBACK_BASE = "origin/main"
+DEFAULT_FILE_BACK_STORE = ".grasp/file-back.sqlite"
+DEFAULT_FILE_BACK_OUTPUT = "wiki"
 DEFAULT_PREFLIGHT_STAMP = ".grasp/file-back-preflight.json"
 PREFLIGHT_STAMP_KIND = "grasp_file_back_preflight"
 PREFLIGHT_STAMP_SCHEMA_VERSION = 1
@@ -80,6 +82,33 @@ def resolve_repo_path(repo: Path, path: str) -> Path:
     if resolved.is_absolute():
         return resolved
     return repo / resolved
+
+
+def resolved_repo_path(repo: Path, path: str) -> Path:
+    return resolve_repo_path(repo, path).resolve(strict=False)
+
+
+def file_back_store_output_pair_errors(
+    repo: Path,
+    *,
+    store: str,
+    output: str,
+) -> list[str]:
+    default_store = resolved_repo_path(repo, DEFAULT_FILE_BACK_STORE)
+    default_output = resolved_repo_path(repo, DEFAULT_FILE_BACK_OUTPUT)
+    store_path = resolved_repo_path(repo, store)
+    output_path = resolved_repo_path(repo, output)
+    store_is_default = store_path == default_store
+    output_is_default = output_path == default_output
+    if store_is_default == output_is_default:
+        return []
+    return [
+        "mixed file-back store/output pair: "
+        f"store={store!r} resolves_to={store_path}, output={output!r} resolves_to={output_path}. "
+        f"Use the repo dogfood pair store={DEFAULT_FILE_BACK_STORE!r} with output={DEFAULT_FILE_BACK_OUTPUT!r}, "
+        "or use a temporary store together with a temporary output. "
+        "Do not run a temporary output against the repo file-back store."
+    ]
 
 
 def git_ref_oid(repo: Path, ref: str) -> tuple[str | None, str | None]:
@@ -290,6 +319,9 @@ def run_grasp_preflight(
     skip_session_uniqueness_check: bool = False,
 ) -> list[str]:
     errors: list[str] = []
+    errors.extend(file_back_store_output_pair_errors(repo, store=store, output=output))
+    if errors:
+        return errors
 
     import_result = run_command(
         [sys.executable, "-m", "grasp", "--store", store, "import", "--markdown", output, "--project", project],
@@ -373,7 +405,7 @@ def main() -> int:
         help="Fetched git base to compare with HEAD. 'auto' prefers the current upstream branch, then origin/main.",
     )
     parser.add_argument("--skip-base-check", action="store_true", help="Skip the base divergence check.")
-    parser.add_argument("--store", default=".grasp/file-back.sqlite")
+    parser.add_argument("--store", default=DEFAULT_FILE_BACK_STORE)
     parser.add_argument("--project", default="grasp-wiki")
     parser.add_argument("--journal", default="wiki.grasp/events.jsonl")
     parser.add_argument("--session-id", default=os.environ.get("GRASP_SESSION_ID", ""), help="Unique session/work-unit id expected for the upcoming file-back. Defaults to $GRASP_SESSION_ID.")
@@ -402,7 +434,7 @@ def main() -> int:
         action="store_true",
         help="Require the compatibility JSONL journal and run journal consistency guards.",
     )
-    parser.add_argument("--output", default="wiki")
+    parser.add_argument("--output", default=DEFAULT_FILE_BACK_OUTPUT)
     parser.add_argument(
         "--dirty-path",
         action="append",

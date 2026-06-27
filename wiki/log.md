@@ -1367,3 +1367,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: `scripts/check_file_back_write_start.py` を追加し、preflight 後・最初の write command 直前に preflight stamp / git dirty paths / `write-status --no-journal --strict` / SQLite authority projection / semantic log projection を import なしで検査するようにした。
 - docs/tests: unit tests、runbook checker、AGENTS/CLAUDE、`/next`、`/ship-next`、repo skill、README、history、current facts、backlog、write plan を write-start guard に更新した。
 - rationale: preflight 再実行は Markdown を store に取り込むため、preflight 後の projection 変化を隠しうる。write-start は stale store export/clobber gap を write 直前に止める運用 guard。public compatibility version は `1.8.44`、schema は v8 のまま。
+
+## [2026-06-28 04:25] implementation+file back | file-back store/output pair guard を追加
+- code: `scripts/check_file_back_preflight.py` / `scripts/check_file_back_write_start.py` / `scripts/check_file_back_postwrite.py` が repo default store/output pair（`.grasp/file-back.sqlite` + `wiki`）と temp store + temp output の混在を failure にするようにした。
+- docs/tests: preflight/write-start/postwrite unit tests、runbook checker、AGENTS/CLAUDE、`/next`、`/ship-next`、repo skill、README、history、current facts、backlog、write plan を store/output pair guard に更新した。
+- rationale: temp dogfood を real store + temp output で走らせると、temp log event が real SQLite events に残り、SQLite events 由来 semantic log projection を stale にする。public compatibility version は `1.8.45`、schema は v8 のまま。

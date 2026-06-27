@@ -5,6 +5,42 @@ from scripts import check_file_back_write_start as write_start
 
 
 class FileBackWriteStartScriptTests(unittest.TestCase):
+    def test_write_start_rejects_mixed_store_output_before_other_guards(self):
+        original_stamp = write_start.run_preflight_stamp_check
+        original_dirty = write_start.check_dirty_paths
+        original_status = write_start.run_write_status
+        original_projection = write_start.run_projection_check
+        original_semantic = write_start.run_semantic_log_projection_check
+
+        def unexpected(*args, **kwargs):
+            self.fail("pair guard should run before other checks")
+
+        try:
+            write_start.run_preflight_stamp_check = unexpected
+            write_start.check_dirty_paths = unexpected
+            write_start.run_write_status = unexpected
+            write_start.run_projection_check = unexpected
+            write_start.run_semantic_log_projection_check = unexpected
+            errors = write_start.run_write_start_checks(
+                Path("/repo"),
+                store=".grasp/file-back.sqlite",
+                project="grasp-wiki",
+                journal=None,
+                output="/tmp/wiki",
+                require_journal=False,
+                dirty_paths=("wiki",),
+                expected_session_id="file-back-session",
+            )
+        finally:
+            write_start.run_preflight_stamp_check = original_stamp
+            write_start.check_dirty_paths = original_dirty
+            write_start.run_write_status = original_status
+            write_start.run_projection_check = original_projection
+            write_start.run_semantic_log_projection_check = original_semantic
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("mixed file-back store/output pair", errors[0])
+
     def test_write_start_runs_stamp_dirty_status_projection_and_semantic_checks(self):
         calls = []
         original_stamp = write_start.run_preflight_stamp_check
