@@ -1141,3 +1141,7 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 ## [2026-06-27 16:40] implementation | remove unclear write-diff command
 - Removed the `write-diff` command and its store helper instead of redefining it under SQLite SSoT.
 - Projection drift checks remain through `export-markdown --check` / `write-status --strict`; a future diff command should use a purpose-specific name.
+
+## [2026-06-27 16:50] implementation | write projection failure rollback to SQLite events
+- Projection export failure rollback now reverts store state and inserts SQLite `event_revert` in the same write transaction.
+- The existing failed export regression now asserts the SQLite event stream matches the legacy journal sequence.

@@ -2851,6 +2851,17 @@ class CliHelpTests(unittest.TestCase):
                 json.loads(line)
                 for line in journal_path.read_text(encoding="utf-8").splitlines()
             ]
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_id, event_type, project, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
             replay_text = (replay_root / "A.md").read_text(encoding="utf-8")
 
         peek_result = json.loads(peek_completed.stdout)
@@ -2858,9 +2869,16 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(failed_completed.returncode, 2)
         self.assertIn("store was reverted with event", failed_completed.stderr)
         self.assertEqual([event["event_type"] for event in journal_events], ["page_create", "section_append", "event_revert"])
+        self.assertEqual([row[1] for row in sqlite_event_rows], ["page_create", "section_append", "event_revert"])
+        self.assertEqual([row[0] for row in sqlite_event_rows], [event["event_id"] for event in journal_events])
+        self.assertEqual([row[2] for row in sqlite_event_rows], ["wiki", "wiki", "wiki"])
         self.assertEqual(journal_events[-1]["payload"]["target_event_id"], journal_events[1]["event_id"])
         self.assertEqual(journal_events[-1]["payload"]["target_event_type"], "section_append")
         self.assertIn("projection export failed", journal_events[-1]["payload"]["reason"])
+        sqlite_revert_payload = json.loads(sqlite_event_rows[-1][3])
+        self.assertEqual(sqlite_revert_payload["target_event_id"], journal_events[1]["event_id"])
+        self.assertEqual(sqlite_revert_payload["target_event_type"], "section_append")
+        self.assertIn("projection export failed", sqlite_revert_payload["reason"])
         self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
         self.assertEqual(replay_text, "# A\n")
         self.assertEqual(replay_result["written_files"], ["A.md"])
