@@ -64,6 +64,8 @@ It supersedes [[llm-wiki-infra-fast-path-plan]] as an implementation plan. The o
 
 `1.8.11` makes the export-only projection policy machine-readable. `export-markdown` now returns `projection_policy` with `authority=sqlite`, `base=stored_markdown_lines`, `output_role=git_tracked_projection`, the current check/write mode, and generated overlays such as `navigation-index` / `legacy-journal-log`. This lets ship loops and file-back cutover assert that Markdown is an output projection, not a hidden authority input.
 
+`scripts/check_projection_policy.py` is the repo-local guard for that assertion. `/next`, `/ship-next`, AGENTS/CLAUDE, and the local file-back skill now route `export-markdown --json --check` through this checker when operating on the grasp wiki.
+
 This does **not** yet make every authority boundary final. `sync`, `acquire`, generated Markdown backup/review policy, and file-back cutover still need migration work.
 
 ## Why This Replaces The Fast Path
@@ -90,16 +92,16 @@ Therefore, adding more guards to `events.jsonl` is only a temporary mitigation. 
 | 3. Write command migration | Core write verbs update SQLite SSoT | Move `write-page`, `write-page --create`, `rename-page`, log record import, and append-style helpers to the transaction helper | Mostly complete for Markdown authoring alpha: `adopt-markdown`, `write-page` / `write-page --create`, `append-section` / `append-log`, `rename-page`, `import-log-records`, and projection export failure rollback write SQLite events |
 | 4. Export-only Markdown | Projection becomes a read side effect, not authority | Make `export-markdown` read from canonical SQLite. Keep `--check`; make direct `import --markdown` an adoption/emergency path, not reconcile default | In progress: `export-markdown` returns `projection_policy` proving SQLite authority and git-tracked projection role; remaining proof is normal file-back without direct Markdown patch |
 | 5. Native review/recovery | Losing git-diffable JSONL is compensated | Rebuild `history`, `revert-event`, status, and replay/check surfaces from SQLite events/state; add a purpose-named projection diff only if needed | In progress: `write-status` shows SQLite event count / last event and strict-fails SQLite/JSONL event stream mismatch; SQLite-sourced `revert-event` and projection failure rollback write state + `event_revert` atomically; `log-records` / `history` read SQLite log events when available; old `write-diff` removed in `1.8.8` |
-| 6. File-back cutover | Daily wiki edits use the new authority path | Update file-back skill / repo commands to call canonical SQLite write first, then export Markdown, lint, and commit projection | Three consecutive file-backs land through SQLite SSoT without direct Markdown patch fallback |
+| 6. File-back cutover | Daily wiki edits use the new authority path | Update file-back skill / repo commands to call canonical SQLite write first, then export Markdown, lint, and commit projection | In progress: repo-local and local user-level file-back instructions assert projection policy; done when three consecutive file-backs land through SQLite SSoT without direct Markdown patch fallback |
 | 7. Retire JSONL authority | Old alpha artifacts cannot mislead implementers | Mark `wiki.grasp/events.jsonl` as legacy import/audit artifact or remove it from the active path; update docs/AGENTS when the command surface changes | No current instruction tells Codex to treat JSONL as the write authority |
 
 ## Immediate Next Slice
 
-With projection policy now machine-readable, the next slice can move from authority substrate work into file-back cutover.
+With projection policy now enforced by repo-local tooling, the next slice is guarded file-back dogfood.
 
-1. Move file-back workflow to assert `projection_policy.authority=sqlite` and use canonical SQLite write first, projection export second.
-2. Clarify generated Markdown backup/review policy only if the cutover exposes a concrete recovery workflow gap.
-3. Retire JSONL-authority wording from AGENTS / skill docs after consecutive file-backs land without direct Markdown patch fallback.
+1. Perform the next three wiki file-backs using the guarded route: import/update store, `write-status --strict`, `export-markdown --json --check | scripts/check_projection_policy.py`, grasp write, then the same checks after write.
+2. Clarify generated Markdown backup/review policy only if those guarded file-backs expose a concrete recovery workflow gap.
+3. Retire remaining JSONL-authority wording only after the guarded file-back streak lands without direct Markdown patch fallback.
 
 Completed in `1.7.39`: Phase 0 authority contract and Phase 1 connection/transaction helper. Completed in `1.8.0`: Phase 2 events table plus JSONL migration/query helpers. Completed in `1.8.1`: first Phase 3 command migration for `write-page` / `write-page --create`. Completed in `1.8.2`: `append-section` / `append-log` transaction migration. Completed in `1.8.3`: `rename-page` transaction migration. Completed in `1.8.4`: `write-status` SQLite event visibility. Completed in `1.8.5`: SQLite-sourced `revert-event` target lookup and state+event transaction. Completed in `1.8.6`: SQLite-sourced `log-records` / `history` for migrated `log_entry_import` rows plus `import-log-records` SQLite event insertion. Completed in `1.8.7`: `adopt-markdown` initial event insertion into SQLite events. Completed in `1.8.8`: removed unclear `write-diff` command. Completed in `1.8.9`: projection export failure rollback writes SQLite `event_revert` atomically with state revert. Completed in `1.8.10`: `write-status --strict` catches SQLite/JSONL event stream mismatch. Completed in `1.8.11`: `export-markdown` returns machine-readable `projection_policy`. Not completed: file-back cutover, generated Markdown backup/review policy if needed.
 
@@ -114,7 +116,7 @@ Completed in `1.7.39`: Phase 0 authority contract and Phase 1 connection/transac
 
 - Do not deepen `events.jsonl` as the long-term authority.
 - Do not treat `import --markdown` as normal reconcile after cutover.
-- Do not move file-back skill to shared write usage until SQLite SSoT phases 1-5 are in place.
+- Do not move file-back skill to unguarded shared write usage; keep `write-status --strict` and projection-policy checks in the loop until the guarded dogfood streak is clean.
 - Do not rely on git staging/pathspec rules to solve authority ownership. Git ownership and grasp write ownership are separate.
 
 ## Related
