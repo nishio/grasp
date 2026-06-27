@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import subprocess
 import tempfile
 import unittest
@@ -317,6 +318,99 @@ class FileBackPreflightScriptTests(unittest.TestCase):
         self.assertIsNone(value)
         self.assertIn("expected object", error)
 
+    def test_project_event_state_treats_missing_events_table_as_empty(self):
+        original_project_events = preflight.project_events
+
+        def fake_project_events(store, project):
+            raise sqlite3.OperationalError("no such table: events")
+
+        try:
+            preflight.project_events = fake_project_events
+            has_events, error = preflight.project_event_state(".grasp/file-back.sqlite", "grasp-wiki")
+        finally:
+            preflight.project_events = original_project_events
+
+        self.assertFalse(has_events)
+        self.assertIsNone(error)
+
+    def test_project_event_state_treats_missing_store_file_as_empty(self):
+        original_project_events = preflight.project_events
+
+        def fake_project_events(store, project):
+            raise sqlite3.OperationalError("unable to open database file")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing_store = Path(tmpdir) / ".grasp" / "file-back.sqlite"
+            try:
+                preflight.project_events = fake_project_events
+                has_events, error = preflight.project_event_state(str(missing_store), "grasp-wiki")
+            finally:
+                preflight.project_events = original_project_events
+
+        self.assertFalse(has_events)
+        self.assertIsNone(error)
+
+    def test_project_event_state_reports_non_bootstrappable_sqlite_errors(self):
+        original_project_events = preflight.project_events
+
+        def fake_project_events(store, project):
+            raise sqlite3.DatabaseError("database disk image is malformed")
+
+        try:
+            preflight.project_events = fake_project_events
+            has_events, error = preflight.project_event_state(".grasp/file-back.sqlite", "grasp-wiki")
+        finally:
+            preflight.project_events = original_project_events
+
+        self.assertFalse(has_events)
+        self.assertIn("could not inspect file-back store events", error)
+        self.assertIn("malformed", error)
+
+    def test_project_event_state_reports_unopenable_existing_store(self):
+        original_project_events = preflight.project_events
+
+        def fake_project_events(store, project):
+            raise sqlite3.OperationalError("unable to open database file")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing_store = Path(tmpdir) / "file-back.sqlite"
+            existing_store.write_text("not sqlite", encoding="utf-8")
+            try:
+                preflight.project_events = fake_project_events
+                has_events, error = preflight.project_event_state(str(existing_store), "grasp-wiki")
+            finally:
+                preflight.project_events = original_project_events
+
+        self.assertFalse(has_events)
+        self.assertIn("could not inspect file-back store events", error)
+        self.assertIn("unable to open database file", error)
+
+    def test_bootstrap_checks_store_relative_to_repo(self):
+        original_project_events = preflight.project_events
+        seen_store = None
+
+        def fake_project_events(store, project):
+            nonlocal seen_store
+            seen_store = store
+            return [{"event_sequence": 1, "session_id": "bootstrap-file-back-store"}]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            try:
+                preflight.project_events = fake_project_events
+                errors = preflight.bootstrap_file_back_store_if_needed(
+                    repo,
+                    store=".grasp/file-back.sqlite",
+                    project="grasp-wiki",
+                    output="wiki",
+                    require_journal=False,
+                )
+            finally:
+                preflight.project_events = original_project_events
+
+        self.assertEqual(errors, [])
+        self.assertEqual(seen_store, str(repo / ".grasp" / "file-back.sqlite"))
+
     def test_run_grasp_preflight_reports_write_status_json_errors(self):
         original_run_command = preflight.run_command
 
@@ -531,6 +625,36 @@ class FileBackPreflightScriptTests(unittest.TestCase):
         self.assertIn(preflight.DEFAULT_FILE_BACK_BOOTSTRAP_JOURNAL, seen_adopt_args)
         self.assertIn("--replace-journal", seen_adopt_args)
         self.assertIn(preflight.DEFAULT_FILE_BACK_BOOTSTRAP_SESSION_ID, seen_adopt_args)
+
+    def test_run_grasp_preflight_rejects_sqlite_errors_instead_of_bootstrapping(self):
+        original_run_command = preflight.run_command
+        original_project_events = preflight.project_events
+
+        def fake_run_command(args, *, cwd):
+            self.fail(f"unexpected bootstrap/import command after store inspection error: {args}")
+
+        def fake_project_events(store, project):
+            raise sqlite3.OperationalError("database is locked")
+
+        try:
+            preflight.run_command = fake_run_command
+            preflight.project_events = fake_project_events
+            errors = preflight.run_grasp_preflight(
+                Path("."),
+                store=".grasp/file-back.sqlite",
+                project="grasp-wiki",
+                journal=None,
+                output="wiki",
+                require_journal=False,
+                expected_session_id="file-back-session",
+            )
+        finally:
+            preflight.run_command = original_run_command
+            preflight.project_events = original_project_events
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("could not inspect file-back store events", errors[0])
+        self.assertIn("database is locked", errors[0])
 
     def test_run_grasp_preflight_does_not_bootstrap_journal_mode(self):
         original_run_command = preflight.run_command
