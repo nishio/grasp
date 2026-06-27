@@ -8,6 +8,7 @@ explicit opt-in.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -34,6 +35,8 @@ def run_write_status(
     journal: str | None,
     output: str,
     require_journal: bool = True,
+    require_session: bool = True,
+    expected_session_id: str = "",
 ) -> list[str]:
     completed = run_command(
         write_status_command(
@@ -50,8 +53,34 @@ def run_write_status(
         command_error = require_success(completed, "grasp write-status --strict")
         return [command_error or error or "write-status returned no JSON"]
     errors = write_status_errors(status_json, require_journal=require_journal)
+    if require_session:
+        errors.extend(session_metadata_errors(status_json, expected_session_id=expected_session_id))
     if completed.returncode != 0 and not errors:
         errors.append(f"grasp write-status --strict failed with exit {completed.returncode}")
+    return errors
+
+
+def session_metadata_errors(result: dict[str, object], *, expected_session_id: str = "") -> list[str]:
+    errors: list[str] = []
+    expected = str(expected_session_id or "").strip()
+    if not expected:
+        errors.append(
+            "file-back session id is required; set GRASP_SESSION_ID or pass --session-id "
+            "(use --skip-session-check only for legacy/ad hoc verification)"
+        )
+    sqlite_last_event = result.get("sqlite_last_event")
+    if not isinstance(sqlite_last_event, dict):
+        errors.append("write-status sqlite_last_event is missing; run a grasp write before postwrite")
+        return errors
+    actual = str(sqlite_last_event.get("session_id") or "").strip()
+    event_id = str(sqlite_last_event.get("event_id") or "")
+    if not actual:
+        errors.append(
+            f"write-status sqlite_last_event {event_id!r} has empty session_id; "
+            "write with --session-id or GRASP_SESSION_ID"
+        )
+    elif expected and actual != expected:
+        errors.append(f"write-status sqlite_last_event session_id={actual!r}, expected {expected!r}")
     return errors
 
 
@@ -149,6 +178,8 @@ def run_postwrite_checks(
     lint: bool,
     diff_check: bool,
     semantic_log_check: bool,
+    require_session: bool = True,
+    expected_session_id: str = "",
 ) -> list[str]:
     errors: list[str] = []
     errors.extend(
@@ -159,6 +190,8 @@ def run_postwrite_checks(
             journal=journal,
             output=output,
             require_journal=require_journal,
+            require_session=require_session,
+            expected_session_id=expected_session_id,
         )
     )
     errors.extend(run_projection_check(repo, store=store, project=project, output=output))
@@ -195,6 +228,16 @@ def main() -> int:
         action="store_true",
         help="Skip export-markdown --regenerate-log --check for the SQLite events-derived log projection.",
     )
+    parser.add_argument(
+        "--session-id",
+        default=os.environ.get("GRASP_SESSION_ID", ""),
+        help="Expected session marker on the latest SQLite event. Defaults to $GRASP_SESSION_ID.",
+    )
+    parser.add_argument(
+        "--skip-session-check",
+        action="store_true",
+        help="Skip the latest-event session marker guard for legacy/ad hoc verification.",
+    )
     args = parser.parse_args()
 
     repo = Path(args.repo).resolve()
@@ -212,6 +255,8 @@ def main() -> int:
         lint=not args.skip_lint,
         diff_check=not args.skip_diff_check,
         semantic_log_check=not args.skip_semantic_log_check,
+        require_session=not args.skip_session_check,
+        expected_session_id=args.session_id,
     )
     if errors:
         for error in errors:
@@ -223,6 +268,7 @@ def main() -> int:
         f"store={args.store} project={args.project} output={args.output} "
         f"journal_mode={args.journal if require_journal else 'none'} "
         f"semantic_log={'skipped' if args.skip_semantic_log_check else 'ok'} "
+        f"session={'skipped' if args.skip_session_check else args.session_id} "
         f"lint={'skipped' if args.skip_lint else 'ok'} "
         f"diff_check={'skipped' if args.skip_diff_check else 'ok'}"
     )
