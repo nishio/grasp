@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import subprocess
 import sys
 from textwrap import dedent
 from typing import Any
@@ -944,7 +945,7 @@ def build_parser() -> argparse.ArgumentParser:
             "and export the Markdown projection."
         ),
         returns=(
-            "project, page, journal|null, journal_written, output, event_id, appended_lines[], appended_line_count, edge_count, projection"
+            "project, page, source_path, journal|null, journal_written, output, event_id, appended_lines[], appended_line_count, edge_count, projection"
         ),
         examples=[
             "grasp --project grasp-wiki append-section llm-wiki-infra-fast-path-plan --heading Updates --line '- note' --output wiki --journal wiki.grasp/events.jsonl",
@@ -953,6 +954,7 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "Alpha write surface: Markdown-backed projects only; rename is still out of scope.",
             "The default journal path is <output-folder-name>.grasp/events.jsonl beside the output folder.",
+            "When --output is inside a Git worktree, dirty projection paths outside the target page are refused before export.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
     )
@@ -972,7 +974,7 @@ def build_parser() -> argparse.ArgumentParser:
             "and export the Markdown projection."
         ),
         returns=(
-            "project, page, journal|null, journal_written, output, event_id, timestamp, op, summary, appended_lines[], appended_line_count, edge_count, projection"
+            "project, page, source_path, journal|null, journal_written, output, event_id, timestamp, op, summary, appended_lines[], appended_line_count, edge_count, projection"
         ),
         examples=[
             "grasp --project grasp-wiki append-log --op implementation --summary 'append-section alpha' --line '- details' --output wiki",
@@ -981,6 +983,7 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "Default target title is Log.",
             "Alpha write surface: Markdown-backed projects only; rename is still out of scope.",
+            "When --output is inside a Git worktree, dirty projection paths outside the target page are refused before export.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
     )
@@ -1014,6 +1017,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Alpha write surface: Markdown-backed projects and unique handles only.",
             "--path is required with --create and deliberately ignored for existing-page updates.",
             "Rename and source-path changes for existing pages are handled by rename-page.",
+            "When --output is inside a Git worktree, dirty projection paths outside the target page are refused before export.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
     )
@@ -1049,6 +1053,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Alpha write surface: Markdown-backed projects only.",
             "The first H1 is updated only when it currently matches the old title.",
             "References like [[old-title]] are preserved as text and resolve through the old-title alias.",
+            "When --output is inside a Git worktree, dirty projection paths outside the previous/new target path are refused before export.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
     )
@@ -2386,7 +2391,11 @@ def run_append_section(store: SQLiteStore, args: argparse.Namespace) -> dict[str
         store,
         journal,
         event,
-        lambda: store.export_markdown(args.output, check=False),
+        lambda: export_markdown_after_dirty_projection_guard(
+            store,
+            args.output,
+            allowed_source_paths={append_result["source_path"]},
+        ),
         **event_metadata(args),
     )
     result = dict(append_result)
@@ -2423,7 +2432,11 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
         store,
         journal,
         event,
-        lambda: store.export_markdown(args.output, check=False),
+        lambda: export_markdown_after_dirty_projection_guard(
+            store,
+            args.output,
+            allowed_source_paths={append_result["source_path"]},
+        ),
         **event_metadata(args),
     )
     result = dict(append_result)
@@ -2457,7 +2470,11 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
         store,
         journal,
         event,
-        lambda: store.export_markdown(args.output, check=False),
+        lambda: export_markdown_after_dirty_projection_guard(
+            store,
+            args.output,
+            allowed_source_paths={update_result["source_path"]},
+        ),
         **event_metadata(args),
     )
     result = dict(update_result)
@@ -2496,6 +2513,14 @@ def run_rename_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, A
         **event_metadata(args),
     )
     def project_rename() -> dict[str, Any]:
+        guard_dirty_projection_paths(
+            store,
+            args.output,
+            allowed_source_paths={
+                rename_result["previous_source_path"],
+                rename_result["source_path"],
+            },
+        )
         removed_files = remove_previous_projection_file(
             args.output,
             rename_result["previous_source_path"],
@@ -2542,6 +2567,136 @@ def remove_projection_file(output: Path, source_path: str) -> list[str]:
         raise ValueError(f"Markdown projection path is a directory: {source_path}")
     target.unlink()
     return [source_path]
+
+
+def export_markdown_after_dirty_projection_guard(
+    store: SQLiteStore,
+    output: Path,
+    *,
+    allowed_source_paths: set[str],
+) -> dict[str, Any]:
+    guard_dirty_projection_paths(store, output, allowed_source_paths=allowed_source_paths)
+    return store.export_markdown(output, check=False)
+
+
+def guard_dirty_projection_paths(store: SQLiteStore, output: Path, *, allowed_source_paths: set[str]) -> None:
+    blocked_paths = dirty_projection_paths_outside_allowlist(store, output, allowed_source_paths)
+    if not blocked_paths:
+        return
+    blocked = ", ".join(blocked_paths[:10])
+    suffix = "" if len(blocked_paths) <= 10 else f", ... (+{len(blocked_paths) - 10} more)"
+    allowed = ", ".join(sorted(allowed_source_paths)) or "(none)"
+    raise ValueError(
+        "Markdown projection has dirty paths outside the current write target; "
+        f"refusing export before overwriting local changes: {blocked}{suffix}; "
+        f"allowed dirty paths: {allowed}"
+    )
+
+
+def dirty_projection_paths_outside_allowlist(
+    store: SQLiteStore,
+    output: Path,
+    allowed_source_paths: set[str],
+) -> list[str]:
+    allowed = {normalize_projection_relative_path(path) for path in allowed_source_paths if str(path).strip()}
+    return [
+        path
+        for path in git_dirty_projection_paths(output)
+        if path not in allowed and not projection_path_matches_store(store, output, path)
+    ]
+
+
+def projection_path_matches_store(store: SQLiteStore, output: Path, relative_path: str) -> bool:
+    expected = store.markdown_projection_text_for_source_path(relative_path)
+    if expected is None:
+        return True
+    target = _safe_replay_output_path(output, relative_path)
+    if not target.exists() or target.is_dir():
+        return False
+    return target.read_text(encoding="utf-8") == expected
+
+
+def normalize_projection_relative_path(path: str | Path) -> str:
+    return Path(str(path)).as_posix().strip("/")
+
+
+def git_dirty_projection_paths(output: Path) -> list[str]:
+    output_abs = output.resolve(strict=False)
+    probe = nearest_existing_path(output_abs)
+    if probe is None:
+        return []
+    root_completed = subprocess.run(
+        ["git", "-C", str(probe), "rev-parse", "--show-toplevel"],
+        text=True,
+        capture_output=True,
+    )
+    if root_completed.returncode != 0:
+        return []
+    root_abs = Path(root_completed.stdout.strip()).resolve(strict=False)
+    try:
+        rel_output = output_abs.relative_to(root_abs)
+    except ValueError:
+        return []
+    rel_output_arg = "." if rel_output == Path(".") else rel_output.as_posix()
+    status_completed = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root_abs),
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+            "--",
+            rel_output_arg,
+        ],
+        capture_output=True,
+    )
+    if status_completed.returncode != 0:
+        error = status_completed.stderr.decode("utf-8", errors="replace").strip()
+        raise ValueError(error or "git status failed")
+
+    dirty_paths: list[str] = []
+    for git_path in parse_git_porcelain_z_paths(status_completed.stdout):
+        dirty_abs = (root_abs / git_path).resolve(strict=False)
+        try:
+            projection_relative = dirty_abs.relative_to(output_abs)
+        except ValueError:
+            continue
+        dirty_paths.append(projection_relative.as_posix())
+    return sorted(set(dirty_paths))
+
+
+def nearest_existing_path(path: Path) -> Path | None:
+    candidate = path
+    while not candidate.exists():
+        parent = candidate.parent
+        if parent == candidate:
+            return None
+        candidate = parent
+    return candidate
+
+
+def parse_git_porcelain_z_paths(raw: bytes) -> list[str]:
+    paths: list[str] = []
+    records = raw.split(b"\0")
+    index = 0
+    while index < len(records):
+        record = records[index]
+        index += 1
+        if not record or len(record) < 4:
+            continue
+        status = record[:2].decode("ascii", errors="replace")
+        path = record[3:].decode("utf-8", errors="surrogateescape")
+        if path:
+            paths.append(path)
+        if "R" in status or "C" in status:
+            if index < len(records):
+                previous_path = records[index].decode("utf-8", errors="surrogateescape")
+                index += 1
+                if previous_path:
+                    paths.append(previous_path)
+    return paths
 
 
 def append_event_and_export_projection(
@@ -6656,6 +6811,7 @@ def format_append_result(result: dict[str, Any]) -> str:
         "# Markdown Append\n"
         f"project: {result['project']}\n"
         f"page: {result['page']['title']}\n"
+        f"source_path: {result['source_path']}\n"
         f"journal: {journal}\n"
         f"journal_written: {str(result.get('journal_written', True)).lower()}\n"
         f"event_id: {result['event_id']}\n"
