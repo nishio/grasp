@@ -1436,3 +1436,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: `tests/test_version_metadata.py` now checks package version against `grasp.__version__`, `pyproject.toml`, [[history]] latest/current release ledger lines, and [[grasp-v1-implemented]] current public compatibility version.
 - reason: dogfood found a stale current fact: after `1.8.56`, [[grasp-v1-implemented]] still said current public compatibility version was `1.8.54` while package/history were `1.8.56`.
 - docs: bumped public/package version to `1.8.57`, updated [[history]], [[grasp-v1-implemented]], and [[sqlite-ssot-write-plan]]. schema remains v8.
+## [2026-06-28 07:36] implementation+file-back | promote version ledger drift guard to lint
+
+- code: added `scripts/check_wiki_version_ledger.py` and wired `scripts/lint_wiki.py` to report release ledger / current facts version drift and exit 1 on drift.
+- tests: added `tests/test_wiki_version_ledger_script.py` for clean ledger, current-facts drift, duplicate history entry, and semver ordering drift. `tests/test_version_metadata.py` still checks package/history/current facts consistency.
+- docs: bumped public/package version to `1.8.58` and updated [[history]], [[grasp-v1-implemented]], and [[sqlite-ssot-write-plan]]. schema remains v8.
