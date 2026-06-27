@@ -20,6 +20,7 @@ from check_projection_policy import projection_policy_errors
 
 
 DEFAULT_DIRTY_PATHS = ("wiki", "wiki.grasp/events.jsonl")
+DEFAULT_NO_JOURNAL_DIRTY_PATHS = ("wiki",)
 
 
 def run_command(args: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -47,7 +48,7 @@ def base_divergence_errors(log_output: str, base: str) -> list[str]:
     return [f"branch differs from {base}; reconcile before file-back:\n" + "\n".join(lines)]
 
 
-def write_status_errors(result: dict[str, Any]) -> list[str]:
+def write_status_errors(result: dict[str, Any], *, require_journal: bool = True) -> list[str]:
     errors: list[str] = []
     projection = result.get("projection")
     projection_ok = result.get("projection_ok")
@@ -57,12 +58,13 @@ def write_status_errors(result: dict[str, Any]) -> list[str]:
         errors.append(f"write-status strict_ok={result.get('strict_ok')!r}, expected True")
     if projection_ok is not True:
         errors.append(f"write-status projection ok={projection_ok!r}, expected True")
-    if result.get("journal_exists") is not True:
-        errors.append("write-status journal_exists is not true")
-    if result.get("event_streams_match") is not True:
-        errors.append("write-status event_streams_match is not true")
-    if result.get("journal_log_stale") is True:
-        errors.append("write-status journal_log_stale is true")
+    if require_journal:
+        if result.get("journal_exists") is not True:
+            errors.append("write-status journal_exists is not true")
+        if result.get("event_streams_match") is not True:
+            errors.append("write-status event_streams_match is not true")
+        if result.get("journal_log_stale") is True:
+            errors.append("write-status journal_log_stale is true")
     return errors
 
 
@@ -96,7 +98,46 @@ def check_dirty_paths(repo: Path, paths: tuple[str, ...]) -> list[str]:
     return dirty_path_errors(status.stdout)
 
 
-def run_grasp_preflight(repo: Path, *, store: str, project: str, journal: str, output: str) -> list[str]:
+def write_status_command(
+    *,
+    store: str,
+    project: str,
+    journal: str | None,
+    output: str,
+    require_journal: bool,
+) -> list[str]:
+    command = [
+        sys.executable,
+        "-m",
+        "grasp",
+        "--store",
+        store,
+        "--project",
+        project,
+        "--json",
+        "write-status",
+        "--output",
+        output,
+    ]
+    if require_journal:
+        if not journal:
+            raise ValueError("journal path is required when require_journal=True")
+        command.extend(["--journal", journal])
+    else:
+        command.append("--no-journal")
+    command.append("--strict")
+    return command
+
+
+def run_grasp_preflight(
+    repo: Path,
+    *,
+    store: str,
+    project: str,
+    journal: str | None,
+    output: str,
+    require_journal: bool = True,
+) -> list[str]:
     errors: list[str] = []
 
     import_result = run_command(
@@ -108,29 +149,20 @@ def run_grasp_preflight(repo: Path, *, store: str, project: str, journal: str, o
         return [error]
 
     write_status = run_command(
-        [
-            sys.executable,
-            "-m",
-            "grasp",
-            "--store",
-            store,
-            "--project",
-            project,
-            "--json",
-            "write-status",
-            "--output",
-            output,
-            "--journal",
-            journal,
-            "--strict",
-        ],
+        write_status_command(
+            store=store,
+            project=project,
+            journal=journal,
+            output=output,
+            require_journal=require_journal,
+        ),
         cwd=repo,
     )
     status_json, error = parse_json_output(write_status.stdout, "write-status")
     if status_json is None:
         command_error = require_success(write_status, "grasp write-status --strict")
         return [command_error or error or "write-status returned no JSON"]
-    errors.extend(write_status_errors(status_json))
+    errors.extend(write_status_errors(status_json, require_journal=require_journal))
     if write_status.returncode != 0 and not errors:
         errors.append(f"grasp write-status --strict failed with exit {write_status.returncode}")
     if errors:
@@ -173,17 +205,24 @@ def main() -> int:
     parser.add_argument("--store", default=".grasp/file-back.sqlite")
     parser.add_argument("--project", default="grasp-wiki")
     parser.add_argument("--journal", default="wiki.grasp/events.jsonl")
+    parser.add_argument(
+        "--no-journal",
+        action="store_true",
+        help="Use write-status --no-journal and do not require the compatibility journal to be clean.",
+    )
     parser.add_argument("--output", default="wiki")
     parser.add_argument(
         "--dirty-path",
         action="append",
         dest="dirty_paths",
-        help="Path that must be clean before file-back. Defaults to wiki and wiki.grasp/events.jsonl.",
+        help="Path that must be clean before file-back. Defaults to wiki and wiki.grasp/events.jsonl; with --no-journal, defaults to wiki only.",
     )
     args = parser.parse_args()
 
     repo = Path(args.repo).resolve()
-    paths = tuple(args.dirty_paths) if args.dirty_paths else DEFAULT_DIRTY_PATHS
+    paths = tuple(args.dirty_paths) if args.dirty_paths else (
+        DEFAULT_NO_JOURNAL_DIRTY_PATHS if args.no_journal else DEFAULT_DIRTY_PATHS
+    )
     errors: list[str] = []
     if not args.skip_base_check:
         errors.extend(check_git_base(repo, args.base))
@@ -194,7 +233,14 @@ def main() -> int:
         return 1
 
     errors.extend(
-        run_grasp_preflight(repo, store=args.store, project=args.project, journal=args.journal, output=args.output)
+        run_grasp_preflight(
+            repo,
+            store=args.store,
+            project=args.project,
+            journal=None if args.no_journal else args.journal,
+            output=args.output,
+            require_journal=not args.no_journal,
+        )
     )
     if errors:
         for error in errors:
@@ -204,6 +250,7 @@ def main() -> int:
     print(
         "file-back preflight ok: "
         f"base={args.base if not args.skip_base_check else 'skipped'} "
+        f"journal_mode={'none' if args.no_journal else args.journal} "
         f"dirty_paths={','.join(paths)} "
         f"store={args.store} project={args.project} output={args.output}"
     )

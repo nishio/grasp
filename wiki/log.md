@@ -1180,3 +1180,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - code: Markdown-backed `append-section` / `append-log` / `write-page` / `rename-page` / `revert-event` に `--no-journal` を追加し、SQLite events + Markdown projection を更新しつつ compatibility JSONL append を省略できるようにした。`write-status --no-journal --strict` は JSONL guards を外し、SQLite-authority projection だけを strict check する。
 - tests: no-journal write が `journal=null` / `journal_written=false` を返し、compatibility journal を変更せず SQLite events と projection を更新する統合テストを追加。既存 journal strict failure と journal あり write path の targeted tests も確認。
 - file back: [[history]] / [[grasp-v1-implemented]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新。public compatibility version は `1.8.12`、schema は v8 のまま。repo file-back は当面 compatibility journal あり guard を継続し、次は guarded dogfood streak と `--no-journal` cutover 判断。
+
+## [2026-06-27 18:36] implementation+file back | file-back guard scripts に --no-journal mode を追加
+- code: `scripts/check_file_back_preflight.py` / `scripts/check_file_back_postwrite.py` に `--no-journal` mode を追加。preflight は `write-status --no-journal --strict` を使い、dirty path default を `wiki` のみにする。postwrite は no-journal status を使いつつ projection policy / wiki lint / `git diff --check` を継続する。既定の compatibility journal あり mode は維持。
+- tests: preflight / postwrite script tests に no-journal guard skip と subprocess argument selection を追加。実 repo に対して journal あり/なし両 mode の preflight/postwrite smoke も通した。
+- file back: [[history]] / [[grasp-v1-implemented]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新。public compatibility version は `1.8.13`、schema は v8 のまま。次は guarded dogfood streak と repo file-back の `--no-journal` cutover 判断。
