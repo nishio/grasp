@@ -1273,6 +1273,16 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual([row[0] for row in sqlite_event_rows], [event["event_id"] for event in journal_events])
         self.assertEqual(json.loads(sqlite_event_rows[0][3])["source_path"], "A.md")
         self.assertTrue(check_result["ok"])
+        self.assertEqual(
+            check_result["projection_policy"],
+            {
+                "authority": "sqlite",
+                "base": "stored_markdown_lines",
+                "output_role": "git_tracked_projection",
+                "write_mode": "check",
+                "generated_overlays": [],
+            },
+        )
         self.assertEqual(check_result["changed_files"], [])
         self.assertEqual(dirty_completed.returncode, 1)
         self.assertFalse(dirty_result["ok"])
@@ -2283,6 +2293,12 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(dirty_result["changed_files"], ["index.md"])
         self.assertEqual(write_result["written_files"], ["index.md"])
         self.assertEqual(write_result["regenerated_files"], ["Log.md", "index.md"])
+        self.assertEqual(write_result["projection_policy"]["authority"], "sqlite")
+        self.assertEqual(write_result["projection_policy"]["write_mode"], "write")
+        self.assertEqual(
+            write_result["projection_policy"]["generated_overlays"],
+            ["legacy-journal-log", "navigation-index"],
+        )
         self.assertTrue(clean_result["ok"])
         self.assertIn("| [A](concepts/A.md) | Alpha summary |", index_text)
         self.assertIn("| [Digest](source/Digest.md) | Source summary |", index_text)

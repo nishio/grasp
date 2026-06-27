@@ -125,6 +125,7 @@ Stable:
 Alpha:
 
 - Markdown-backed project 向けの `append-section` / `append-log` / `write-page` / `rename-page`
+- SQLite store を authority とする `export-markdown --check` の projection freshness gate
 - `write-status` / `revert-event` / `replay-journal` による recovery surface
 
 スコープ外:

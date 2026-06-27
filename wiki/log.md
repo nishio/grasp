@@ -1150,3 +1150,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - `write-status` now checks whether selected-project SQLite events appear in the legacy JSONL journal in order.
 - `write-status --strict` fails with `event_stream_mismatch` when that compatibility audit fails.
 - README recovery surface was updated to remove the deleted `write-diff` command.
+
+## [2026-06-27 17:38] implementation | expose Markdown projection policy
+- `export-markdown` now returns `projection_policy` with SQLite authority, stored-lines base, git-tracked projection role, write mode, and generated overlays.
+- CLI help/text output now labels `export-markdown --check` as the projection freshness gate for ship loops and file-back cutover.
+- The repo skill instructions were updated to remove stale `write-diff` usage and reflect the current `write-status` strict guard.

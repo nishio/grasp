@@ -2419,12 +2419,14 @@ class SQLiteStore:
 
         projections = self._markdown_projection_files(project, files)
         regenerated_files: list[str] = []
+        generated_overlays: list[str] = []
         if regenerate_index:
             index_path = _markdown_primary_role_path(files, "navigation", "index.md")
             if index_path is None:
                 raise ValueError(f"project has no navigation index page to regenerate: {project}")
             projections[index_path] = self._markdown_index_projection_text(project, files)
             regenerated_files.append(index_path)
+            generated_overlays.append("navigation-index")
         if log_journal_events is not None:
             log_path = _markdown_primary_role_path(files, "log", "log.md")
             if log_path is None:
@@ -2436,6 +2438,7 @@ class SQLiteStore:
                 log_journal_events,
             )
             regenerated_files.append(log_path)
+            generated_overlays.append("legacy-journal-log")
         changed_files: list[str] = []
         missing_files: list[str] = []
         written_files: list[str] = []
@@ -2473,6 +2476,13 @@ class SQLiteStore:
             "written_count": len(written_files),
             "regenerated_files": sorted(regenerated_files),
             "regenerated_count": len(regenerated_files),
+            "projection_policy": {
+                "authority": "sqlite",
+                "base": "stored_markdown_lines",
+                "output_role": "git_tracked_projection",
+                "write_mode": "check" if check else "write",
+                "generated_overlays": sorted(generated_overlays),
+            },
             "changed_files": sorted(changed_files),
             "missing_files": sorted(missing_files),
             "extra_files": extra_files,
