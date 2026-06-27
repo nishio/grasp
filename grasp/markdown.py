@@ -332,14 +332,26 @@ def markdown_projection_frontmatter_fields(
     h1_title = first_markdown_h1_title(body_lines)
     page_id = str(page_id)
     title = str(title)
+    derived_alias_norms = {
+        normalize_title(title),
+        normalize_title(markdown_title(Path(relative_path))),
+    }
+    meaningful_aliases = [
+        alias for alias in aliases if normalize_title(alias) not in derived_alias_norms
+    ]
     identity_needs_frontmatter = page_id != markdown_page_id(Path(relative_path))
     title_needs_frontmatter = bool(title) and normalize_title(title) != normalize_title(h1_title or "")
-    if not identity_needs_frontmatter and not title_needs_frontmatter:
+    alias_needs_frontmatter = bool(meaningful_aliases)
+    if (
+        not identity_needs_frontmatter
+        and not title_needs_frontmatter
+        and not alias_needs_frontmatter
+    ):
         return {}
     return {
         "id": page_id,
         "title": title,
-        "aliases": aliases,
+        "aliases": meaningful_aliases,
     }
 
 

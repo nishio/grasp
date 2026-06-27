@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.7.38`（更新: 2026-06-27 11:48、store: schema `7`、compat: schema `7` compatible）: Markdown projection が `id` / `title` を path / H1 から推論できる場合でも、title / current file stem から導出できない alias があるなら `id` / `title` / `aliases` frontmatter を出すようにした。`write-page --create` で path stem と title が異なる page を作成し、`rename-page` で H1 を新 title に更新した後、fresh `import --markdown` しても旧 title alias が残り、旧 `[[...]]` backlink が red 化しないことを CLI regression test で確認。schema は不変
 - `1.7.37`（更新: 2026-06-26 22:52、store: schema `7`、compat: schema `7` compatible）: 連続 git history replay harness に `revert_events` step を追加した。`0db1449` の fast-path plan page create を同じ step 内で `revert-event` し、既存3 page update は残しつつ created page が projection から消え、journal event order が `page_create` / `page_update` / `event_revert` として replay clean になることを確認する。schema は不変
 - `1.7.36`（更新: 2026-06-26 22:28、store: schema `7`、compat: schema `7` compatible）: 連続 git history replay harness に `rename_pages` step を追加した。`d4e4c39` の `why-design-B` → `why-not-scrapbox-clone` rename を同じ operation table で replay し、旧 path stub が無く、旧 handle `why-design-B` で新 title を read でき、projection に旧名 alias が残ることを確認する。`rename-page` JSON result は `write-page` と揃えて `event_type=page_rename` を返す。schema は不変
 - `1.7.35`（更新: 2026-06-26 22:08、store: schema `7`、compat: schema `7` compatible）: 連続 git history replay harness を mixed operation table に拡張した。各 step が `create_pages` と `update_paths` を持てるようにし、`0db1449` → `a07f1af` の fast-path plan create + later update sequence も同じ test で replay / direct re-import / final projection exact match する。schema は不変
@@ -137,6 +138,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.7.28`
+- Current public compatibility version: `1.7.38`
 - Current internal `SCHEMA_VERSION`: `7`
-- Current package metadata should match `1.7.28`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.7.38`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
