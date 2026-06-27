@@ -1255,3 +1255,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - implemented: write command projection export failures now raise a structured rollback diagnostic on --json stderr after automatic event_revert rollback.
 - covered: both compatibility journal and --no-journal paths report target_event_id / rollback_event_id / journal_written / original_error.
 - scope: this starts the SQLite authority rollback policy slice; remaining general revert policy still needs a concrete multi-event or planning definition.
+
+## [2026-06-27 21:05] implementation | add revert-event dry-run planning surface
+implemented: revert-event --dry-run now runs existing revert safety guards inside a rollback-only SQLite write transaction and reports dry_run / revertible / reason / would_* fields without writing event_revert, journal, or projection.
+tests: covered reversible page_create dry-run and non-revertible section_append dependency/tail guard dry-run.
+file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], and [[grasp-backlog]] now treat dry-run diagnostics as implemented; remaining work is mutating multi-event / dependency-aware general revert policy.
