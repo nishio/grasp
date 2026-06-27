@@ -1405,3 +1405,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: revert-event, revert-events, and revert-event --include-dependents now run dirty projection guard before mutating store/event rows.
 - guard: reverted target paths are allowed; unrelated dirty paths must already match the current store projection, with older payloads resolving source_path from page_id via the Markdown manifest.
 - tests: added regression coverage that dirty unrelated B.md blocks each revert surface without inserting event_revert or changing target files. public compatibility version is 1.8.51; schema remains v8.
+
+## [2026-06-28 06:30] implementation+file-back | guard dirty revert target files
+- code: revert-event, revert-events, and revert-event --include-dependents now reject dirty target projection paths unless they match the current store projection before mutation.
+- risk: 1.8.51 blocked unrelated dirty projection files, but a local draft in the recovered target path could still be overwritten or removed during recovery export.
+- tests: added regression coverage that dirty target A.md blocks revert before event_revert insertion while preserving both store state and the local draft. public compatibility version is 1.8.52; schema remains v8.

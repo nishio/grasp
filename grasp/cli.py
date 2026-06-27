@@ -1133,7 +1133,8 @@ def build_parser() -> argparse.ArgumentParser:
             "page_update/page_rename require the current lines and path/title state to match the target event.",
             "--dry-run is the planning surface for dependency-aware/general revert work: it never appends event_revert.",
             "--include-dependents is SQLite-only and reverts later active same-page events in reverse event order before the target.",
-            "When --output is inside a Git worktree, dirty projection paths outside the reverted target path(s) are refused before mutation.",
+            "When --output is inside a Git worktree, dirty projection paths outside the reverted target path(s), "
+            "and dirty target paths that do not match the current store projection, are refused before mutation.",
         ],
     )
     revert_event_parser.add_argument("event_id", help="Write event id to revert.")
@@ -1167,7 +1168,8 @@ def build_parser() -> argparse.ArgumentParser:
             "SQLite-only: this command does not fall back to a legacy JSONL journal for target lookup.",
             "Use this for an explicit multi-page rollback plan; use revert-event --include-dependents for automatic same-page dependency rollback.",
             "The reverse event_sequence order is required so later page state changes are undone before earlier ones.",
-            "When --output is inside a Git worktree, dirty projection paths outside the reverted target path(s) are refused before mutation.",
+            "When --output is inside a Git worktree, dirty projection paths outside the reverted target path(s), "
+            "and dirty target paths that do not match the current store projection, are refused before mutation.",
         ],
     )
     revert_events_parser.add_argument("event_ids", nargs="+", help="SQLite write event ids to revert as one operation.")
@@ -3062,6 +3064,45 @@ def guard_dirty_projection_paths_for_revert_targets(
     for target in targets:
         allowed_source_paths.update(revert_target_projection_source_paths(store, target))
     guard_dirty_projection_paths(store, output, allowed_source_paths=allowed_source_paths)
+    blocked_target_paths = dirty_projection_target_paths_not_matching_store(
+        store,
+        output,
+        allowed_source_paths,
+    )
+    if not blocked_target_paths:
+        return
+    blocked = ", ".join(blocked_target_paths[:10])
+    suffix = "" if len(blocked_target_paths) <= 10 else f", ... (+{len(blocked_target_paths) - 10} more)"
+    allowed = ", ".join(sorted(allowed_source_paths)) or "(none)"
+    raise ValueError(
+        "Markdown projection has dirty reverted target paths that do not match the current store projection; "
+        f"refusing revert before mutating store state: {blocked}{suffix}; "
+        f"reverted target paths: {allowed}"
+    )
+
+
+def dirty_projection_target_paths_not_matching_store(
+    store: SQLiteStore,
+    output: Path,
+    target_source_paths: set[str],
+) -> list[str]:
+    targets = {normalize_projection_relative_path(path) for path in target_source_paths if str(path).strip()}
+    dirty = set(git_dirty_projection_paths(output))
+    return sorted(
+        path
+        for path in dirty
+        if path in targets and not projection_path_has_current_store_text(store, output, path)
+    )
+
+
+def projection_path_has_current_store_text(store: SQLiteStore, output: Path, relative_path: str) -> bool:
+    expected = store.markdown_projection_text_for_source_path(relative_path)
+    if expected is None:
+        return False
+    target = _safe_replay_output_path(output, relative_path)
+    if not target.exists() or target.is_dir():
+        return False
+    return target.read_text(encoding="utf-8") == expected
 
 
 def revert_target_projection_source_paths(store: SQLiteStore, target: dict[str, Any]) -> set[str]:
