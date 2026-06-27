@@ -34,6 +34,9 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "protected branch",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
             "repo runbook では `--with-journal` を使わない",
+            "repo default store/output pair",
+            "temp dogfood は temp store + temp output",
+            "default store と temp output を混在させない",
         ),
         forbidden=(
             "check_file_back_preflight.py --no-journal",
@@ -70,6 +73,9 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "protected branch",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
             "repo runbook では `--with-journal` を使わない",
+            "repo default store/output pair",
+            "temp dogfood は temp store + temp output",
+            "default store と temp output を混在させない",
         ),
         forbidden=(
             "check_file_back_preflight.py --no-journal",
@@ -107,6 +113,9 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "protected branch",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
             "repo runbook では `--with-journal` を使わない",
+            "repo default store/output pair",
+            "temp dogfood は temp store + temp output",
+            "default store と temp output を混在させない",
         ),
         forbidden=(
             "check_file_back_preflight.py --no-journal",
@@ -141,6 +150,9 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "protected branches",
             "tracked `wiki.grasp/events.jsonl` was retired and removed in `1.8.18`",
             "Do not use repo-runbook `--with-journal`",
+            "repo default store/output pair",
+            "temporary dogfood must use a temporary store and temporary output",
+            "never the repo store with a temporary output",
         ),
         forbidden=(
             "check_file_back_preflight.py --no-journal",
@@ -174,6 +186,9 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "python3 scripts/check_push_ownership.py",
             "protected branch",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
+            "repo default store/output pair",
+            "temp dogfood は temp store + temp output",
+            "default store と temp output を混在させない",
         ),
         forbidden=(
             "wiki・journal dirty",
@@ -203,6 +218,9 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "python3 scripts/check_push_ownership.py",
             "protected branch",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役済み",
+            "repo default store/output pair",
+            "temp dogfood は temp store + temp output",
+            "default store と temp output を混在",
         ),
         forbidden=(
             "journal あり mode と `--no-journal` mode の両方を検査できる",
@@ -248,7 +266,7 @@ def main() -> int:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
-    print("file-back runbook ok: no-journal default, retired journal, semantic log guard, session marker, preflight stamp, write-start guard, and push ownership guard documented")
+    print("file-back runbook ok: no-journal default, retired journal, semantic log guard, session marker, preflight stamp, write-start guard, store/output pair guard, and push ownership guard documented")
     return 0
 
 

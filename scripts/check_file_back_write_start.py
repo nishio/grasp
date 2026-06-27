@@ -25,8 +25,11 @@ from check_file_back_postwrite import (
 )
 from check_file_back_preflight import (
     DEFAULT_DIRTY_PATHS,
+    DEFAULT_FILE_BACK_OUTPUT,
+    DEFAULT_FILE_BACK_STORE,
     DEFAULT_NO_JOURNAL_DIRTY_PATHS,
     check_dirty_paths,
+    file_back_store_output_pair_errors,
     resolve_require_journal,
 )
 
@@ -46,6 +49,9 @@ def run_write_start_checks(
     expected_session_id: str = "",
 ) -> list[str]:
     errors: list[str] = []
+    errors.extend(file_back_store_output_pair_errors(repo, store=store, output=output))
+    if errors:
+        return errors
     if require_preflight_stamp:
         errors.extend(
             run_preflight_stamp_check(
@@ -79,10 +85,10 @@ def run_write_start_checks(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check guarded grasp file-back write-start conditions.")
     parser.add_argument("--repo", default=".", help="Repository root.")
-    parser.add_argument("--store", default=".grasp/file-back.sqlite")
+    parser.add_argument("--store", default=DEFAULT_FILE_BACK_STORE)
     parser.add_argument("--project", default="grasp-wiki")
     parser.add_argument("--journal", default="wiki.grasp/events.jsonl")
-    parser.add_argument("--output", default="wiki")
+    parser.add_argument("--output", default=DEFAULT_FILE_BACK_OUTPUT)
     parser.add_argument(
         "--session-id",
         default=os.environ.get("GRASP_SESSION_ID", ""),
