@@ -2656,12 +2656,12 @@ def run_rename_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, A
                 rename_result["source_path"],
             },
         )
+        projection = store.export_markdown(args.output, check=False)
         removed_files = remove_previous_projection_file(
             args.output,
             rename_result["previous_source_path"],
             rename_result["source_path"],
         )
-        projection = store.export_markdown(args.output, check=False)
         projection["removed_files"] = removed_files
         projection["removed_count"] = len(removed_files)
         return projection
