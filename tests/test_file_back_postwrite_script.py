@@ -227,6 +227,7 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
             "head": "abc123",
             "base": "origin/main",
             "base_oid": "def456",
+            "sqlite_event_sequence": 10,
             "store": ".grasp/file-back.sqlite",
             "project": "grasp-wiki",
             "output": "wiki",
@@ -252,6 +253,7 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
             "head": "abc123",
             "base": "skipped",
             "base_oid": None,
+            "sqlite_event_sequence": None,
             "store": ".grasp/file-back.sqlite",
             "project": "grasp-wiki",
             "output": "wiki",
@@ -277,6 +279,7 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
             "head": "old-head",
             "base": "origin/main",
             "base_oid": "old-base",
+            "sqlite_event_sequence": "bad",
             "store": "other.sqlite",
             "project": "other-project",
             "output": "other-output",
@@ -298,6 +301,7 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
         self.assertIn("session_id", joined)
         self.assertIn("current HEAD", joined)
         self.assertIn("current base origin/main", joined)
+        self.assertIn("sqlite_event_sequence", joined)
         self.assertIn("store", joined)
         self.assertIn("project", joined)
         self.assertIn("output", joined)
@@ -310,6 +314,7 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
             "head": "abc123",
             "base": "skipped",
             "base_oid": None,
+            "sqlite_event_sequence": 10,
             "store": ".grasp/file-back.sqlite",
             "project": "grasp-wiki",
             "output": "wiki",
@@ -349,6 +354,54 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
         )
 
         self.assertTrue(any("base is missing" in error for error in errors))
+        self.assertTrue(any("sqlite_event_sequence is missing" in error for error in errors))
+
+    def test_file_back_session_window_accepts_all_events_after_preflight_with_expected_session(self):
+        errors = postwrite.file_back_session_window_errors(
+            [
+                {"event_sequence": 9, "event_id": "old", "session_id": "old-session"},
+                {"event_sequence": 10, "event_id": "baseline", "session_id": "baseline-session"},
+                {"event_sequence": 11, "event_id": "page", "session_id": "file-back-session"},
+                {"event_sequence": 12, "event_id": "log", "session_id": "file-back-session"},
+            ],
+            expected_session_id="file-back-session",
+            after_event_sequence=10,
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_file_back_session_window_rejects_intermediate_missing_or_mismatched_session(self):
+        errors = postwrite.file_back_session_window_errors(
+            [
+                {"event_sequence": 10, "event_id": "baseline", "session_id": "old-session"},
+                {"event_sequence": 11, "event_id": "page-a", "session_id": "file-back-session"},
+                {"event_sequence": 12, "event_id": "page-b", "session_id": ""},
+                {"event_sequence": 13, "event_id": "log", "session_id": "file-back-session"},
+                {"event_sequence": 14, "event_id": "page-c", "session_id": "other-session"},
+            ],
+            expected_session_id="file-back-session",
+            after_event_sequence=10,
+        )
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("missing or mismatched session_id", errors[0])
+        self.assertIn("bad_events=2/4", errors[0])
+        self.assertIn("first_bad_sequence=12", errors[0])
+        self.assertIn("last_bad_sequence=14", errors[0])
+
+    def test_file_back_session_window_rejects_no_events_after_preflight(self):
+        errors = postwrite.file_back_session_window_errors(
+            [
+                {"event_sequence": 10, "event_id": "baseline", "session_id": "old-session"},
+            ],
+            expected_session_id="file-back-session",
+            after_event_sequence=10,
+        )
+
+        self.assertEqual(
+            errors,
+            ["no SQLite events were written after preflight baseline event_sequence=10"],
+        )
 
     def test_postwrite_rejects_dirty_projection_policy(self):
         def fake_run_command(args, *, cwd):

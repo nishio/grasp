@@ -217,6 +217,7 @@ class FileBackPreflightScriptTests(unittest.TestCase):
             head="abc123",
             base="origin/main",
             base_oid="def456",
+            sqlite_event_sequence=42,
             store=".grasp/file-back.sqlite",
             project="grasp-wiki",
             output="wiki",
@@ -230,6 +231,7 @@ class FileBackPreflightScriptTests(unittest.TestCase):
         self.assertEqual(payload["head"], "abc123")
         self.assertEqual(payload["base"], "origin/main")
         self.assertEqual(payload["base_oid"], "def456")
+        self.assertEqual(payload["sqlite_event_sequence"], 42)
         self.assertEqual(payload["store"], ".grasp/file-back.sqlite")
         self.assertEqual(payload["project"], "grasp-wiki")
         self.assertEqual(payload["output"], "wiki")
@@ -241,6 +243,7 @@ class FileBackPreflightScriptTests(unittest.TestCase):
             head="abc123",
             base=None,
             base_oid=None,
+            sqlite_event_sequence=None,
             store=".grasp/file-back.sqlite",
             project="grasp-wiki",
             output="wiki",
@@ -259,6 +262,7 @@ class FileBackPreflightScriptTests(unittest.TestCase):
                 head="abc123",
                 base="origin/main",
                 base_oid="def456",
+                sqlite_event_sequence=9,
                 store=".grasp/file-back.sqlite",
                 project="grasp-wiki",
                 output="wiki",
@@ -270,6 +274,20 @@ class FileBackPreflightScriptTests(unittest.TestCase):
 
             self.assertTrue(stamp_path.exists())
             self.assertEqual(json.loads(stamp_path.read_text(encoding="utf-8")), payload)
+
+    def test_latest_event_sequence_returns_max_sequence(self):
+        self.assertEqual(
+            preflight.latest_event_sequence(
+                [
+                    {"event_sequence": 2},
+                    {"event_sequence": "7"},
+                    {"event_sequence": None},
+                    {"event_sequence": "bad"},
+                ]
+            ),
+            7,
+        )
+        self.assertIsNone(preflight.latest_event_sequence([{"event_sequence": None}]))
 
     def test_write_status_command_selects_journal_or_no_journal_mode(self):
         journal_command = preflight.write_status_command(
