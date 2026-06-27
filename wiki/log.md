@@ -1195,3 +1195,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - code: `scripts/check_file_back_runbook.py` を追加し、AGENTS/CLAUDE、Codex `/next`、Claude `/ship-next`、repo `grasp` skill、README が `--no-journal` default を保持しているか検査できるようにした。
 - tests: `tests/test_file_back_runbook_script.py` を追加し、required / forbidden fragment と current repo docs の一致を確認する。`/next` と `/ship-next` の verification に runbook checker を追加。
 - file back: [[history]] / [[grasp-v1-implemented]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新。public compatibility version は `1.8.15`、schema は v8 のまま。
+
+## [2026-06-27 19:09] implementation+file back | file-back guard scripts を no-journal default に切替
+- code: `scripts/check_file_back_preflight.py` / `scripts/check_file_back_postwrite.py` の default を no-journal mode に切替。compatibility JSONL journal checks は `--with-journal` の明示 opt-in にした。`--no-journal` は既存 runbook 用の明示互換フラグとして残した。
+- tests: `resolve_require_journal()` の default / conflict tests を追加し、preflight / postwrite の no-flag smoke で `journal_mode=none` を確認。
+- file back: [[history]] / [[grasp-v1-implemented]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新。public compatibility version は `1.8.16`、schema は v8 のまま。

@@ -71,8 +71,8 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
         "skills/grasp/SKILL.md",
         required=(
             "通常編集は `--no-journal` path",
-            "python3 scripts/check_file_back_preflight.py --no-journal",
-            "python3 scripts/check_file_back_postwrite.py --no-journal",
+            "python3 scripts/check_file_back_preflight.py`（no-journal default）",
+            "python3 scripts/check_file_back_postwrite.py`（no-journal default）",
         ),
         forbidden=(
             "wiki・journal dirty",
@@ -82,7 +82,7 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
     RunbookRule(
         "README.md",
         required=(
-            "repo-local file-back guard scripts の通常 path は `--no-journal`",
+            "repo-local file-back guard scripts は no-journal が default",
         ),
         forbidden=(
             "journal あり mode と `--no-journal` mode の両方を検査できる",
