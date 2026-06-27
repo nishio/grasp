@@ -3128,6 +3128,191 @@ class CliHelpTests(unittest.TestCase):
         self.assertIn("- first", page_text)
         self.assertIn("- second", page_text)
 
+    def test_revert_event_include_dependents_reverts_later_same_page_events(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            first_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-section",
+                    "A",
+                    "--heading",
+                    "First",
+                    "--line",
+                    "- first",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            second_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-section",
+                    "A",
+                    "--heading",
+                    "Second",
+                    "--line",
+                    "- second",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            first_result = json.loads(first_completed.stdout)
+            second_result = json.loads(second_completed.stdout)
+            dry_run_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "revert-event",
+                    first_result["event_id"],
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                    "--dry-run",
+                    "--include-dependents",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows_after_dry_run = connection.execute(
+                    """
+                    SELECT event_id, event_type, project
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            page_text_after_dry_run = (root / "A.md").read_text(encoding="utf-8")
+            revert_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "revert-event",
+                    first_result["event_id"],
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                    "--include-dependents",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows_after_revert = connection.execute(
+                    """
+                    SELECT event_id, event_type, project, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            page_text_after_revert = (root / "A.md").read_text(encoding="utf-8")
+
+        dry_run_result = json.loads(dry_run_completed.stdout)
+        revert_result = json.loads(revert_completed.stdout)
+        self.assertTrue(dry_run_result["dry_run"])
+        self.assertTrue(dry_run_result["revertible"])
+        self.assertIsNone(dry_run_result["event_id"])
+        self.assertEqual(dry_run_result["event_ids"], [])
+        self.assertEqual(dry_run_result["target_event_id"], first_result["event_id"])
+        self.assertEqual(dry_run_result["target_event_type"], "section_append")
+        self.assertEqual(dry_run_result["included_dependent_event_ids"], [second_result["event_id"]])
+        self.assertEqual(dry_run_result["included_dependent_count"], 1)
+        self.assertEqual(dry_run_result["would_event_count"], 2)
+        self.assertEqual(
+            [event["target_event_id"] for event in dry_run_result["reverted_events"]],
+            [second_result["event_id"], first_result["event_id"]],
+        )
+        self.assertTrue(dry_run_result["would_export_projection"])
+        self.assertEqual(dry_run_result["would_remove_files"], [])
+        self.assertEqual([row[1] for row in sqlite_event_rows_after_dry_run], ["section_append", "section_append"])
+        self.assertIn("- first", page_text_after_dry_run)
+        self.assertIn("- second", page_text_after_dry_run)
+        self.assertFalse(revert_result["dry_run"])
+        self.assertTrue(revert_result["revertible"])
+        self.assertEqual(revert_result["target_event_id"], first_result["event_id"])
+        self.assertEqual(revert_result["target_event_type"], "section_append")
+        self.assertEqual(revert_result["included_dependent_event_ids"], [second_result["event_id"]])
+        self.assertEqual(revert_result["included_dependent_count"], 1)
+        self.assertEqual(revert_result["reverted_event_count"], 2)
+        self.assertEqual(len(revert_result["event_ids"]), 2)
+        self.assertEqual(revert_result["event_id"], revert_result["event_ids"][-1])
+        self.assertEqual(
+            [event["target_event_id"] for event in revert_result["reverted_events"]],
+            [second_result["event_id"], first_result["event_id"]],
+        )
+        self.assertEqual(
+            [row[1] for row in sqlite_event_rows_after_revert],
+            ["section_append", "section_append", "event_revert", "event_revert"],
+        )
+        self.assertEqual(
+            [json.loads(row[3])["target_event_id"] for row in sqlite_event_rows_after_revert[2:]],
+            [second_result["event_id"], first_result["event_id"]],
+        )
+        self.assertEqual(page_text_after_revert, "# A\n")
+
     def test_replay_journal_page_update_tolerates_line_id_drift_when_text_matches(self):
         def event(event_type, event_id, payload):
             return {
