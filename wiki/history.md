@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.63`（更新: 2026-06-28 08:44、store: schema `8`、compat: schema `8` compatible）: `rename-page` の projection export failure rollback で旧 projection file を先に削除しないようにした。旧実装は store に `page_rename` event を書いた後、旧 file を削除してから新 path を export していたため、新 path が directory などで export に失敗すると SQLite state は `event_revert` で戻っても旧 Markdown projection が消えたままになり得た。新実装は新 projection export が成功してから旧 file を削除する。regression は `New.md` directory で export を失敗させ、rollback diagnostic / SQLite `event_revert` / current store state / `Old.md` 残存を確認する。schema は不変
 - `1.8.62`（更新: 2026-06-28 08:29、store: schema `8`、compat: schema `8` compatible）: 実 git history replay corpus に、`3eaab75` の既存6ページ横断 `page_update` を適用した後で `grasp-backlog.md` の `page_update` だけを `revert-event` で戻す regression を追加した。expected projection は戻した1ページだけ親 revision、他5ページは更新後 commit の mixed state とし、`replay-journal --check` と direct re-import が clean であることを確認する。これにより `page_update` revert が単体 test だけでなく実履歴 corpus でも復旧できることを固定する。schema は不変
 - `1.8.61`（更新: 2026-06-28 08:17、store: schema `8`、compat: schema `8` compatible）: `history <query>` の `current_state_target` を追加し、query が current page handle とどう対応するかを `resolved_unique` / `ambiguous` / `unresolved` / `unavailable` で返すようにした。unique なら `read --page-id <id>`、ambiguous なら候補ごとの `read_args` / `read_command`、store 無しの journal fallback なら `unavailable` を返す。text formatter も target status と候補を出す。これにより `history` hit から現在 projection を読む時に、曖昧な handle を単一 page と誤読する gap を塞ぐ。schema は不変
 - `1.8.60`（更新: 2026-06-28 08:04、store: schema `8`、compat: schema `8` compatible）: `log-records` / `history` の JSON result に `result_mode: event-stream`、`current_state: false`、`current_state_hint`、`staleness_signals[]` を追加し、text formatter も同じ mode/current-state header を出すようにした。これにより、log entry import 由来の過去 transition record を現在状態の主張として読む stale-log gap を command output 側で明示する。schema は不変
@@ -202,6 +203,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.62`
+- Current public compatibility version: `1.8.63`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.62`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.63`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
