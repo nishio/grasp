@@ -83,6 +83,50 @@ class FileBackPreflightScriptTests(unittest.TestCase):
 
         self.assertEqual(errors, [])
 
+    def test_session_uniqueness_errors_require_expected_session_id(self):
+        errors = preflight.session_uniqueness_errors(
+            [],
+            expected_session_id="",
+        )
+
+        self.assertEqual(errors, ["GRASP_SESSION_ID or --session-id is required before file-back"])
+
+    def test_session_uniqueness_errors_accept_unused_session_id(self):
+        errors = preflight.session_uniqueness_errors(
+            [
+                {"event_sequence": 1, "session_id": "old-session"},
+                {"event_sequence": 2, "session_id": ""},
+            ],
+            expected_session_id="new-session",
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_session_uniqueness_errors_reject_reused_session_id(self):
+        errors = preflight.session_uniqueness_errors(
+            [
+                {"event_sequence": 1, "session_id": "work-1"},
+                {"event_sequence": 2, "session_id": "other"},
+                {"event_sequence": 3, "session_id": "work-1"},
+            ],
+            expected_session_id="work-1",
+        )
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("session_id already exists", errors[0])
+        self.assertIn("work-1", errors[0])
+        self.assertIn("first_sequence=1", errors[0])
+        self.assertIn("last_sequence=3", errors[0])
+
+    def test_session_uniqueness_errors_can_be_skipped_for_legacy_audits(self):
+        errors = preflight.session_uniqueness_errors(
+            [{"event_sequence": 1, "session_id": "work-1"}],
+            expected_session_id="",
+            skip_session_uniqueness_check=True,
+        )
+
+        self.assertEqual(errors, [])
+
     def test_write_status_command_selects_journal_or_no_journal_mode(self):
         journal_command = preflight.write_status_command(
             store=".grasp/file-back.sqlite",
@@ -172,6 +216,7 @@ class FileBackPreflightScriptTests(unittest.TestCase):
 
     def test_run_grasp_preflight_no_journal_uses_no_journal_write_status(self):
         original_run_command = preflight.run_command
+        original_project_events = preflight.project_events
         seen_write_status_args = None
 
         def fake_run_command(args, *, cwd):
@@ -216,6 +261,7 @@ class FileBackPreflightScriptTests(unittest.TestCase):
 
         try:
             preflight.run_command = fake_run_command
+            preflight.project_events = lambda store, project: []
             errors = preflight.run_grasp_preflight(
                 Path("."),
                 store=".grasp/file-back.sqlite",
@@ -223,14 +269,63 @@ class FileBackPreflightScriptTests(unittest.TestCase):
                 journal=None,
                 output="wiki",
                 require_journal=False,
+                expected_session_id="file-back-session",
             )
         finally:
             preflight.run_command = original_run_command
+            preflight.project_events = original_project_events
 
         self.assertEqual(errors, [])
         self.assertIsNotNone(seen_write_status_args)
         self.assertIn("--no-journal", seen_write_status_args)
         self.assertNotIn("--journal", seen_write_status_args)
+
+    def test_run_grasp_preflight_rejects_reused_session_id_before_projection_check(self):
+        original_run_command = preflight.run_command
+        original_project_events = preflight.project_events
+
+        def fake_run_command(args, *, cwd):
+            if "import" in args:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if "write-status" in args:
+                return subprocess.CompletedProcess(
+                    args,
+                    0,
+                    json.dumps(
+                        {
+                            "strict_ok": True,
+                            "projection": {"ok": True},
+                            "journal_exists": False,
+                            "event_streams_match": False,
+                            "journal_log_stale": False,
+                        }
+                    ),
+                    "",
+                )
+            if "export-markdown" in args:
+                self.fail("projection check should not run after session reuse failure")
+            self.fail(f"unexpected command: {args}")
+
+        try:
+            preflight.run_command = fake_run_command
+            preflight.project_events = lambda store, project: [
+                {"event_sequence": 7, "session_id": "file-back-session"}
+            ]
+            errors = preflight.run_grasp_preflight(
+                Path("."),
+                store=".grasp/file-back.sqlite",
+                project="grasp-wiki",
+                journal=None,
+                output="wiki",
+                require_journal=False,
+                expected_session_id="file-back-session",
+            )
+        finally:
+            preflight.run_command = original_run_command
+            preflight.project_events = original_project_events
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("session_id already exists", errors[0])
 
 
 if __name__ == "__main__":
