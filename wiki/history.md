@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.26`（更新: 2026-06-27 22:42、store: schema `8`、compat: schema `8` compatible）: `revert-plan <event-id> --scope log-batch` を追加。選択 project の SQLite event stream だけを読み、anchor event を含む file-back 風 work unit を前後の `log_append` 境界から推定し、`candidate_event_ids` / `revert_order_event_ids` / `candidate_events` / `excluded_events` / `revertible` / `reverted_events` を read-only で返す。実データ dogfood では直近 file-back の4 page updates + closing `log_append` を1つの rollback candidate set として抽出できることを確認した。schema は不変
 - `1.8.25`（更新: 2026-06-27 22:05、store: schema `8`、compat: schema `8` compatible）: `revert-events <event-id...>` を追加。選択 project の SQLite event stream から明示 event ids を解決し、全 target が active reversible events であることを確認してから、reverse `event_sequence` order で1つの SQLite transaction 内に `event_revert` rows を挿入する。`--dry-run` は同じ sequence / safety check を rollback-only transaction で検査し、`requested_event_ids` / `revert_order_event_ids` / `would_event_count` を返す。regression test は2ページの `page_update` を1つの recovery operation として戻すことを確認する。schema は不変
 - `1.8.24`（更新: 2026-06-27 21:16、store: schema `8`、compat: schema `8` compatible）: `revert-event --include-dependents` を追加。SQLite-sourced target に限り、target より後の active same-page reversible events を event_sequence 逆順で先に `event_revert` し、その後 target を revert する。`--dry-run --include-dependents` では同じ sequence を rollback-only transaction で検査し、`included_dependent_event_ids` / `would_event_count` / `reverted_events` を返して mutation しない。regression test は後続 `section_append` があるため通常 dry-run では不可逆な先行 append を、dependent append と一緒に戻して page を元に戻すことを確認する。schema は不変
 - `1.8.23`（更新: 2026-06-27 20:58、store: schema `8`、compat: schema `8` compatible）: `revert-event --dry-run` を追加。実際の `revert-event` と同じ安全条件を SQLite write transaction 内で通し、最後に rollback して store / journal / Markdown projection を変更せず、JSON result に `dry_run=true`、`revertible`、`reason`、`would_event_type=event_revert`、`would_write_journal`、`would_export_projection`、`would_remove_files` を返す。可逆な `page_create` と、後続 append があるため tail guard で不可逆な `section_append` を regression test で確認した。schema は不変
@@ -165,6 +166,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.25`
+- Current public compatibility version: `1.8.26`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.25`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.26`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
