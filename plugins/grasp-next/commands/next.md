@@ -73,7 +73,7 @@ python3 scripts/lint_wiki.py
 git diff --check
 ```
 
-変更内容に関係する時は、小さな dogfood command を 1 つ走らせる。file-back / projection 周りを触った時は、`export-markdown --json --check | scripts/check_projection_policy.py` を必須にし、重要な観測があれば file back する。
+変更内容に関係する時は、小さな dogfood command を 1 つ走らせる。file-back / projection 周りを触った時は、`scripts/check_file_back_postwrite.py` を必須にし、重要な観測があれば file back する。
 
 ### 4. Commit And Push
 
@@ -92,7 +92,7 @@ git diff --check
 - unittest が通っている。
 - wiki lint が通っている。
 - `git diff --check` が通っている。
-- file-back / projection 周りを触った時は `scripts/check_projection_policy.py` が通っている。
+- file-back / projection 周りを触った時は `scripts/check_file_back_postwrite.py` が通っている。
 - commit と push が成功している、または clean tree のため commit 不要と判断している。
 - 失敗時は commit/push していない。
 

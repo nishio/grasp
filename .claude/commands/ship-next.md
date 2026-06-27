@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(python3 -m unittest discover -s tests:*), Bash(python3 scripts/lint_wiki.py:*), Bash(python3 scripts/check_projection_policy.py:*), Bash(python3 scripts/check_file_back_preflight.py:*), Bash(python3 -m grasp:*), Bash(git diff --check:*), Bash(date:*), Bash(rg:*), Bash(sed:*), Read, Edit, MultiEdit, TodoWrite
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(python3 -m unittest discover -s tests:*), Bash(python3 scripts/lint_wiki.py:*), Bash(python3 scripts/check_projection_policy.py:*), Bash(python3 scripts/check_file_back_preflight.py:*), Bash(python3 scripts/check_file_back_postwrite.py:*), Bash(python3 -m grasp:*), Bash(git diff --check:*), Bash(date:*), Bash(rg:*), Bash(sed:*), Read, Edit, MultiEdit, TodoWrite
 description: File back grasp work, commit, push, and propose what to build next in Japanese
 ---
 
@@ -27,7 +27,7 @@ Follow these steps:
 3. Run verification:
    - `python3 -m unittest discover -s tests`
    - `python3 scripts/lint_wiki.py`
-   - if file-back / projection behavior changed, `python3 -m grasp --json --store .grasp/file-back.sqlite --project grasp-wiki export-markdown --output wiki --check | python3 scripts/check_projection_policy.py`
+   - if file-back / projection behavior changed, `python3 scripts/check_file_back_postwrite.py`
    - `git diff --check`
    - If relevant, run one small dogfood command and file back any important observation.
 4. Stage all intentional changes, commit once with a concise message, and push the current branch to `origin`.
