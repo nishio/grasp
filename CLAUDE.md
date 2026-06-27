@@ -61,7 +61,7 @@ file back は **grasp write first**。通常編集の authority は SQLite store
 `python3 scripts/lint_wiki.py`（孤立・壊れたリンク・未登録）→ 意味的 lint（実装済み事実・backlog・decision の矛盾 / stale open q）→ log に `## [YYYY-MM-DD HH:MM] lint | <summary>`。
 
 ### Ship loop
-Claude Code では `/ship-next`（`.claude/commands/ship-next.md`）で、差分理解 → wiki file back → `python3 -m unittest discover -s tests` / `python3 scripts/lint_wiki.py` / `git diff --check` → commit → push → "what's next?" 提示までを一つの作業ループとして閉じる。空差分なら empty commit せず、current backlog から次候補だけ答える。
+Claude Code では `/ship-next`（`.claude/commands/ship-next.md`）で、差分理解 → wiki file back → `python3 -m unittest discover -s tests` / `python3 scripts/lint_wiki.py` / `python3 scripts/check_file_back_runbook.py` / `git diff --check` → commit → push → "what's next?" 提示までを一つの作業ループとして閉じる。空差分なら empty commit せず、current backlog から次候補だけ答える。
 
 ## 運用方針
 

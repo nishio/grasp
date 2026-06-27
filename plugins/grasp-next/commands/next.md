@@ -72,6 +72,7 @@ file back は factual and scoped にする。未来の over-spec は避ける。
 ```bash
 $PYTHON_BIN -m unittest discover -s tests
 python3 scripts/lint_wiki.py
+python3 scripts/check_file_back_runbook.py
 git diff --check
 ```
 
@@ -93,6 +94,7 @@ git diff --check
 
 - unittest が通っている。
 - wiki lint が通っている。
+- file-back runbook checker が通っている。
 - `git diff --check` が通っている。
 - file-back / projection 周りを触った時は `scripts/check_file_back_postwrite.py --no-journal` が通っている。
 - commit と push が成功している、または clean tree のため commit 不要と判断している。

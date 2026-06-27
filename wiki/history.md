@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.15`（更新: 2026-06-27 18:58、store: schema `8`、compat: schema `8` compatible）: `scripts/check_file_back_runbook.py` を追加し、AGENTS/CLAUDE、Codex `/next`、Claude `/ship-next`、repo `grasp` skill、README が `--no-journal` default を保持しているか検査できるようにした。`/next` と `/ship-next` の verification にこの checker を追加し、runbook が compatibility journal 既定へ戻る drift を ship loop で検出する。schema は不変
 - `1.8.14`（更新: 2026-06-27 18:49、store: schema `8`、compat: schema `8` compatible）: repo-local file-back runbooks を `--no-journal` default に切り替えた。AGENTS/CLAUDE、Codex `/next`、Claude `/ship-next`、repo `grasp` skill は通常 file-back で `scripts/check_file_back_preflight.py --no-journal`、write commands の `--no-journal --output wiki`、`scripts/check_file_back_postwrite.py --no-journal` を使う。`wiki.grasp/events.jsonl` は transition 中の compatibility/audit artifact として残し、明示 audit が必要な時だけ journal あり mode を使う。schema は不変
 - `1.8.13`（更新: 2026-06-27 18:36、store: schema `8`、compat: schema `8` compatible）: repo-local file-back guard scripts に `--no-journal` mode を追加。`scripts/check_file_back_preflight.py --no-journal` は `write-status --no-journal --strict` を使い、dirty path default を `wiki` のみにする。`scripts/check_file_back_postwrite.py --no-journal` も同じ status mode を使い、projection policy / wiki lint / whitespace diff check は従来通り実行する。既定の journal あり mode は維持し、通常 file-back は明示 cutover まで compatibility journal あり path を使う。schema は不変
 - `1.8.12`（更新: 2026-06-27 18:05、store: schema `8`、compat: schema `8` compatible）: Markdown-backed alpha write commands に `--no-journal` を追加。`append-section` / `append-log` / `write-page` / `rename-page` / `revert-event` は SQLite events と Markdown projection を更新しつつ、compatibility JSONL journal への append を明示的に省略できる。JSON result は `journal=null` / `journal_written=false` を返す。`write-status --no-journal --strict` は journal missing / event stream mismatch / journal-log stale を guard せず、SQLite-authority projection だけを strict check する。既存の `--journal` / default journal path の挙動と repo file-back guard は維持。schema は不変
@@ -154,6 +155,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.14`
+- Current public compatibility version: `1.8.15`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.14`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.15`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

@@ -1190,3 +1190,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - docs: AGENTS/CLAUDE、Codex `/next`、Claude `/ship-next`、repo `grasp` skill、README を通常 `--no-journal` path に更新。`wiki.grasp/events.jsonl` は明示 audit 用 artifact として残す。
 - file back: [[history]] / [[grasp-v1-implemented]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新。public compatibility version は `1.8.14`、schema は v8 のまま。
 - dogfood: `scripts/check_file_back_preflight.py --no-journal` から開始し、wiki 更新は `write-page --no-journal` / `append-log --no-journal` で store に反映した。
+
+## [2026-06-27 18:58] implementation+file back | file-back runbook drift checker を追加
+- code: `scripts/check_file_back_runbook.py` を追加し、AGENTS/CLAUDE、Codex `/next`、Claude `/ship-next`、repo `grasp` skill、README が `--no-journal` default を保持しているか検査できるようにした。
+- tests: `tests/test_file_back_runbook_script.py` を追加し、required / forbidden fragment と current repo docs の一致を確認する。`/next` と `/ship-next` の verification に runbook checker を追加。
+- file back: [[history]] / [[grasp-v1-implemented]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新。public compatibility version は `1.8.15`、schema は v8 のまま。
