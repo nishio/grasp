@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -4147,6 +4148,258 @@ class CliHelpTests(unittest.TestCase):
             [row[1] for row in sqlite_event_rows_after_plan],
             ["page_update", "page_update", "page_update"],
         )
+
+    def test_revert_plan_session_infers_multi_page_sequence_from_write_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nold A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nold B\n", encoding="utf-8")
+            (root / "C.md").write_text("# C\nold C\n", encoding="utf-8")
+            (root / "D.md").write_text("# D\nold D\n", encoding="utf-8")
+            a_source = Path(tmpdir) / "A-new.md"
+            b_source = Path(tmpdir) / "B-new.md"
+            c_source = Path(tmpdir) / "C-new.md"
+            d_source = Path(tmpdir) / "D-new.md"
+            a_source.write_text("# A\nnew A\n", encoding="utf-8")
+            b_source.write_text("# B\nnew B\n", encoding="utf-8")
+            c_source.write_text("# C\nnew C\n", encoding="utf-8")
+            d_source.write_text("# D\nnew D\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            a_update = run_json(
+                "write-page",
+                "A",
+                "--from-file",
+                str(a_source),
+                "--output",
+                str(root),
+                "--no-journal",
+                actor="codex",
+                session_id="work-1",
+            )
+            b_update = run_json(
+                "write-page",
+                "B",
+                "--from-file",
+                str(b_source),
+                "--output",
+                str(root),
+                "--no-journal",
+                actor="codex",
+                session_id="other-work",
+            )
+            c_update = run_json(
+                "write-page",
+                "C",
+                "--from-file",
+                str(c_source),
+                "--output",
+                str(root),
+                "--no-journal",
+                actor="codex",
+                session_id="work-1",
+            )
+            d_update = run_json(
+                "write-page",
+                "D",
+                "--from-file",
+                str(d_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            plan = run_json(
+                "revert-plan",
+                a_update["event_id"],
+                "--scope",
+                "session",
+                "--output",
+                str(root),
+            )
+            no_session_plan = run_json(
+                "revert-plan",
+                d_update["event_id"],
+                "--scope",
+                "session",
+                "--output",
+                str(root),
+            )
+            a_text_after_plan = (root / "A.md").read_text(encoding="utf-8")
+            b_text_after_plan = (root / "B.md").read_text(encoding="utf-8")
+            c_text_after_plan = (root / "C.md").read_text(encoding="utf-8")
+            d_text_after_plan = (root / "D.md").read_text(encoding="utf-8")
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows_after_plan = connection.execute(
+                    """
+                    SELECT event_id, event_type, actor, session_id
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+
+        self.assertEqual(plan["scope"], "session")
+        self.assertTrue(plan["complete"])
+        self.assertTrue(plan["revertible"])
+        self.assertEqual(plan["session_id"], "work-1")
+        self.assertEqual(plan["session_actor"], "codex")
+        self.assertEqual(
+            plan["session_event_ids"],
+            [a_update["event_id"], c_update["event_id"]],
+        )
+        self.assertEqual(
+            plan["candidate_event_ids"],
+            [a_update["event_id"], c_update["event_id"]],
+        )
+        self.assertEqual(
+            plan["revert_order_event_ids"],
+            [c_update["event_id"], a_update["event_id"]],
+        )
+        self.assertEqual(
+            [event["session_id"] for event in plan["candidate_events"]],
+            ["work-1", "work-1"],
+        )
+        self.assertEqual(
+            [event["target_event_id"] for event in plan["reverted_events"]],
+            [c_update["event_id"], a_update["event_id"]],
+        )
+        self.assertEqual(
+            plan["suggested_revert_events_args"],
+            [
+                "revert-events",
+                a_update["event_id"],
+                c_update["event_id"],
+                "--output",
+                str(root),
+            ],
+        )
+        self.assertFalse(no_session_plan["complete"])
+        self.assertFalse(no_session_plan["revertible"])
+        self.assertIn("no session_id", no_session_plan["reason"])
+        self.assertEqual(a_text_after_plan, "# A\nnew A\n")
+        self.assertEqual(b_text_after_plan, "# B\nnew B\n")
+        self.assertEqual(c_text_after_plan, "# C\nnew C\n")
+        self.assertEqual(d_text_after_plan, "# D\nnew D\n")
+        self.assertEqual(
+            sqlite_event_rows_after_plan,
+            [
+                (a_update["event_id"], "page_update", "codex", "work-1"),
+                (b_update["event_id"], "page_update", "codex", "other-work"),
+                (c_update["event_id"], "page_update", "codex", "work-1"),
+                (d_update["event_id"], "page_update", "", ""),
+            ],
+        )
+
+    def test_write_event_metadata_defaults_from_environment(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nold A\n", encoding="utf-8")
+            source = Path(tmpdir) / "A-new.md"
+            source.write_text("# A\nnew A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            env = {
+                **os.environ,
+                "GRASP_ACTOR": "env-codex",
+                "GRASP_SESSION_ID": "env-session",
+            }
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    "A",
+                    "--from-file",
+                    str(source),
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+                env=env,
+            )
+            update = json.loads(completed.stdout)
+            connection = sqlite3.connect(store_path)
+            try:
+                row = connection.execute(
+                    """
+                    SELECT event_id, actor, session_id
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchone()
+            finally:
+                connection.close()
+
+        self.assertEqual(row, (update["event_id"], "env-codex", "env-session"))
 
     def test_replay_journal_page_update_tolerates_line_id_drift_when_text_matches(self):
         def event(event_type, event_id, payload):

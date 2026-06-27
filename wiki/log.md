@@ -1295,3 +1295,9 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 - implemented: revert-plan <event-id> --scope time-burst --max-gap-seconds returns a bounded multi-page rollback candidate set from adjacent event created_at gaps without crossing log_append boundaries.
 - tests: covered three page_update events across different pages with a large gap after the second update, verifying the burst excludes the later event and does not mutate store/projection.
 - docs: bumped compatibility version to 1.8.29 and narrowed remaining revert planning to semantic multi-page work-unit inference beyond log-batch, same-page, explicit event-window, or time-burst boundaries.
+
+## [2026-06-27 23:38] implementation | add session-scoped revert planning
+- implemented: global --actor / --session-id metadata now reaches SQLite write, revert, import-log, and adopt events, defaulting from GRASP_ACTOR / GRASP_SESSION_ID.
+- implemented: revert-plan <event-id> --scope session returns read-only rollback candidates for selected-project events sharing the anchor session_id.
+- tests: covered interleaved page_update events from two sessions, env-default event metadata, and empty-session anchors rejected by session planning.
+- docs: bumped compatibility version to 1.8.30 and narrowed remaining work-unit inference to cases beyond log-batch, same-page, explicit event-window, time-burst, or session boundaries.
