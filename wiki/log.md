@@ -1231,3 +1231,12 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - implemented: tracked wiki.grasp/events.jsonl を削除し、repo-local file-back runbook / checker / skill / README を no-journal default + retired journal policy に更新。
 - guard: scripts/check_file_back_preflight.py は no-journal default でも wiki/ と退役済み JSONL path の dirty を止める。runbook checker は repo runbook の --with-journal 復帰を stale として検出する。
 - file back: history / grasp-v1-implemented / sqlite-ssot-write-plan / grasp-backlog / log を --no-journal --output wiki で更新し、wiki.grasp/events.jsonl は再作成していない。
+
+## [2026-06-27 19:50] implementation | regenerate log from SQLite events
+- implemented: export-markdown --regenerate-log は --journal なしなら SQLite events を source にし、projection_policy generated_overlays に sqlite-events-log、result に log_event_source=sqlite / log_event_count を返す。
+- compatibility: --journal <path> を明示した時だけ legacy JSONL event stream を読み、legacy-journal-log overlay を返す ad hoc audit path として残した。
+- test: record-per-file log_entry_import を SQLite events から Log.md へ生成する no-journal regression を追加した。
+
+## [2026-06-27 19:50] dogfood | sqlite regenerate-log check passes on repo store
+- command: python3 -m grasp --store .grasp/file-back.sqlite --project grasp-wiki --json export-markdown --output wiki --regenerate-log --check
+- result: ok=true, regenerated_files=[log.md], log_event_source=sqlite, log_event_count=135, generated_overlays=[sqlite-events-log], changed_files=[]。partial event stream は log page page_update を seed にして replay できる。

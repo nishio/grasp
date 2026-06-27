@@ -880,26 +880,29 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "project, output, check, ok, file_count, checked_files, written_files, written_count, "
-            "regenerated_files, projection_policy, changed_files, missing_files, extra_files"
+            "regenerated_files, log_event_source|null, log_event_count, projection_policy, "
+            "changed_files, missing_files, extra_files"
         ),
         examples=[
             "grasp --project grasp-wiki export-markdown --output wiki --check",
             "grasp --project grasp-wiki --json export-markdown --output wiki --check",
-            "grasp --project grasp-wiki export-markdown --output wiki --regenerate-index --regenerate-log --journal wiki.grasp/events.jsonl --check",
+            "grasp --project grasp-wiki export-markdown --output wiki --regenerate-index --regenerate-log --check",
+            "grasp --project grasp-wiki export-markdown --output wiki --regenerate-log --journal /tmp/events.jsonl --check",
             "grasp --project grasp-wiki export-markdown --output wiki",
         ],
         notes=[
             "The projection authority is SQLite; Markdown is a git-tracked output for review, backup, publish, and recovery.",
             "This projection preserves stored lines and paths; formatting synthesis comes later.",
             "--check is the projection freshness gate for ship loops and file-back cutover.",
-            "--regenerate-log replays log page events and appends latest record-per-file log_entry_import records.",
+            "--regenerate-log replays SQLite log page events by default and appends latest record-per-file log_entry_import records.",
+            "--journal switches --regenerate-log to a legacy JSONL event stream for ad hoc audits.",
         ],
     )
     export_markdown_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder.")
     export_markdown_parser.add_argument("--check", action="store_true", help="Only compare projection output; do not write files.")
     export_markdown_parser.add_argument("--regenerate-index", action="store_true", help="Regenerate the primary navigation index page from the Markdown store catalog.")
-    export_markdown_parser.add_argument("--regenerate-log", action="store_true", help="Regenerate the primary log page by replaying log page events and latest record-per-file records from the journal.")
-    export_markdown_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path for --regenerate-log. Defaults to <output>.grasp/events.jsonl beside the output folder.")
+    export_markdown_parser.add_argument("--regenerate-log", action="store_true", help="Regenerate the primary log page by replaying SQLite log page events and latest record-per-file records.")
+    export_markdown_parser.add_argument("--journal", type=Path, default=None, help="Legacy JSONL event stream path for --regenerate-log ad hoc audits. Omit to use SQLite events.")
 
     append_section_parser = add_command_parser(
         subparsers,
@@ -2190,15 +2193,25 @@ def log_entry_later_event_summary(
 
 
 def run_export_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
-    log_journal_events = None
+    log_events = None
+    log_event_source = None
+    log_overlay_name = None
     if args.regenerate_log:
-        journal = journal_path_for_output(args.output, args.journal)
-        log_journal_events = read_journal_events(journal)
+        if args.journal is not None:
+            log_events = read_journal_events(args.journal)
+            log_event_source = "journal"
+            log_overlay_name = "legacy-journal-log"
+        else:
+            log_events = store.events(project=args.project, limit=None)
+            log_event_source = "sqlite"
+            log_overlay_name = "sqlite-events-log"
     return store.export_markdown(
         args.output,
         check=args.check,
         regenerate_index=args.regenerate_index,
-        log_journal_events=log_journal_events,
+        log_events=log_events,
+        log_event_source=log_event_source,
+        log_overlay_name=log_overlay_name,
     )
 
 
@@ -2439,7 +2452,9 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
             journal_log_projection = store.export_markdown(
                 args.output,
                 check=True,
-                log_journal_events=events,
+                log_events=events,
+                log_event_source="journal",
+                log_overlay_name="legacy-journal-log",
             )
             journal_log_changed_files = regenerated_projection_dirty_files(journal_log_projection)
         except ValueError as error:
@@ -4017,6 +4032,9 @@ def format_export_markdown(result: dict[str, Any]) -> str:
     if generated_overlays:
         parts.append("generated_overlays:\n")
         parts.extend(f"- {overlay}\n" for overlay in generated_overlays)
+    if result.get("log_event_source"):
+        parts.append(f"log_event_source: {result['log_event_source']}\n")
+        parts.append(f"log_event_count: {result.get('log_event_count', 0)}\n")
     for key, label in (
         ("regenerated_files", "regenerated"),
         ("changed_files", "changed"),
