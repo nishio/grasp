@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.51`（更新: 2026-06-28 06:10、store: schema `8`、compat: schema `8` compatible）: Markdown-backed recovery commands の projection dirty guard を mutation 前へ追加した。`revert-event` / `revert-events` / `revert-event --include-dependents` は `--output` が Git worktree 内にある時、reverted target source path（rename は旧/new path、古い payload は `page_id` から Markdown manifest で解決）以外の dirty projection path を事前に検出し、store state や SQLite `event_revert` rows を変更する前に拒否する。schema は不変
 - `1.8.50`（更新: 2026-06-28 05:20、store: schema `8`、compat: schema `8` compatible）: Markdown-backed write commands の projection export 前 dirty guard を追加した。`append-section` / `append-log` / `write-page` / `rename-page` は `--output` が Git worktree 内にある時、今回の対象 source path（rename は旧/new path）以外の dirty projection path を検出すると export 前に拒否し、既存の projection-export rollback path で `event_revert` を記録する。対象 page 自体の dirty path は direct patch fallback 用に許容する。併せて `append-section` / `append-log` の JSON result と event payload が対象 `source_path` を返すようにした。schema は不変
 - `1.8.49`（更新: 2026-06-28 05:13、store: schema `8`、compat: schema `8` compatible）: repo-local `scripts/check_file_back_preflight.py` の fresh store bootstrap 判定を狭めた。repo 基準で解決した store path がまだ無い場合と `events` table が無い場合だけ bootstrap 可能な empty state と扱い、locked / malformed / unopenable existing store などその他 SQLite error は `could not inspect file-back store events` で preflight failure にする。schema は不変
 - `1.8.48`（更新: 2026-06-28 05:03、store: schema `8`、compat: schema `8` compatible）: repo-local `scripts/check_file_back_preflight.py` が no-journal mode で selected-project SQLite events の無い file-back store を検出した場合、`adopt-markdown` で `.grasp/file-back-adopt.jsonl` へ gitignored bootstrap audit を作ってから通常の `import --markdown` / `write-status --no-journal --strict` / projection check へ進むようにした。fresh isolated worktree で `.grasp/file-back.sqlite` が未初期化でも、semantic log seed 不在で preflight が止まらない。schema は不変
@@ -190,6 +191,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.50`
+- Current public compatibility version: `1.8.51`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.50`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.51`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
