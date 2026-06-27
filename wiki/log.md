@@ -1125,3 +1125,7 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 ## [2026-06-27 14:29] implementation | show SQLite events in write-status
 - `write-status` now reports selected-project SQLite `events` count and last event in JSON and text output, alongside legacy JSONL journal count and last event.
 - Strict mode remains projection / JSONL / regenerated-log based; SQLite-vs-JSONL mismatch is visible but not yet a failure.
+
+## [2026-06-27 14:56] implementation | migrate revert-event to SQLite events
+- `revert-event` now resolves target events from SQLite `events` first and falls back to legacy JSONL.
+- SQLite-sourced reverts commit state rollback and SQLite `event_revert` insert in one transaction, then append legacy JSONL and export Markdown.

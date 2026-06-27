@@ -31,6 +31,7 @@ from .sqlite_store import (
     ensure_store_schema,
     import_export_to_sqlite,
     import_markdown_folder_to_sqlite,
+    insert_store_event,
     recover_store_from_import_cache,
 )
 
@@ -48,6 +49,7 @@ STORE_WRITE_COMMANDS = {
     "sync",
     "write-page",
 }
+REVERSIBLE_EVENT_TYPES = {"page_create", "section_append", "log_append", "page_update", "page_rename"}
 
 
 class GraspHelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
@@ -1073,12 +1075,13 @@ def build_parser() -> argparse.ArgumentParser:
     revert_event_parser = add_command_parser(
         subparsers,
         "revert-event",
-        help="Revert a supported alpha write journal event.",
+        help="Revert a supported alpha write event.",
         description=(
-            "Revert a supported alpha write journal event when the current page still matches the target event, "
-            "then append an event_revert journal entry and export projection."
+            "Revert a supported alpha write event when the current page still matches the target event. "
+            "SQLite events are searched first, then the legacy JSONL journal. SQLite-sourced reverts insert "
+            "event_revert in the same transaction as the state change, then append the legacy JSONL event and export projection."
         ),
-        returns="project, journal, output, event_id, target_event_id, target_event_type, page, removed_lines[]|restored_lines[], removed_line_count|restored_line_count, projection",
+        returns="project, journal, output, event_id, target_event_id, target_event_type, target_event_source, page, removed_lines[]|restored_lines[], removed_line_count|restored_line_count, projection",
         examples=[
             "grasp --project grasp-wiki revert-event <event-id> --output wiki",
             "grasp --project grasp-wiki --json revert-event <event-id> --output wiki --journal wiki.grasp/events.jsonl",
@@ -1089,7 +1092,7 @@ def build_parser() -> argparse.ArgumentParser:
             "page_update/page_rename require the current lines and path/title state to match the target event.",
         ],
     )
-    revert_event_parser.add_argument("event_id", help="Journal event id to revert.")
+    revert_event_parser.add_argument("event_id", help="Write event id to revert.")
     revert_event_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
     revert_event_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
     revert_event_parser.add_argument("--reason", default="", help="Optional reason stored in the revert event payload.")
@@ -2462,33 +2465,47 @@ def run_write_diff(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
 
 def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = journal_path_for_output(args.output, args.journal)
-    events = read_journal_events(journal)
-    target = next((event for event in events if event["event_id"] == args.event_id), None)
-    if target is None:
-        raise ValueError(f"journal event not found: {args.event_id}")
-    if target["event_type"] not in {"page_create", "section_append", "log_append", "page_update", "page_rename"}:
-        raise ValueError(f"cannot revert event_type with this alpha command: {target['event_type']}")
+    journal_events = read_journal_events(journal)
     selected_project = store._require_project()
+    sqlite_events = store.events(project=selected_project, limit=None)
+    target = next((event for event in sqlite_events if event["event_id"] == args.event_id), None)
+    target_source = "sqlite"
+    if target is None:
+        target = next((event for event in journal_events if event["event_id"] == args.event_id), None)
+        target_source = "journal"
+    if target is None:
+        raise ValueError(f"event not found: {args.event_id}")
+    if target["event_type"] not in REVERSIBLE_EVENT_TYPES:
+        raise ValueError(f"cannot revert event_type with this alpha command: {target['event_type']}")
     if target["project"] != selected_project:
-        raise ValueError(
-            f"journal event belongs to project {target['project']!r}; selected project is {selected_project!r}"
-        )
+        raise ValueError(f"event belongs to project {target['project']!r}; selected project is {selected_project!r}")
     if any(
         event["event_type"] == "event_revert"
         and event.get("payload", {}).get("target_event_id") == args.event_id
-        for event in events
+        for event in [*sqlite_events, *journal_events]
     ):
-        raise ValueError(f"journal event is already reverted: {args.event_id}")
-    rollback = revert_journal_event_in_store(store, target, reason=args.reason)
+        raise ValueError(f"event is already reverted: {args.event_id}")
+    if target_source == "sqlite":
+        with store.write_transaction():
+            rollback = revert_journal_event_in_store(store, target, reason=args.reason, uncommitted=True)
+            reverted = rollback["reverted"]
+            event = make_journal_event(
+                "event_revert",
+                project=reverted["project"],
+                payload=rollback["payload"],
+            )
+            insert_store_event(store.connection, event)
+    else:
+        rollback = revert_journal_event_in_store(store, target, reason=args.reason)
+        reverted = rollback["reverted"]
+        event = make_journal_event(
+            "event_revert",
+            project=reverted["project"],
+            payload=rollback["payload"],
+        )
     reverted = rollback["reverted"]
-    revert_payload = rollback["payload"]
     source_path = rollback["source_path"]
     previous_source_path = rollback["previous_source_path"]
-    event = make_journal_event(
-        "event_revert",
-        project=reverted["project"],
-        payload=revert_payload,
-    )
     append_journal_event(journal, event)
     removed_files = []
     if target["event_type"] == "page_rename":
@@ -2506,6 +2523,7 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
             "event_id": event["event_id"],
             "target_event_id": target["event_id"],
             "target_event_type": target["event_type"],
+            "target_event_source": target_source,
             "projection": projection,
         }
     )
@@ -2517,6 +2535,7 @@ def revert_journal_event_in_store(
     target: dict[str, Any],
     *,
     reason: str,
+    uncommitted: bool = False,
 ) -> dict[str, Any]:
     payload = target["payload"]
     page_id = str(payload.get("page_id") or "")
@@ -2531,7 +2550,12 @@ def revert_journal_event_in_store(
         aliases = payload.get("aliases") or []
         if not isinstance(current_lines, list) or not title or not source_path or not isinstance(aliases, list):
             raise ValueError("page_create payload is incomplete")
-        reverted = store.revert_markdown_page_create(
+        revert_page_create = (
+            store._revert_markdown_page_create_uncommitted
+            if uncommitted
+            else store.revert_markdown_page_create
+        )
+        reverted = revert_page_create(
             page_id,
             title=title,
             source_path=source_path,
@@ -2554,7 +2578,12 @@ def revert_journal_event_in_store(
         current_lines = payload.get("lines")
         if not isinstance(previous_lines, list) or not isinstance(current_lines, list):
             raise ValueError("page_update payload is missing previous_lines or lines")
-        reverted = store.revert_markdown_page_update(page_id, previous_lines, current_lines)
+        revert_page_update = (
+            store._revert_markdown_page_update_uncommitted
+            if uncommitted
+            else store.revert_markdown_page_update
+        )
+        reverted = revert_page_update(page_id, previous_lines, current_lines)
         revert_payload = {
             "target_event_id": target["event_id"],
             "target_event_type": target["event_type"],
@@ -2585,7 +2614,12 @@ def revert_journal_event_in_store(
             or not isinstance(aliases, list)
         ):
             raise ValueError("page_rename payload is incomplete")
-        reverted = store.revert_markdown_page_rename(
+        revert_page_rename = (
+            store._revert_markdown_page_rename_uncommitted
+            if uncommitted
+            else store.revert_markdown_page_rename
+        )
+        reverted = revert_page_rename(
             page_id,
             previous_title=previous_title,
             title=title,
@@ -2615,7 +2649,8 @@ def revert_journal_event_in_store(
         inserted_lines = payload.get("inserted_lines")
         if not isinstance(inserted_lines, list):
             raise ValueError("target event payload is missing inserted_lines")
-        reverted = store.revert_markdown_append(page_id, inserted_lines)
+        revert_append = store._revert_markdown_append_uncommitted if uncommitted else store.revert_markdown_append
+        reverted = revert_append(page_id, inserted_lines)
         revert_payload = {
             "target_event_id": target["event_id"],
             "target_event_type": target["event_type"],
@@ -4031,6 +4066,7 @@ def format_revert_event(result: dict[str, Any]) -> str:
         f"event_id: {result['event_id']}\n"
         f"target_event_id: {result['target_event_id']}\n"
         f"target_event_type: {result['target_event_type']}\n"
+        f"target_event_source: {result.get('target_event_source', '')}\n"
         f"lines: {line_count}\n"
         f"projection_written: {projection.get('written_count', 0)}\n"
     )

@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.5`（更新: 2026-06-27 14:56、store: schema `8`、compat: schema `8` compatible）: `revert-event` の SQLite events migration 第一弾。target event lookup は selected project の SQLite `events` を優先し、見つからない場合だけ legacy JSONL journal に fallback する。SQLite-sourced revert は page state revert と SQLite `event_revert` row insert を同じ `BEGIN IMMEDIATE` transaction で commit し、その後 legacy JSONL `event_revert` append と Markdown projection export を続ける。result は `target_event_source` を返す。tests は page_create / append/log / page_update / page_rename revert が SQLite `event_revert` rows を残すことを確認する。projection failure rollback / `write-diff` / `history` は未移行
 - `1.8.4`（更新: 2026-06-27 14:29、store: schema `8`、compat: schema `8` compatible）: `write-status` に SQLite events visibility を追加した。従来の JSONL `journal_event_count` / `last_event` に加えて、selected project の `sqlite_event_count` / `sqlite_last_event` を JSON で返し、text output では `sqlite_events` / `sqlite_last_event` を表示する。strict gate はまだ projection / JSONL journal / regenerated log consistency の判定で、SQLite events と JSONL の count mismatch は failure にしない。tests は `write-page --create` 後の status が SQLite `page_create` last event を返すことを確認する。`revert-event` / `write-diff` / `history` の SQLite events 化は未移行
 - `1.8.3`（更新: 2026-06-27 14:12、store: schema `8`、compat: schema `8` compatible）: `rename-page` の SQLite SSoT migration。rename state update と SQLite `events` row insert を同じ `BEGIN IMMEDIATE` transaction で commit する `SQLiteStore.rename_markdown_page_with_event()` を追加し、CLI `rename-page` / `rename` から使うようにした。legacy `events.jsonl` append と Markdown projection export は互換のため継続する。tests は CLI rename が SQLite events に `page_rename` を残すこと、event id duplicate で events insert が失敗した時に rename state が rollback されることを確認する。`revert-event` / projection failure rollback / SQLite events 由来 recovery は未移行
 - `1.8.2`（更新: 2026-06-27 13:37、store: schema `8`、compat: schema `8` compatible）: `append-section` / `append-log` の SQLite SSoT migration。append する lines 更新と SQLite `events` row insert を同じ `BEGIN IMMEDIATE` transaction で commit する `SQLiteStore.append_markdown_lines_with_event()` を追加し、CLI `append-section` / `append-log` から使うようにした。legacy `events.jsonl` append と Markdown projection export は互換のため継続する。tests は CLI append が SQLite events に `section_append` / `log_append` を残すこと、event id duplicate で events insert が失敗した時に appended lines が rollback されることを確認する。`rename-page` / `revert-event` / SQLite events 由来 recovery は未移行
@@ -144,6 +145,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.4`
+- Current public compatibility version: `1.8.5`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.4`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.5`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
