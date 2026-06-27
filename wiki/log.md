@@ -1,5 +1,9 @@
 # Log
 
+## [2026-06-27 13:34] file back | [[ai-agent-implementation-experiment]] を新設し、grasp を AI agent 実装実験として説明
+- [[ai-agent-implementation-experiment]]: 初見エンジニア向けに、local graph store と AI agent による継続的実装 dogfood の二重性を整理。
+- index.md concepts 表へ追加。write-first は current main に対して page_create → index page_update → append-log の順で実行。
+
 ## [2026-06-27 13:28] implementation+file back | `write-page` を SQLite state+event 1 transaction に移行
 - code: `SQLiteStore.write_markdown_page_with_event()` を追加し、`write-page` / `write-page --create` が Markdown page state update と SQLite `events` row insert を同じ `BEGIN IMMEDIATE` transaction で commit するようにした。既存互換のため legacy `events.jsonl` append と Markdown projection export は継続。
 - tests: CLI `write-page --create` が SQLite events table に `page_create` を残すこと、duplicate event id で SQLite event insert が失敗した時に page state が rollback されることを追加。`python3 -m unittest discover -s tests` は 112 tests OK。
