@@ -3923,6 +3923,259 @@ class CliHelpTests(unittest.TestCase):
             ["log_append", "page_update", "page_update", "page_update", "log_append"],
         )
 
+    def test_revert_plan_subject_log_includes_required_same_page_dependents_after_closing_log(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nold A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nold B\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            a_source = Path(tmpdir) / "A-new.md"
+            a_cleanup_source = Path(tmpdir) / "A-cleanup.md"
+            b_source = Path(tmpdir) / "B-new.md"
+            a_source.write_text("# A\nnew A\n", encoding="utf-8")
+            a_cleanup_source.write_text("# A\nnew A\ncleanup\n", encoding="utf-8")
+            b_source.write_text("# B\nnew B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            def run_json(*args):
+                completed = subprocess.run(
+                    [sys.executable, "-m", "grasp", "--json", "--store", str(store_path), "--project", "wiki", *args],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            a_update = run_json(
+                "write-page",
+                "A",
+                "--from-file",
+                str(a_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            b_update = run_json(
+                "write-page",
+                "B",
+                "--from-file",
+                str(b_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            closing_log = run_json(
+                "append-log",
+                "--timestamp",
+                "2026-06-28 01:00",
+                "--op",
+                "test",
+                "--summary",
+                "subject batch for [[A]]",
+                "--line",
+                "- B was noise",
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            a_cleanup = run_json(
+                "write-page",
+                "A",
+                "--from-file",
+                str(a_cleanup_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            log_batch_plan = run_json(
+                "revert-plan",
+                a_update["event_id"],
+                "--scope",
+                "log-batch",
+                "--output",
+                str(root),
+            )
+            plan = run_json(
+                "revert-plan",
+                a_update["event_id"],
+                "--scope",
+                "subject-log",
+                "--output",
+                str(root),
+            )
+            a_text_after_plan = (root / "A.md").read_text(encoding="utf-8")
+            b_text_after_plan = (root / "B.md").read_text(encoding="utf-8")
+            log_text_after_plan = (root / "Log.md").read_text(encoding="utf-8")
+
+        self.assertEqual(log_batch_plan["scope"], "log-batch")
+        self.assertTrue(log_batch_plan["revertible"])
+        self.assertEqual(log_batch_plan["dependent_event_ids"], [a_cleanup["event_id"]])
+        self.assertEqual(
+            log_batch_plan["candidate_event_ids"],
+            [a_update["event_id"], b_update["event_id"], closing_log["event_id"], a_cleanup["event_id"]],
+        )
+        self.assertEqual(
+            log_batch_plan["revert_order_event_ids"],
+            [a_cleanup["event_id"], closing_log["event_id"], b_update["event_id"], a_update["event_id"]],
+        )
+        self.assertEqual(plan["scope"], "subject-log")
+        self.assertTrue(plan["complete"])
+        self.assertTrue(plan["revertible"])
+        self.assertEqual(plan["subject_log_subjects"], ["A"])
+        self.assertEqual(plan["dependent_event_ids"], [a_cleanup["event_id"]])
+        self.assertEqual(
+            plan["candidate_event_ids"],
+            [a_update["event_id"], closing_log["event_id"], a_cleanup["event_id"]],
+        )
+        self.assertEqual(
+            plan["revert_order_event_ids"],
+            [a_cleanup["event_id"], closing_log["event_id"], a_update["event_id"]],
+        )
+        self.assertEqual(
+            [event["target_event_id"] for event in plan["reverted_events"]],
+            [a_cleanup["event_id"], closing_log["event_id"], a_update["event_id"]],
+        )
+        self.assertIn(
+            b_update["event_id"],
+            [event["event_id"] for event in plan["excluded_events"]],
+        )
+        self.assertEqual(a_text_after_plan, "# A\nnew A\ncleanup\n")
+        self.assertEqual(b_text_after_plan, "# B\nnew B\n")
+        self.assertIn("subject batch", log_text_after_plan)
+
+    def test_revert_plan_log_page_subjects_includes_required_same_page_dependents_after_closing_log_update(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nold A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nold B\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            a_source = Path(tmpdir) / "A-new.md"
+            a_cleanup_source = Path(tmpdir) / "A-cleanup.md"
+            b_source = Path(tmpdir) / "B-new.md"
+            log_source = Path(tmpdir) / "Log-new.md"
+            a_source.write_text("# A\nnew A\n", encoding="utf-8")
+            a_cleanup_source.write_text("# A\nnew A\ncleanup\n", encoding="utf-8")
+            b_source.write_text("# B\nnew B\n", encoding="utf-8")
+            log_source.write_text(
+                "# Log\n\n## [2026-06-28 01:00] test | subject batch for [[A]]\n- B was noise\n",
+                encoding="utf-8",
+            )
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            def run_json(*args):
+                completed = subprocess.run(
+                    [sys.executable, "-m", "grasp", "--json", "--store", str(store_path), "--project", "wiki", *args],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            a_update = run_json(
+                "write-page",
+                "A",
+                "--from-file",
+                str(a_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            b_update = run_json(
+                "write-page",
+                "B",
+                "--from-file",
+                str(b_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            closing_log = run_json(
+                "write-page",
+                "Log",
+                "--from-file",
+                str(log_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            a_cleanup = run_json(
+                "write-page",
+                "A",
+                "--from-file",
+                str(a_cleanup_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            plan = run_json(
+                "revert-plan",
+                a_update["event_id"],
+                "--scope",
+                "log-page-subjects",
+                "--output",
+                str(root),
+            )
+            a_text_after_plan = (root / "A.md").read_text(encoding="utf-8")
+            b_text_after_plan = (root / "B.md").read_text(encoding="utf-8")
+            log_text_after_plan = (root / "Log.md").read_text(encoding="utf-8")
+
+        self.assertEqual(plan["scope"], "log-page-subjects")
+        self.assertTrue(plan["complete"])
+        self.assertTrue(plan["revertible"])
+        self.assertEqual(plan["log_page_subjects"], ["A"])
+        self.assertEqual(plan["dependent_event_ids"], [a_cleanup["event_id"]])
+        self.assertEqual(
+            plan["candidate_event_ids"],
+            [a_update["event_id"], closing_log["event_id"], a_cleanup["event_id"]],
+        )
+        self.assertEqual(
+            plan["revert_order_event_ids"],
+            [a_cleanup["event_id"], closing_log["event_id"], a_update["event_id"]],
+        )
+        self.assertIn(
+            b_update["event_id"],
+            [event["event_id"] for event in plan["excluded_events"]],
+        )
+        self.assertEqual(a_text_after_plan, "# A\nnew A\ncleanup\n")
+        self.assertEqual(b_text_after_plan, "# B\nnew B\n")
+        self.assertIn("subject batch", log_text_after_plan)
+
     def test_revert_plan_content_subjects_falls_back_to_anchor_target_for_page_create(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
