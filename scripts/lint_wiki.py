@@ -9,11 +9,18 @@ Reference-count-based broken-link split (Scrapbox 2-hop semantics):
 Usage: python3 scripts/lint_wiki.py
 """
 import re
+import sys
 from datetime import date
 from pathlib import Path
 from collections import defaultdict
 
 WIKI = Path(__file__).parent.parent / "wiki"
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO = SCRIPT_DIR.parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from check_wiki_version_ledger import version_ledger_errors
 
 # Collect all pages by basename (without .md). Wikilinks resolve by basename, so
 # duplicate stems make links ambiguous and must not be silently overwritten.
@@ -173,6 +180,13 @@ for n in missing_sources_required:
     print(f"    - [{typ}] {n}")
 print()
 
+# 4.5. Release ledger / current facts hard drift
+version_errors = version_ledger_errors(REPO)
+print(f"## release ledger / current facts version drift: {len(version_errors)}")
+for error in version_errors:
+    print(f"  - ERROR: {error}")
+print()
+
 # 5. Aspect handle 候補 (2+ page で参照されるが page なし = 2-hop hub の種)
 # 参照: [[aspect-wikilinkはhubの種-20260601]] path B (empty page) または C (concept page) 化候補
 aspect_candidates = [(t, missing_with_src[t]) for t in missing if len(missing_with_src[t]) >= 2]
@@ -309,3 +323,6 @@ for slogan, source, citers, warn_count in slogan_status:
     print(f"  「{slogan}」(出典 {source}): 下流 {len(citers)} 件, うち未張替(⚠) {warn_count} 件 → {status}")
     for ref, ok in sorted(citers):
         print(f"    {'✓' if ok else '⚠'} {ref}")
+
+if version_errors:
+    raise SystemExit(1)
