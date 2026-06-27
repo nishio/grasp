@@ -39,7 +39,7 @@ DEFAULT_FILE_BACK_BOOTSTRAP_ACTOR = "file-back-preflight"
 DEFAULT_FILE_BACK_BOOTSTRAP_SESSION_ID = "bootstrap-file-back-store"
 DEFAULT_PREFLIGHT_STAMP = ".grasp/file-back-preflight.json"
 PREFLIGHT_STAMP_KIND = "grasp_file_back_preflight"
-PREFLIGHT_STAMP_SCHEMA_VERSION = 1
+PREFLIGHT_STAMP_SCHEMA_VERSION = 2
 
 
 def run_command(args: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -129,6 +129,7 @@ def preflight_stamp_payload(
     head: str,
     base: str | None,
     base_oid: str | None,
+    sqlite_event_sequence: int | None,
     store: str,
     project: str,
     output: str,
@@ -143,6 +144,7 @@ def preflight_stamp_payload(
         "head": head,
         "base": base or "skipped",
         "base_oid": base_oid,
+        "sqlite_event_sequence": sqlite_event_sequence,
         "store": store,
         "project": project,
         "output": output,
@@ -155,6 +157,7 @@ def preflight_stamp_from_repo(
     *,
     session_id: str,
     base: str | None,
+    sqlite_event_sequence: int | None,
     store: str,
     project: str,
     output: str,
@@ -174,6 +177,7 @@ def preflight_stamp_from_repo(
             head=head or "",
             base=base,
             base_oid=base_oid,
+            sqlite_event_sequence=sqlite_event_sequence,
             store=store,
             project=project,
             output=output,
@@ -278,6 +282,18 @@ def project_events(store: str, project: str) -> list[dict[str, Any]]:
         return sqlite_store.events(project=project, limit=None)
     finally:
         sqlite_store.close()
+
+
+def latest_event_sequence(events: list[dict[str, Any]]) -> int | None:
+    sequences: list[int] = []
+    for event in events:
+        try:
+            sequences.append(int(event.get("event_sequence")))
+        except (TypeError, ValueError):
+            continue
+    if not sequences:
+        return None
+    return max(sequences)
 
 
 def is_missing_events_table_error(error: sqlite3.Error) -> bool:
@@ -568,10 +584,19 @@ def main() -> int:
         if not args.skip_base_check:
             errors.extend(check_git_base(repo, resolved_base))
         if not errors:
+            sqlite_event_sequence = None
+            try:
+                sqlite_event_sequence = latest_event_sequence(
+                    project_events(str(resolve_repo_path(repo, args.store)), args.project)
+                )
+            except sqlite3.Error as error:
+                errors.append(f"could not inspect SQLite event sequence for preflight stamp: {error}")
+        if not errors:
             payload, stamp_errors = preflight_stamp_from_repo(
                 repo,
                 session_id=args.session_id,
                 base=None if args.skip_base_check else resolved_base,
+                sqlite_event_sequence=sqlite_event_sequence,
                 store=args.store,
                 project=args.project,
                 output=args.output,
