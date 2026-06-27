@@ -2556,6 +2556,17 @@ class SQLiteStore:
             lines=[row["text"] for row in lines],
         )
 
+    def markdown_source_path_for_page_id(self, page_id: str) -> str | None:
+        project = self._require_project()
+        manifest = self._markdown_manifest_for_project(project)
+        files = manifest.get("files")
+        if not isinstance(files, dict) or not files:
+            raise ValueError(f"project is not a Markdown mirror project or has no Markdown manifest: {project}")
+        for source_path, item in files.items():
+            if isinstance(item, dict) and str(item.get("page_id") or "") == str(page_id):
+                return str(source_path)
+        return None
+
     def _markdown_index_projection_text(self, project: str, files: dict[str, Any]) -> str:
         groups: dict[str, list[tuple[str, str, str]]] = {}
         for relative_path in sorted(str(path) for path in files):

@@ -1400,3 +1400,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: Markdown-backed write commands now refuse Git dirty projection paths outside the current target unless those paths already match the current store projection; append-section/log also expose source_path in result and event payload.
 - dogfood: initial guard blocked the next wiki page because the previous page was already stored but still git-dirty, so 1.8.50 compares dirty files against store projection before blocking.
 - tests: added regression coverage for blocking unrelated dirty B.md, allowing target dirty direct patch fallback, and allowing prior stored dirty pages during multi-page file-back. public compatibility version is 1.8.50; schema remains v8.
+
+## [2026-06-28 06:10] implementation+file-back | guard revert projection exports before mutation
+- code: revert-event, revert-events, and revert-event --include-dependents now run dirty projection guard before mutating store/event rows.
+- guard: reverted target paths are allowed; unrelated dirty paths must already match the current store projection, with older payloads resolving source_path from page_id via the Markdown manifest.
+- tests: added regression coverage that dirty unrelated B.md blocks each revert surface without inserting event_revert or changing target files. public compatibility version is 1.8.51; schema remains v8.

@@ -1133,6 +1133,7 @@ def build_parser() -> argparse.ArgumentParser:
             "page_update/page_rename require the current lines and path/title state to match the target event.",
             "--dry-run is the planning surface for dependency-aware/general revert work: it never appends event_revert.",
             "--include-dependents is SQLite-only and reverts later active same-page events in reverse event order before the target.",
+            "When --output is inside a Git worktree, dirty projection paths outside the reverted target path(s) are refused before mutation.",
         ],
     )
     revert_event_parser.add_argument("event_id", help="Write event id to revert.")
@@ -1166,6 +1167,7 @@ def build_parser() -> argparse.ArgumentParser:
             "SQLite-only: this command does not fall back to a legacy JSONL journal for target lookup.",
             "Use this for an explicit multi-page rollback plan; use revert-event --include-dependents for automatic same-page dependency rollback.",
             "The reverse event_sequence order is required so later page state changes are undone before earlier ones.",
+            "When --output is inside a Git worktree, dirty projection paths outside the reverted target path(s) are refused before mutation.",
         ],
     )
     revert_events_parser.add_argument("event_ids", nargs="+", help="SQLite write event ids to revert as one operation.")
@@ -3051,6 +3053,40 @@ def regenerated_projection_dirty_files(projection: dict[str, Any]) -> list[str]:
     return sorted(regenerated & dirty)
 
 
+def guard_dirty_projection_paths_for_revert_targets(
+    store: SQLiteStore,
+    output: Path,
+    targets: list[dict[str, Any]],
+) -> None:
+    allowed_source_paths: set[str] = set()
+    for target in targets:
+        allowed_source_paths.update(revert_target_projection_source_paths(store, target))
+    guard_dirty_projection_paths(store, output, allowed_source_paths=allowed_source_paths)
+
+
+def revert_target_projection_source_paths(store: SQLiteStore, target: dict[str, Any]) -> set[str]:
+    payload = target.get("payload") or {}
+    event_type = target.get("event_type")
+    paths: set[str] = set()
+    if event_type == "page_rename":
+        for key in ("previous_source_path", "source_path"):
+            path = str(payload.get(key) or "").strip()
+            if path:
+                paths.add(path)
+        return paths
+    path = str(payload.get("source_path") or "").strip()
+    if path:
+        paths.add(path)
+        return paths
+    page_id = str(payload.get("page_id") or "").strip()
+    if not page_id:
+        return paths
+    source_path = store.markdown_source_path_for_page_id(page_id)
+    if source_path:
+        paths.add(source_path)
+    return paths
+
+
 def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = optional_journal_path_for_output(args)
     journal_events = read_journal_events(journal) if journal is not None else []
@@ -3126,6 +3162,7 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
             target=target,
             target_source=target_source,
         )
+    guard_dirty_projection_paths_for_revert_targets(store, args.output, [target])
     if target_source == "sqlite":
         with store.write_transaction():
             rollback = revert_journal_event_in_store(store, target, reason=args.reason, uncommitted=True)
@@ -3197,6 +3234,7 @@ def run_revert_events(store: SQLiteStore, args: argparse.Namespace) -> dict[str,
             targets=targets,
         )
 
+    guard_dirty_projection_paths_for_revert_targets(store, args.output, targets)
     records: list[dict[str, Any]] = []
     with store.write_transaction():
         for target in targets:
@@ -4991,6 +5029,7 @@ def run_revert_event_with_dependents(
             dependent_events=dependent_events,
         )
 
+    guard_dirty_projection_paths_for_revert_targets(store, args.output, targets)
     records: list[dict[str, Any]] = []
     with store.write_transaction():
         for current_target in targets:
