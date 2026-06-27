@@ -1170,3 +1170,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - Added `scripts/check_file_back_postwrite.py` to verify `write-status --strict`, SQLite-authority projection policy, wiki lint, and `git diff --check` after grasp write-first file-backs.
 - Updated `/next`, `/ship-next`, AGENTS/CLAUDE, repo `grasp` skill, and local `file-back` skill to use the postwrite checker when available.
 - Dogfood: preflight passed before this file-back, and the new postwrite checker passed on the clean projection before the wiki write.
+
+## [2026-06-27 18:08] file-back | compatibility journal boundary in active runbooks
+- Updated AGENTS/CLAUDE, `/next`, repo `grasp` skill, and local `file-back` skill so `wiki.grasp/events.jsonl` is described as a transition compatibility/audit journal, not normal edit authority.
+- Recovery wording now routes through `scripts/check_file_back_postwrite.py` where available instead of spelling raw projection checks in the active path.
+- Dogfood: this file-back started with `scripts/check_file_back_preflight.py` and used grasp `write-page` / `append-log` only for wiki changes.
