@@ -1614,6 +1614,24 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
+            history_text_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "history",
+                    "Alpha",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
             connection = sqlite3.connect(store_path)
             try:
                 sqlite_event_rows = connection.execute(
@@ -1630,18 +1648,30 @@ class CliHelpTests(unittest.TestCase):
         import_result = json.loads(import_completed.stdout)
         log_records_result = json.loads(log_records_completed.stdout)
         history_result = json.loads(history_completed.stdout)
+        history_text = history_text_completed.stdout
         self.assertEqual(import_result["imported_records"], 1)
         self.assertEqual(import_result["sqlite_events_inserted"], 1)
         self.assertEqual([row[0] for row in sqlite_event_rows], ["log_entry_import"])
         self.assertEqual(sqlite_event_rows[0][1], "wiki")
         self.assertEqual(json.loads(sqlite_event_rows[0][2])["summary"], "first entry")
         self.assertEqual(log_records_result["event_source"], "sqlite")
+        self.assertEqual(log_records_result["result_mode"], "event-stream")
+        self.assertFalse(log_records_result["current_state"])
+        self.assertIsNone(log_records_result["current_state_hint"])
+        self.assertEqual(log_records_result["staleness_signals"], ["superseded_by", "later_events"])
         self.assertEqual(log_records_result["sqlite_event_count"], 1)
         self.assertEqual(log_records_result["matched_records"], 1)
         self.assertEqual(log_records_result["records"][0]["subjects"], ["Alpha"])
         self.assertEqual(history_result["event_source"], "sqlite")
+        self.assertEqual(history_result["result_mode"], "event-stream")
+        self.assertFalse(history_result["current_state"])
+        self.assertEqual(history_result["current_state_hint"], "read Alpha")
+        self.assertEqual(history_result["staleness_signals"], ["superseded_by", "later_events"])
         self.assertEqual(history_result["matched_records"], 1)
         self.assertEqual(history_result["records"][0]["summary"], "first entry")
+        self.assertIn("result_mode: event-stream", history_text)
+        self.assertIn("current_state: false", history_text)
+        self.assertIn("current_state_hint: read Alpha", history_text)
 
     def test_import_log_records_does_not_duplicate_legacy_payloads(self):
         with tempfile.TemporaryDirectory() as tmpdir:

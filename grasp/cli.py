@@ -285,7 +285,8 @@ def build_parser() -> argparse.ArgumentParser:
             "This is the event-stream surface for log records; it does not read current page projection."
         ),
         returns=(
-            "project, store, journal, event_source, total_records, matched_records, returned_records, offset, limit, order, filters, records[]. "
+            "project, store, journal, event_source, result_mode, current_state, current_state_hint|null, staleness_signals[], "
+            "total_records, matched_records, returned_records, offset, limit, order, filters, records[]. "
             "Records include subjects[], content_fingerprint, record_version, superseded_by, later_event_count, later_events[]"
         ),
         examples=[
@@ -298,6 +299,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Superseded record versions are hidden by default; use --include-superseded to inspect them.",
             "--query is whitespace-term AND search over heading, summary, op, source_path, subjects, and body lines.",
             "--subject matches extracted log subjects from wikilinks and mentioned Markdown paths.",
+            "The result is historical event stream data, not the current state of any page.",
         ],
     )
     add_log_record_query_arguments(log_records_parser, include_positional_query=False)
@@ -312,7 +314,8 @@ def build_parser() -> argparse.ArgumentParser:
             "This is the event-stream counterpart to read <page>."
         ),
         returns=(
-            "project, store, journal, event_source, query, total_records, matched_records, returned_records, offset, limit, order, filters, records[]. "
+            "project, store, journal, event_source, result_mode, current_state, current_state_hint, query, "
+            "total_records, matched_records, returned_records, offset, limit, order, filters, records[]. "
             "Records include subjects[], content_fingerprint, record_version, superseded_by, later_event_count, later_events[]"
         ),
         examples=[
@@ -324,6 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Matching uses extracted subjects from wikilinks and mentioned Markdown paths, not free text search.",
             "Superseded record versions are hidden by default; use --include-superseded to inspect them.",
             "Returned records include later events for the same subject so stale transitions are visible.",
+            "The result is historical event stream data; use read <page> for current projection state.",
         ],
     )
     history_parser.add_argument("query", help="Page/topic string to search for in log records.")
@@ -2023,11 +2027,16 @@ def run_log_records(args: argparse.Namespace, store: SQLiteStore | None = None) 
         visible_records,
         later_limit=args.later_limit,
     )
+    current_state_hint = f"read {query}" if args.command == "history" and query else None
     return {
         "project": selected_project,
         "store": str(store.path) if store is not None else None,
         "journal": str(args.journal),
         "event_source": event_source,
+        "result_mode": "event-stream",
+        "current_state": False,
+        "current_state_hint": current_state_hint,
+        "staleness_signals": ["superseded_by", "later_events"],
         "sqlite_event_count": sqlite_event_count,
         "query": query,
         "total_records": len(visible_records),
@@ -6957,6 +6966,9 @@ def format_log_records(result: dict[str, Any]) -> str:
         f"store: {result.get('store') or ''}\n",
         f"journal: {result['journal']}\n",
         f"event_source: {result.get('event_source', 'journal')}\n",
+        f"result_mode: {result.get('result_mode', 'event-stream')}\n",
+        f"current_state: {str(result.get('current_state', False)).lower()}\n",
+        f"current_state_hint: {result.get('current_state_hint') or ''}\n",
         f"query: {result.get('query') or ''}\n",
         f"total_records: {result['total_records']}\n",
         f"total_record_events: {result.get('total_record_events', result['total_records'])}\n",
