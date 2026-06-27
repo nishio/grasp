@@ -2408,7 +2408,9 @@ class SQLiteStore:
         *,
         check: bool = False,
         regenerate_index: bool = False,
-        log_journal_events: list[dict[str, Any]] | None = None,
+        log_events: list[dict[str, Any]] | None = None,
+        log_event_source: str | None = None,
+        log_overlay_name: str | None = None,
     ) -> dict[str, Any]:
         project = self._require_project()
         output = Path(output_folder)
@@ -2427,18 +2429,18 @@ class SQLiteStore:
             projections[index_path] = self._markdown_index_projection_text(project, files)
             regenerated_files.append(index_path)
             generated_overlays.append("navigation-index")
-        if log_journal_events is not None:
+        if log_events is not None:
             log_path = _markdown_primary_role_path(files, "log", "log.md")
             if log_path is None:
                 raise ValueError(f"project has no log page to regenerate: {project}")
-            projections[log_path] = self._markdown_log_projection_text_from_journal(
+            projections[log_path] = self._markdown_log_projection_text_from_events(
                 project,
                 log_path,
                 files,
-                log_journal_events,
+                log_events,
             )
             regenerated_files.append(log_path)
-            generated_overlays.append("legacy-journal-log")
+            generated_overlays.append(log_overlay_name or "sqlite-events-log")
         changed_files: list[str] = []
         missing_files: list[str] = []
         written_files: list[str] = []
@@ -2476,6 +2478,8 @@ class SQLiteStore:
             "written_count": len(written_files),
             "regenerated_files": sorted(regenerated_files),
             "regenerated_count": len(regenerated_files),
+            "log_event_source": log_event_source,
+            "log_event_count": len(log_events) if log_events is not None else 0,
             "projection_policy": {
                 "authority": "sqlite",
                 "base": "stored_markdown_lines",
@@ -2562,7 +2566,7 @@ class SQLiteStore:
         ).fetchall()
         return _markdown_frontmatter_summary([row["text"] for row in rows])
 
-    def _markdown_log_projection_text_from_journal(
+    def _markdown_log_projection_text_from_events(
         self,
         project: str,
         log_path: str,
@@ -2586,13 +2590,15 @@ class SQLiteStore:
                 lines = _journal_lines_to_text(payload.get("lines"))
             elif event_type == "page_update" and str(payload.get("page_id") or "") == log_page_id:
                 if lines is None:
-                    raise ValueError(f"page_update references log page before page_create in event {event.get('event_id')}")
+                    lines = _journal_lines_to_text(payload.get("lines"))
+                    continue
                 lines = _journal_lines_to_text(payload.get("lines"))
             elif event_type == "page_rename" and str(payload.get("page_id") or "") == log_page_id:
-                if lines is None:
-                    raise ValueError(f"page_rename references log page before page_create in event {event.get('event_id')}")
                 source_path = str(payload.get("source_path") or "")
                 if source_path and _safe_markdown_relative_path(source_path) != log_path:
+                    continue
+                if lines is None:
+                    lines = _journal_lines_to_text(payload.get("lines"))
                     continue
                 lines = _journal_lines_to_text(payload.get("lines"))
             elif event_type == "log_append" and str(payload.get("page_id") or "") == log_page_id:
@@ -2610,19 +2616,27 @@ class SQLiteStore:
                     del lines[-len(removed):]
                 elif target_event_type == "page_update":
                     current = _journal_lines_to_text(payload.get("current_lines"))
+                    if lines is None:
+                        lines = _journal_lines_to_text(payload.get("previous_lines"))
+                        continue
                     if lines != current:
                         raise ValueError(f"event_revert current_lines do not match log page in event {event.get('event_id')}")
                     lines = _journal_lines_to_text(payload.get("previous_lines"))
                 elif target_event_type == "page_rename":
                     current = _journal_lines_to_text(payload.get("current_lines"))
                     previous_source_path = str(payload.get("previous_source_path") or "")
+                    if lines is None:
+                        if previous_source_path and _safe_markdown_relative_path(previous_source_path) != log_path:
+                            continue
+                        lines = _journal_lines_to_text(payload.get("previous_lines"))
+                        continue
                     if lines != current:
                         raise ValueError(f"event_revert current_lines do not match log page in event {event.get('event_id')}")
                     if previous_source_path and _safe_markdown_relative_path(previous_source_path) != log_path:
                         continue
                     lines = _journal_lines_to_text(payload.get("previous_lines"))
         if lines is None:
-            raise ValueError(f"journal does not contain a page_create event for log page: {log_page_id}")
+            raise ValueError(f"event stream does not contain a page_create or page_update seed for log page: {log_page_id}")
         record_file_lines = _journal_record_file_log_projection_lines(project, events)
         if record_file_lines:
             if lines and lines[-1].strip():

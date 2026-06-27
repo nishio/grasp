@@ -2450,6 +2450,184 @@ class CliHelpTests(unittest.TestCase):
         )
         self.assertNotIn("first body", log_text)
 
+    def test_export_markdown_regenerates_log_from_sqlite_events_without_journal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            log_dir = root / "log"
+            log_dir.mkdir(parents=True)
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            (root / "Alpha.md").write_text("# Alpha\n", encoding="utf-8")
+            (log_dir / "entry.md").write_text(
+                "---\n"
+                "type: log-entry\n"
+                "date: 2026-06-26 03:00\n"
+                "op: decision\n"
+                "summary: sqlite projected record\n"
+                "subjects:\n"
+                "  - Alpha\n"
+                "---\n"
+                "# sqlite projected record\n\n"
+                "- body from sqlite [[Alpha]]\n",
+                encoding="utf-8",
+            )
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            dirty_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--regenerate-log",
+                    "--check",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            write_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--regenerate-log",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            log_text = (root / "Log.md").read_text(encoding="utf-8")
+
+        dirty_result = json.loads(dirty_completed.stdout)
+        write_result = json.loads(write_completed.stdout)
+        self.assertEqual(dirty_completed.returncode, 1)
+        self.assertEqual(dirty_result["log_event_source"], "sqlite")
+        self.assertGreater(dirty_result["log_event_count"], 0)
+        self.assertEqual(dirty_result["changed_files"], ["Log.md"])
+        self.assertEqual(write_result["written_files"], ["Log.md"])
+        self.assertEqual(
+            write_result["projection_policy"]["generated_overlays"],
+            ["sqlite-events-log"],
+        )
+        self.assertEqual(
+            log_text,
+            "# Log\n\n"
+            "## [2026-06-26 03:00] decision | sqlite projected record\n"
+            "- body from sqlite [[Alpha]]\n",
+        )
+
+    def test_export_markdown_regenerate_log_accepts_sqlite_page_update_seed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            replacement = Path(tmpdir) / "replacement.md"
+            replacement.write_text(
+                "# Log\n\n"
+                "## [2026-06-26 04:00] test | update seed\n"
+                "- from page update\n",
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    "Log",
+                    "--from-file",
+                    str(replacement),
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            dirty_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--regenerate-log",
+                    "--check",
+                ],
+                text=True,
+                capture_output=True,
+            )
+
+        dirty_result = json.loads(dirty_completed.stdout)
+        self.assertEqual(dirty_completed.returncode, 1)
+        self.assertEqual(dirty_result["log_event_source"], "sqlite")
+        self.assertEqual(dirty_result["projection_policy"]["generated_overlays"], ["sqlite-events-log"])
+        self.assertEqual(dirty_result["changed_files"], ["Log.md"])
+
     def test_write_page_create_writes_page_create_journal_and_projection(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
