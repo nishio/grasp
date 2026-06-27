@@ -2331,6 +2331,26 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
+            status_after_create_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
             read_completed = subprocess.run(
                 [
                     sys.executable,
@@ -2430,6 +2450,7 @@ class CliHelpTests(unittest.TestCase):
             new_exists_after_revert = (root / "New.md").exists()
 
         create_result = json.loads(create_completed.stdout)
+        status_after_create = json.loads(status_after_create_completed.stdout)
         read_result = json.loads(read_completed.stdout)
         replay_result = json.loads(replay_completed.stdout)
         revert_result = json.loads(revert_completed.stdout)
@@ -2440,6 +2461,11 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(sqlite_event_rows[0][1], "page_create")
         self.assertEqual(sqlite_event_rows[0][2], "wiki")
         self.assertEqual(json.loads(sqlite_event_rows[0][3])["source_path"], "New.md")
+        self.assertEqual(status_after_create["journal_event_count"], 2)
+        self.assertEqual(status_after_create["last_event"]["event_id"], create_result["event_id"])
+        self.assertEqual(status_after_create["sqlite_event_count"], 1)
+        self.assertEqual(status_after_create["sqlite_last_event"]["event_id"], create_result["event_id"])
+        self.assertEqual(status_after_create["sqlite_last_event"]["event_type"], "page_create")
         self.assertEqual(create_result["event_type"], "page_create")
         self.assertEqual(create_result["source_path"], "New.md")
         self.assertEqual(create_result["previous_line_count"], 0)

@@ -2346,6 +2346,13 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     journal = journal_path_for_output(args.output, args.journal)
     events = read_journal_events(journal)
     projection = store.export_markdown(args.output, check=True)
+    sqlite_event_count = store.event_count(project=projection["project"])
+    sqlite_last_events = store.events(
+        project=projection["project"],
+        limit=1,
+        offset=max(0, sqlite_event_count - 1),
+    ) if sqlite_event_count else []
+    sqlite_last_event = sqlite_last_events[0] if sqlite_last_events else None
     journal_log_projection = None
     journal_log_changed_files: list[str] = []
     journal_log_error = None
@@ -2374,6 +2381,8 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
         "journal_event_count": len(events),
         "journal_log_record_count": journal_log_record_count(events, project=projection["project"]),
         "last_event": events[-1] if events else None,
+        "sqlite_event_count": sqlite_event_count,
+        "sqlite_last_event": sqlite_last_event,
         "projection": projection,
         "journal_log_stale": bool(journal_log_changed_files),
         "journal_log_changed_files": journal_log_changed_files,
@@ -3965,6 +3974,7 @@ def format_write_status(result: dict[str, Any]) -> str:
     projection = result["projection"]
     journal_log_projection = result.get("journal_log_projection") or {}
     last_event = result.get("last_event") or {}
+    sqlite_last_event = result.get("sqlite_last_event") or {}
     text = (
         "# Write Status\n"
         f"project: {result['project']}\n"
@@ -3974,6 +3984,8 @@ def format_write_status(result: dict[str, Any]) -> str:
         f"journal_events: {result['journal_event_count']}\n"
         f"journal_log_records: {result.get('journal_log_record_count', 0)}\n"
         f"last_event: {last_event.get('event_type', '')} {last_event.get('event_id', '')}\n"
+        f"sqlite_events: {result.get('sqlite_event_count', 0)}\n"
+        f"sqlite_last_event: {sqlite_last_event.get('event_type', '')} {sqlite_last_event.get('event_id', '')}\n"
         f"projection_ok: {str(projection['ok']).lower()}\n"
         f"changed: {len(projection.get('changed_files') or [])}\n"
         f"missing: {len(projection.get('missing_files') or [])}\n"

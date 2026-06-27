@@ -1121,3 +1121,7 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 ## [2026-06-27 14:12] implementation | migrate rename-page to SQLite events transaction
 - `rename-page` / `rename` now use `SQLiteStore.rename_markdown_page_with_event()`, committing rename state and SQLite `events` insert in one `BEGIN IMMEDIATE` transaction while keeping legacy JSONL journal append and Markdown projection export.
 - Added regression coverage for SQLite `page_rename` rows and rollback when event insert fails.
+
+## [2026-06-27 14:29] implementation | show SQLite events in write-status
+- `write-status` now reports selected-project SQLite `events` count and last event in JSON and text output, alongside legacy JSONL journal count and last event.
+- Strict mode remains projection / JSONL / regenerated-log based; SQLite-vs-JSONL mismatch is visible but not yet a failure.
