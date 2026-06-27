@@ -1037,14 +1037,16 @@ def build_parser() -> argparse.ArgumentParser:
             "primary log page against the journal-regenerated projection so direct Markdown log edits "
             "can be reported as stale. With --strict, return exit status 1 when any write guard fails; "
             "a clean journal-regenerated log projection satisfies the log-page guard even if stored lines differ. "
-            "With --no-journal, strict mode skips JSONL guards and checks the SQLite-authority projection only."
+            "With --no-journal, strict mode skips JSONL guards and checks the SQLite-authority projection plus "
+            "the SQLite events-derived semantic log projection when a log page exists."
         ),
         returns=(
             "project, output, journal|null, journal_required, journal_exists, journal_event_count, last_event|null, "
             "journal_project_event_count, sqlite_event_count, sqlite_last_event|null, "
             "event_streams_match, event_stream_mismatch|null, "
             "projection, journal_log_record_count, journal_log_stale, journal_log_changed_files, "
-            "journal_log_projection|null, journal_log_error|null, strict_ok, strict_failures[]"
+            "journal_log_projection|null, journal_log_error|null, semantic_log_stale, semantic_log_changed_files, "
+            "semantic_log_projection|null, semantic_log_error|null, strict_ok, strict_failures[]"
         ),
         examples=[
             "grasp --project grasp-wiki write-status --output wiki",
@@ -1055,6 +1057,7 @@ def build_parser() -> argparse.ArgumentParser:
             "This is an alpha recovery surface for Markdown-backed write dogfood.",
             "projection.ok=false means export-markdown --check would fail.",
             "journal_log_stale=true means the log page no longer matches the replayed journal log projection.",
+            "semantic_log_stale=true means the log page no longer matches the SQLite events-derived log projection.",
             "event_streams_match=false means selected-project SQLite events are not an ordered subsequence of the legacy JSONL journal.",
             "--strict is intended for ship loops and CI-style gates.",
         ],
@@ -2459,6 +2462,24 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
             journal_log_changed_files = regenerated_projection_dirty_files(journal_log_projection)
         except ValueError as error:
             journal_log_error = str(error)
+    semantic_log_projection = None
+    semantic_log_changed_files: list[str] = []
+    semantic_log_error = None
+    semantic_log_policy_errors: list[str] = []
+    try:
+        semantic_log_projection = store.export_markdown(
+            args.output,
+            check=True,
+            log_events=sqlite_events,
+            log_event_source="sqlite",
+            log_overlay_name="sqlite-events-log",
+        )
+        semantic_log_changed_files = regenerated_projection_dirty_files(semantic_log_projection)
+        semantic_log_policy_errors = semantic_log_projection_contract_errors(semantic_log_projection)
+    except ValueError as error:
+        message = str(error)
+        if "has no log page to regenerate" not in message:
+            semantic_log_error = message
     strict_failures = write_status_strict_failures(
         projection=projection,
         journal_exists=journal.exists() if journal is not None else False,
@@ -2466,6 +2487,10 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
         journal_log_projection=journal_log_projection,
         journal_log_changed_files=journal_log_changed_files,
         journal_log_error=journal_log_error,
+        semantic_log_projection=semantic_log_projection,
+        semantic_log_changed_files=semantic_log_changed_files,
+        semantic_log_error=semantic_log_error,
+        semantic_log_policy_errors=semantic_log_policy_errors,
         event_stream_mismatch=event_stream_mismatch,
     )
     return {
@@ -2487,6 +2512,11 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
         "journal_log_changed_files": journal_log_changed_files,
         "journal_log_projection": journal_log_projection,
         "journal_log_error": journal_log_error,
+        "semantic_log_stale": bool(semantic_log_changed_files),
+        "semantic_log_changed_files": semantic_log_changed_files,
+        "semantic_log_projection": semantic_log_projection,
+        "semantic_log_error": semantic_log_error,
+        "semantic_log_policy_errors": semantic_log_policy_errors,
         "strict_ok": not strict_failures,
         "strict_failures": strict_failures,
     }
@@ -2552,6 +2582,10 @@ def write_status_strict_failures(
     journal_log_projection: dict[str, Any] | None,
     journal_log_changed_files: list[str],
     journal_log_error: str | None,
+    semantic_log_projection: dict[str, Any] | None,
+    semantic_log_changed_files: list[str],
+    semantic_log_error: str | None,
+    semantic_log_policy_errors: list[str],
     event_stream_mismatch: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     failures: list[dict[str, Any]] = []
@@ -2560,6 +2594,13 @@ def write_status_strict_failures(
     projection_extra_files = list(projection.get("extra_files") or [])
     if journal_log_projection and journal_log_projection.get("ok"):
         regenerated = set(journal_log_projection.get("regenerated_files") or [])
+        projection_changed_files = [
+            path
+            for path in projection_changed_files
+            if path not in regenerated
+        ]
+    if semantic_log_projection and semantic_log_projection.get("ok"):
+        regenerated = set(semantic_log_projection.get("regenerated_files") or [])
         projection_changed_files = [
             path
             for path in projection_changed_files
@@ -2597,7 +2638,47 @@ def write_status_strict_failures(
                 "message": journal_log_error,
             }
         )
+    if semantic_log_changed_files:
+        failures.append(
+            {
+                "type": "semantic_log_stale",
+                "changed_files": semantic_log_changed_files,
+            }
+        )
+    if semantic_log_error:
+        failures.append(
+            {
+                "type": "semantic_log_error",
+                "message": semantic_log_error,
+            }
+        )
+    if semantic_log_policy_errors:
+        failures.append(
+            {
+                "type": "semantic_log_policy",
+                "errors": semantic_log_policy_errors,
+            }
+        )
     return failures
+
+
+def semantic_log_projection_contract_errors(projection: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if projection.get("log_event_source") != "sqlite":
+        errors.append(f"log_event_source={projection.get('log_event_source')!r}, expected 'sqlite'")
+    policy = projection.get("projection_policy")
+    if not isinstance(policy, dict):
+        errors.append("missing projection_policy object")
+        return errors
+    overlays = policy.get("generated_overlays")
+    if not isinstance(overlays, list):
+        errors.append("projection_policy.generated_overlays must be a list")
+    elif "sqlite-events-log" not in overlays:
+        errors.append("projection_policy.generated_overlays is missing 'sqlite-events-log'")
+    regenerated_files = projection.get("regenerated_files")
+    if not isinstance(regenerated_files, list) or not regenerated_files:
+        errors.append("regenerated_files must include the semantic log projection")
+    return errors
 
 
 def regenerated_projection_dirty_files(projection: dict[str, Any]) -> list[str]:
@@ -4183,6 +4264,7 @@ def format_rename_page_result(result: dict[str, Any]) -> str:
 def format_write_status(result: dict[str, Any]) -> str:
     projection = result["projection"]
     journal_log_projection = result.get("journal_log_projection") or {}
+    semantic_log_projection = result.get("semantic_log_projection") or {}
     last_event = result.get("last_event") or {}
     sqlite_last_event = result.get("sqlite_last_event") or {}
     journal = result.get("journal") or "(none)"
@@ -4213,6 +4295,14 @@ def format_write_status(result: dict[str, Any]) -> str:
         )
     elif result.get("journal_log_error"):
         text += f"journal_log_error: {result['journal_log_error']}\n"
+    if semantic_log_projection:
+        text += (
+            f"semantic_log_stale: {str(result.get('semantic_log_stale', False)).lower()}\n"
+            f"semantic_log_changed: {len(result.get('semantic_log_changed_files') or [])}\n"
+            f"semantic_log_source: {semantic_log_projection.get('log_event_source', '')}\n"
+        )
+    elif result.get("semantic_log_error"):
+        text += f"semantic_log_error: {result['semantic_log_error']}\n"
     failures = result.get("strict_failures") or []
     if failures:
         text += "strict_failures:\n"

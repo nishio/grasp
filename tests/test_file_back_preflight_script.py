@@ -54,6 +54,9 @@ class FileBackPreflightScriptTests(unittest.TestCase):
                 "journal_exists": False,
                 "event_streams_match": False,
                 "journal_log_stale": True,
+                "semantic_log_stale": True,
+                "semantic_log_error": "boom",
+                "semantic_log_policy_errors": ["bad overlay"],
             }
         )
 
@@ -62,6 +65,9 @@ class FileBackPreflightScriptTests(unittest.TestCase):
         self.assertIn("journal_exists", "\n".join(errors))
         self.assertIn("event_streams_match", "\n".join(errors))
         self.assertIn("journal_log_stale", "\n".join(errors))
+        self.assertIn("semantic_log_stale", "\n".join(errors))
+        self.assertIn("semantic_log_error", "\n".join(errors))
+        self.assertIn("semantic_log_policy_errors", "\n".join(errors))
 
     def test_write_status_errors_no_journal_ignores_journal_guards(self):
         errors = preflight.write_status_errors(

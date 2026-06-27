@@ -2428,7 +2428,6 @@ class CliHelpTests(unittest.TestCase):
                     str(journal_path),
                     "--strict",
                 ],
-                check=True,
                 text=True,
                 capture_output=True,
             )
@@ -2441,7 +2440,12 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(dirty_result["changed_files"], ["Log.md"])
         self.assertEqual(write_result["written_files"], ["Log.md"])
         self.assertEqual(write_result["regenerated_files"], ["Log.md"])
-        self.assertTrue(status_result["strict_ok"])
+        self.assertEqual(status_completed.returncode, 1)
+        self.assertFalse(status_result["strict_ok"])
+        self.assertEqual([failure["type"] for failure in status_result["strict_failures"]], ["semantic_log_stale"])
+        self.assertTrue(status_result["journal_log_projection"]["ok"])
+        self.assertTrue(status_result["semantic_log_stale"])
+        self.assertEqual(status_result["semantic_log_changed_files"], ["Log.md"])
         self.assertEqual(
             log_text,
             "# Log\n\n"
@@ -3615,10 +3619,127 @@ class CliHelpTests(unittest.TestCase):
         self.assertTrue(status_result["event_streams_match"])
         self.assertEqual(status_result["sqlite_event_count"], 8)
         self.assertTrue(status_result["projection"]["ok"])
+        self.assertFalse(status_result["semantic_log_stale"])
+        self.assertEqual(status_result["semantic_log_changed_files"], [])
+        self.assertTrue(status_result["semantic_log_projection"]["ok"])
+        self.assertEqual(status_result["semantic_log_projection"]["log_event_source"], "sqlite")
+        self.assertEqual(
+            status_result["semantic_log_projection"]["projection_policy"]["generated_overlays"],
+            ["sqlite-events-log"],
+        )
         self.assertTrue(export_result["ok"])
         self.assertEqual(page_text, "# A\n- rewritten [[C]]\n")
         self.assertEqual(log_text, "# Log\n")
         self.assertFalse(renamed_exists_after_revert)
+
+    def test_write_status_no_journal_strict_fails_on_sqlite_semantic_log_drift(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-log",
+                    "--timestamp",
+                    "2026-06-26 02:00",
+                    "--op",
+                    "test",
+                    "--summary",
+                    "sqlite entry",
+                    "--line",
+                    "- sqlite line",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "Log.md").write_text(
+                "# Log\n\n## [2026-06-26 02:00] test | manual replacement\n- not from sqlite events\n",
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            status_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                    "--strict",
+                ],
+                text=True,
+                capture_output=True,
+            )
+
+        status_result = json.loads(status_completed.stdout)
+        self.assertEqual(status_completed.returncode, 1)
+        self.assertTrue(status_result["projection"]["ok"])
+        self.assertFalse(status_result["strict_ok"])
+        self.assertEqual([failure["type"] for failure in status_result["strict_failures"]], ["semantic_log_stale"])
+        self.assertTrue(status_result["semantic_log_stale"])
+        self.assertEqual(status_result["semantic_log_changed_files"], ["Log.md"])
+        self.assertFalse(status_result["semantic_log_projection"]["ok"])
+        self.assertEqual(status_result["semantic_log_projection"]["changed_files"], ["Log.md"])
+        self.assertEqual(status_result["semantic_log_projection"]["log_event_source"], "sqlite")
+        self.assertEqual(
+            status_result["semantic_log_projection"]["projection_policy"]["generated_overlays"],
+            ["sqlite-events-log"],
+        )
 
     def test_write_status_reports_stale_log_after_direct_markdown_import(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -3866,6 +3987,8 @@ class CliHelpTests(unittest.TestCase):
         self.assertFalse(status_result["journal_exists"])
         self.assertFalse(status_result["strict_ok"])
         self.assertEqual([failure["type"] for failure in status_result["strict_failures"]], ["journal_missing"])
+        self.assertIsNone(status_result["semantic_log_projection"])
+        self.assertIsNone(status_result["semantic_log_error"])
 
     def test_write_status_strict_fails_when_event_streams_diverge(self):
         with tempfile.TemporaryDirectory() as tmpdir:
