@@ -5747,6 +5747,108 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(sqlite_revert_payload["target_event_type"], "section_append")
         self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
 
+    def test_rename_projection_export_failure_preserves_previous_projection_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "Old.md").write_text("# Old\nbody\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "New.md").mkdir()
+            failed_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "rename-page",
+                    "Old",
+                    "New",
+                    "--new-path",
+                    "New.md",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            peek_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "Old",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_id, event_type, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            old_text = (
+                (root / "Old.md").read_text(encoding="utf-8")
+                if (root / "Old.md").exists()
+                else None
+            )
+            new_is_dir = (root / "New.md").is_dir()
+
+        failed_error = json.loads(failed_completed.stderr)
+        rollback_diagnostic = failed_error["diagnostic"]
+        peek_result = json.loads(peek_completed.stdout)
+        self.assertEqual(failed_completed.returncode, 2)
+        self.assertEqual(rollback_diagnostic["type"], "projection_export_rollback")
+        self.assertTrue(rollback_diagnostic["rolled_back"])
+        self.assertEqual(rollback_diagnostic["target_event_type"], "page_rename")
+        self.assertEqual(rollback_diagnostic["rollback_event_type"], "event_revert")
+        self.assertEqual(rollback_diagnostic["original_error"]["type"], "IsADirectoryError")
+        self.assertEqual([row[1] for row in sqlite_event_rows], ["page_rename", "event_revert"])
+        self.assertEqual(rollback_diagnostic["target_event_id"], sqlite_event_rows[0][0])
+        self.assertEqual(rollback_diagnostic["rollback_event_id"], sqlite_event_rows[1][0])
+        sqlite_revert_payload = json.loads(sqlite_event_rows[1][2])
+        self.assertEqual(sqlite_revert_payload["target_event_id"], sqlite_event_rows[0][0])
+        self.assertEqual(sqlite_revert_payload["target_event_type"], "page_rename")
+        self.assertEqual(peek_result["page"]["title"], "Old")
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# Old", "body"])
+        self.assertEqual(old_text, "# Old\nbody\n")
+        self.assertTrue(new_is_dir)
+
     def test_write_page_refuses_export_when_other_projection_file_is_dirty(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir) / "repo"

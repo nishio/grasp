@@ -1462,3 +1462,9 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - tests: added a continuous git history replay sequence for commit `3eaab75` that applies six existing-page `page_update` events, then reverts only the `grasp-backlog.md` update.
 - coverage: expected projection is mixed state: the reverted page matches the parent revision while the other five pages remain at the updated commit; `replay-journal --check` and direct re-import stay clean.
 - docs: bumped public/package version to `1.8.62` and updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[sqlite-ssot-write-plan]]. schema remains v8.
+
+## [2026-06-28 08:44] implementation+file-back | preserve old rename projection on export rollback
+
+- code: `rename-page` now exports the new projection before deleting the previous projection file, so a failed new-path export rolls SQLite back without also deleting the old Markdown file.
+- tests: added a regression with `New.md` as a directory; the command returns `projection_export_rollback`, inserts SQLite `event_revert`, restores current store state to `Old`, and leaves `Old.md` intact.
+- docs: bumped public/package version to `1.8.63` and updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[sqlite-ssot-write-plan]]. schema remains v8.
