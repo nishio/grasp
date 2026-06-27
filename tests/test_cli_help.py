@@ -2424,6 +2424,37 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows_after_revert = connection.execute(
+                    """
+                    SELECT event_id, event_type, project, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            status_after_revert_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
             replay_after_revert_completed = subprocess.run(
                 [
                     sys.executable,
@@ -2454,6 +2485,7 @@ class CliHelpTests(unittest.TestCase):
         read_result = json.loads(read_completed.stdout)
         replay_result = json.loads(replay_completed.stdout)
         revert_result = json.loads(revert_completed.stdout)
+        status_after_revert = json.loads(status_after_revert_completed.stdout)
         replay_after_revert = json.loads(replay_after_revert_completed.stdout)
         self.assertEqual([event["event_type"] for event in journal_events], ["page_create", "page_create", "event_revert"])
         self.assertEqual(len(sqlite_event_rows), 1)
@@ -2477,8 +2509,16 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(read_result["backlink_count_total"], 1)
         self.assertTrue(replay_result["ok"])
         self.assertEqual(revert_result["target_event_type"], "page_create")
+        self.assertEqual(revert_result["target_event_source"], "sqlite")
         self.assertEqual(revert_result["removed_line_count"], 2)
         self.assertEqual(revert_result["projection"]["removed_files"], ["New.md"])
+        self.assertEqual([row[1] for row in sqlite_event_rows_after_revert], ["page_create", "event_revert"])
+        self.assertEqual(sqlite_event_rows_after_revert[1][0], revert_result["event_id"])
+        sqlite_revert_payload = json.loads(sqlite_event_rows_after_revert[1][3])
+        self.assertEqual(sqlite_revert_payload["target_event_id"], create_result["event_id"])
+        self.assertEqual(status_after_revert["sqlite_event_count"], 2)
+        self.assertEqual(status_after_revert["sqlite_last_event"]["event_id"], revert_result["event_id"])
+        self.assertEqual(status_after_revert["sqlite_last_event"]["event_type"], "event_revert")
         self.assertFalse(new_exists_after_revert)
         self.assertTrue(replay_after_revert["ok"])
 
@@ -2911,14 +2951,18 @@ class CliHelpTests(unittest.TestCase):
         )
         self.assertEqual(
             [row[1] for row in sqlite_event_rows],
-            ["section_append", "log_append", "page_update"],
+            ["section_append", "log_append", "event_revert", "page_update", "event_revert"],
         )
-        self.assertEqual([row[2] for row in sqlite_event_rows], ["wiki", "wiki", "wiki"])
+        self.assertEqual([row[2] for row in sqlite_event_rows], ["wiki", "wiki", "wiki", "wiki", "wiki"])
         self.assertEqual(sqlite_event_rows[0][0], section_result["event_id"])
         self.assertEqual(sqlite_event_rows[1][0], log_result["event_id"])
-        self.assertEqual(sqlite_event_rows[2][0], write_result["event_id"])
+        self.assertEqual(sqlite_event_rows[2][0], revert_result["event_id"])
+        self.assertEqual(sqlite_event_rows[3][0], write_result["event_id"])
+        self.assertEqual(sqlite_event_rows[4][0], revert_write_result["event_id"])
         self.assertEqual(json.loads(sqlite_event_rows[0][3])["heading"], "Updates")
         self.assertEqual(json.loads(sqlite_event_rows[1][3])["op"], "test")
+        self.assertEqual(json.loads(sqlite_event_rows[2][3])["target_event_id"], log_result["event_id"])
+        self.assertEqual(json.loads(sqlite_event_rows[4][3])["target_event_id"], write_result["event_id"])
         self.assertIn("\n## Updates\n- detail [[B]]\n", page_text)
         self.assertNotIn("- rewritten [[C]]", page_text)
         self.assertEqual(log_text, "# Log\n")
@@ -3415,7 +3459,7 @@ class CliHelpTests(unittest.TestCase):
             [event["event_type"] for event in journal_events],
             ["page_create", "page_create", "page_rename", "event_revert"],
         )
-        self.assertEqual(len(sqlite_event_rows), 1)
+        self.assertEqual(len(sqlite_event_rows), 2)
         self.assertEqual(sqlite_event_rows[0][0], rename_result["event_id"])
         self.assertEqual(sqlite_event_rows[0][1], "page_rename")
         self.assertEqual(sqlite_event_rows[0][2], "wiki")
@@ -3424,6 +3468,11 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(sqlite_rename_payload["title"], "New")
         self.assertEqual(sqlite_rename_payload["previous_source_path"], "Old.md")
         self.assertEqual(sqlite_rename_payload["source_path"], "New.md")
+        self.assertEqual(sqlite_event_rows[1][0], revert_result["event_id"])
+        self.assertEqual(sqlite_event_rows[1][1], "event_revert")
+        sqlite_revert_payload = json.loads(sqlite_event_rows[1][3])
+        self.assertEqual(sqlite_revert_payload["target_event_id"], rename_result["event_id"])
+        self.assertEqual(sqlite_revert_payload["target_event_type"], "page_rename")
         self.assertEqual(rename_result["previous_title"], "Old")
         self.assertEqual(rename_result["title"], "New")
         self.assertEqual(rename_result["event_type"], "page_rename")
@@ -3457,6 +3506,7 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(reimport_read_old["backlink_count_total"], 1)
         self.assertTrue(reimport_check["ok"])
         self.assertEqual(revert_result["target_event_type"], "page_rename")
+        self.assertEqual(revert_result["target_event_source"], "sqlite")
         self.assertEqual(revert_result["restored_line_count"], 2)
         self.assertTrue(old_exists_after_revert)
         self.assertFalse(new_exists_after_revert)

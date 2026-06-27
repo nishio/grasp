@@ -3244,6 +3244,32 @@ class SQLiteStore:
         previous_lines: list[dict[str, Any]],
         current_lines: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        with self.connection:
+            return self._revert_markdown_page_rename_uncommitted(
+                page_id,
+                previous_title=previous_title,
+                title=title,
+                previous_source_path=previous_source_path,
+                source_path=source_path,
+                previous_aliases=previous_aliases,
+                aliases=aliases,
+                previous_lines=previous_lines,
+                current_lines=current_lines,
+            )
+
+    def _revert_markdown_page_rename_uncommitted(
+        self,
+        page_id: str,
+        *,
+        previous_title: str,
+        title: str,
+        previous_source_path: str,
+        source_path: str,
+        previous_aliases: list[str],
+        aliases: list[str],
+        previous_lines: list[dict[str, Any]],
+        current_lines: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         project = self._require_project()
         if not self._markdown_manifest_for_project(project):
             raise ValueError(f"project is not a Markdown-backed project: {project}")
@@ -3265,7 +3291,7 @@ class SQLiteStore:
             raise ValueError("page_rename source path no longer matches the current page")
         graph_role = str(item.get("graph_role") or self._markdown_graph_role_for_page(project, page_id))
         now = int(time.time())
-        edge_count = self._apply_markdown_page_identity(
+        edge_count = self._apply_markdown_page_identity_uncommitted(
             project,
             page_id,
             title=previous_title,
@@ -3291,6 +3317,24 @@ class SQLiteStore:
         }
 
     def revert_markdown_page_create(
+        self,
+        page_id: str,
+        *,
+        title: str,
+        source_path: str,
+        aliases: list[str],
+        current_lines: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        with self.connection:
+            return self._revert_markdown_page_create_uncommitted(
+                page_id,
+                title=title,
+                source_path=source_path,
+                aliases=aliases,
+                current_lines=current_lines,
+            )
+
+    def _revert_markdown_page_create_uncommitted(
         self,
         page_id: str,
         *,
@@ -3336,29 +3380,28 @@ class SQLiteStore:
             if alias_norm and alias_map.get(alias_norm) == title:
                 alias_map.pop(alias_norm, None)
 
-        with self.connection:
-            self.connection.execute(
-                "DELETE FROM pages WHERE project = ? AND id = ?",
-                (project, page_id),
-            )
-            refresh_edge_resolutions(self.connection, project)
-            rebuild_unresolved_targets(self.connection, project)
-            _refresh_project_counts_sql(self.connection, project)
-            _write_metadata(
-                self.connection,
-                {
-                    f"project.{project}.title_aliases": json.dumps(
-                        alias_map,
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    ),
-                    f"project.{project}.markdown_manifest": json.dumps(
-                        manifest,
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    ),
-                },
-            )
+        self.connection.execute(
+            "DELETE FROM pages WHERE project = ? AND id = ?",
+            (project, page_id),
+        )
+        refresh_edge_resolutions(self.connection, project)
+        rebuild_unresolved_targets(self.connection, project)
+        _refresh_project_counts_sql(self.connection, project)
+        _write_metadata(
+            self.connection,
+            {
+                f"project.{project}.title_aliases": json.dumps(
+                    alias_map,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                f"project.{project}.markdown_manifest": json.dumps(
+                    manifest,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            },
+        )
         return {
             "project": project,
             "page": {"id": page_id, "title": title},
@@ -3368,6 +3411,14 @@ class SQLiteStore:
         }
 
     def revert_markdown_append(self, page_id: str, inserted_lines: list[dict[str, Any]]) -> dict[str, Any]:
+        with self.connection:
+            return self._revert_markdown_append_uncommitted(page_id, inserted_lines)
+
+    def _revert_markdown_append_uncommitted(
+        self,
+        page_id: str,
+        inserted_lines: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         project = self._require_project()
         if not self._markdown_manifest_for_project(project):
             raise ValueError(f"project is not a Markdown-backed project: {project}")
@@ -3419,27 +3470,26 @@ class SQLiteStore:
         now = int(time.time())
         line_ids = [item["line_id"] for item in expected]
         placeholders = ",".join("?" for _ in line_ids)
-        with self.connection:
-            self.connection.execute(
-                f"DELETE FROM edges WHERE project = ? AND line_id IN ({placeholders})",
-                (project, *line_ids),
-            )
-            self.connection.execute(
-                f"DELETE FROM lines WHERE project = ? AND page_id = ? AND line_id IN ({placeholders})",
-                (project, page_id, *line_ids),
-            )
-            refresh_edge_resolutions(self.connection, project)
-            rebuild_unresolved_targets(self.connection, project)
-            self.connection.execute(
-                """
-                UPDATE pages
-                SET updated = ?,
-                    line_count = (SELECT COUNT(*) FROM lines WHERE project = ? AND page_id = ?)
-                WHERE project = ? AND id = ?
-                """,
-                (now, project, page_id, project, page_id),
-            )
-            _refresh_project_counts_sql(self.connection, project)
+        self.connection.execute(
+            f"DELETE FROM edges WHERE project = ? AND line_id IN ({placeholders})",
+            (project, *line_ids),
+        )
+        self.connection.execute(
+            f"DELETE FROM lines WHERE project = ? AND page_id = ? AND line_id IN ({placeholders})",
+            (project, page_id, *line_ids),
+        )
+        refresh_edge_resolutions(self.connection, project)
+        rebuild_unresolved_targets(self.connection, project)
+        self.connection.execute(
+            """
+            UPDATE pages
+            SET updated = ?,
+                line_count = (SELECT COUNT(*) FROM lines WHERE project = ? AND page_id = ?)
+            WHERE project = ? AND id = ?
+            """,
+            (now, project, page_id, project, page_id),
+        )
+        _refresh_project_counts_sql(self.connection, project)
         page = self._page_by_id(page_id)
         return {
             "project": project,
@@ -3449,6 +3499,19 @@ class SQLiteStore:
         }
 
     def revert_markdown_page_update(
+        self,
+        page_id: str,
+        previous_lines: list[dict[str, Any]],
+        current_lines: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        with self.connection:
+            return self._revert_markdown_page_update_uncommitted(
+                page_id,
+                previous_lines,
+                current_lines,
+            )
+
+    def _revert_markdown_page_update_uncommitted(
         self,
         page_id: str,
         previous_lines: list[dict[str, Any]],
@@ -3464,7 +3527,7 @@ class SQLiteStore:
             raise ValueError("page_update current lines no longer match the current page")
         graph_role = self._markdown_graph_role_for_page(project, page_id)
         now = int(time.time())
-        edge_count = self._replace_markdown_page_line_payloads(
+        edge_count = self._replace_markdown_page_line_payloads_uncommitted(
             project,
             page_id,
             restored,

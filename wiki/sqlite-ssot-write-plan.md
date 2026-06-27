@@ -50,7 +50,9 @@ It supersedes [[llm-wiki-infra-fast-path-plan]] as an implementation plan. The o
 
 `1.8.4` makes `write-status` show SQLite event count and last event alongside legacy JSONL journal count and last event. This is visibility only; strict mode does not yet fail on SQLite/JSONL mismatch.
 
-This does **not** yet make every recovery path atomic at the new authority boundary. `revert-event`, projection failure rollback, `write-diff`, `history`, `sync`, and `acquire` still need SQLite events / recovery migration work.
+`1.8.5` moves the SQLite-sourced `revert-event` path onto SQLite events. It resolves target events from selected-project SQLite `events` first, falls back to legacy JSONL only when needed, and commits the page state revert plus SQLite `event_revert` row in the same `BEGIN IMMEDIATE` transaction. It still appends the legacy JSONL `event_revert` and exports Markdown projection for compatibility.
+
+This does **not** yet make every recovery path atomic at the new authority boundary. Projection failure rollback, `write-diff`, `history`, `sync`, and `acquire` still need SQLite events / recovery migration work.
 
 ## Why This Replaces The Fast Path
 
@@ -75,7 +77,7 @@ Therefore, adding more guards to `events.jsonl` is only a temporary mitigation. 
 | 2. Events table | JSONL is no longer the write authority | Add `events` table with monotonic sequence, event id, type, payload, actor/session metadata, created_at, and migration/import from existing JSONL where needed | Done in `1.8.0`: existing event types can be represented and queried from SQLite without reading `events.jsonl` |
 | 3. Write command migration | Core write verbs update SQLite SSoT | Move `write-page`, `write-page --create`, `rename-page`, log record import, and append-style helpers to the transaction helper | In progress: `write-page` / `write-page --create` / `append-section` / `append-log` / `rename-page` commit state + SQLite event atomically; recovery paths still need migration |
 | 4. Export-only Markdown | Projection becomes a read side effect, not authority | Make `export-markdown` read from canonical SQLite. Keep `--check`; make direct `import --markdown` an adoption/emergency path, not reconcile default | Fresh export is stable, no-op diff is clean, and normal file-back never needs Markdown direct patch |
-| 5. Native review/recovery | Losing git-diffable JSONL is compensated | Rebuild `history`, `write-diff`, `revert-event`, status, and replay/check surfaces from SQLite events/state | In progress: `write-status` shows SQLite event count / last event; a bad write still needs JSONL-backed recovery to revert |
+| 5. Native review/recovery | Losing git-diffable JSONL is compensated | Rebuild `history`, `write-diff`, `revert-event`, status, and replay/check surfaces from SQLite events/state | In progress: `write-status` shows SQLite event count / last event; SQLite-sourced `revert-event` writes state + `event_revert` atomically; `write-diff` and `history` still need SQLite-native sources |
 | 6. File-back cutover | Daily wiki edits use the new authority path | Update file-back skill / repo commands to call canonical SQLite write first, then export Markdown, lint, and commit projection | Three consecutive file-backs land through SQLite SSoT without direct Markdown patch fallback |
 | 7. Retire JSONL authority | Old alpha artifacts cannot mislead implementers | Mark `wiki.grasp/events.jsonl` as legacy import/audit artifact or remove it from the active path; update docs/AGENTS when the command surface changes | No current instruction tells Codex to treat JSONL as the write authority |
 
@@ -83,11 +85,11 @@ Therefore, adding more guards to `events.jsonl` is only a temporary mitigation. 
 
 Do not start with file-back integration. Continue from the authority substrate into events.
 
-1. Rebase `revert-event`, `write-status`, `write-diff`, and `history` onto SQLite events rather than JSONL-only reads.
+1. Rebase `write-diff` and `history` onto SQLite events/state rather than JSONL-only reads.
 2. Decide how projection export failure rollback should be represented once SQLite events are authoritative.
 3. Then move file-back workflow only after native recovery is usable.
 
-Completed in `1.7.39`: Phase 0 authority contract and Phase 1 connection/transaction helper. Completed in `1.8.0`: Phase 2 events table plus JSONL migration/query helpers. Completed in `1.8.1`: first Phase 3 command migration for `write-page` / `write-page --create`. Completed in `1.8.2`: `append-section` / `append-log` transaction migration. Completed in `1.8.3`: `rename-page` transaction migration. Completed in `1.8.4`: `write-status` SQLite event visibility. Not completed: SQLite-native revert/diff/history surfaces, projection failure rollback policy, file-back cutover.
+Completed in `1.7.39`: Phase 0 authority contract and Phase 1 connection/transaction helper. Completed in `1.8.0`: Phase 2 events table plus JSONL migration/query helpers. Completed in `1.8.1`: first Phase 3 command migration for `write-page` / `write-page --create`. Completed in `1.8.2`: `append-section` / `append-log` transaction migration. Completed in `1.8.3`: `rename-page` transaction migration. Completed in `1.8.4`: `write-status` SQLite event visibility. Completed in `1.8.5`: SQLite-sourced `revert-event` target lookup and state+event transaction. Not completed: SQLite-native `write-diff` / `history` surfaces, projection failure rollback policy, file-back cutover.
 
 ## Carry Forward From The Old Plan
 
