@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,9 @@ DEFAULT_DIRTY_PATHS = ("wiki", "wiki.grasp/events.jsonl")
 DEFAULT_NO_JOURNAL_DIRTY_PATHS = ("wiki", "wiki.grasp/events.jsonl")
 DEFAULT_BASE = "auto"
 FALLBACK_BASE = "origin/main"
+DEFAULT_PREFLIGHT_STAMP = ".grasp/file-back-preflight.json"
+PREFLIGHT_STAMP_KIND = "grasp_file_back_preflight"
+PREFLIGHT_STAMP_SCHEMA_VERSION = 1
 
 
 def run_command(args: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -69,6 +73,86 @@ def resolve_git_base(repo: Path, requested_base: str) -> str:
         if upstream_name:
             return upstream_name
     return FALLBACK_BASE
+
+
+def resolve_repo_path(repo: Path, path: str) -> Path:
+    resolved = Path(path)
+    if resolved.is_absolute():
+        return resolved
+    return repo / resolved
+
+
+def git_ref_oid(repo: Path, ref: str) -> tuple[str | None, str | None]:
+    completed = run_command(["git", "rev-parse", "--verify", ref], cwd=repo)
+    error = require_success(completed, f"git rev-parse {ref}")
+    if error:
+        return None, error
+    return completed.stdout.strip(), None
+
+
+def preflight_stamp_payload(
+    *,
+    session_id: str,
+    head: str,
+    base: str | None,
+    base_oid: str | None,
+    store: str,
+    project: str,
+    output: str,
+    journal_mode: str,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema_version": PREFLIGHT_STAMP_SCHEMA_VERSION,
+        "kind": PREFLIGHT_STAMP_KIND,
+        "created_at": created_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "session_id": session_id,
+        "head": head,
+        "base": base or "skipped",
+        "base_oid": base_oid,
+        "store": store,
+        "project": project,
+        "output": output,
+        "journal_mode": journal_mode,
+    }
+
+
+def preflight_stamp_from_repo(
+    repo: Path,
+    *,
+    session_id: str,
+    base: str | None,
+    store: str,
+    project: str,
+    output: str,
+    journal_mode: str,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    head, error = git_ref_oid(repo, "HEAD")
+    if error:
+        return None, [error]
+    base_oid = None
+    if base:
+        base_oid, error = git_ref_oid(repo, base)
+        if error:
+            return None, [error]
+    return (
+        preflight_stamp_payload(
+            session_id=session_id,
+            head=head or "",
+            base=base,
+            base_oid=base_oid,
+            store=store,
+            project=project,
+            output=output,
+            journal_mode=journal_mode,
+        ),
+        [],
+    )
+
+
+def write_preflight_stamp(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def write_status_errors(result: dict[str, Any], *, require_journal: bool = True) -> list[str]:
@@ -299,6 +383,16 @@ def main() -> int:
         help="Skip the unused-session-id guard for legacy/ad hoc verification.",
     )
     parser.add_argument(
+        "--preflight-stamp",
+        default=DEFAULT_PREFLIGHT_STAMP,
+        help="Gitignored JSON stamp written after a clean preflight and checked by postwrite.",
+    )
+    parser.add_argument(
+        "--skip-preflight-stamp",
+        action="store_true",
+        help="Skip writing the preflight stamp for legacy/ad hoc verification.",
+    )
+    parser.add_argument(
         "--no-journal",
         action="store_true",
         help="Use write-status --no-journal and do not require the compatibility journal to be clean. This is the default.",
@@ -353,11 +447,40 @@ def main() -> int:
             print(error, file=sys.stderr)
         return 1
 
+    stamp_written = "skipped"
+    if not args.skip_preflight_stamp:
+        if not args.skip_base_check:
+            errors.extend(check_git_base(repo, resolved_base))
+        if not errors:
+            payload, stamp_errors = preflight_stamp_from_repo(
+                repo,
+                session_id=args.session_id,
+                base=None if args.skip_base_check else resolved_base,
+                store=args.store,
+                project=args.project,
+                output=args.output,
+                journal_mode=args.journal if require_journal else "none",
+            )
+            errors.extend(stamp_errors)
+            if payload is not None and not errors:
+                stamp_path = resolve_repo_path(repo, args.preflight_stamp)
+                try:
+                    write_preflight_stamp(stamp_path, payload)
+                except OSError as error:
+                    errors.append(f"write preflight stamp {stamp_path} failed: {error}")
+                else:
+                    stamp_written = str(stamp_path.relative_to(repo) if stamp_path.is_relative_to(repo) else stamp_path)
+        if errors:
+            for error in errors:
+                print(error, file=sys.stderr)
+            return 1
+
     print(
         "file-back preflight ok: "
         f"base={resolved_base if not args.skip_base_check else 'skipped'} "
         f"journal_mode={args.journal if require_journal else 'none'} "
         f"session={'skipped' if args.skip_session_uniqueness_check else args.session_id} "
+        f"stamp={stamp_written} "
         f"dirty_paths={','.join(paths)} "
         f"store={args.store} project={args.project} output={args.output}"
     )
