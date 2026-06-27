@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-27 12:44] implementation | SQLite SSoT Phase 0 contract + Phase 1 write transaction substrate
+- [[sqlite-ssot-write-plan]] に Phase 0 authority contract を固定: repo-local `.grasp/authority.sqlite`（`$GRASP_CANONICAL_STORE` override）が authoring SSoT default、`wiki/` は git-tracked projection/recovery snapshot、`wiki.grasp/events.jsonl` は legacy audit/migration input、`.grasp/authority.sqlite` 自体は現時点では git tracked にしない。
+- code: `canonical_store_path()`、write connection setup（WAL / busy_timeout / `synchronous=NORMAL`）、`sqlite_write_transaction()`（`BEGIN IMMEDIATE` + commit/rollback）を追加。CLI は store 更新系 command を write-configured connection で開く。
+- tests: canonical path、WAL/busy_timeout、commit/rollback、2 writer lock contention を追加。events table / JSONL migration / command-level state+event atomic migration は次 slice。public compatibility version は `1.7.39`、schema は v7 のまま。
+
 ## [2026-06-27 11:48] implementation | alias-only projection frontmatter を出し、write-page-create→rename→fresh import の旧名 red 化を修正
 - `markdown_projection_frontmatter_fields` が `id` / `title` の推論可否だけを見ており、有意味な `aliases` だけが durable 化を必要とする case で frontmatter を出していなかった。これにより `write-page --create` で path stem と title が異なる title==H1 page を作り、`rename-page` で H1 を新 title に更新すると、fresh `import --markdown` 後に旧 title alias が失われ `[[旧名]]` が red 化しうる。
 - projection 条件を修正し、title / current file stem から導出できない alias がある場合は `id` / `title` / `aliases` frontmatter を生成するようにした。title と current file stem は fresh import で復元できるため projection 管理 fields から除外する。

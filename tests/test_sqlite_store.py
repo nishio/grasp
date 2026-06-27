@@ -1,9 +1,19 @@
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from grasp.sqlite_store import SQLiteStore, import_cache_manifest_path, import_export_to_sqlite
+from grasp.sqlite_store import (
+    SQLiteStore,
+    canonical_store_path,
+    connect_sqlite_store,
+    ensure_store_schema,
+    import_cache_manifest_path,
+    import_export_to_sqlite,
+    sqlite_write_transaction,
+)
 
 
 FIXTURE = {
@@ -71,6 +81,109 @@ OTHER_FIXTURE = {
 
 
 class SQLiteStoreTests(unittest.TestCase):
+    def test_canonical_store_path_prefers_env_then_repo_root(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            env_path = Path(tmpdir) / "custom.sqlite"
+            with patch.dict("os.environ", {"GRASP_CANONICAL_STORE": str(env_path)}):
+                self.assertEqual(canonical_store_path(root), env_path)
+            with patch.dict("os.environ", {}, clear=True):
+                self.assertEqual(
+                    canonical_store_path(root),
+                    root / ".grasp" / "authority.sqlite",
+                )
+
+    def test_write_connection_uses_wal_and_busy_timeout(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = Path(tmpdir) / "store.sqlite"
+            ensure_store_schema(store_path)
+            connection = connect_sqlite_store(
+                store_path,
+                for_write=True,
+                busy_timeout_ms=1234,
+            )
+            try:
+                journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+                busy_timeout = connection.execute("PRAGMA busy_timeout").fetchone()[0]
+            finally:
+                connection.close()
+
+        self.assertEqual(journal_mode.lower(), "wal")
+        self.assertEqual(busy_timeout, 1234)
+
+    def test_sqlite_write_transaction_commits_and_rolls_back(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = Path(tmpdir) / "store.sqlite"
+            ensure_store_schema(store_path)
+            connection = connect_sqlite_store(store_path, for_write=True)
+            try:
+                with sqlite_write_transaction(connection):
+                    connection.execute(
+                        "INSERT INTO metadata (key, value) VALUES (?, ?)",
+                        ("committed", "yes"),
+                    )
+                committed = connection.execute(
+                    "SELECT value FROM metadata WHERE key = ?",
+                    ("committed",),
+                ).fetchone()[0]
+                with self.assertRaises(RuntimeError):
+                    with sqlite_write_transaction(connection):
+                        connection.execute(
+                            "INSERT INTO metadata (key, value) VALUES (?, ?)",
+                            ("rolled-back", "no"),
+                        )
+                        raise RuntimeError("force rollback")
+                rolled_back = connection.execute(
+                    "SELECT value FROM metadata WHERE key = ?",
+                    ("rolled-back",),
+                ).fetchone()
+            finally:
+                connection.close()
+
+        self.assertEqual(committed, "yes")
+        self.assertIsNone(rolled_back)
+
+    def test_sqlite_write_transaction_serializes_competing_writers(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = Path(tmpdir) / "store.sqlite"
+            ensure_store_schema(store_path)
+            first = connect_sqlite_store(store_path, for_write=True, busy_timeout_ms=50, timeout=0.05)
+            second = connect_sqlite_store(store_path, for_write=True, busy_timeout_ms=50, timeout=0.05)
+            try:
+                with sqlite_write_transaction(first):
+                    first.execute(
+                        "INSERT INTO metadata (key, value) VALUES (?, ?)",
+                        ("first-writer", "active"),
+                    )
+                    with self.assertRaises(sqlite3.OperationalError):
+                        with sqlite_write_transaction(second):
+                            second.execute(
+                                "INSERT INTO metadata (key, value) VALUES (?, ?)",
+                                ("second-writer", "should-not-commit"),
+                            )
+                with sqlite_write_transaction(second):
+                    second.execute(
+                        "INSERT INTO metadata (key, value) VALUES (?, ?)",
+                        ("second-writer", "after-first-commit"),
+                    )
+                values = dict(
+                    second.execute(
+                        "SELECT key, value FROM metadata WHERE key IN (?, ?)",
+                        ("first-writer", "second-writer"),
+                    ).fetchall()
+                )
+            finally:
+                first.close()
+                second.close()
+
+        self.assertEqual(
+            values,
+            {
+                "first-writer": "active",
+                "second-writer": "after-first-commit",
+            },
+        )
+
     def test_import_export_to_sqlite_and_query(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             export_path = Path(tmpdir) / "export.json"
