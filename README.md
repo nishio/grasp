@@ -128,7 +128,7 @@ Alpha:
 
 - Markdown-backed project 向けの `append-section` / `append-log` / `write-page` / `rename-page`
 - SQLite store を authority とする `export-markdown --check` の projection freshness gate
-- `write-status` / `revert-event` / `replay-journal` による recovery surface
+- `write-status` / `revert-event` / `revert-events` / `replay-journal` による recovery surface
 - write/status は移行用の compatibility JSONL journal を使えるほか、`--no-journal` で SQLite events + Markdown projection + semantic log projection の path も検証できる
 - write 系 command の projection export が event write 後に失敗した場合は SQLite state を `event_revert` で自動 rollback し、`--json` では stderr に rollback diagnostic を返す
 - repo-local file-back guard scripts は no-journal が default で、postwrite は SQLite events 由来の semantic log projection も確認し、compatibility journal あり mode は明示 audit 用に残す
