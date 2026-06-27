@@ -1456,6 +1456,124 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(second_import_result["skipped_records"], 2)
         self.assertEqual(len(log_events), 2)
 
+    def test_log_records_and_history_query_sqlite_events_when_available(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            log_path = root / "Log.md"
+            (root / "Alpha.md").write_text("# Alpha\n", encoding="utf-8")
+            log_path.write_text("# Log\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            log_path.write_text(
+                "# Log\n\n"
+                "## [2026-06-26 01:00] implementation | first entry\n"
+                "- touched [[Alpha]]\n",
+                encoding="utf-8",
+            )
+            import_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "import-log-records",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            log_records_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "log-records",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            history_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "history",
+                    "Alpha",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_type, project, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+
+        import_result = json.loads(import_completed.stdout)
+        log_records_result = json.loads(log_records_completed.stdout)
+        history_result = json.loads(history_completed.stdout)
+        self.assertEqual(import_result["imported_records"], 1)
+        self.assertEqual(import_result["sqlite_events_inserted"], 1)
+        self.assertEqual([row[0] for row in sqlite_event_rows], ["log_entry_import"])
+        self.assertEqual(sqlite_event_rows[0][1], "wiki")
+        self.assertEqual(json.loads(sqlite_event_rows[0][2])["summary"], "first entry")
+        self.assertEqual(log_records_result["event_source"], "sqlite")
+        self.assertEqual(log_records_result["sqlite_event_count"], 1)
+        self.assertEqual(log_records_result["matched_records"], 1)
+        self.assertEqual(log_records_result["records"][0]["subjects"], ["Alpha"])
+        self.assertEqual(history_result["event_source"], "sqlite")
+        self.assertEqual(history_result["matched_records"], 1)
+        self.assertEqual(history_result["records"][0]["summary"], "first entry")
+
     def test_import_log_records_does_not_duplicate_legacy_payloads(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
@@ -1596,7 +1714,7 @@ class CliHelpTests(unittest.TestCase):
                     "grasp",
                     "--json",
                     "--store",
-                    str(Path(tmpdir) / "missing.sqlite"),
+                    str(store_path),
                     "--project",
                     "wiki",
                     "history",
@@ -1615,7 +1733,7 @@ class CliHelpTests(unittest.TestCase):
                     "grasp",
                     "--json",
                     "--store",
-                    str(Path(tmpdir) / "missing.sqlite"),
+                    str(store_path),
                     "--project",
                     "wiki",
                     "history",
@@ -1647,6 +1765,8 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(payload["subject_source"], "frontmatter")
         self.assertEqual(payload["sources"], ["raw/session.txt"])
         self.assertEqual(payload["body_line_count"], 1)
+        self.assertEqual(history_alpha["event_source"], "journal")
+        self.assertEqual(history_alpha["sqlite_event_count"], 0)
         self.assertEqual(history_alpha["matched_records"], 1)
         self.assertEqual(history_alpha["records"][0]["subjects"], ["Alpha", "Beta"])
         self.assertEqual(history_gamma["matched_records"], 0)
@@ -1966,6 +2086,9 @@ class CliHelpTests(unittest.TestCase):
         newest_result = json.loads(newest_completed.stdout)
         filtered_result = json.loads(filtered_completed.stdout)
         history_result = json.loads(history_completed.stdout)
+        self.assertEqual(newest_result["event_source"], "journal")
+        self.assertIsNone(newest_result["store"])
+        self.assertEqual(newest_result["sqlite_event_count"], 0)
         self.assertEqual(newest_result["total_records"], 2)
         self.assertEqual(newest_result["returned_records"], 1)
         self.assertEqual(newest_result["records"][0]["summary"], "second entry")

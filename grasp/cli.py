@@ -247,13 +247,14 @@ def build_parser() -> argparse.ArgumentParser:
     log_records_parser = add_command_parser(
         subparsers,
         "log-records",
-        help="Query first-class log entry records from a journal.",
+        help="Query first-class log entry records from SQLite events or a journal.",
         description=(
-            "Read log_entry_import records from a JSONL journal without opening SQLite. "
+            "Read log_entry_import records from SQLite events when the selected store has them, "
+            "falling back to a JSONL journal when it does not. "
             "This is the event-stream surface for log records; it does not read current page projection."
         ),
         returns=(
-            "project, journal, total_records, matched_records, returned_records, offset, limit, order, filters, records[]. "
+            "project, store, journal, event_source, total_records, matched_records, returned_records, offset, limit, order, filters, records[]. "
             "Records include subjects[], content_fingerprint, record_version, superseded_by, later_event_count, later_events[]"
         ),
         examples=[
@@ -275,11 +276,12 @@ def build_parser() -> argparse.ArgumentParser:
         "history",
         help="Search the log event stream for a page or topic.",
         description=(
-            "Search log_entry_import records by extracted subject without reading current page projection. "
+            "Search log_entry_import records from SQLite events when available, falling back to JSONL journal records, "
+            "by extracted subject without reading current page projection. "
             "This is the event-stream counterpart to read <page>."
         ),
         returns=(
-            "project, journal, query, total_records, matched_records, returned_records, offset, limit, order, filters, records[]. "
+            "project, store, journal, event_source, query, total_records, matched_records, returned_records, offset, limit, order, filters, records[]. "
             "Records include subjects[], content_fingerprint, record_version, superseded_by, later_event_count, later_events[]"
         ),
         examples=[
@@ -1244,7 +1246,12 @@ def add_command_parser(
 
 
 def add_log_record_query_arguments(command_parser: argparse.ArgumentParser, *, include_positional_query: bool) -> None:
-    command_parser.add_argument("--journal", type=Path, required=True, help="JSONL journal path containing log_entry_import records.")
+    command_parser.add_argument(
+        "--journal",
+        type=Path,
+        required=True,
+        help="JSONL journal path containing log_entry_import records, used as a fallback when SQLite events are unavailable.",
+    )
     if not include_positional_query:
         command_parser.add_argument("--query", default=None, help="Text query matched against record id, source, timestamp, op, summary, heading, and body lines.")
     command_parser.add_argument("--source-path", default=None, help="Only return records imported from this Markdown source path.")
@@ -1696,6 +1703,7 @@ def run_import_log_records(store: SQLiteStore, args: argparse.Namespace) -> dict
         for record in mirror.records
         if record.graph_role == "log"
     }
+    events_to_import = []
     for event in candidate_events:
         payload = event.get("payload") or {}
         record_id = str(payload.get("record_id") or "")
@@ -1710,13 +1718,22 @@ def run_import_log_records(store: SQLiteStore, args: argparse.Namespace) -> dict
             updated_record_ids.append(record_id)
         else:
             imported_record_ids.append(record_id)
-        append_journal_event(journal, event)
+        events_to_import.append(event)
         for key in log_entry_payload_identity_keys(payload):
             existing_records[key] = payload
+    sqlite_events_inserted = 0
+    if events_to_import:
+        with store.write_transaction():
+            for event in events_to_import:
+                if insert_store_event(store.connection, event, if_exists="skip"):
+                    sqlite_events_inserted += 1
+        for event in events_to_import:
+            append_journal_event(journal, event)
     return {
         "project": project,
         "folder": str(args.folder),
         "journal": str(journal),
+        "sqlite_events_inserted": sqlite_events_inserted,
         "log_pages": sorted(log_pages),
         "log_page_count": len(log_pages),
         "scanned_records": len(candidate_events),
@@ -1772,16 +1789,15 @@ def log_entry_payload_content_fingerprint(payload: dict[str, Any]) -> str:
     return str(payload.get("content_fingerprint") or log_entry_content_fingerprint(payload))
 
 
-def run_log_records(args: argparse.Namespace) -> dict[str, Any]:
-    events = read_journal_events(args.journal)
-    selected_project = select_journal_project(events, args.project)
+def run_log_records(args: argparse.Namespace, store: SQLiteStore | None = None) -> dict[str, Any]:
+    events, selected_project, event_source, sqlite_event_count = log_record_source_events(args, store)
     query = getattr(args, "query", None)
     text_query = query if args.command == "log-records" else None
     subject_filters = list(args.subject or [])
     if args.command == "history":
         subject_filters.insert(0, query)
     records = [
-        log_entry_record_from_event(event, journal_index=index)
+        log_entry_record_from_event(event, journal_index=log_record_event_order_index(event, index))
         for index, event in enumerate(events)
         if (selected_project is None or event["project"] == selected_project)
         and event["event_type"] == "log_entry_import"
@@ -1825,7 +1841,10 @@ def run_log_records(args: argparse.Namespace) -> dict[str, Any]:
     )
     return {
         "project": selected_project,
+        "store": str(store.path) if store is not None else None,
         "journal": str(args.journal),
+        "event_source": event_source,
+        "sqlite_event_count": sqlite_event_count,
         "query": query,
         "total_records": len(visible_records),
         "total_record_events": len(versioned_records),
@@ -1843,15 +1862,37 @@ def run_log_records(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def select_journal_project(events: list[dict[str, Any]], project: str | None) -> str | None:
+def log_record_source_events(
+    args: argparse.Namespace,
+    store: SQLiteStore | None,
+) -> tuple[list[dict[str, Any]], str | None, str, int]:
+    sqlite_events: list[dict[str, Any]] = []
+    if store is not None:
+        sqlite_events = store.events(project=args.project, event_type="log_entry_import", limit=None)
+        if sqlite_events:
+            selected_project = select_event_project(sqlite_events, args.project, source_label="SQLite events")
+            return sqlite_events, selected_project, "sqlite", len(sqlite_events)
+    journal_events = read_journal_events(args.journal)
+    selected_project = select_event_project(journal_events, args.project, source_label="journal")
+    return journal_events, selected_project, "journal", len(sqlite_events)
+
+
+def select_event_project(events: list[dict[str, Any]], project: str | None, *, source_label: str) -> str | None:
     event_projects = {event["project"] for event in events}
     if project is None and len(event_projects) > 1:
         available = ", ".join(sorted(event_projects))
-        raise ValueError(f"journal contains multiple projects; specify --project <name> (available: {available})")
+        raise ValueError(f"{source_label} contains multiple projects; specify --project <name> (available: {available})")
     if project is not None and event_projects and project not in event_projects:
         available = ", ".join(sorted(event_projects))
-        raise ValueError(f"project {project!r} is not present in journal (available: {available})")
+        raise ValueError(f"project {project!r} is not present in {source_label} (available: {available})")
     return project or (next(iter(event_projects)) if event_projects else None)
+
+
+def log_record_event_order_index(event: dict[str, Any], fallback_index: int) -> int:
+    event_sequence = event.get("event_sequence")
+    if event_sequence is None:
+        return fallback_index
+    return int(event_sequence)
 
 
 def log_entry_record_from_event(event: dict[str, Any], *, journal_index: int) -> dict[str, Any]:
@@ -3033,10 +3074,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command in {"log-records", "history"}:
+        store: SQLiteStore | None = None
         try:
-            result = run_log_records(args)
+            if args.store.exists():
+                store = SQLiteStore(args.store, project=args.project, for_write=False)
+                if not store.schema_ok():
+                    store.close()
+                    store = None
+            result = run_log_records(args, store=store)
         except ValueError as error:
             parser.error(str(error))
+        finally:
+            if store is not None:
+                store.close()
         emit_result(args, result)
         return 0
 
@@ -3889,6 +3939,7 @@ def format_import_log_records(result: dict[str, Any]) -> str:
         f"project: {result['project']}\n"
         f"folder: {result['folder']}\n"
         f"journal: {result['journal']}\n"
+        f"sqlite_events_inserted: {result.get('sqlite_events_inserted', 0)}\n"
         f"log_pages: {result['log_page_count']}\n"
         f"scanned_records: {result['scanned_records']}\n"
         f"imported_records: {result['imported_records']}\n"
@@ -3903,7 +3954,9 @@ def format_log_records(result: dict[str, Any]) -> str:
     parts = [
         "# Log Records\n",
         f"project: {result.get('project') or ''}\n",
+        f"store: {result.get('store') or ''}\n",
         f"journal: {result['journal']}\n",
+        f"event_source: {result.get('event_source', 'journal')}\n",
         f"query: {result.get('query') or ''}\n",
         f"total_records: {result['total_records']}\n",
         f"total_record_events: {result.get('total_record_events', result['total_records'])}\n",
