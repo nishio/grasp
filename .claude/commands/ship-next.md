@@ -30,7 +30,7 @@ Follow these steps:
    - `python3 -m unittest discover -s tests`
    - `python3 scripts/lint_wiki.py`
    - `python3 scripts/check_file_back_runbook.py`
-   - if file-back / projection behavior changed, `python3 scripts/check_file_back_postwrite.py` (no-journal default)
+   - if file-back / projection behavior changed, `python3 scripts/check_file_back_postwrite.py` (no-journal default; includes SQLite events semantic log projection check)
    - `git diff --check`
    - If relevant, run one small dogfood command and file back any important observation.
 4. Stage all intentional changes, commit once with a concise message, and push the current branch to `origin`.

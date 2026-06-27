@@ -1240,3 +1240,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 ## [2026-06-27 19:50] dogfood | sqlite regenerate-log check passes on repo store
 - command: python3 -m grasp --store .grasp/file-back.sqlite --project grasp-wiki --json export-markdown --output wiki --regenerate-log --check
 - result: ok=true, regenerated_files=[log.md], log_event_source=sqlite, log_event_count=135, generated_overlays=[sqlite-events-log], changed_files=[]。partial event stream は log page page_update を seed にして replay できる。
+
+## [2026-06-27 20:06] implementation | guard semantic log projection in postwrite
+- implemented: check_file_back_postwrite.py runs export-markdown --regenerate-log --check by default and verifies sqlite source / sqlite-events-log overlay.
+- escape hatch: --skip-semantic-log-check skips only this additional semantic log projection check.
+- file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], and [[grasp-backlog]] now treat the repo postwrite guard as implemented.

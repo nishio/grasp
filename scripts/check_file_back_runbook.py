@@ -21,6 +21,7 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "python3 scripts/check_file_back_preflight.py`（no-journal default）",
             "`--no-journal --output wiki`",
             "python3 scripts/check_file_back_postwrite.py`（no-journal default）",
+            "SQLite events 由来の semantic log projection",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
             "repo runbook では `--with-journal` を使わない",
         ),
@@ -41,6 +42,7 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "python3 scripts/check_file_back_preflight.py`（no-journal default）",
             "`--no-journal --output wiki`",
             "python3 scripts/check_file_back_postwrite.py`（no-journal default）",
+            "SQLite events 由来の semantic log projection",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
             "repo runbook では `--with-journal` を使わない",
         ),
@@ -61,7 +63,8 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "$PYTHON_BIN scripts/check_file_back_preflight.py",
             "この preflight は no-journal default",
             "`--output wiki --no-journal`",
-            "scripts/check_file_back_postwrite.py`（no-journal default）",
+            "scripts/check_file_back_postwrite.py`（no-journal default",
+            "SQLite events 由来の semantic log projection",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
             "repo runbook では `--with-journal` を使わない",
         ),
@@ -79,7 +82,8 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
         ".claude/commands/ship-next.md",
         required=(
             "python3 scripts/check_file_back_preflight.py` (no-journal default)",
-            "python3 scripts/check_file_back_postwrite.py` (no-journal default)",
+            "python3 scripts/check_file_back_postwrite.py` (no-journal default",
+            "SQLite events semantic log projection",
             "tracked `wiki.grasp/events.jsonl` was retired and removed in `1.8.18`",
             "Do not use repo-runbook `--with-journal`",
         ),
@@ -98,6 +102,7 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "通常編集は `--no-journal` path",
             "python3 scripts/check_file_back_preflight.py`（no-journal default）",
             "python3 scripts/check_file_back_postwrite.py`（no-journal default）",
+            "SQLite events 由来の semantic log projection",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
         ),
         forbidden=(
@@ -111,6 +116,7 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
         "README.md",
         required=(
             "repo-local file-back guard scripts は no-journal が default",
+            "SQLite events 由来の semantic log projection",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役済み",
         ),
         forbidden=(
@@ -152,7 +158,7 @@ def main() -> int:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
-    print("file-back runbook ok: no-journal default and retired journal documented")
+    print("file-back runbook ok: no-journal default, retired journal, and semantic log guard documented")
     return 0
 
 

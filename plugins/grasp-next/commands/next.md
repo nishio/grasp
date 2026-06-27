@@ -50,7 +50,7 @@ git fetch origin main
 $PYTHON_BIN scripts/check_file_back_preflight.py
 ```
 
-この preflight は no-journal default で `.grasp/file-back.sqlite` を import/update し、remote 分岐なし、wiki dirty なし、退役済み JSONL path の再作成なし、`write-status --no-journal --strict`、projection policy check を確認する。tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済みで、通常編集は repo に JSONL を作らない。その後、表現できる変更は `append-section` / `write-page` / `append-log` を `--output wiki --no-journal` 付きで使う。任意 frontmatter merge、canonical docs、曖昧 handle、混在 hunk など grasp alpha が安全に扱えない場合だけ direct Markdown patch に fallback し、理由を `wiki/log.md` に残す。
+この preflight は no-journal default で `.grasp/file-back.sqlite` を import/update し、remote 分岐なし、wiki dirty なし、退役済み JSONL path の再作成なし、`write-status --no-journal --strict`、projection policy check を確認する。tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済みで、通常編集は repo に JSONL を作らない。その後、表現できる変更は `append-section` / `write-page` / `append-log` を `--output wiki --no-journal` 付きで使い、postwrite は SQLite events 由来の semantic log projection も確認する。任意 frontmatter merge、canonical docs、曖昧 handle、混在 hunk など grasp alpha が安全に扱えない場合だけ direct Markdown patch に fallback し、理由を `wiki/log.md` に残す。
 
 `--journal` / `--with-journal` は CLI の legacy/ad hoc audit 用には残るが、repo runbook では `--with-journal` を使わない。JSONL 調査が必要な時は task-local の明示 path を使い、別途 migration decision を切るまで repo artifact として commit しない。
 
@@ -76,7 +76,7 @@ python3 scripts/check_file_back_runbook.py
 git diff --check
 ```
 
-変更内容に関係する時は、小さな dogfood command を 1 つ走らせる。file-back / projection 周りを触った時は、`scripts/check_file_back_postwrite.py`（no-journal default）を必須にし、重要な観測があれば file back する。
+変更内容に関係する時は、小さな dogfood command を 1 つ走らせる。file-back / projection 周りを触った時は、`scripts/check_file_back_postwrite.py`（no-journal default、SQLite events 由来の semantic log projection check を含む）を必須にし、重要な観測があれば file back する。
 
 ### 4. Commit And Push
 
@@ -96,7 +96,7 @@ git diff --check
 - wiki lint が通っている。
 - file-back runbook checker が通っている。
 - `git diff --check` が通っている。
-- file-back / projection 周りを触った時は `scripts/check_file_back_postwrite.py`（no-journal default）が通っている。
+- file-back / projection 周りを触った時は `scripts/check_file_back_postwrite.py`（no-journal default、SQLite events 由来の semantic log projection check を含む）が通っている。
 - commit と push が成功している、または clean tree のため commit 不要と判断している。
 - 失敗時は commit/push していない。
 

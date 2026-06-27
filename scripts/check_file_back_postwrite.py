@@ -1,8 +1,9 @@
 """Check that a grasp write-first file-back landed cleanly.
 
 Run this after grasp write commands updated wiki/, before staging or committing
-the projection. The default mode is no-journal; compatibility journal checks
-are explicit opt-in.
+the projection. The default mode is no-journal and also checks the SQLite
+events-derived semantic log projection; compatibility journal checks are
+explicit opt-in.
 """
 from __future__ import annotations
 
@@ -82,6 +83,55 @@ def run_projection_check(repo: Path, *, store: str, project: str, output: str) -
     return errors
 
 
+def semantic_log_projection_errors(result: dict[str, object]) -> list[str]:
+    errors = projection_policy_errors(result)
+    if errors:
+        return errors
+    policy = result.get("projection_policy")
+    if not isinstance(policy, dict):
+        return ["missing projection_policy object"]
+    overlays = policy.get("generated_overlays")
+    if not isinstance(overlays, list):
+        return ["projection_policy.generated_overlays must be a list"]
+    if result.get("log_event_source") != "sqlite":
+        errors.append(f"log_event_source={result.get('log_event_source')!r}, expected 'sqlite'")
+    if "sqlite-events-log" not in overlays:
+        errors.append("projection_policy.generated_overlays is missing 'sqlite-events-log'")
+    regenerated_files = result.get("regenerated_files")
+    if not isinstance(regenerated_files, list) or not regenerated_files:
+        errors.append("regenerated_files must include the semantic log projection")
+    return errors
+
+
+def run_semantic_log_projection_check(repo: Path, *, store: str, project: str, output: str) -> list[str]:
+    completed = run_command(
+        [
+            sys.executable,
+            "-m",
+            "grasp",
+            "--json",
+            "--store",
+            store,
+            "--project",
+            project,
+            "export-markdown",
+            "--output",
+            output,
+            "--regenerate-log",
+            "--check",
+        ],
+        cwd=repo,
+    )
+    projection_json, error = parse_json_output(completed.stdout, "export-markdown --regenerate-log")
+    if projection_json is None:
+        command_error = require_success(completed, "grasp export-markdown --regenerate-log --check")
+        return [command_error or error or "export-markdown --regenerate-log returned no JSON"]
+    errors = semantic_log_projection_errors(projection_json)
+    if completed.returncode != 0 and not errors:
+        errors.append(f"grasp export-markdown --regenerate-log --check failed with exit {completed.returncode}")
+    return errors
+
+
 def run_optional_command(repo: Path, args: list[str], label: str) -> list[str]:
     completed = run_command(args, cwd=repo)
     error = require_success(completed, label)
@@ -98,6 +148,7 @@ def run_postwrite_checks(
     require_journal: bool = True,
     lint: bool,
     diff_check: bool,
+    semantic_log_check: bool,
 ) -> list[str]:
     errors: list[str] = []
     errors.extend(
@@ -111,6 +162,8 @@ def run_postwrite_checks(
         )
     )
     errors.extend(run_projection_check(repo, store=store, project=project, output=output))
+    if semantic_log_check:
+        errors.extend(run_semantic_log_projection_check(repo, store=store, project=project, output=output))
     if lint:
         errors.extend(run_optional_command(repo, [sys.executable, "scripts/lint_wiki.py"], "wiki lint"))
     if diff_check:
@@ -137,6 +190,11 @@ def main() -> int:
     parser.add_argument("--output", default="wiki")
     parser.add_argument("--skip-lint", action="store_true", help="Skip scripts/lint_wiki.py.")
     parser.add_argument("--skip-diff-check", action="store_true", help="Skip git diff --check.")
+    parser.add_argument(
+        "--skip-semantic-log-check",
+        action="store_true",
+        help="Skip export-markdown --regenerate-log --check for the SQLite events-derived log projection.",
+    )
     args = parser.parse_args()
 
     repo = Path(args.repo).resolve()
@@ -153,6 +211,7 @@ def main() -> int:
         require_journal=require_journal,
         lint=not args.skip_lint,
         diff_check=not args.skip_diff_check,
+        semantic_log_check=not args.skip_semantic_log_check,
     )
     if errors:
         for error in errors:
@@ -163,6 +222,7 @@ def main() -> int:
         "file-back postwrite ok: "
         f"store={args.store} project={args.project} output={args.output} "
         f"journal_mode={args.journal if require_journal else 'none'} "
+        f"semantic_log={'skipped' if args.skip_semantic_log_check else 'ok'} "
         f"lint={'skipped' if args.skip_lint else 'ok'} "
         f"diff_check={'skipped' if args.skip_diff_check else 'ok'}"
     )

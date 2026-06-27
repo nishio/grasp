@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.20`（更新: 2026-06-27 20:06、store: schema `8`、compat: schema `8` compatible）: `scripts/check_file_back_postwrite.py` が no-journal default の標準 postwrite guard として SQLite events 由来の semantic log projection も検査するようにした。内部では `export-markdown --regenerate-log --check` を実行し、clean projection に加えて `log_event_source="sqlite"`、`projection_policy.generated_overlays` の `sqlite-events-log`、`regenerated_files` の存在を確認する。必要な時だけ `--skip-semantic-log-check` でこの追加検査を省ける。runbook checker / AGENTS / CLAUDE / `/next` / `/ship-next` / repo skill / README もこの標準 guard を明示する。schema は不変
 - `1.8.19`（更新: 2026-06-27 19:50、store: schema `8`、compat: schema `8` compatible）: `export-markdown --regenerate-log` の通常 source を SQLite events に切り替えた。`--journal` を省略すると selected project の SQLite event stream から log page events と latest record-per-file `log_entry_import` records を replay し、projection policy は `generated_overlays=["sqlite-events-log"]` と `log_event_source="sqlite"` を返す。`--journal <path>` を明示した場合だけ legacy JSONL event stream を ad hoc audit 用に読み、従来の `legacy-journal-log` overlay を返す。`import --markdown` 後の partial event stream でも log page `page_update` / `page_rename` / supported revert を replay seed として扱える。schema は不変
 - `1.8.18`（更新: 2026-06-27 19:41、store: schema `8`、compat: schema `8` compatible）: tracked `wiki.grasp/events.jsonl` を退役・削除した。repo-local file-back は no-journal default の SQLite authority path を通常経路にし、preflight は `wiki/` に加えて退役済み JSONL path の再作成/変更も dirty path として止める。AGENTS/CLAUDE、Codex `/next`、Claude `/ship-next`、repo `grasp` skill、README、runbook checker は `--with-journal` を repo runbook から外し、`--journal` / `--with-journal` を legacy/ad hoc CLI audit 用としてだけ残す。schema は不変
 - `1.8.17`（更新: 2026-06-27 19:15、store: schema `8`、compat: schema `8` compatible）: no-journal default 化後に残っていた AGENTS/CLAUDE、Codex `/next`、Claude `/ship-next` の guard script 呼び出しを、`scripts/check_file_back_preflight.py` / `scripts/check_file_back_postwrite.py` のフラグなし default へ揃えた。互換 JSONL audit は `--with-journal` を明示する手順にし、`scripts/check_file_back_runbook.py` は guard script の旧 `--no-journal` 明示と `--with-journal` 漏れを検出する。schema は不変
@@ -159,6 +160,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.17`
+- Current public compatibility version: `1.8.20`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.17`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.20`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
