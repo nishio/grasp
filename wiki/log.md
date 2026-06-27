@@ -1155,3 +1155,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - `export-markdown` now returns `projection_policy` with SQLite authority, stored-lines base, git-tracked projection role, write mode, and generated overlays.
 - CLI help/text output now labels `export-markdown --check` as the projection freshness gate for ship loops and file-back cutover.
 - The repo skill instructions were updated to remove stale `write-diff` usage and reflect the current `write-status` strict guard.
+
+## [2026-06-27 18:03] implementation | guard file-back projection authority
+- Added `scripts/check_projection_policy.py` to validate clean `export-markdown --json --check` output and reject non-SQLite projection authority.
+- Updated `/next`, `/ship-next`, AGENTS/CLAUDE, repo `grasp` skill, and local `file-back` skill so file-back / ship loops assert the projection policy before treating Markdown as clean.
+- Targeted test and dogfood pipe confirmed `projection_policy authority=sqlite base=stored_markdown_lines output_role=git_tracked_projection`.

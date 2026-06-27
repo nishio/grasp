@@ -48,11 +48,12 @@ argument-hint: [focus]
 ```bash
 $PYTHON_BIN -m grasp --store .grasp/file-back.sqlite import --markdown wiki --project grasp-wiki
 $PYTHON_BIN -m grasp --store .grasp/file-back.sqlite --project grasp-wiki write-status --output wiki --journal wiki.grasp/events.jsonl --strict
+$PYTHON_BIN -m grasp --json --store .grasp/file-back.sqlite --project grasp-wiki export-markdown --output wiki --check | $PYTHON_BIN scripts/check_projection_policy.py
 ```
 
 その後、表現できる変更は `append-section` / `write-page` / `append-log` を `--output wiki --journal wiki.grasp/events.jsonl` 付きで使う。任意 frontmatter merge、canonical docs、曖昧 handle、混在 hunk など grasp alpha が安全に扱えない場合だけ direct Markdown patch に fallback し、理由を `wiki/log.md` に残す。
 
-同じ `.grasp/file-back.sqlite` / `wiki.grasp/events.jsonl` への write 系 command は直列に実行する。並列 write で projection が stale になったら、対象 page を直列で `write-page --from-file` し直してから `write-status --strict` / `export-markdown --check` / `replay-journal --check` を通す。
+同じ `.grasp/file-back.sqlite` / `wiki.grasp/events.jsonl` への write 系 command は直列に実行する。並列 write で projection が stale になったら、対象 page を直列で `write-page --from-file` し直してから `write-status --strict` / `export-markdown --check` + `scripts/check_projection_policy.py` / `replay-journal --check` を通す。
 
 複数 wiki page を direct patch fallback してから journal に戻す場合も、1 page patch → `write-page --from-file` → 次 page の順で行う。`write-page` の projection export は全 page を書くため、未反映の direct patch は上書きされる。
 
@@ -73,7 +74,7 @@ python3 scripts/lint_wiki.py
 git diff --check
 ```
 
-変更内容に関係する時は、小さな dogfood command を 1 つ走らせ、重要な観測があれば file back する。
+変更内容に関係する時は、小さな dogfood command を 1 つ走らせる。file-back / projection 周りを触った時は、`export-markdown --json --check | scripts/check_projection_policy.py` を必須にし、重要な観測があれば file back する。
 
 ### 4. Commit And Push
 
@@ -92,6 +93,7 @@ git diff --check
 - unittest が通っている。
 - wiki lint が通っている。
 - `git diff --check` が通っている。
+- file-back / projection 周りを触った時は `scripts/check_projection_policy.py` が通っている。
 - commit と push が成功している、または clean tree のため commit 不要と判断している。
 - 失敗時は commit/push していない。
 

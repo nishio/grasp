@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(python3 -m unittest discover -s tests:*), Bash(python3 scripts/lint_wiki.py:*), Bash(git diff --check:*), Bash(date:*), Bash(rg:*), Bash(sed:*), Read, Edit, MultiEdit, TodoWrite
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(python3 -m unittest discover -s tests:*), Bash(python3 scripts/lint_wiki.py:*), Bash(python3 scripts/check_projection_policy.py:*), Bash(python3 -m grasp:*), Bash(git diff --check:*), Bash(date:*), Bash(rg:*), Bash(sed:*), Read, Edit, MultiEdit, TodoWrite
 description: File back grasp work, commit, push, and propose what to build next in Japanese
 ---
 
@@ -23,9 +23,11 @@ Follow these steps:
    - design rationale or changed decision -> `wiki/decisions/`
    - chronological record -> `wiki/log.md` using `## [YYYY-MM-DD HH:MM] <op> | <desc>`
    - keep file back factual and scoped; do not over-spec future work.
+   - for grasp-write-backed file back, first run `python3 -m grasp --store .grasp/file-back.sqlite import --markdown wiki --project grasp-wiki`, `python3 -m grasp --store .grasp/file-back.sqlite --project grasp-wiki write-status --output wiki --journal wiki.grasp/events.jsonl --strict`, and `python3 -m grasp --json --store .grasp/file-back.sqlite --project grasp-wiki export-markdown --output wiki --check | python3 scripts/check_projection_policy.py`.
 3. Run verification:
    - `python3 -m unittest discover -s tests`
    - `python3 scripts/lint_wiki.py`
+   - if file-back / projection behavior changed, `python3 -m grasp --json --store .grasp/file-back.sqlite --project grasp-wiki export-markdown --output wiki --check | python3 scripts/check_projection_policy.py`
    - `git diff --check`
    - If relevant, run one small dogfood command and file back any important observation.
 4. Stage all intentional changes, commit once with a concise message, and push the current branch to `origin`.
