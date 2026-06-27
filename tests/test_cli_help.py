@@ -65,6 +65,7 @@ class CliHelpTests(unittest.TestCase):
         self.assertIn("Mechanics SSoT", help_text)
         self.assertIn("--json is also", help_text)
         self.assertIn("--full-ids", help_text)
+        self.assertIn("--version", help_text)
         self.assertNotIn("--store .grasp/grasp.sqlite", help_text)
         self.assertNotIn("--export", help_text)
         self.assertNotIn("--rebuild-store", help_text)
