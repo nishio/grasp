@@ -37,6 +37,17 @@ from .sqlite_store import (
 
 LOG_ENTRY_HEADING_RE = re.compile(r"^## \[(?P<timestamp>[^\]]+)\]\s+(?P<op>[^|]+?)\s*\|\s*(?P<summary>.*)$")
 LOG_ENTRY_MARKDOWN_PATH_RE = re.compile(r"(?<![\w/.-])(?P<path>[\w.-]+(?:/[\w.-]+)*\.md)(?![\w/.-])")
+STORE_WRITE_COMMANDS = {
+    "acquire",
+    "append-log",
+    "append-section",
+    "import-log-records",
+    "rename",
+    "rename-page",
+    "revert-event",
+    "sync",
+    "write-page",
+}
 
 
 class GraspHelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
@@ -3044,7 +3055,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         parser.error(store_missing_error(args.store))
 
-    store: SQLiteStore | None = SQLiteStore(args.store, project=args.project)
+    store_for_write = args.command in STORE_WRITE_COMMANDS
+    store: SQLiteStore | None = SQLiteStore(args.store, project=args.project, for_write=store_for_write)
     try:
         if args.command != "stats" and not store.schema_ok():
             schema_version = store.schema_version()
@@ -3055,7 +3067,7 @@ def main(argv: list[str] | None = None) -> int:
                     f"store schema is {schema_version}, current is {SCHEMA_VERSION}; "
                     "run `grasp import --cosense <json>` or `grasp import --markdown <folder>` to rebuild"
                 )
-            store = SQLiteStore(args.store, project=args.project)
+            store = SQLiteStore(args.store, project=args.project, for_write=store_for_write)
         try:
             result = run_command(store, args)
         except ValueError as error:

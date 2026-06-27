@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, deque
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape as escape_html
@@ -52,6 +53,9 @@ from .markdown import (
 
 SCHEMA_VERSION = "7"
 IMPORT_CACHE_MANIFEST_VERSION = 1
+CANONICAL_STORE_ENV = "GRASP_CANONICAL_STORE"
+SQLITE_BUSY_TIMEOUT_MS = 30_000
+SQLITE_CONNECT_TIMEOUT_SECONDS = SQLITE_BUSY_TIMEOUT_MS / 1000
 PYTHON_LOOSE_SEARCH_MAX_LINES = 50_000
 STRUCTURAL_SPREAD_HANDLE_NORMS = frozenset(
     {
@@ -181,6 +185,70 @@ CREATE INDEX idx_unresolved_target_examples_project_norm_rank ON unresolved_targ
 """
 
 
+def canonical_store_path(root: str | Path | None = None) -> Path:
+    env_path = os.environ.get(CANONICAL_STORE_ENV)
+    if env_path:
+        return Path(env_path)
+    if root is not None:
+        return Path(root) / ".grasp" / "authority.sqlite"
+    env_home = os.environ.get("GRASP_HOME")
+    home = Path(env_home) if env_home else Path.home() / ".grasp"
+    return home / "authority.sqlite"
+
+
+def connect_sqlite_store(
+    store_path: str | Path,
+    *,
+    row_factory: bool = False,
+    for_write: bool = False,
+    timeout: float | None = None,
+    busy_timeout_ms: int = SQLITE_BUSY_TIMEOUT_MS,
+) -> sqlite3.Connection:
+    path = Path(store_path)
+    if for_write:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(
+        path,
+        timeout=SQLITE_CONNECT_TIMEOUT_SECONDS if timeout is None else timeout,
+    )
+    if row_factory:
+        connection.row_factory = sqlite3.Row
+    configure_sqlite_connection(
+        connection,
+        for_write=for_write,
+        busy_timeout_ms=busy_timeout_ms,
+    )
+    return connection
+
+
+def configure_sqlite_connection(
+    connection: sqlite3.Connection,
+    *,
+    for_write: bool = False,
+    busy_timeout_ms: int = SQLITE_BUSY_TIMEOUT_MS,
+) -> None:
+    connection.execute("PRAGMA foreign_keys = ON")
+    busy_timeout_ms = max(0, int(busy_timeout_ms))
+    connection.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
+    if for_write:
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA synchronous = NORMAL")
+
+
+@contextmanager
+def sqlite_write_transaction(connection: sqlite3.Connection):
+    if connection.in_transaction:
+        raise RuntimeError("SQLite write transaction already active")
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        yield connection
+    except BaseException:
+        connection.rollback()
+        raise
+    else:
+        connection.commit()
+
+
 def import_export_to_sqlite(
     export_path: str | Path,
     store_path: str | Path,
@@ -195,10 +263,8 @@ def import_export_to_sqlite(
         raise ValueError(f"could not determine project name for export: {export_path}")
 
     ensure_store_schema(store_path)
-    connection = sqlite3.connect(store_path)
+    connection = connect_sqlite_store(store_path, for_write=True)
     try:
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA synchronous = NORMAL")
         with connection:
             _delete_project(connection, project)
             connection.execute(
@@ -320,11 +386,9 @@ def import_markdown_folder_to_sqlite(
         raise ValueError(f"could not determine project name for Markdown folder: {folder_path}")
 
     ensure_store_schema(store_path)
-    connection = sqlite3.connect(store_path)
+    connection = connect_sqlite_store(store_path, for_write=True)
     import_summary: dict[str, Any] = {}
     try:
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA synchronous = NORMAL")
         with connection:
             now = int(time.time())
             metadata = _connection_metadata(connection)
@@ -1245,12 +1309,17 @@ def _refresh_project_counts_sql(connection: sqlite3.Connection, project: str) ->
 
 
 class SQLiteStore:
-    def __init__(self, path: str | Path, project: str | None = None):
+    def __init__(self, path: str | Path, project: str | None = None, *, for_write: bool = False):
         self.path = Path(path)
         self.project = normalize_project_name(project) if project is not None else None
-        self.connection = sqlite3.connect(self.path)
-        self.connection.row_factory = sqlite3.Row
-        self.connection.execute("PRAGMA foreign_keys = ON")
+        self.connection = connect_sqlite_store(
+            self.path,
+            row_factory=True,
+            for_write=for_write,
+        )
+
+    def write_transaction(self):
+        return sqlite_write_transaction(self.connection)
 
     def close(self) -> None:
         self.connection.close()

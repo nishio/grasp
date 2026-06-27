@@ -27,6 +27,21 @@ It supersedes [[llm-wiki-infra-fast-path-plan]] as an implementation plan. The o
 - **Write operations are one SQLite transaction**. A write command opens the canonical store, takes the write transaction (`BEGIN IMMEDIATE` or equivalent), appends event rows, updates materialized state, and commits once.
 - **Recovery is grasp-native**. `history`, `write-diff`, `revert-event`, and export/replay checks replace the old escape hatch of manually editing `events.jsonl` / `wiki/` and using git checkout.
 
+## Phase 0 Authority Contract (2026-06-27)
+
+- Canonical authoring store for a grasp-backed repository is repo-local `.grasp/authority.sqlite` by default, overridable with `$GRASP_CANONICAL_STORE`. The existing `$GRASP_STORE` / `~/.grasp/grasp.sqlite` default remains the general read/import cache path and is not automatically the wiki authoring SSoT.
+- The canonical SQLite file is durable local state, but is **not git-tracked** in the current plan. It remains under `.grasp/` with other local stores. Git-tracking SQLite is deferred until there is evidence that binary review/merge cost is acceptable.
+- `wiki/` remains a git-tracked Markdown projection for review, backup, publishing, and fresh-checkout recovery. It is still an output that must match the store, not the normal edit input after cutover.
+- `wiki.grasp/events.jsonl` is legacy audit/migration input for the `1.7.x` fast path. New authority work must not deepen JSONL as the long-term source of truth.
+- Fresh checkout recovery before Phase 2/3 is: use git-tracked `wiki/` to seed current page state, then use legacy JSONL only for audit/history where needed. After events table migration lands, recovery should import/migrate legacy JSONL into SQLite events and export Markdown from SQLite.
+- Commits during the transition should include generated Markdown projection and migration/audit text artifacts, not `.grasp/authority.sqlite`.
+
+## Phase 1 Substrate Status
+
+`1.7.39` adds the first substrate slice: `canonical_store_path()`, write-oriented SQLite connection setup with WAL + busy timeout, and `sqlite_write_transaction()` using `BEGIN IMMEDIATE`. Tests cover WAL/busy_timeout configuration, commit/rollback, and deterministic lock contention between two writers.
+
+This does **not** yet make existing write commands atomic at the new authority boundary. `write-page`, `rename-page`, `append-*`, `sync`, and `acquire` can open write-configured connections, but their state change + event append + projection export migration is Phase 3 work after the events table exists.
+
 ## Why This Replaces The Fast Path
 
 The old fast path proved that the write surface can exist: `write-page`, `rename-page`, replay, status, diff, and revert all landed. It did not prove that the authority model is safe.
@@ -56,15 +71,14 @@ Therefore, adding more guards to `events.jsonl` is only a temporary mitigation. 
 
 ## Immediate Next Slice
 
-Do not start with file-back integration. Start with the authority substrate.
+Do not start with file-back integration. Continue from the authority substrate into events.
 
-1. Write Phase 0 authority contract.
-2. Add the SQLite transaction helper with WAL / busy timeout / `BEGIN IMMEDIATE`.
-3. Add the `events` table and migration/test fixtures for existing event payloads.
-4. Port one low-risk command (`write-page` on a temp project) to state + event in one transaction.
-5. Add a concurrency regression test that would have failed under the old path.
+1. Add the `events` table with monotonic sequence, event id/type/payload, created_at, actor/session metadata, and JSONL migration/test fixtures.
+2. Port one low-risk command (`write-page` on a temp project) to state + event in one SQLite transaction.
+3. Add a concurrency regression test at command level that would have failed under the old path.
+4. Only then move `append-log`, `rename-page`, and file-back workflow.
 
-Only after this slice should `append-log`, `rename-page`, and file-back workflow be moved.
+Completed in `1.7.39`: Phase 0 authority contract and Phase 1 connection/transaction helper. Not completed: events table, command migration, file-back cutover.
 
 ## Carry Forward From The Old Plan
 
@@ -90,7 +104,6 @@ Only after this slice should `append-log`, `rename-page`, and file-back workflow
 
 ## Open Questions
 
-- Canonical store persistence: repo-tracked SQLite, repo-local untracked durable store plus generated Markdown backup, or a text dump/export companion.
 - Exact migration policy for existing `wiki.grasp/events.jsonl`: one-time import, legacy audit read path, or discard after projection verification.
 - What actor/session metadata is enough to attribute writes across multiple agents.
-- Whether generated Markdown remains git-tracked as backup/review artifact or becomes publish-only output.
+- Whether a future portable text dump/export companion is needed so `.grasp/authority.sqlite` can stay untracked without making fresh-checkout recovery depend only on generated Markdown.
