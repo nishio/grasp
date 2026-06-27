@@ -91,6 +91,14 @@ def default_project() -> str | None:
     return os.environ.get("GRASP_PROJECT")
 
 
+def default_actor() -> str:
+    return os.environ.get("GRASP_ACTOR", "")
+
+
+def default_session_id() -> str:
+    return os.environ.get("GRASP_SESSION_ID", "")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="grasp",
@@ -138,6 +146,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     parser.add_argument("--full-ids", action="store_true", help="In text output, show full stable line ids instead of local aliases.")
+    parser.add_argument("--actor", default=default_actor(), help="Actor metadata for SQLite events written by write/revert/import-log/adopt commands. Defaults to $GRASP_ACTOR.")
+    parser.add_argument("--session-id", default=default_session_id(), help="Session/work-unit metadata for SQLite events written by write/revert/import-log/adopt commands. Defaults to $GRASP_SESSION_ID.")
 
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="command")
 
@@ -1167,20 +1177,22 @@ def build_parser() -> argparse.ArgumentParser:
             "anchor is blocked by later active events on the same page. Use --scope event-window with --before/--after "
             "when the intended multi-page unit is a small contiguous SQLite event_sequence window and no semantic "
             "boundary is available. Use --scope time-burst with --max-gap-seconds when the intended unit is a "
-            "small burst of adjacent writes close in time and no log boundary exists. The result is intended to feed "
+            "small burst of adjacent writes close in time and no log boundary exists. Use --scope session when write "
+            "events carry a non-empty --session-id / GRASP_SESSION_ID work-unit marker. The result is intended to feed "
             "revert-events; it does not mutate store, journal, or projection files."
         ),
         returns=(
             "project, scope, anchor_event_id, complete, previous_log_event|null, closing_log_event|null, "
             "candidate_event_ids[], dependent_event_ids[]?, window_before?, window_after?, max_gap_seconds?, "
-            "boundary_events[]?, revert_order_event_ids[], candidate_events[], excluded_events[], revertible, "
-            "reverted_events[], reason?, suggested_revert_events_args[]?"
+            "session_id?, session_actor?, boundary_events[]?, revert_order_event_ids[], candidate_events[], "
+            "excluded_events[], revertible, reverted_events[], reason?, suggested_revert_events_args[]?"
         ),
         examples=[
             "grasp --project grasp-wiki revert-plan <event-id> --scope log-batch",
             "grasp --project grasp-wiki revert-plan <event-id> --scope same-page-dependents",
             "grasp --project grasp-wiki revert-plan <event-id> --scope event-window --after 2",
             "grasp --project grasp-wiki revert-plan <event-id> --scope time-burst --max-gap-seconds 120",
+            "grasp --project grasp-wiki revert-plan <event-id> --scope session",
             "grasp --project grasp-wiki --json revert-plan <event-id> --scope log-batch --output wiki",
         ],
         notes=[
@@ -1189,11 +1201,12 @@ def build_parser() -> argparse.ArgumentParser:
             "same-page-dependents mirrors revert-event --include-dependents planning without mutating.",
             "event-window is explicit sequence planning: pass --before and/or --after to bound the event_sequence window.",
             "time-burst is explicit temporal planning: pass --max-gap-seconds to bound adjacent event gaps; it does not cross log_append boundaries.",
+            "session is explicit metadata planning: it requires a non-empty session_id on the anchor event.",
             "Use the returned candidate_event_ids with revert-events, then run revert-events --dry-run before mutating.",
         ],
     )
     revert_plan_parser.add_argument("event_id", help="Anchor SQLite event id inside the work unit to plan.")
-    revert_plan_parser.add_argument("--scope", choices=["log-batch", "same-page-dependents", "event-window", "time-burst"], default="log-batch", help="Planning scope to infer around the anchor event.")
+    revert_plan_parser.add_argument("--scope", choices=["log-batch", "same-page-dependents", "event-window", "time-burst", "session"], default="log-batch", help="Planning scope to infer around the anchor event.")
     revert_plan_parser.add_argument("--before", type=int, default=0, help="For --scope event-window, include this many SQLite events before the anchor.")
     revert_plan_parser.add_argument("--after", type=int, default=0, help="For --scope event-window, include this many SQLite events after the anchor.")
     revert_plan_parser.add_argument("--max-gap-seconds", type=float, default=None, help="For --scope time-burst, include adjacent SQLite events while created_at gaps are at most this many seconds.")
@@ -1405,6 +1418,8 @@ def adopt_markdown(
     journal_path: Path | None,
     replace_journal: bool,
     exclude_dirs: tuple[str, ...],
+    actor: str = "",
+    session_id: str = "",
 ) -> dict[str, Any]:
     folder = Path(folder)
     journal = journal_path or default_journal_path(folder)
@@ -1433,7 +1448,12 @@ def adopt_markdown(
     if events:
         event_store = SQLiteStore(store_path, project=adopted_project, for_write=True)
         try:
-            sqlite_event_summary = event_store.import_journal_events(events, project=adopted_project)
+            sqlite_event_summary = event_store.import_journal_events(
+                events,
+                project=adopted_project,
+                actor=actor,
+                session_id=session_id,
+            )
         finally:
             event_store.close()
     if replace_journal:
@@ -1855,7 +1875,7 @@ def run_import_log_records(store: SQLiteStore, args: argparse.Namespace) -> dict
     if events_to_import:
         with store.write_transaction():
             for event in events_to_import:
-                if insert_store_event(store.connection, event, if_exists="skip"):
+                if insert_store_event(store.connection, event, if_exists="skip", **event_metadata(args)):
                     sqlite_events_inserted += 1
         for event in events_to_import:
             append_journal_event(journal, event)
@@ -2322,6 +2342,13 @@ def run_export_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict[st
     )
 
 
+def event_metadata(args: argparse.Namespace) -> dict[str, str]:
+    return {
+        "actor": str(getattr(args, "actor", "") or "").strip(),
+        "session_id": str(getattr(args, "session_id", "") or "").strip(),
+    }
+
+
 def run_append_section(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = optional_journal_path_for_output(args)
     section_lines = ["", f"## {args.heading}", *args.line]
@@ -2333,12 +2360,14 @@ def run_append_section(store: SQLiteStore, args: argparse.Namespace) -> dict[str
             "heading": args.heading,
             "lines": args.line,
         },
+        **event_metadata(args),
     )
     projection = append_event_and_export_projection(
         store,
         journal,
         event,
         lambda: store.export_markdown(args.output, check=False),
+        **event_metadata(args),
     )
     result = dict(append_result)
     result.update(
@@ -2368,12 +2397,14 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
             "summary": args.summary,
             "lines": args.line,
         },
+        **event_metadata(args),
     )
     projection = append_event_and_export_projection(
         store,
         journal,
         event,
         lambda: store.export_markdown(args.output, check=False),
+        **event_metadata(args),
     )
     result = dict(append_result)
     result.update(
@@ -2400,12 +2431,14 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
         create=args.create,
         source_path=args.source_path,
         message=args.message,
+        **event_metadata(args),
     )
     projection = append_event_and_export_projection(
         store,
         journal,
         event,
         lambda: store.export_markdown(args.output, check=False),
+        **event_metadata(args),
     )
     result = dict(update_result)
     result.update(
@@ -2440,6 +2473,7 @@ def run_rename_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, A
         new_source_path=args.new_path,
         update_heading=not args.no_heading_update,
         message=args.message,
+        **event_metadata(args),
     )
     def project_rename() -> dict[str, Any]:
         removed_files = remove_previous_projection_file(
@@ -2452,7 +2486,7 @@ def run_rename_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, A
         projection["removed_count"] = len(removed_files)
         return projection
 
-    projection = append_event_and_export_projection(store, journal, event, project_rename)
+    projection = append_event_and_export_projection(store, journal, event, project_rename, **event_metadata(args))
     result = dict(rename_result)
     result.update(
         {
@@ -2495,13 +2529,23 @@ def append_event_and_export_projection(
     journal: Path | None,
     event: dict[str, Any],
     export_projection: Any,
+    *,
+    actor: str = "",
+    session_id: str = "",
 ) -> dict[str, Any]:
     if journal is not None:
         append_journal_event(journal, event)
     try:
         return export_projection()
     except Exception as error:
-        rollback = rollback_event_after_projection_failure(store, journal, event, error)
+        rollback = rollback_event_after_projection_failure(
+            store,
+            journal,
+            event,
+            error,
+            actor=actor,
+            session_id=session_id,
+        )
         raise ProjectionExportRollbackError(
             "projection export failed after event write; "
             f"store was reverted with event {rollback['rollback_event_id']}: {error}",
@@ -2514,6 +2558,9 @@ def rollback_event_after_projection_failure(
     journal: Path | None,
     target: dict[str, Any],
     error: Exception,
+    *,
+    actor: str = "",
+    session_id: str = "",
 ) -> dict[str, Any]:
     reason = f"projection export failed: {type(error).__name__}: {error}"
     try:
@@ -2524,7 +2571,7 @@ def rollback_event_after_projection_failure(
                 project=rollback["reverted"]["project"],
                 payload=rollback["payload"],
             )
-            insert_store_event(store.connection, event)
+            insert_store_event(store.connection, event, actor=actor, session_id=session_id)
         if journal is not None:
             append_journal_event(journal, event)
         return {
@@ -2913,7 +2960,7 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
                 project=reverted["project"],
                 payload=rollback["payload"],
             )
-            insert_store_event(store.connection, event)
+            insert_store_event(store.connection, event, **event_metadata(args))
     else:
         rollback = revert_journal_event_in_store(store, target, reason=args.reason)
         reverted = rollback["reverted"]
@@ -2985,7 +3032,7 @@ def run_revert_events(store: SQLiteStore, args: argparse.Namespace) -> dict[str,
                 project=reverted["project"],
                 payload=rollback["payload"],
             )
-            insert_store_event(store.connection, event)
+            insert_store_event(store.connection, event, **event_metadata(args))
             records.append({"target": target, "rollback": rollback, "event": event})
     if journal is not None:
         for record in records:
@@ -3189,6 +3236,8 @@ def run_revert_plan(store: SQLiteStore, args: argparse.Namespace) -> dict[str, A
         return event_window_revert_plan(store, args, selected_project, sqlite_events, anchor)
     if args.scope == "time-burst":
         return time_burst_revert_plan(store, args, selected_project, sqlite_events, anchor)
+    if args.scope == "session":
+        return session_revert_plan(store, args, selected_project, sqlite_events, anchor)
     raise ValueError(f"unsupported revert-plan scope: {args.scope}")
 
 
@@ -3549,6 +3598,111 @@ def time_burst_revert_plan(
     return result
 
 
+def session_revert_plan(
+    store: SQLiteStore,
+    args: argparse.Namespace,
+    project: str,
+    sqlite_events: list[dict[str, Any]],
+    anchor: dict[str, Any],
+) -> dict[str, Any]:
+    session_id = str(anchor.get("session_id") or "")
+    session_actor = str(anchor.get("actor") or "")
+    reverted_ids = reverted_target_event_ids(sqlite_events)
+    excluded_events: list[dict[str, Any]] = []
+    anchor_exclusion = revert_plan_exclusion_reason(anchor, reverted_ids)
+    if anchor_exclusion:
+        excluded_events.append(revert_plan_event_summary(anchor, reason=anchor_exclusion))
+        return {
+            "project": project,
+            "scope": args.scope,
+            "anchor_event_id": anchor["event_id"],
+            "anchor_event": revert_plan_event_summary(anchor),
+            "complete": bool(session_id),
+            "previous_log_event": None,
+            "closing_log_event": None,
+            "session_id": session_id,
+            "session_actor": session_actor,
+            "session_event_ids": [event["event_id"] for event in sqlite_events if event.get("session_id") == session_id] if session_id else [],
+            "candidate_event_ids": [],
+            "revert_order_event_ids": [],
+            "candidate_events": [],
+            "excluded_events": excluded_events,
+            "revertible": False,
+            "reverted_events": [],
+            "reason": f"anchor event is not an active reversible target: {anchor_exclusion}",
+        }
+    if not session_id:
+        return {
+            "project": project,
+            "scope": args.scope,
+            "anchor_event_id": anchor["event_id"],
+            "anchor_event": revert_plan_event_summary(anchor),
+            "complete": False,
+            "previous_log_event": None,
+            "closing_log_event": None,
+            "session_id": "",
+            "session_actor": session_actor,
+            "session_event_ids": [],
+            "candidate_event_ids": [],
+            "revert_order_event_ids": [],
+            "candidate_events": [],
+            "excluded_events": [],
+            "revertible": False,
+            "reverted_events": [],
+            "reason": "anchor event has no session_id; write with --session-id or GRASP_SESSION_ID to enable session planning",
+        }
+
+    session_events = [
+        event
+        for event in sorted(sqlite_events, key=event_sequence)
+        if event.get("session_id") == session_id
+    ]
+    candidates: list[dict[str, Any]] = []
+    for event in session_events:
+        exclusion_reason = revert_plan_exclusion_reason(event, reverted_ids)
+        if exclusion_reason:
+            excluded_events.append(revert_plan_event_summary(event, reason=exclusion_reason))
+            continue
+        candidates.append(event)
+
+    targets = sorted(candidates, key=event_sequence, reverse=True)
+    check = check_revert_plan_revertible(store, targets)
+    candidate_event_ids = [event["event_id"] for event in candidates]
+    result: dict[str, Any] = {
+        "project": project,
+        "scope": args.scope,
+        "anchor_event_id": anchor["event_id"],
+        "anchor_event": revert_plan_event_summary(anchor),
+        "complete": True,
+        "previous_log_event": None,
+        "closing_log_event": None,
+        "session_id": session_id,
+        "session_actor": session_actor,
+        "session_event_ids": [event["event_id"] for event in session_events],
+        "session_start_event_sequence": event_sequence(session_events[0]) if session_events else None,
+        "session_end_event_sequence": event_sequence(session_events[-1]) if session_events else None,
+        "candidate_event_ids": candidate_event_ids,
+        "revert_order_event_ids": [event["event_id"] for event in targets],
+        "candidate_events": [revert_plan_event_summary(event) for event in candidates],
+        "excluded_events": excluded_events,
+        "revertible": check["revertible"],
+        "reverted_events": check["reverted_events"],
+    }
+    if not candidate_event_ids:
+        result["revertible"] = False
+        result["reason"] = "session contains no active reversible events"
+    if not check["revertible"]:
+        result["reason"] = check["reason"]
+    if args.output is not None and candidate_event_ids:
+        result["suggested_revert_events_args"] = [
+            "revert-events",
+            *candidate_event_ids,
+            "--output",
+            str(args.output),
+        ]
+    return result
+
+
 def event_sequence(event: dict[str, Any]) -> int:
     return int(event.get("event_sequence") or 0)
 
@@ -3634,6 +3788,10 @@ def revert_plan_event_summary(event: dict[str, Any] | None, *, reason: str | Non
     }
     if payload.get("summary"):
         summary["summary"] = payload.get("summary")
+    if event.get("actor"):
+        summary["actor"] = event.get("actor")
+    if event.get("session_id"):
+        summary["session_id"] = event.get("session_id")
     if reason:
         summary["reason"] = reason
     return summary
@@ -3719,7 +3877,7 @@ def run_revert_event_with_dependents(
                 project=reverted["project"],
                 payload=rollback["payload"],
             )
-            insert_store_event(store.connection, event)
+            insert_store_event(store.connection, event, **event_metadata(args))
             records.append({"target": current_target, "rollback": rollback, "event": event})
     if journal is not None:
         for record in records:
@@ -4511,6 +4669,7 @@ def main(argv: list[str] | None = None) -> int:
                 journal_path=args.journal,
                 replace_journal=args.replace_journal,
                 exclude_dirs=tuple(args.markdown_exclude_dir),
+                **event_metadata(args),
             )
         except MarkdownCollisionError as error:
             if args.json:
@@ -5708,6 +5867,10 @@ def format_revert_plan(result: dict[str, Any]) -> str:
         text += f"window: before={result.get('window_before', 0)} after={result.get('window_after', 0)}\n"
     if "max_gap_seconds" in result:
         text += f"time_burst_max_gap_seconds: {result.get('max_gap_seconds')}\n"
+    if result.get("session_id"):
+        text += f"session_id: {result.get('session_id')}\n"
+        if result.get("session_actor"):
+            text += f"session_actor: {result.get('session_actor')}\n"
     order = result.get("revert_order_event_ids") or []
     if order:
         text += "revert_order:\n"
