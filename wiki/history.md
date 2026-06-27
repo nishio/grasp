@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.47`（更新: 2026-06-28 04:49、store: schema `8`、compat: schema `8` compatible）: root CLI に `grasp --version` を追加し、`grasp.__version__` を表示できるようにした。`tests/test_version_metadata.py` は package metadata と `grasp.__version__` の一致に加え、CLI version output が package version と一致することも検査する。schema は不変
 - `1.8.46`（更新: 2026-06-28 04:41、store: schema `8`、compat: schema `8` compatible）: package version metadata drift を防ぐため、`grasp.__version__` と `pyproject.toml` の `[project] version` を `1.8.46` に揃え、`tests/test_version_metadata.py` が両者の一致を検査するようにした。schema は不変
 - `1.8.45`（更新: 2026-06-28 04:25、store: schema `8`、compat: schema `8` compatible）: repo-local `scripts/check_file_back_preflight.py` / `scripts/check_file_back_write_start.py` / `scripts/check_file_back_postwrite.py` が default store/output pair を検査するようにした。repo default は `.grasp/file-back.sqlite` + `wiki` の pair で、temp dogfood は temp store + temp output を要求する。片方だけ temp path にした混在は、temp output を real store に import/write して SQLite events 由来 semantic log projection を stale にするため failure にする。schema は不変
 - `1.8.44`（更新: 2026-06-28 03:56、store: schema `8`、compat: schema `8` compatible）: repo-local `scripts/check_file_back_write_start.py` を追加し、preflight 後・最初の write command 直前に preflight stamp、git dirty paths、`write-status --no-journal --strict`、SQLite authority projection、SQLite events 由来の semantic log projection を import なしで検査するようにした。preflight 再実行は Markdown を store に取り込むため、preflight 後の projection 変化を隠しうる。この guard は stale store export/clobber gap を write 開始直前に止めるための通常 runbook gate。schema は不変
@@ -186,6 +187,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.46`
+- Current public compatibility version: `1.8.47`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.46`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.47`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

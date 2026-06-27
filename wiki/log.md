@@ -1380,3 +1380,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: `grasp.__version__` と `pyproject.toml` の `[project] version` を `1.8.46` に揃え、`tests/test_version_metadata.py` が一致を検査するようにした。
 - finding: `1.8.45` 時点で package metadata は進んでいたが `grasp.__version__` は `1.8.42` のままで、runtime から見る version と release ledger がずれていた。
 - docs: [[history]] の current state と [[grasp-v1-implemented]] の current facts を更新した。public compatibility version は `1.8.46`、schema は v8 のまま。
+
+## [2026-06-28 04:49] implementation+file back | `grasp --version` を追加
+- code: root CLI に `--version` を追加し、`grasp.__version__` を `grasp 1.8.47` の形式で表示できるようにした。
+- tests: `tests/test_version_metadata.py` は package metadata と `grasp.__version__` の一致に加え、`python3 -m grasp --version` の出力も package version と一致することを検査する。
+- docs: [[history]] と [[grasp-v1-implemented]] を更新した。public compatibility version は `1.8.47`、schema は v8 のまま。

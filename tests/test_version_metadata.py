@@ -1,4 +1,6 @@
 import re
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -14,3 +16,12 @@ class VersionMetadataTests(unittest.TestCase):
         match = re.search(r'(?m)^version = "([^"]+)"$', pyproject)
         self.assertIsNotNone(match, "pyproject.toml must declare [project] version")
         self.assertEqual(grasp.__version__, match.group(1))
+
+    def test_cli_version_reports_package_version(self):
+        completed = subprocess.run(
+            [sys.executable, "-m", "grasp", "--version"],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(completed.stdout.strip(), f"grasp {grasp.__version__}")
