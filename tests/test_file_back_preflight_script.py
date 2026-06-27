@@ -427,7 +427,9 @@ class FileBackPreflightScriptTests(unittest.TestCase):
 
         try:
             preflight.run_command = fake_run_command
-            preflight.project_events = lambda store, project: []
+            preflight.project_events = lambda store, project: [
+                {"event_sequence": 1, "session_id": "bootstrap-file-back-store"}
+            ]
             errors = preflight.run_grasp_preflight(
                 Path("."),
                 store=".grasp/file-back.sqlite",
@@ -445,6 +447,135 @@ class FileBackPreflightScriptTests(unittest.TestCase):
         self.assertIsNotNone(seen_write_status_args)
         self.assertIn("--no-journal", seen_write_status_args)
         self.assertNotIn("--journal", seen_write_status_args)
+
+    def test_run_grasp_preflight_bootstraps_empty_no_journal_store(self):
+        original_run_command = preflight.run_command
+        original_project_events = preflight.project_events
+        seen_adopt_args = None
+
+        def fake_run_command(args, *, cwd):
+            nonlocal seen_adopt_args
+            if "adopt-markdown" in args:
+                seen_adopt_args = args
+                return subprocess.CompletedProcess(
+                    args,
+                    0,
+                    json.dumps({"project": "grasp-wiki", "sqlite_events_inserted": 3}),
+                    "",
+                )
+            if "import" in args:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if "write-status" in args:
+                return subprocess.CompletedProcess(
+                    args,
+                    0,
+                    json.dumps(
+                        {
+                            "strict_ok": True,
+                            "projection": {"ok": True},
+                            "journal_exists": False,
+                            "event_streams_match": False,
+                            "journal_log_stale": False,
+                        }
+                    ),
+                    "",
+                )
+            if "export-markdown" in args:
+                return subprocess.CompletedProcess(
+                    args,
+                    0,
+                    json.dumps(
+                        {
+                            "ok": True,
+                            "projection_policy": {
+                                "authority": "sqlite",
+                                "base": "stored_markdown_lines",
+                                "output_role": "git_tracked_projection",
+                                "write_mode": "check",
+                                "generated_overlays": [],
+                            },
+                        }
+                    ),
+                    "",
+                )
+            self.fail(f"unexpected command: {args}")
+
+        try:
+            preflight.run_command = fake_run_command
+            calls = {"count": 0}
+
+            def fake_project_events(store, project):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    return []
+                return [{"event_sequence": 1, "session_id": "bootstrap-file-back-store"}]
+
+            preflight.project_events = fake_project_events
+            errors = preflight.run_grasp_preflight(
+                Path("."),
+                store=".grasp/file-back.sqlite",
+                project="grasp-wiki",
+                journal=None,
+                output="wiki",
+                require_journal=False,
+                expected_session_id="file-back-session",
+            )
+        finally:
+            preflight.run_command = original_run_command
+            preflight.project_events = original_project_events
+
+        self.assertEqual(errors, [])
+        self.assertIsNotNone(seen_adopt_args)
+        self.assertIn("adopt-markdown", seen_adopt_args)
+        self.assertIn("--journal", seen_adopt_args)
+        self.assertIn(preflight.DEFAULT_FILE_BACK_BOOTSTRAP_JOURNAL, seen_adopt_args)
+        self.assertIn("--replace-journal", seen_adopt_args)
+        self.assertIn(preflight.DEFAULT_FILE_BACK_BOOTSTRAP_SESSION_ID, seen_adopt_args)
+
+    def test_run_grasp_preflight_does_not_bootstrap_journal_mode(self):
+        original_run_command = preflight.run_command
+        original_project_events = preflight.project_events
+
+        def fake_run_command(args, *, cwd):
+            if "adopt-markdown" in args:
+                self.fail("journal mode should not bootstrap the no-journal file-back store")
+            if "import" in args:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if "write-status" in args:
+                return subprocess.CompletedProcess(
+                    args,
+                    1,
+                    json.dumps(
+                        {
+                            "strict_ok": False,
+                            "projection": {"ok": True},
+                            "journal_exists": False,
+                            "event_streams_match": False,
+                            "journal_log_stale": False,
+                        }
+                    ),
+                    "",
+                )
+            self.fail(f"unexpected command: {args}")
+
+        try:
+            preflight.run_command = fake_run_command
+            preflight.project_events = lambda store, project: []
+            errors = preflight.run_grasp_preflight(
+                Path("."),
+                store=".grasp/file-back.sqlite",
+                project="grasp-wiki",
+                journal="wiki.grasp/events.jsonl",
+                output="wiki",
+                require_journal=True,
+                expected_session_id="file-back-session",
+            )
+        finally:
+            preflight.run_command = original_run_command
+            preflight.project_events = original_project_events
+
+        self.assertTrue(errors)
+        self.assertIn("journal_exists", "\n".join(errors))
 
     def test_run_grasp_preflight_rejects_reused_session_id_before_projection_check(self):
         original_run_command = preflight.run_command

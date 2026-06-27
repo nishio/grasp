@@ -142,6 +142,8 @@ Dogfood in the same `1.8.42` slice confirmed the guard fails while the worktree 
 
 `1.8.45` adds the store/output pair guard exposed by dogfood of `1.8.44`. Using the repo file-back store `.grasp/file-back.sqlite` with a temporary output can import a temporary projection into the real store and leave temporary log events behind, making the SQLite events-derived semantic log projection stale. `scripts/check_file_back_preflight.py`, `scripts/check_file_back_write_start.py`, and `scripts/check_file_back_postwrite.py` now require either the repo default pair (`.grasp/file-back.sqlite` + `wiki`) or a temporary store paired with a temporary output.
 
+`1.8.48` closes the fresh isolated worktree bootstrap gap in that preflight boundary. When no selected-project SQLite events exist in no-journal mode, `scripts/check_file_back_preflight.py` now runs `adopt-markdown` into the repo file-back store with a gitignored `.grasp/file-back-adopt.jsonl` audit journal before continuing to the normal import, `write-status --no-journal --strict`, and projection checks. This keeps a new `.grasp/file-back.sqlite` from failing on `semantic_log_error='event stream does not contain a page_create or page_update seed for log page'` while still avoiding tracked JSONL.
+
 This does **not** yet make every authority boundary final. `sync`, `acquire`, generated Markdown backup/review policy, broader native event-derived semantic page projection, and semantic multi-page work-unit inference beyond log-batch, subject-log, log-page-subjects, content-subjects, version-bump, same-page dependency, explicit event-window, time-burst, or explicit session metadata boundaries still need migration work.
 
 ## Why This Replaces The Fast Path

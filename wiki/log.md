@@ -1385,3 +1385,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: root CLI に `--version` を追加し、`grasp.__version__` を `grasp 1.8.47` の形式で表示できるようにした。
 - tests: `tests/test_version_metadata.py` は package metadata と `grasp.__version__` の一致に加え、`python3 -m grasp --version` の出力も package version と一致することを検査する。
 - docs: [[history]] と [[grasp-v1-implemented]] を更新した。public compatibility version は `1.8.47`、schema は v8 のまま。
+
+## [2026-06-28 05:03] implementation+file back | fresh file-back store を preflight で bootstrap
+- code: `scripts/check_file_back_preflight.py` が no-journal mode で selected-project SQLite events の無い file-back store を検出した場合、`adopt-markdown` で gitignored `.grasp/file-back-adopt.jsonl` に bootstrap audit を作ってから通常の `import --markdown` / `write-status --no-journal --strict` / projection check に進むようにした。
+- tests/docs: preflight unit tests、runbook checker、AGENTS/CLAUDE、`/next`、`/ship-next`、repo skill、README、history、current facts、write plan を fresh store bootstrap guard に更新した。
+- dogfood: fresh isolated worktree の `.grasp/file-back.sqlite` が未初期化でも、`GRASP_SESSION_ID=file-back-20260627T200500Z-bootstrap-repro python3 scripts/check_file_back_preflight.py` が通った。public compatibility version は `1.8.48`、schema は v8 のまま。
