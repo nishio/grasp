@@ -23,11 +23,11 @@ Follow these steps:
    - design rationale or changed decision -> `wiki/decisions/`
    - chronological record -> `wiki/log.md` using `## [YYYY-MM-DD HH:MM] <op> | <desc>`
    - keep file back factual and scoped; do not over-spec future work.
-   - for grasp-write-backed file back, first run `git fetch origin main` and `python3 scripts/check_file_back_preflight.py`.
+   - for grasp-write-backed file back, first run `git fetch origin main` and `python3 scripts/check_file_back_preflight.py --no-journal`.
 3. Run verification:
    - `python3 -m unittest discover -s tests`
    - `python3 scripts/lint_wiki.py`
-   - if file-back / projection behavior changed, `python3 scripts/check_file_back_postwrite.py`
+   - if file-back / projection behavior changed, `python3 scripts/check_file_back_postwrite.py --no-journal`
    - `git diff --check`
    - If relevant, run one small dogfood command and file back any important observation.
 4. Stage all intentional changes, commit once with a concise message, and push the current branch to `origin`.

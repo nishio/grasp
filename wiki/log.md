@@ -1185,3 +1185,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - code: `scripts/check_file_back_preflight.py` / `scripts/check_file_back_postwrite.py` に `--no-journal` mode を追加。preflight は `write-status --no-journal --strict` を使い、dirty path default を `wiki` のみにする。postwrite は no-journal status を使いつつ projection policy / wiki lint / `git diff --check` を継続する。既定の compatibility journal あり mode は維持。
 - tests: preflight / postwrite script tests に no-journal guard skip と subprocess argument selection を追加。実 repo に対して journal あり/なし両 mode の preflight/postwrite smoke も通した。
 - file back: [[history]] / [[grasp-v1-implemented]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新。public compatibility version は `1.8.13`、schema は v8 のまま。次は guarded dogfood streak と repo file-back の `--no-journal` cutover 判断。
+
+## [2026-06-27 18:49] implementation+file back | repo file-back runbooks を --no-journal default に切替
+- docs: AGENTS/CLAUDE、Codex `/next`、Claude `/ship-next`、repo `grasp` skill、README を通常 `--no-journal` path に更新。`wiki.grasp/events.jsonl` は明示 audit 用 artifact として残す。
+- file back: [[history]] / [[grasp-v1-implemented]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新。public compatibility version は `1.8.14`、schema は v8 のまま。
+- dogfood: `scripts/check_file_back_preflight.py --no-journal` から開始し、wiki 更新は `write-page --no-journal` / `append-log --no-journal` で store に反映した。
