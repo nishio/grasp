@@ -1160,3 +1160,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - Added `scripts/check_projection_policy.py` to validate clean `export-markdown --json --check` output and reject non-SQLite projection authority.
 - Updated `/next`, `/ship-next`, AGENTS/CLAUDE, repo `grasp` skill, and local `file-back` skill so file-back / ship loops assert the projection policy before treating Markdown as clean.
 - Targeted test and dogfood pipe confirmed `projection_policy authority=sqlite base=stored_markdown_lines output_role=git_tracked_projection`.
+
+## [2026-06-27 17:51] implementation+file-back | file-back preflight guard
+- Added `scripts/check_file_back_preflight.py` to fail file-back before writes when `origin/main...HEAD` is non-empty, wiki/journal paths are dirty, `write-status --strict` is not clean, or projection policy is not SQLite-authority clean.
+- Updated `/next`, `/ship-next`, AGENTS/CLAUDE, repo `grasp` skill, and local `file-back` skill to use the preflight when available.
+- Dogfood: the preflight passed on the clean wiki/journal state before this grasp write-first file-back; targeted tests cover dirty path, divergence, and write-status guard failures.
