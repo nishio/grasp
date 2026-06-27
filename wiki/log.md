@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-27 11:48] implementation | alias-only projection frontmatter を出し、write-page-create→rename→fresh import の旧名 red 化を修正
+- `markdown_projection_frontmatter_fields` が `id` / `title` の推論可否だけを見ており、有意味な `aliases` だけが durable 化を必要とする case で frontmatter を出していなかった。これにより `write-page --create` で path stem と title が異なる title==H1 page を作り、`rename-page` で H1 を新 title に更新すると、fresh `import --markdown` 後に旧 title alias が失われ `[[旧名]]` が red 化しうる。
+- projection 条件を修正し、title / current file stem から導出できない alias がある場合は `id` / `title` / `aliases` frontmatter を生成するようにした。title と current file stem は fresh import で復元できるため projection 管理 fields から除外する。
+- regression test: `write-page --create` → `rename-page` → fresh `import --markdown` 後も旧 title alias が新 page id / title に解決し、backlink が残ることを確認。public compatibility version は `1.7.38`、schema は v7 のまま。
+
 ## [2026-06-27 11:08] file back | [[sqlite-ssot-write-plan]] を新設し、旧 fast-path 計画を superseded と明示
 - [[llm-wiki-infra-fast-path-plan]] は `1.7.x` alpha / replay harness の履歴として残すが、現行の次実装順ではないと先頭に明記。`events.jsonl` を強化して file-back cutover へ進む前提と、`import --markdown` を通常 reconcile にする前提は使わない。
 - 新規 [[sqlite-ssot-write-plan]] を current implementation plan として追加。SQLite を canonical SSoT、events を SQLite table、Markdown を export-only projection にし、canonical store / WAL+busy_timeout / 1 transaction write / native recovery を先に作ってから file-back cutover する phase に整理。

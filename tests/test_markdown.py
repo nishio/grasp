@@ -131,6 +131,38 @@ class MarkdownParsingTests(unittest.TestCase):
         self.assertEqual(
             markdown_projection_text(
                 "New.md",
+                page_id=path_id,
+                title="Renamed",
+                aliases=["New"],
+                lines=["# Renamed", "body"],
+            ),
+            "# Renamed\nbody\n",
+        )
+        self.assertEqual(
+            markdown_projection_text(
+                "New.md",
+                page_id=path_id,
+                title="New",
+                aliases=["Old"],
+                lines=["# New", "body"],
+            ),
+            "\n".join(
+                [
+                    "---",
+                    f"id: {path_id}",
+                    "title: New",
+                    "aliases:",
+                    "  - Old",
+                    "---",
+                    "# New",
+                    "body",
+                    "",
+                ]
+            ),
+        )
+        self.assertEqual(
+            markdown_projection_text(
+                "New.md",
                 page_id="old-stable-id",
                 title="New",
                 aliases=["Old"],

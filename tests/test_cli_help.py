@@ -3379,6 +3379,149 @@ class CliHelpTests(unittest.TestCase):
         self.assertFalse(new_exists_after_revert)
         self.assertTrue(replay_after_revert["ok"])
 
+    def test_write_page_create_then_rename_preserves_old_alias_after_fresh_import(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nlink [[Draft title]]\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    "Draft title",
+                    "--create",
+                    "--path",
+                    "note.md",
+                    "--line",
+                    "# Draft title",
+                    "--line",
+                    "body",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            rename_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "rename-page",
+                    "Draft title",
+                    "Final title",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            renamed_text = (root / "note.md").read_text(encoding="utf-8")
+            reimport_store_path = Path(tmpdir) / "reimport.sqlite"
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(reimport_store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            reimport_read_old_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(reimport_store_path),
+                    "--project",
+                    "wiki",
+                    "read",
+                    "Draft title",
+                    "--related-limit",
+                    "0",
+                    "--unresolved-limit",
+                    "0",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        rename_result = json.loads(rename_completed.stdout)
+        reimport_read_old = json.loads(reimport_read_old_completed.stdout)
+        self.assertEqual(rename_result["previous_aliases"], ["note"])
+        self.assertEqual(rename_result["aliases"], ["note", "Draft title"])
+        self.assertEqual(
+            renamed_text,
+            "\n".join(
+                [
+                    "---",
+                    f"id: {rename_result['page']['id']}",
+                    "title: Final title",
+                    "aliases:",
+                    "  - Draft title",
+                    "---",
+                    "# Final title",
+                    "body",
+                    "",
+                ]
+            ),
+        )
+        self.assertEqual(reimport_read_old["page"]["id"], rename_result["page"]["id"])
+        self.assertEqual(reimport_read_old["page"]["title"], "Final title")
+        self.assertEqual(reimport_read_old["backlink_count_total"], 1)
+
     def test_read_markdown_page_by_source_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
