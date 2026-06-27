@@ -14,6 +14,7 @@ import sys
 from textwrap import dedent
 from typing import Any
 
+from . import __version__
 from .cosense import normalize_title
 from .cosense_cli import CosenseCliClient, acquire_from_cosense, sync_from_cosense
 from .forest import import_forest_from_registry
@@ -135,6 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
             """
         ).strip(),
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument(
         "--store",
         type=Path,
