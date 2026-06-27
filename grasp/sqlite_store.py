@@ -2984,6 +2984,7 @@ class SQLiteStore:
             "project": project,
             "page": page.to_summary() if page is not None else {"id": page_id, "title": title},
             "source_path": source_path,
+            "graph_role": graph_role,
             "previous_lines": previous_lines,
             "lines": self._markdown_line_payloads(project, page_id),
             "previous_line_count": len(previous_lines),
@@ -3030,6 +3031,8 @@ class SQLiteStore:
                 payload = {
                     "page_id": update_result["page"]["id"],
                     "title": update_result["page"]["title"],
+                    "source_path": update_result["source_path"],
+                    "graph_role": update_result["graph_role"],
                     "message": message,
                     "previous_lines": update_result["previous_lines"],
                     "lines": update_result["lines"],

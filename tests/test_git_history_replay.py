@@ -855,6 +855,157 @@ class GitHistoryReplayTests(unittest.TestCase):
             projected_texts["entities/wiki-forest-markdown-import-dogfood-2026-06-25.md"],
         )
 
+    def test_revert_plan_log_page_subjects_uses_direct_log_update_in_git_history(self):
+        try:
+            before_fixture = {
+                path: git_show_file(f"{SOURCE_DIGEST_POLICY_COMMIT}^", path)
+                for path in SOURCE_DIGEST_POLICY_PATHS
+            }
+            after_fixture = {
+                path: git_show_file(SOURCE_DIGEST_POLICY_COMMIT, path)
+                for path in SOURCE_DIGEST_POLICY_PATHS
+            }
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            raise unittest.SkipTest(f"git history fixture unavailable: {exc}") from exc
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            after_root = Path(tmpdir) / "after"
+            after_root.mkdir()
+            write_fixture_files(root, before_fixture)
+            write_fixture_files(after_root, after_fixture)
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            run_grasp_json(
+                "--store",
+                store_path,
+                "adopt-markdown",
+                root,
+                "--project",
+                "wiki",
+                "--journal",
+                journal_path,
+            )
+            update_results_by_path = {}
+            for relative_path in SOURCE_DIGEST_POLICY_PATHS:
+                update_results_by_path[relative_path] = run_grasp_json(
+                    "--store",
+                    store_path,
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    Path(relative_path).stem,
+                    "--from-file",
+                    after_root / relative_path,
+                    "--output",
+                    root,
+                    "--journal",
+                    journal_path,
+                )
+
+            anchor_event_id = update_results_by_path[
+                "entities/wiki-forest-markdown-import-dogfood-2026-06-25.md"
+            ]["event_id"]
+            plan = run_grasp_json(
+                "--store",
+                store_path,
+                "--project",
+                "wiki",
+                "revert-plan",
+                anchor_event_id,
+                "--scope",
+                "log-page-subjects",
+                "--output",
+                root,
+            )
+            subject_log_plan = run_grasp_json(
+                "--store",
+                store_path,
+                "--project",
+                "wiki",
+                "revert-plan",
+                anchor_event_id,
+                "--scope",
+                "subject-log",
+                "--output",
+                root,
+            )
+            index_anchor_plan = run_grasp_json(
+                "--store",
+                store_path,
+                "--project",
+                "wiki",
+                "revert-plan",
+                update_results_by_path["index.md"]["event_id"],
+                "--scope",
+                "log-page-subjects",
+                "--output",
+                root,
+            )
+            projected_texts_after_plan = {
+                path: (root / path).read_text(encoding="utf-8")
+                for path in SOURCE_DIGEST_POLICY_PATHS
+            }
+
+        expected_candidate_paths = [
+            "decisions/markdown-identity-name-collision-policy.md",
+            "decisions/markdown-obsidian-indexed-mirror.md",
+            "entities/wiki-forest-markdown-import-dogfood-2026-06-25.md",
+            "grasp-backlog.md",
+            "log.md",
+        ]
+        self.assertFalse(subject_log_plan["complete"])
+        self.assertIn("no closing log_append", subject_log_plan["reason"])
+        self.assertEqual(plan["scope"], "log-page-subjects")
+        self.assertTrue(plan["complete"])
+        self.assertTrue(plan["revertible"])
+        self.assertEqual(plan["closing_log_event"]["event_id"], update_results_by_path["log.md"]["event_id"])
+        self.assertEqual(
+            plan["log_page_subjects"],
+            [
+                "wiki-forest-markdown-import-dogfood-2026-06-25",
+                "grasp-backlog",
+                "markdown-identity-name-collision-policy",
+                "markdown-obsidian-indexed-mirror",
+            ],
+        )
+        self.assertEqual(
+            plan["candidate_event_ids"],
+            [update_results_by_path[path]["event_id"] for path in expected_candidate_paths],
+        )
+        self.assertEqual(
+            plan["revert_order_event_ids"],
+            [update_results_by_path[path]["event_id"] for path in reversed(expected_candidate_paths)],
+        )
+        self.assertEqual(
+            [event["source_path"] for event in plan["candidate_events"]],
+            expected_candidate_paths,
+        )
+        self.assertEqual(
+            [event["source_path"] for event in plan["excluded_events"]],
+            ["index.md"],
+        )
+        self.assertIn("does not match closing log page subjects", plan["excluded_events"][0]["reason"])
+        self.assertEqual(
+            [event["target_event_id"] for event in plan["reverted_events"]],
+            [update_results_by_path[path]["event_id"] for path in reversed(expected_candidate_paths)],
+        )
+        self.assertEqual(
+            plan["suggested_revert_events_args"],
+            [
+                "revert-events",
+                *[update_results_by_path[path]["event_id"] for path in expected_candidate_paths],
+                "--output",
+                str(root),
+            ],
+        )
+        self.assertFalse(index_anchor_plan["complete"])
+        self.assertFalse(index_anchor_plan["revertible"])
+        self.assertIn("does not match closing log page subjects", index_anchor_plan["reason"])
+        self.assertEqual(projected_texts_after_plan, after_fixture)
+
     def test_actual_consecutive_wiki_history_replay_cleanly(self):
         for sequence in CONTINUOUS_REPLAY_SEQUENCES:
             with self.subTest(sequence=sequence["name"]):
