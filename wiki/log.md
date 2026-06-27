@@ -1415,3 +1415,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: append-section, append-log, write-page, and rename-page now reject dirty target projection paths before mutation unless they already match the current store projection.
 - exception: write-page --from-file may still use the target projection file itself as the replacement input, preserving the direct patch fallback.
 - tests: added regression coverage for dirty target drafts in write-page --line, append-section, append-log, and rename-page. public compatibility version is 1.8.53; schema remains v8.
+
+## [2026-06-28 07:15] implementation+file-back | guard full file-back session window
+- code: preflight stamp schema v2 records the latest SQLite event_sequence before file-back writes.
+- guard: postwrite now checks every SQLite event written after that baseline for the expected GRASP_SESSION_ID, not only the latest event.
+- reason: dogfood showed an intermediate write-page can accidentally omit session metadata while the final append-log still makes the latest-event guard pass. public compatibility version is 1.8.54; schema remains v8.

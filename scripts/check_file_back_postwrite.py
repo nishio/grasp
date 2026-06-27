@@ -26,6 +26,7 @@ from check_file_back_preflight import (
     file_back_store_output_pair_errors,
     git_ref_oid,
     parse_json_output,
+    project_events,
     require_success,
     resolve_repo_path,
     resolve_require_journal,
@@ -93,6 +94,52 @@ def session_metadata_errors(result: dict[str, object], *, expected_session_id: s
     return errors
 
 
+def event_sequence(value: object) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def file_back_session_window_errors(
+    events: list[dict[str, object]],
+    *,
+    expected_session_id: str,
+    after_event_sequence: int | None,
+) -> list[str]:
+    expected = str(expected_session_id or "").strip()
+    if not expected:
+        return [
+            "file-back session window check requires GRASP_SESSION_ID or --session-id "
+            "(use --skip-session-check only for legacy/ad hoc verification)"
+        ]
+    new_events: list[dict[str, object]] = []
+    for event in events:
+        sequence = event_sequence(event.get("event_sequence"))
+        if sequence is None:
+            continue
+        if after_event_sequence is None or sequence > after_event_sequence:
+            new_events.append(event)
+    if not new_events:
+        baseline = "none" if after_event_sequence is None else str(after_event_sequence)
+        return [f"no SQLite events were written after preflight baseline event_sequence={baseline}"]
+    mismatched = [
+        event
+        for event in new_events
+        if str(event.get("session_id") or "").strip() != expected
+    ]
+    if not mismatched:
+        return []
+    first = mismatched[0]
+    last = mismatched[-1]
+    return [
+        "SQLite events written after preflight have missing or mismatched session_id; "
+        f"expected {expected!r}, bad_events={len(mismatched)}/{len(new_events)}, "
+        f"first_bad_sequence={first.get('event_sequence')}, first_bad_event={first.get('event_id')}, "
+        f"last_bad_sequence={last.get('event_sequence')}, last_bad_event={last.get('event_id')}"
+    ]
+
+
 def load_preflight_stamp(path: Path) -> tuple[dict[str, object] | None, str | None]:
     if not path.exists():
         return None, f"preflight stamp is missing: {path}"
@@ -154,6 +201,11 @@ def preflight_stamp_errors(
         actual_value = str(stamp.get(key) or "")
         if actual_value != expected_value:
             errors.append(f"preflight stamp {key}={actual_value!r}, expected {expected_value!r}")
+    if "sqlite_event_sequence" not in stamp:
+        errors.append("preflight stamp sqlite_event_sequence is missing")
+    sequence = stamp.get("sqlite_event_sequence")
+    if "sqlite_event_sequence" in stamp and sequence is not None and event_sequence(sequence) is None:
+        errors.append(f"preflight stamp sqlite_event_sequence={sequence!r}, expected integer or null")
     return errors
 
 
@@ -186,6 +238,31 @@ def run_preflight_stamp_check(
         store=store,
         project=project,
         output=output,
+    )
+
+
+def run_session_window_check(
+    repo: Path,
+    *,
+    stamp_path: Path,
+    expected_session_id: str,
+    store: str,
+    project: str,
+) -> list[str]:
+    stamp, error = load_preflight_stamp(stamp_path)
+    if stamp is None:
+        return [error or "preflight stamp returned no JSON"]
+    baseline = event_sequence(stamp.get("sqlite_event_sequence"))
+    if stamp.get("sqlite_event_sequence") is not None and baseline is None:
+        return [f"preflight stamp sqlite_event_sequence={stamp.get('sqlite_event_sequence')!r}, expected integer or null"]
+    try:
+        events = project_events(str(resolve_repo_path(repo, store)), project)
+    except Exception as error:
+        return [f"could not inspect SQLite events after file-back: {error}"]
+    return file_back_session_window_errors(
+        events,
+        expected_session_id=expected_session_id,
+        after_event_sequence=baseline,
     )
 
 
@@ -315,6 +392,16 @@ def run_postwrite_checks(
             expected_session_id=expected_session_id,
         )
     )
+    if require_session and require_preflight_stamp:
+        errors.extend(
+            run_session_window_check(
+                repo,
+                stamp_path=resolve_repo_path(repo, preflight_stamp),
+                expected_session_id=expected_session_id,
+                store=store,
+                project=project,
+            )
+        )
     errors.extend(run_projection_check(repo, store=store, project=project, output=output))
     if semantic_log_check:
         errors.extend(run_semantic_log_projection_check(repo, store=store, project=project, output=output))
