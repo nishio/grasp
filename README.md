@@ -125,7 +125,7 @@ Stable:
 Alpha:
 
 - Markdown-backed project 向けの `append-section` / `append-log` / `write-page` / `rename-page`
-- `write-status` / `write-diff` / `revert-event` / `replay-journal` による recovery surface
+- `write-status` / `revert-event` / `replay-journal` による recovery surface
 
 スコープ外:
 

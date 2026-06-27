@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.10`（更新: 2026-06-27 17:01、store: schema `8`、compat: schema `8` compatible）: `write-status --strict` に SQLite events / legacy JSONL journal の event stream mismatch guard を追加。selected project の SQLite `(event_id, event_type, project)` sequence が legacy JSONL journal 内に順序を保って現れるかを比較し、JSON は `journal_project_event_count` / `event_streams_match` / `event_stream_mismatch` を返す。不一致時は `strict_failures[].type=event_stream_mismatch` で exit 1。これは JSONL を authority に戻すものではなく、移行期間の互換 audit として SQLite primary stream が legacy journal stream に欠けていないことを検出する。README から削除済み `write-diff` 記述も除去。schema は不変
 - `1.8.9`（更新: 2026-06-27 16:50、store: schema `8`、compat: schema `8` compatible）: projection export failure rollback の SQLite events migration。write 系 command が target event を SQLite events + legacy JSONL に残した後に Markdown projection export で失敗した場合、自動 rollback は state revert と SQLite `event_revert` insert を同じ `BEGIN IMMEDIATE` transaction で commit し、その後 legacy JSONL `event_revert` を append する。regression test は `A.md` を directory にして `append-section A` の export を失敗させ、SQLite / journal が `page_create` / `section_append` / `event_revert` になり、store `peek A` と `replay-journal` が original page に戻ることを確認する。schema は不変
 - `1.8.8`（更新: 2026-06-27 16:40、store: schema `8`、compat: schema `8` compatible）: 明確な目的のない `write-diff` command を削除。current filesystem → stored projection の unified diff surface は SQLite SSoT milestone の中で目的が曖昧になったため残さず削除した。必要になった場合は `projection-diff` / `check-projection` など目的が読める新 command として設計する。projection drift check は `export-markdown --check` / `write-status --strict`、event recovery は `revert-event` / `history` が担う。schema は不変
 - `1.8.7`（更新: 2026-06-27 16:22、store: schema `8`、compat: schema `8` compatible）: `adopt-markdown` initial events の SQLite migration。adoption が生成する `page_create` / `log_entry_import` events を SQLite `events` に duplicate-skip で insert してから legacy JSONL journal に append する。result は `sqlite_events_inserted` / `sqlite_events_skipped` を返す。fresh adoption 後の `log-records` / `history` は initial `log_entry_import` rows を SQLite source として読める。tests は page_create-only adoption、log-entry adoption、write-page / append-log / rename など既存 write tests の initial SQLite event sequence を確認する。`write-diff` / projection failure rollback は未移行
@@ -149,6 +150,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.9`
+- Current public compatibility version: `1.8.10`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.9`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.10`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

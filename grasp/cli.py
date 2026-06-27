@@ -1034,6 +1034,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "project, output, journal, journal_exists, journal_event_count, last_event|null, "
+            "journal_project_event_count, sqlite_event_count, sqlite_last_event|null, "
+            "event_streams_match, event_stream_mismatch|null, "
             "projection, journal_log_record_count, journal_log_stale, journal_log_changed_files, "
             "journal_log_projection|null, journal_log_error|null, strict_ok, strict_failures[]"
         ),
@@ -1046,6 +1048,7 @@ def build_parser() -> argparse.ArgumentParser:
             "This is an alpha recovery surface for Markdown-backed write dogfood.",
             "projection.ok=false means export-markdown --check would fail.",
             "journal_log_stale=true means the log page no longer matches the replayed journal log projection.",
+            "event_streams_match=false means selected-project SQLite events are not an ordered subsequence of the legacy JSONL journal.",
             "--strict is intended for ship loops and CI-style gates.",
         ],
     )
@@ -2380,13 +2383,15 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     journal = journal_path_for_output(args.output, args.journal)
     events = read_journal_events(journal)
     projection = store.export_markdown(args.output, check=True)
-    sqlite_event_count = store.event_count(project=projection["project"])
-    sqlite_last_events = store.events(
-        project=projection["project"],
-        limit=1,
-        offset=max(0, sqlite_event_count - 1),
-    ) if sqlite_event_count else []
-    sqlite_last_event = sqlite_last_events[0] if sqlite_last_events else None
+    journal_project_events = [
+        event
+        for event in events
+        if event.get("project") == projection["project"]
+    ]
+    sqlite_events = store.events(project=projection["project"], limit=None)
+    sqlite_event_count = len(sqlite_events)
+    sqlite_last_event = sqlite_events[-1] if sqlite_events else None
+    event_stream_mismatch = compare_event_streams(journal_project_events, sqlite_events)
     journal_log_projection = None
     journal_log_changed_files: list[str] = []
     journal_log_error = None
@@ -2406,6 +2411,7 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
         journal_log_projection=journal_log_projection,
         journal_log_changed_files=journal_log_changed_files,
         journal_log_error=journal_log_error,
+        event_stream_mismatch=event_stream_mismatch,
     )
     return {
         "project": projection["project"],
@@ -2413,10 +2419,13 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
         "journal": str(journal),
         "journal_exists": journal.exists(),
         "journal_event_count": len(events),
+        "journal_project_event_count": len(journal_project_events),
         "journal_log_record_count": journal_log_record_count(events, project=projection["project"]),
         "last_event": events[-1] if events else None,
         "sqlite_event_count": sqlite_event_count,
         "sqlite_last_event": sqlite_last_event,
+        "event_streams_match": event_stream_mismatch is None,
+        "event_stream_mismatch": event_stream_mismatch,
         "projection": projection,
         "journal_log_stale": bool(journal_log_changed_files),
         "journal_log_changed_files": journal_log_changed_files,
@@ -2425,6 +2434,50 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
         "strict_ok": not strict_failures,
         "strict_failures": strict_failures,
     }
+
+
+def compare_event_streams(
+    journal_events: list[dict[str, Any]],
+    sqlite_events: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    def summary(event: dict[str, Any] | None) -> dict[str, Any] | None:
+        if event is None:
+            return None
+        return {
+            "event_id": event.get("event_id"),
+            "event_type": event.get("event_type"),
+            "project": event.get("project"),
+        }
+
+    if not sqlite_events:
+        return None
+    if len(sqlite_events) > len(journal_events):
+        return {
+            "kind": "count_mismatch",
+            "index": len(journal_events),
+            "journal_event_count": len(journal_events),
+            "sqlite_event_count": len(sqlite_events),
+            "journal_event": None,
+            "sqlite_event": summary(sqlite_events[len(journal_events)]),
+        }
+
+    journal_index = 0
+    for index, sqlite_event in enumerate(sqlite_events):
+        sqlite = summary(sqlite_event)
+        while journal_index < len(journal_events) and summary(journal_events[journal_index]) != sqlite:
+            journal_index += 1
+        if journal_index >= len(journal_events):
+            return {
+                "kind": "event_mismatch",
+                "index": index,
+                "journal_search_start": journal_index,
+                "journal_event_count": len(journal_events),
+                "sqlite_event_count": len(sqlite_events),
+                "journal_event": None,
+                "sqlite_event": sqlite,
+            }
+        journal_index += 1
+    return None
 
 
 def journal_log_record_count(events: list[dict[str, Any]], *, project: str) -> int:
@@ -2442,6 +2495,7 @@ def write_status_strict_failures(
     journal_log_projection: dict[str, Any] | None,
     journal_log_changed_files: list[str],
     journal_log_error: str | None,
+    event_stream_mismatch: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     failures: list[dict[str, Any]] = []
     projection_changed_files = list(projection.get("changed_files") or [])
@@ -2465,6 +2519,13 @@ def write_status_strict_failures(
         )
     if not journal_exists:
         failures.append({"type": "journal_missing"})
+    if event_stream_mismatch is not None:
+        failures.append(
+            {
+                "type": "event_stream_mismatch",
+                "mismatch": event_stream_mismatch,
+            }
+        )
     if journal_log_changed_files:
         failures.append(
             {
@@ -4054,10 +4115,12 @@ def format_write_status(result: dict[str, Any]) -> str:
         f"journal: {result['journal']}\n"
         f"journal_exists: {str(result['journal_exists']).lower()}\n"
         f"journal_events: {result['journal_event_count']}\n"
+        f"journal_project_events: {result.get('journal_project_event_count', 0)}\n"
         f"journal_log_records: {result.get('journal_log_record_count', 0)}\n"
         f"last_event: {last_event.get('event_type', '')} {last_event.get('event_id', '')}\n"
         f"sqlite_events: {result.get('sqlite_event_count', 0)}\n"
         f"sqlite_last_event: {sqlite_last_event.get('event_type', '')} {sqlite_last_event.get('event_id', '')}\n"
+        f"event_streams_match: {str(result.get('event_streams_match', False)).lower()}\n"
         f"projection_ok: {str(projection['ok']).lower()}\n"
         f"changed: {len(projection.get('changed_files') or [])}\n"
         f"missing: {len(projection.get('missing_files') or [])}\n"

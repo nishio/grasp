@@ -3139,6 +3139,10 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(write_result["edge_count"], 1)
         self.assertEqual(write_result["projection"]["written_files"], ["A.md"])
         self.assertEqual(status_result["journal_event_count"], 4)
+        self.assertEqual(status_result["journal_project_event_count"], 4)
+        self.assertEqual(status_result["sqlite_event_count"], 4)
+        self.assertTrue(status_result["event_streams_match"])
+        self.assertIsNone(status_result["event_stream_mismatch"])
         self.assertTrue(status_result["projection"]["ok"])
         self.assertTrue(status_result["strict_ok"])
         self.assertEqual(status_result["strict_failures"], [])
@@ -3254,7 +3258,7 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(status_completed.returncode, 1)
         self.assertTrue(status_result["projection"]["ok"])
         self.assertFalse(status_result["strict_ok"])
-        self.assertEqual([failure["type"] for failure in status_result["strict_failures"]], ["journal_log_stale"])
+        self.assertIn("journal_log_stale", [failure["type"] for failure in status_result["strict_failures"]])
         self.assertTrue(status_result["journal_log_stale"])
         self.assertEqual(status_result["journal_log_changed_files"], ["Log.md"])
         self.assertFalse(status_result["journal_log_projection"]["ok"])
@@ -3400,6 +3404,160 @@ class CliHelpTests(unittest.TestCase):
         self.assertFalse(status_result["journal_exists"])
         self.assertFalse(status_result["strict_ok"])
         self.assertEqual([failure["type"] for failure in status_result["strict_failures"]], ["journal_missing"])
+
+    def test_write_status_strict_fails_when_event_streams_diverge(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            journal_path.write_text("", encoding="utf-8")
+            status_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                    "--strict",
+                ],
+                text=True,
+                capture_output=True,
+            )
+
+        status_result = json.loads(status_completed.stdout)
+        self.assertEqual(status_completed.returncode, 1)
+        self.assertTrue(status_result["journal_exists"])
+        self.assertEqual(status_result["journal_event_count"], 0)
+        self.assertEqual(status_result["journal_project_event_count"], 0)
+        self.assertEqual(status_result["sqlite_event_count"], 1)
+        self.assertFalse(status_result["event_streams_match"])
+        self.assertEqual(status_result["event_stream_mismatch"]["kind"], "count_mismatch")
+        self.assertEqual(status_result["event_stream_mismatch"]["sqlite_event"]["event_type"], "page_create")
+        self.assertEqual([failure["type"] for failure in status_result["strict_failures"]], ["event_stream_mismatch"])
+
+    def test_write_status_accepts_legacy_journal_records_around_sqlite_events(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            legacy_prefix = {
+                "schema_version": 1,
+                "event_id": "legacy-prefix",
+                "event_type": "projection_export",
+                "project": "wiki",
+                "created_at": "2026-06-26T00:00:00+00:00",
+                "payload": {},
+            }
+            legacy_middle = {
+                "schema_version": 1,
+                "event_id": "legacy-middle",
+                "event_type": "projection_export",
+                "project": "wiki",
+                "created_at": "2026-06-26T00:01:00+00:00",
+                "payload": {},
+            }
+            legacy_tail = {
+                "schema_version": 1,
+                "event_id": "legacy-tail",
+                "event_type": "projection_export",
+                "project": "wiki",
+                "created_at": "2026-06-26T00:02:00+00:00",
+                "payload": {},
+            }
+            original_journal_lines = journal_path.read_text(encoding="utf-8").splitlines()
+            journal_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps(legacy_prefix, ensure_ascii=False, sort_keys=True),
+                        original_journal_lines[0],
+                        json.dumps(legacy_middle, ensure_ascii=False, sort_keys=True),
+                        *original_journal_lines[1:],
+                        json.dumps(legacy_tail, ensure_ascii=False, sort_keys=True),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            status_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                    "--strict",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        status_result = json.loads(status_completed.stdout)
+        self.assertEqual(status_result["journal_project_event_count"], 5)
+        self.assertEqual(status_result["sqlite_event_count"], 2)
+        self.assertTrue(status_result["event_streams_match"])
+        self.assertIsNone(status_result["event_stream_mismatch"])
+        self.assertTrue(status_result["strict_ok"])
+        self.assertEqual(status_result["strict_failures"], [])
 
     def test_rename_page_preserves_old_handle_and_replays(self):
         with tempfile.TemporaryDirectory() as tmpdir:
