@@ -1307,3 +1307,10 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 - implemented: subject-log candidates include matching page events plus the closing log_append, then reuse the existing rollback-only safety check and suggested revert-events args.
 - tests: covered a mixed A/B/C page_update log-batch where the closing log mentions [[A]] and concepts/C.md, proving B is excluded and the plan stays read-only.
 - docs: bumped compatibility version to 1.8.31 and narrowed remaining work-unit inference to cases beyond log-batch, subject-log, same-page, explicit event-window, time-burst, or session boundaries.
+
+## [2026-06-28 00:09] implementation | add log page subject revert planning
+- implemented: revert-plan <event-id> --scope log-page-subjects now handles legacy/direct Markdown history where a closing log entry appears as a log.md page_update rather than log_append.
+- implemented: the plan diffs previous_lines and lines to read only newly added log lines, extracts wikilink/Markdown path subjects, and keeps matching page events plus the closing log page update.
+- implemented: page_update SQLite event payloads now include source_path and graph_role; older page_update events are matched through page_id-derived current handles/source paths.
+- tests: covered real git history replay commit 3eaab75, proving subject-log is incomplete without log_append while log-page-subjects selects the four subject pages plus log.md and excludes index.md without mutating projection.
+- docs: bumped compatibility version to 1.8.32 and narrowed remaining work-unit inference to cases beyond log-batch, subject-log, log-page-subjects, same-page, explicit event-window, time-burst, or session boundaries.
