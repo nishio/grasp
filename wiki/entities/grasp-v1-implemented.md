@@ -53,7 +53,7 @@ v1 stable scope 外:
 
 ## store
 
-- current public compatibility version は `1.8.58`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.8.59`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - authoring SSoT substrate 用の canonical store path helper は `$GRASP_CANONICAL_STORE` → `<repo>/.grasp/authority.sqlite` → `$GRASP_HOME/authority.sqlite` → `~/.grasp/authority.sqlite`。これは Phase 0/1 helper であり、既存 default read/import store path とは分ける。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
@@ -193,6 +193,7 @@ parser が link から除外するもの:
 - `1.8.47` 以降、root CLI は `grasp --version` を受け付け、`grasp.__version__` を `grasp <version>` として表示する。`tests/test_version_metadata.py` は CLI version output も package version と一致することを検査する。
 - `1.8.57` 以降、`tests/test_version_metadata.py` は package metadata だけでなく [[history]] の latest entry / current public compatibility version / package metadata version と、本ページの current public compatibility version も package version と一致することを検査する。`1.8.56` 後に本ページの current public compatibility version だけ `1.8.54` に残っていたため、wiki current facts と release ledger の drift を test で固定した。
 - `1.8.58` 以降、`scripts/check_wiki_version_ledger.py` が同じ version/current-facts consistency を独立 checker として検査し、history version entry の重複と semver 降順も検査する。`scripts/lint_wiki.py` はこの checker を hard lint として呼び、drift があれば exit 1 にするため、通常 file-back postwrite の wiki lint でも stale current facts を止める。
+- `1.8.59` 以降、`revert-plan --scope event-window` / `time-burst` / `session` は base selection で選んだ page event を戻すために必要な後続 same-page dependents を候補へ足し、`dependent_event_ids` として返す。これにより、明示 window / time gap / session の外側に同一 page cleanup がある場合でも rollback-only safety check が実行可能な plan を返す。`log-batch` / `subject-log` / `log-page-subjects` / `content-subjects` / `version-bump` と同じ dependency closure helper を使う。
 - `1.8.55` 以降、repo-local `scripts/check_file_back_write_start.py` は preflight stamp の latest SQLite `event_sequence` と write-start 時点の current latest `event_sequence` を比較し、preflight 後・最初の write command 前に store が進んだ場合は failure にする。これは preflight と write-start の間に別 writer が `.grasp/file-back.sqlite` を更新した時、postwrite で自分の write 後に検出するのではなく、mutation 前に preflight 再実行を要求する guard。
 - `1.8.56` 以降、repo-local file-back guard は gitignored lock `.grasp/file-back.lock.json` を使う。preflight は clean run 後に lock を取得し、write-start / postwrite は同じ session/store/project/output の lock を要求する。postwrite は全 checks が clean な時だけ lock を解放する。通常 runbook 同士では、複数 write command の file-back 中に別 writer が割り込むことを preflight 時点で止める。
 - SQLite write substrate: `connect_sqlite_store(..., for_write=True)` は WAL / `busy_timeout` / `synchronous=NORMAL` を設定し、`sqlite_write_transaction()` は `BEGIN IMMEDIATE` で write lock を取り commit/rollback する。CLI は store 更新系 command を write-configured connection で開く。
