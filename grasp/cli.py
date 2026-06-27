@@ -954,7 +954,8 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "Alpha write surface: Markdown-backed projects only; rename is still out of scope.",
             "The default journal path is <output-folder-name>.grasp/events.jsonl beside the output folder.",
-            "When --output is inside a Git worktree, dirty projection paths outside the target page are refused before export.",
+            "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
+            "Dirty projection paths outside the target page are refused before export.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
     )
@@ -983,7 +984,8 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "Default target title is Log.",
             "Alpha write surface: Markdown-backed projects only; rename is still out of scope.",
-            "When --output is inside a Git worktree, dirty projection paths outside the target page are refused before export.",
+            "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
+            "Dirty projection paths outside the target page are refused before export.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
     )
@@ -1017,7 +1019,9 @@ def build_parser() -> argparse.ArgumentParser:
             "Alpha write surface: Markdown-backed projects and unique handles only.",
             "--path is required with --create and deliberately ignored for existing-page updates.",
             "Rename and source-path changes for existing pages are handled by rename-page.",
-            "When --output is inside a Git worktree, dirty projection paths outside the target page are refused before export.",
+            "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
+            "--from-file may intentionally use the target projection file itself as the replacement input.",
+            "Dirty projection paths outside the target page are refused before export.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
     )
@@ -1053,7 +1057,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Alpha write surface: Markdown-backed projects only.",
             "The first H1 is updated only when it currently matches the old title.",
             "References like [[old-title]] are preserved as text and resolve through the old-title alias.",
-            "When --output is inside a Git worktree, dirty projection paths outside the previous/new target path are refused before export.",
+            "When --output is inside a Git worktree, dirty previous/new target paths that do not match the current store projection are refused before mutation.",
+            "Dirty projection paths outside the previous/new target path are refused before export.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
     )
@@ -2380,6 +2385,12 @@ def event_metadata(args: argparse.Namespace) -> dict[str, str]:
 
 def run_append_section(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = optional_journal_path_for_output(args)
+    target_source_path = store.markdown_source_path_for_unique_handle(args.title)
+    guard_dirty_write_target_paths_before_mutation(
+        store,
+        args.output,
+        target_source_paths={target_source_path},
+    )
     section_lines = ["", f"## {args.heading}", *args.line]
     append_result, event = store.append_markdown_lines_with_event(
         args.title,
@@ -2417,6 +2428,12 @@ def run_append_section(store: SQLiteStore, args: argparse.Namespace) -> dict[str
 
 def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = optional_journal_path_for_output(args)
+    target_source_path = store.markdown_source_path_for_unique_handle(args.title)
+    guard_dirty_write_target_paths_before_mutation(
+        store,
+        args.output,
+        target_source_paths={target_source_path},
+    )
     timestamp = args.timestamp or datetime.now().strftime("%Y-%m-%d %H:%M")
     heading = f"[{timestamp}] {args.op} | {args.summary}"
     log_lines = ["", f"## {heading}", *args.line]
@@ -2462,6 +2479,13 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
 def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = optional_journal_path_for_output(args)
     replacement_lines = write_page_replacement_lines(args)
+    target_source_paths = write_page_target_source_paths_before_mutation(store, args)
+    guard_dirty_write_target_paths_before_mutation(
+        store,
+        args.output,
+        target_source_paths=target_source_paths,
+        allow_dirty_source_paths=write_page_allowed_dirty_source_paths(args, target_source_paths),
+    )
     update_result, event = store.write_markdown_page_with_event(
         args.title,
         lines=replacement_lines,
@@ -2507,6 +2531,16 @@ def write_page_replacement_lines(args: argparse.Namespace) -> list[str]:
 
 def run_rename_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = optional_journal_path_for_output(args)
+    target_source_paths = store.markdown_source_paths_for_rename_target(
+        args.target,
+        target_kind=args.target_kind,
+        new_source_path=args.new_path,
+    )
+    guard_dirty_write_target_paths_before_mutation(
+        store,
+        args.output,
+        target_source_paths=target_source_paths,
+    )
     rename_result, event = store.rename_markdown_page_with_event(
         args.target,
         args.new_title,
@@ -2618,6 +2652,71 @@ def projection_path_matches_store(store: SQLiteStore, output: Path, relative_pat
     if not target.exists() or target.is_dir():
         return False
     return target.read_text(encoding="utf-8") == expected
+
+
+def guard_dirty_write_target_paths_before_mutation(
+    store: SQLiteStore,
+    output: Path,
+    *,
+    target_source_paths: set[str],
+    allow_dirty_source_paths: set[str] | None = None,
+) -> None:
+    blocked_paths = dirty_write_target_paths_not_matching_store(
+        store,
+        output,
+        target_source_paths=target_source_paths,
+        allow_dirty_source_paths=allow_dirty_source_paths or set(),
+    )
+    if not blocked_paths:
+        return
+    blocked = ", ".join(blocked_paths[:10])
+    suffix = "" if len(blocked_paths) <= 10 else f", ... (+{len(blocked_paths) - 10} more)"
+    targets = ", ".join(sorted(target_source_paths)) or "(none)"
+    raise ValueError(
+        "Markdown projection has dirty write target paths that do not match the current store projection; "
+        f"refusing write before mutating store state: {blocked}{suffix}; "
+        f"write target paths: {targets}"
+    )
+
+
+def dirty_write_target_paths_not_matching_store(
+    store: SQLiteStore,
+    output: Path,
+    *,
+    target_source_paths: set[str],
+    allow_dirty_source_paths: set[str],
+) -> list[str]:
+    targets = {normalize_projection_relative_path(path) for path in target_source_paths if str(path).strip()}
+    allowed_dirty = {normalize_projection_relative_path(path) for path in allow_dirty_source_paths if str(path).strip()}
+    dirty = set(git_dirty_projection_paths(output))
+    return sorted(
+        path
+        for path in dirty
+        if path in targets
+        and path not in allowed_dirty
+        and not projection_path_has_current_store_text(store, output, path)
+    )
+
+
+def write_page_target_source_paths_before_mutation(store: SQLiteStore, args: argparse.Namespace) -> set[str]:
+    if args.create:
+        if not args.source_path:
+            raise ValueError("write-page --create requires --path")
+        return {normalize_projection_relative_path(args.source_path)}
+    return {store.markdown_source_path_for_unique_handle(args.title)}
+
+
+def write_page_allowed_dirty_source_paths(args: argparse.Namespace, target_source_paths: set[str]) -> set[str]:
+    if args.from_file is None:
+        return set()
+    from_file = args.from_file.resolve(strict=False)
+    output = args.output.resolve(strict=False)
+    allowed: set[str] = set()
+    for source_path in target_source_paths:
+        normalized = normalize_projection_relative_path(source_path)
+        if from_file == (output / normalized).resolve(strict=False):
+            allowed.add(normalized)
+    return allowed
 
 
 def normalize_projection_relative_path(path: str | Path) -> str:
