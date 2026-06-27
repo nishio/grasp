@@ -1053,27 +1053,6 @@ def build_parser() -> argparse.ArgumentParser:
     write_status_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
     write_status_parser.add_argument("--strict", action="store_true", help="Exit 1 if projection, journal, or journal-derived log guards are not clean.")
 
-    write_diff_parser = add_command_parser(
-        subparsers,
-        "write-diff",
-        help="Show the Markdown projection diff for alpha write recovery.",
-        description=(
-            "Compare the stored Markdown projection with files on disk and return unified diffs "
-            "without writing files."
-        ),
-        returns="project, output, check, ok, changed_files, missing_files, extra_files, diff_count, diffs[]",
-        examples=[
-            "grasp --project grasp-wiki write-diff --output wiki",
-            "grasp --project grasp-wiki --json write-diff --output wiki --context 5",
-        ],
-        notes=[
-            "Diff direction is current filesystem -> stored projection.",
-            "Use export-markdown --output <folder> to write the projection after review.",
-        ],
-    )
-    write_diff_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to compare.")
-    write_diff_parser.add_argument("--context", type=int, default=3, help="Unified diff context lines.")
-
     revert_event_parser = add_command_parser(
         subparsers,
         "revert-event",
@@ -2509,10 +2488,6 @@ def regenerated_projection_dirty_files(projection: dict[str, Any]) -> list[str]:
     return sorted(regenerated & dirty)
 
 
-def run_write_diff(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
-    return store.markdown_projection_diff(args.output, context=args.context)
-
-
 def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = journal_path_for_output(args.output, args.journal)
     journal_events = read_journal_events(journal)
@@ -3406,8 +3381,6 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return run_rename_page(store, args)
     if args.command == "write-status":
         return run_write_status(store, args)
-    if args.command == "write-diff":
-        return run_write_diff(store, args)
     if args.command == "revert-event":
         return run_revert_event(store, args)
     if args.command == "unresolved":
@@ -3872,8 +3845,6 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_rename_page_result(result)
     if command == "write-status":
         return format_write_status(result)
-    if command == "write-diff":
-        return format_write_diff(result)
     if command == "revert-event":
         return format_revert_event(result)
     if command == "replay-journal":
@@ -4103,20 +4074,6 @@ def format_write_status(result: dict[str, Any]) -> str:
         text += "strict_failures:\n"
         text += "".join(f"- {failure.get('type', '')}\n" for failure in failures)
     return text
-
-
-def format_write_diff(result: dict[str, Any]) -> str:
-    parts = [
-        "# Write Diff\n",
-        f"project: {result['project']}\n",
-        f"output: {result['output']}\n",
-        f"ok: {str(result['ok']).lower()}\n",
-        f"diffs: {result['diff_count']}\n",
-    ]
-    for diff in result.get("diffs") or []:
-        parts.append(f"\n## {diff['kind']} {diff['path']}\n")
-        parts.extend(diff.get("diff") or [])
-    return "".join(parts)
 
 
 def format_revert_event(result: dict[str, Any]) -> str:

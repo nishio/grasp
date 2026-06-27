@@ -5,7 +5,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape as escape_html
-import difflib
 import json
 from pathlib import Path
 import os
@@ -2628,62 +2627,6 @@ class SQLiteStore:
             aliases=[str(alias) for alias in item.get("aliases") or []],
             lines=lines,
         )
-
-    def markdown_projection_diff(self, output_folder: str | Path, *, context: int = 3) -> dict[str, Any]:
-        project = self._require_project()
-        output = Path(output_folder)
-        manifest = self._markdown_manifest_for_project(project)
-        files = manifest.get("files")
-        if not isinstance(files, dict) or not files:
-            raise ValueError(f"project is not a Markdown mirror project or has no Markdown manifest: {project}")
-
-        projections = self._markdown_projection_files(project, files)
-        status = self.export_markdown(output, check=True)
-        diffs = []
-        for relative_path, projected in projections.items():
-            target = _safe_markdown_output_path(output, relative_path)
-            if target.exists():
-                current = target.read_text(encoding="utf-8")
-                if current == projected:
-                    continue
-                kind = "changed"
-                current_lines = current.splitlines(keepends=True)
-            else:
-                kind = "missing"
-                current_lines = []
-            diff_lines = list(
-                difflib.unified_diff(
-                    current_lines,
-                    projected.splitlines(keepends=True),
-                    fromfile=f"current/{relative_path}",
-                    tofile=f"projection/{relative_path}",
-                    n=max(0, context),
-                )
-            )
-            diffs.append({"path": relative_path, "kind": kind, "diff": diff_lines})
-
-        exclude_dirs = tuple(str(item) for item in manifest.get("exclude_dirs") or [])
-        existing_files = {
-            path.relative_to(output).as_posix(): path
-            for path in iter_markdown_files(output, exclude_dirs=exclude_dirs)
-        } if output.exists() else {}
-        for relative_path in status["extra_files"]:
-            current = existing_files.get(relative_path)
-            current_lines = current.read_text(encoding="utf-8").splitlines(keepends=True) if current else []
-            diff_lines = list(
-                difflib.unified_diff(
-                    current_lines,
-                    [],
-                    fromfile=f"current/{relative_path}",
-                    tofile=f"projection/{relative_path}",
-                    n=max(0, context),
-                )
-            )
-            diffs.append({"path": relative_path, "kind": "extra", "diff": diff_lines})
-
-        result = dict(status)
-        result.update({"diffs": diffs, "diff_count": len(diffs)})
-        return result
 
     def append_markdown_lines(self, title: str, lines: list[str]) -> dict[str, Any]:
         with self.connection:

@@ -38,7 +38,6 @@ COMMANDS = [
     "write-page",
     "rename-page",
     "write-status",
-    "write-diff",
     "revert-event",
     "replay-journal",
     "sync",
@@ -2968,24 +2967,6 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
-            diff_completed = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "grasp",
-                    "--json",
-                    "--store",
-                    str(store_path),
-                    "--project",
-                    "wiki",
-                    "write-diff",
-                    "--output",
-                    str(root),
-                ],
-                check=True,
-                text=True,
-                capture_output=True,
-            )
             revert_completed = subprocess.run(
                 [
                     sys.executable,
@@ -3093,7 +3074,6 @@ class CliHelpTests(unittest.TestCase):
 
         section_result = json.loads(section_completed.stdout)
         status_result = json.loads(status_completed.stdout)
-        diff_result = json.loads(diff_completed.stdout)
         revert_result = json.loads(revert_completed.stdout)
         revert_write_result = json.loads(revert_write_completed.stdout)
         replay_result = json.loads(replay_completed.stdout)
@@ -3148,8 +3128,6 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(status_result["journal_log_changed_files"], [])
         self.assertTrue(status_result["journal_log_projection"]["ok"])
         self.assertEqual(status_result["journal_log_projection"]["regenerated_files"], ["Log.md"])
-        self.assertTrue(diff_result["ok"])
-        self.assertEqual(diff_result["diff_count"], 0)
         self.assertEqual(revert_result["target_event_type"], "log_append")
         self.assertEqual(revert_result["projection"]["written_files"], ["Log.md"])
         self.assertEqual(revert_result["removed_line_count"], 3)

@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.8`（更新: 2026-06-27 16:40、store: schema `8`、compat: schema `8` compatible）: 明確な目的のない `write-diff` command を削除。current filesystem → stored projection の unified diff surface は SQLite SSoT milestone の中で目的が曖昧になったため残さず削除した。必要になった場合は `projection-diff` / `check-projection` など目的が読める新 command として設計する。projection drift check は `export-markdown --check` / `write-status --strict`、event recovery は `revert-event` / `history` が担う。schema は不変
 - `1.8.7`（更新: 2026-06-27 16:22、store: schema `8`、compat: schema `8` compatible）: `adopt-markdown` initial events の SQLite migration。adoption が生成する `page_create` / `log_entry_import` events を SQLite `events` に duplicate-skip で insert してから legacy JSONL journal に append する。result は `sqlite_events_inserted` / `sqlite_events_skipped` を返す。fresh adoption 後の `log-records` / `history` は initial `log_entry_import` rows を SQLite source として読める。tests は page_create-only adoption、log-entry adoption、write-page / append-log / rename など既存 write tests の initial SQLite event sequence を確認する。`write-diff` / projection failure rollback は未移行
 - `1.8.6`（更新: 2026-06-27 15:20、store: schema `8`、compat: schema `8` compatible）: `log-records` / `history` の SQLite events migration 第一弾。既存 store に selected project の `log_entry_import` rows がある場合は SQLite `events` を優先し、無い場合は legacy JSONL journal に fallback する。`import-log-records` は missing / updated `log_entry_import` record を SQLite `events` に duplicate-skip で insert してから legacy JSONL に append する。JSON result は `event_source` / `sqlite_event_count` / `store` を返す。tests は SQLite-sourced log/history query と、adopt-markdown 由来の未移行 record が journal fallback で読めることを確認する。`adopt-markdown` initial events / `write-diff` / projection failure rollback は未移行
 - `1.8.5`（更新: 2026-06-27 14:56、store: schema `8`、compat: schema `8` compatible）: `revert-event` の SQLite events migration 第一弾。target event lookup は selected project の SQLite `events` を優先し、見つからない場合だけ legacy JSONL journal に fallback する。SQLite-sourced revert は page state revert と SQLite `event_revert` row insert を同じ `BEGIN IMMEDIATE` transaction で commit し、その後 legacy JSONL `event_revert` append と Markdown projection export を続ける。result は `target_event_source` を返す。tests は page_create / append/log / page_update / page_rename revert が SQLite `event_revert` rows を残すことを確認する。projection failure rollback / `write-diff` / `history` は未移行
@@ -147,6 +148,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.7`
+- Current public compatibility version: `1.8.8`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.7`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.8`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
