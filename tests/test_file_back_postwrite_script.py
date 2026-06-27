@@ -57,6 +57,7 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
         require_session=True,
         expected_session_id="file-back-session",
         require_preflight_stamp=False,
+        require_file_back_lock=False,
     ):
         original_run_command = postwrite.run_command
         try:
@@ -74,6 +75,7 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
                 require_session=require_session,
                 expected_session_id=expected_session_id,
                 require_preflight_stamp=require_preflight_stamp,
+                require_file_back_lock=require_file_back_lock,
             )
         finally:
             postwrite.run_command = original_run_command
@@ -99,12 +101,115 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
                 require_session=True,
                 expected_session_id="file-back-session",
                 require_preflight_stamp=True,
+                require_file_back_lock=True,
             )
         finally:
             postwrite.run_command = original_run_command
 
         self.assertEqual(len(errors), 1)
         self.assertIn("mixed file-back store/output pair", errors[0])
+
+    def test_postwrite_checks_and_releases_file_back_lock_after_clean_checks(self):
+        calls = []
+        original_run_command = postwrite.run_command
+        original_lock_check = postwrite.run_file_back_lock_check
+        original_release = postwrite.release_file_back_lock
+
+        def fake_run_command(args, *, cwd):
+            if "write-status" in args:
+                calls.append("status")
+                return subprocess.CompletedProcess(args, 0, json.dumps(clean_write_status()), "")
+            if "export-markdown" in args:
+                if "--regenerate-log" in args:
+                    calls.append("semantic")
+                    return subprocess.CompletedProcess(args, 0, json.dumps(clean_semantic_log_projection()), "")
+                calls.append("projection")
+                return subprocess.CompletedProcess(args, 0, json.dumps(clean_projection()), "")
+            if args[-1] in {"scripts/lint_wiki.py", "--check"}:
+                calls.append(args[-1])
+                return subprocess.CompletedProcess(args, 0, "", "")
+            self.fail(f"unexpected command: {args}")
+
+        def fake_lock_check(path, *, expected_session_id, store, project, output):
+            calls.append(("lock", path, expected_session_id, store, project, output))
+            return []
+
+        def fake_release(path, *, expected_session_id):
+            calls.append(("release", path, expected_session_id))
+            return []
+
+        try:
+            postwrite.run_command = fake_run_command
+            postwrite.run_file_back_lock_check = fake_lock_check
+            postwrite.release_file_back_lock = fake_release
+            errors = postwrite.run_postwrite_checks(
+                Path("/repo"),
+                store=".grasp/file-back.sqlite",
+                project="grasp-wiki",
+                journal=None,
+                output="wiki",
+                require_journal=False,
+                lint=True,
+                diff_check=True,
+                semantic_log_check=True,
+                require_session=True,
+                expected_session_id="file-back-session",
+                require_preflight_stamp=False,
+                require_file_back_lock=True,
+            )
+        finally:
+            postwrite.run_command = original_run_command
+            postwrite.run_file_back_lock_check = original_lock_check
+            postwrite.release_file_back_lock = original_release
+
+        self.assertEqual(errors, [])
+        self.assertEqual(calls[0][0], "lock")
+        self.assertEqual(calls[0][1], Path("/repo/.grasp/file-back.lock.json"))
+        self.assertEqual(calls[-1][0], "release")
+        self.assertEqual(calls[-1][2], "file-back-session")
+
+    def test_postwrite_keeps_file_back_lock_when_checks_fail(self):
+        original_run_command = postwrite.run_command
+        original_lock_check = postwrite.run_file_back_lock_check
+        original_release = postwrite.release_file_back_lock
+
+        def fake_run_command(args, *, cwd):
+            if "write-status" in args:
+                return subprocess.CompletedProcess(args, 0, json.dumps(clean_write_status()), "")
+            if "export-markdown" in args:
+                payload = clean_projection()
+                payload["ok"] = False
+                return subprocess.CompletedProcess(args, 1, json.dumps(payload), "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        def fake_release(*args, **kwargs):
+            self.fail("lock should not be released when postwrite checks fail")
+
+        try:
+            postwrite.run_command = fake_run_command
+            postwrite.run_file_back_lock_check = lambda *args, **kwargs: []
+            postwrite.release_file_back_lock = fake_release
+            errors = postwrite.run_postwrite_checks(
+                Path("/repo"),
+                store=".grasp/file-back.sqlite",
+                project="grasp-wiki",
+                journal=None,
+                output="wiki",
+                require_journal=False,
+                lint=False,
+                diff_check=False,
+                semantic_log_check=False,
+                require_session=True,
+                expected_session_id="file-back-session",
+                require_preflight_stamp=False,
+                require_file_back_lock=True,
+            )
+        finally:
+            postwrite.run_command = original_run_command
+            postwrite.run_file_back_lock_check = original_lock_check
+            postwrite.release_file_back_lock = original_release
+
+        self.assertTrue(errors)
 
     def test_postwrite_accepts_clean_status_projection_lint_and_diff(self):
         seen_semantic_log_args = None
