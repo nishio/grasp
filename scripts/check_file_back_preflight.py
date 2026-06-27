@@ -38,8 +38,11 @@ DEFAULT_FILE_BACK_BOOTSTRAP_JOURNAL = ".grasp/file-back-adopt.jsonl"
 DEFAULT_FILE_BACK_BOOTSTRAP_ACTOR = "file-back-preflight"
 DEFAULT_FILE_BACK_BOOTSTRAP_SESSION_ID = "bootstrap-file-back-store"
 DEFAULT_PREFLIGHT_STAMP = ".grasp/file-back-preflight.json"
+DEFAULT_FILE_BACK_LOCK = ".grasp/file-back.lock.json"
 PREFLIGHT_STAMP_KIND = "grasp_file_back_preflight"
 PREFLIGHT_STAMP_SCHEMA_VERSION = 2
+FILE_BACK_LOCK_KIND = "grasp_file_back_lock"
+FILE_BACK_LOCK_SCHEMA_VERSION = 1
 
 
 def run_command(args: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -190,6 +193,146 @@ def preflight_stamp_from_repo(
 def write_preflight_stamp(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def file_back_lock_payload(
+    *,
+    session_id: str,
+    store: str,
+    project: str,
+    output: str,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema_version": FILE_BACK_LOCK_SCHEMA_VERSION,
+        "kind": FILE_BACK_LOCK_KIND,
+        "created_at": created_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "session_id": session_id,
+        "store": store,
+        "project": project,
+        "output": output,
+    }
+
+
+def load_file_back_lock(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    if not path.exists():
+        return None, f"file-back lock is missing: {path}"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        return None, f"file-back lock {path} is not valid JSON: {error}"
+    except OSError as error:
+        return None, f"file-back lock {path} could not be read: {error}"
+    if not isinstance(value, dict):
+        return None, f"file-back lock {path} returned {type(value).__name__}, expected object"
+    return value, None
+
+
+def file_back_lock_errors(
+    lock: dict[str, Any],
+    *,
+    expected_session_id: str,
+    store: str,
+    project: str,
+    output: str,
+) -> list[str]:
+    errors: list[str] = []
+    if lock.get("schema_version") != FILE_BACK_LOCK_SCHEMA_VERSION:
+        errors.append(
+            "file-back lock schema_version="
+            f"{lock.get('schema_version')!r}, expected {FILE_BACK_LOCK_SCHEMA_VERSION!r}"
+        )
+    if lock.get("kind") != FILE_BACK_LOCK_KIND:
+        errors.append(f"file-back lock kind={lock.get('kind')!r}, expected {FILE_BACK_LOCK_KIND!r}")
+    expected = str(expected_session_id or "").strip()
+    actual_session = str(lock.get("session_id") or "").strip()
+    if not expected:
+        errors.append("file-back lock check requires GRASP_SESSION_ID or --session-id")
+    elif actual_session != expected:
+        errors.append(f"active file-back lock session_id={actual_session!r}, expected {expected!r}")
+    for key, expected_value in (("store", store), ("project", project), ("output", output)):
+        actual_value = str(lock.get(key) or "")
+        if actual_value != expected_value:
+            errors.append(f"file-back lock {key}={actual_value!r}, expected {expected_value!r}")
+    return errors
+
+
+def acquire_file_back_lock(
+    path: Path,
+    *,
+    session_id: str,
+    store: str,
+    project: str,
+    output: str,
+) -> list[str]:
+    if not str(session_id or "").strip():
+        return ["file-back lock acquisition requires GRASP_SESSION_ID or --session-id"]
+    payload = file_back_lock_payload(session_id=session_id, store=store, project=project, output=output)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+    except FileExistsError:
+        lock, error = load_file_back_lock(path)
+        if lock is None:
+            return [error or f"file-back lock exists but could not be read: {path}"]
+        errors = file_back_lock_errors(
+            lock,
+            expected_session_id=session_id,
+            store=store,
+            project=project,
+            output=output,
+        )
+        if errors:
+            return [
+                "another file-back lock is active; finish or remove the stale lock before starting: "
+                f"{path}"
+            ] + errors
+        return []
+    except OSError as error:
+        return [f"file-back lock {path} could not be acquired: {error}"]
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    return []
+
+
+def run_file_back_lock_check(
+    path: Path,
+    *,
+    expected_session_id: str,
+    store: str,
+    project: str,
+    output: str,
+) -> list[str]:
+    lock, error = load_file_back_lock(path)
+    if lock is None:
+        return [error or "file-back lock returned no JSON"]
+    return file_back_lock_errors(
+        lock,
+        expected_session_id=expected_session_id,
+        store=store,
+        project=project,
+        output=output,
+    )
+
+
+def release_file_back_lock(path: Path, *, expected_session_id: str) -> list[str]:
+    lock, error = load_file_back_lock(path)
+    if lock is None:
+        return [error or "file-back lock returned no JSON"]
+    actual_session = str(lock.get("session_id") or "").strip()
+    expected = str(expected_session_id or "").strip()
+    if actual_session != expected:
+        return [
+            f"refusing to release file-back lock {path}: "
+            f"session_id={actual_session!r}, expected {expected!r}"
+        ]
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return []
+    except OSError as error:
+        return [f"file-back lock {path} could not be released: {error}"]
+    return []
 
 
 def write_status_errors(result: dict[str, Any], *, require_journal: bool = True) -> list[str]:
@@ -520,9 +663,19 @@ def main() -> int:
         help="Gitignored JSON stamp written after a clean preflight and checked by postwrite.",
     )
     parser.add_argument(
+        "--file-back-lock",
+        default=DEFAULT_FILE_BACK_LOCK,
+        help="Gitignored lock acquired after a clean preflight and released by postwrite.",
+    )
+    parser.add_argument(
         "--skip-preflight-stamp",
         action="store_true",
         help="Skip writing the preflight stamp for legacy/ad hoc verification.",
+    )
+    parser.add_argument(
+        "--skip-file-back-lock",
+        action="store_true",
+        help="Skip the file-back lock guard for legacy/ad hoc verification.",
     )
     parser.add_argument(
         "--no-journal",
@@ -579,6 +732,24 @@ def main() -> int:
             print(error, file=sys.stderr)
         return 1
 
+    lock_status = "skipped"
+    if not args.skip_file_back_lock:
+        lock_path = resolve_repo_path(repo, args.file_back_lock)
+        errors.extend(
+            acquire_file_back_lock(
+                lock_path,
+                session_id=args.session_id,
+                store=args.store,
+                project=args.project,
+                output=args.output,
+            )
+        )
+        if errors:
+            for error in errors:
+                print(error, file=sys.stderr)
+            return 1
+        lock_status = str(lock_path.relative_to(repo) if lock_path.is_relative_to(repo) else lock_path)
+
     stamp_written = "skipped"
     if not args.skip_preflight_stamp:
         if not args.skip_base_check:
@@ -622,6 +793,7 @@ def main() -> int:
         f"journal_mode={args.journal if require_journal else 'none'} "
         f"session={'skipped' if args.skip_session_uniqueness_check else args.session_id} "
         f"stamp={stamp_written} "
+        f"lock={lock_status} "
         f"dirty_paths={','.join(paths)} "
         f"store={args.store} project={args.project} output={args.output}"
     )

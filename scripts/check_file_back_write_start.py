@@ -27,6 +27,7 @@ from check_file_back_postwrite import (
 )
 from check_file_back_preflight import (
     DEFAULT_DIRTY_PATHS,
+    DEFAULT_FILE_BACK_LOCK,
     DEFAULT_FILE_BACK_OUTPUT,
     DEFAULT_FILE_BACK_STORE,
     DEFAULT_NO_JOURNAL_DIRTY_PATHS,
@@ -34,6 +35,7 @@ from check_file_back_preflight import (
     file_back_store_output_pair_errors,
     latest_event_sequence,
     project_events,
+    run_file_back_lock_check,
     resolve_repo_path,
     resolve_require_journal,
 )
@@ -79,6 +81,8 @@ def run_write_start_checks(
     semantic_log_check: bool = True,
     require_preflight_stamp: bool = True,
     preflight_stamp: str = DEFAULT_PREFLIGHT_STAMP,
+    require_file_back_lock: bool = True,
+    file_back_lock: str = DEFAULT_FILE_BACK_LOCK,
     expected_session_id: str = "",
 ) -> list[str]:
     errors: list[str] = []
@@ -105,6 +109,16 @@ def run_write_start_checks(
                     project=project,
                 )
             )
+    if require_file_back_lock:
+        errors.extend(
+            run_file_back_lock_check(
+                resolve_repo_path(repo, file_back_lock),
+                expected_session_id=expected_session_id,
+                store=store,
+                project=project,
+                output=output,
+            )
+        )
     errors.extend(check_dirty_paths(repo, dirty_paths))
     errors.extend(
         run_write_status(
@@ -142,9 +156,19 @@ def main() -> int:
         help="Gitignored JSON stamp created by preflight.",
     )
     parser.add_argument(
+        "--file-back-lock",
+        default=DEFAULT_FILE_BACK_LOCK,
+        help="Gitignored lock created by preflight and released by postwrite.",
+    )
+    parser.add_argument(
         "--skip-preflight-stamp-check",
         action="store_true",
         help="Skip the preflight stamp guard for legacy/ad hoc verification.",
+    )
+    parser.add_argument(
+        "--skip-file-back-lock-check",
+        action="store_true",
+        help="Skip the file-back lock guard for legacy/ad hoc verification.",
     )
     parser.add_argument(
         "--skip-semantic-log-check",
@@ -188,6 +212,8 @@ def main() -> int:
         semantic_log_check=not args.skip_semantic_log_check,
         require_preflight_stamp=not args.skip_preflight_stamp_check,
         preflight_stamp=args.preflight_stamp,
+        require_file_back_lock=not args.skip_file_back_lock_check,
+        file_back_lock=args.file_back_lock,
         expected_session_id=args.session_id,
     )
     if errors:
@@ -195,12 +221,16 @@ def main() -> int:
             print(error, file=sys.stderr)
         return 1
 
+    session_status = (
+        "skipped" if args.skip_preflight_stamp_check and args.skip_file_back_lock_check else args.session_id
+    )
     print(
         "file-back write-start ok: "
         f"store={args.store} project={args.project} output={args.output} "
         f"journal_mode={args.journal if require_journal else 'none'} "
-        f"session={args.session_id if not args.skip_preflight_stamp_check else 'skipped'} "
+        f"session={session_status} "
         f"preflight_stamp={'skipped' if args.skip_preflight_stamp_check else args.preflight_stamp} "
+        f"lock={'skipped' if args.skip_file_back_lock_check else args.file_back_lock} "
         f"event_sequence={'skipped' if args.skip_preflight_stamp_check else 'unchanged'} "
         f"semantic_log={'skipped' if args.skip_semantic_log_check else 'ok'} "
         f"dirty_paths={','.join(paths)}"

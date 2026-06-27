@@ -18,6 +18,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from check_file_back_preflight import (
+    DEFAULT_FILE_BACK_LOCK,
     DEFAULT_FILE_BACK_OUTPUT,
     DEFAULT_FILE_BACK_STORE,
     DEFAULT_PREFLIGHT_STAMP,
@@ -28,8 +29,10 @@ from check_file_back_preflight import (
     parse_json_output,
     project_events,
     require_success,
+    release_file_back_lock,
     resolve_repo_path,
     resolve_require_journal,
+    run_file_back_lock_check,
     run_command,
     write_status_command,
     write_status_errors,
@@ -364,6 +367,8 @@ def run_postwrite_checks(
     expected_session_id: str = "",
     require_preflight_stamp: bool = True,
     preflight_stamp: str = DEFAULT_PREFLIGHT_STAMP,
+    require_file_back_lock: bool = True,
+    file_back_lock: str = DEFAULT_FILE_BACK_LOCK,
 ) -> list[str]:
     errors: list[str] = []
     errors.extend(file_back_store_output_pair_errors(repo, store=store, output=output))
@@ -374,6 +379,16 @@ def run_postwrite_checks(
             run_preflight_stamp_check(
                 repo,
                 stamp_path=resolve_repo_path(repo, preflight_stamp),
+                expected_session_id=expected_session_id,
+                store=store,
+                project=project,
+                output=output,
+            )
+        )
+    if require_file_back_lock:
+        errors.extend(
+            run_file_back_lock_check(
+                resolve_repo_path(repo, file_back_lock),
                 expected_session_id=expected_session_id,
                 store=store,
                 project=project,
@@ -409,6 +424,13 @@ def run_postwrite_checks(
         errors.extend(run_optional_command(repo, [sys.executable, "scripts/lint_wiki.py"], "wiki lint"))
     if diff_check:
         errors.extend(run_optional_command(repo, ["git", "diff", "--check"], "git diff --check"))
+    if not errors and require_file_back_lock:
+        errors.extend(
+            release_file_back_lock(
+                resolve_repo_path(repo, file_back_lock),
+                expected_session_id=expected_session_id,
+            )
+        )
     return errors
 
 
@@ -452,9 +474,19 @@ def main() -> int:
         help="Gitignored JSON stamp created by preflight.",
     )
     parser.add_argument(
+        "--file-back-lock",
+        default=DEFAULT_FILE_BACK_LOCK,
+        help="Gitignored lock created by preflight and released after a clean postwrite.",
+    )
+    parser.add_argument(
         "--skip-preflight-stamp-check",
         action="store_true",
         help="Skip the preflight stamp guard for legacy/ad hoc verification.",
+    )
+    parser.add_argument(
+        "--skip-file-back-lock-check",
+        action="store_true",
+        help="Skip the file-back lock guard for legacy/ad hoc verification.",
     )
     args = parser.parse_args()
 
@@ -477,19 +509,27 @@ def main() -> int:
         expected_session_id=args.session_id,
         require_preflight_stamp=not args.skip_preflight_stamp_check,
         preflight_stamp=args.preflight_stamp,
+        require_file_back_lock=not args.skip_file_back_lock_check,
+        file_back_lock=args.file_back_lock,
     )
     if errors:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
 
+    session_status = (
+        "skipped"
+        if args.skip_session_check and args.skip_preflight_stamp_check and args.skip_file_back_lock_check
+        else args.session_id
+    )
     print(
         "file-back postwrite ok: "
         f"store={args.store} project={args.project} output={args.output} "
         f"journal_mode={args.journal if require_journal else 'none'} "
         f"semantic_log={'skipped' if args.skip_semantic_log_check else 'ok'} "
-        f"session={'skipped' if args.skip_session_check else args.session_id} "
+        f"session={session_status} "
         f"preflight_stamp={'skipped' if args.skip_preflight_stamp_check else args.preflight_stamp} "
+        f"lock={'skipped' if args.skip_file_back_lock_check else args.file_back_lock} "
         f"lint={'skipped' if args.skip_lint else 'ok'} "
         f"diff_check={'skipped' if args.skip_diff_check else 'ok'}"
     )
