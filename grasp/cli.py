@@ -40,6 +40,7 @@ from .sqlite_store import (
 
 LOG_ENTRY_HEADING_RE = re.compile(r"^## \[(?P<timestamp>[^\]]+)\]\s+(?P<op>[^|]+?)\s*\|\s*(?P<summary>.*)$")
 LOG_ENTRY_MARKDOWN_PATH_RE = re.compile(r"(?<![\w/.-])(?P<path>[\w.-]+(?:/[\w.-]+)*\.md)(?![\w/.-])")
+VERSION_BUMP_TOKEN_RE = re.compile(r"(?<![\w.])\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?(?![\w])")
 STORE_WRITE_COMMANDS = {
     "acquire",
     "append-log",
@@ -1178,7 +1179,8 @@ def build_parser() -> argparse.ArgumentParser:
             "log entry names the intended pages with wikilinks or Markdown paths. Use --scope log-page-subjects "
             "when legacy/direct Markdown history updated a log page with write-page instead of log_append. "
             "Use --scope content-subjects when page content changes share wikilinks, Markdown path subjects, or the anchor page target "
-            "but no explicit log/session/window boundary describes the work unit. "
+            "but no explicit log/session/window boundary describes the work unit. Use --scope version-bump when "
+            "page changes in the same log-bounded unit share a semver token such as a release/file-back version. "
             "Use --scope same-page-dependents when no log-batch boundary exists and the "
             "anchor is blocked by later active events on the same page. Use --scope event-window with --before/--after "
             "when the intended multi-page unit is a small contiguous SQLite event_sequence window and no semantic "
@@ -1190,7 +1192,7 @@ def build_parser() -> argparse.ArgumentParser:
         returns=(
             "project, scope, anchor_event_id, complete, previous_log_event|null, closing_log_event|null, "
             "candidate_event_ids[], dependent_event_ids[]?, subject_log_subjects[]?, log_page_subjects[]?, "
-            "content_subjects[]?, content_subject_source?, window_before?, window_after?, max_gap_seconds?, session_id?, session_actor?, boundary_events[]?, "
+            "content_subjects[]?, content_subject_source?, version_bump_versions[]?, window_before?, window_after?, max_gap_seconds?, session_id?, session_actor?, boundary_events[]?, "
             "revert_order_event_ids[], candidate_events[], excluded_events[], revertible, reverted_events[], "
             "reason?, suggested_revert_events_args[]?"
         ),
@@ -1199,6 +1201,7 @@ def build_parser() -> argparse.ArgumentParser:
             "grasp --project grasp-wiki revert-plan <event-id> --scope subject-log",
             "grasp --project grasp-wiki revert-plan <event-id> --scope log-page-subjects",
             "grasp --project grasp-wiki revert-plan <event-id> --scope content-subjects",
+            "grasp --project grasp-wiki revert-plan <event-id> --scope version-bump",
             "grasp --project grasp-wiki revert-plan <event-id> --scope same-page-dependents",
             "grasp --project grasp-wiki revert-plan <event-id> --scope event-window --after 2",
             "grasp --project grasp-wiki revert-plan <event-id> --scope time-burst --max-gap-seconds 120",
@@ -1211,6 +1214,7 @@ def build_parser() -> argparse.ArgumentParser:
             "subject-log filters a log-batch to page events named by the closing log entry subjects, and includes the closing log_append.",
             "log-page-subjects handles legacy/direct Markdown history where the closing log entry is inside a log page_update.",
             "content-subjects matches page events by subjects extracted from changed page lines, falling back to the anchor target when changed lines contain no subjects.",
+            "version-bump matches page events whose changed lines share a semver token with the anchor; the token must occur in at least two events in the inferred log-bounded slice.",
             "Inferred plans add required later same-page dependents for selected page events and report them as dependent_event_ids.",
             "same-page-dependents mirrors revert-event --include-dependents planning without mutating.",
             "event-window is explicit sequence planning: pass --before and/or --after to bound the event_sequence window.",
@@ -1220,7 +1224,7 @@ def build_parser() -> argparse.ArgumentParser:
         ],
     )
     revert_plan_parser.add_argument("event_id", help="Anchor SQLite event id inside the work unit to plan.")
-    revert_plan_parser.add_argument("--scope", choices=["log-batch", "subject-log", "log-page-subjects", "content-subjects", "same-page-dependents", "event-window", "time-burst", "session"], default="log-batch", help="Planning scope to infer around the anchor event.")
+    revert_plan_parser.add_argument("--scope", choices=["log-batch", "subject-log", "log-page-subjects", "content-subjects", "version-bump", "same-page-dependents", "event-window", "time-burst", "session"], default="log-batch", help="Planning scope to infer around the anchor event.")
     revert_plan_parser.add_argument("--before", type=int, default=0, help="For --scope event-window, include this many SQLite events before the anchor.")
     revert_plan_parser.add_argument("--after", type=int, default=0, help="For --scope event-window, include this many SQLite events after the anchor.")
     revert_plan_parser.add_argument("--max-gap-seconds", type=float, default=None, help="For --scope time-burst, include adjacent SQLite events while created_at gaps are at most this many seconds.")
@@ -3250,6 +3254,8 @@ def run_revert_plan(store: SQLiteStore, args: argparse.Namespace) -> dict[str, A
         return log_page_subjects_revert_plan(store, args, selected_project, sqlite_events, anchor)
     if args.scope == "content-subjects":
         return content_subjects_revert_plan(store, args, selected_project, sqlite_events, anchor)
+    if args.scope == "version-bump":
+        return version_bump_revert_plan(store, args, selected_project, sqlite_events, anchor)
     if args.scope == "same-page-dependents":
         return same_page_dependents_revert_plan(store, args, selected_project, sqlite_events, anchor)
     if args.scope == "event-window":
@@ -3826,6 +3832,178 @@ def content_subjects_revert_plan(
     return result
 
 
+def version_bump_revert_plan(
+    store: SQLiteStore,
+    args: argparse.Namespace,
+    project: str,
+    sqlite_events: list[dict[str, Any]],
+    anchor: dict[str, Any],
+) -> dict[str, Any]:
+    events = sorted(sqlite_events, key=event_sequence)
+    anchor_sequence = event_sequence(anchor)
+    baseline_sequence = initial_baseline_end_sequence_before(events, anchor_sequence)
+    closing_log = first_log_boundary_at_or_after(events, anchor_sequence)
+    previous_log = last_log_boundary_before(
+        events,
+        event_sequence(closing_log) if closing_log is not None else anchor_sequence,
+    )
+    start_sequence = (
+        max(event_sequence(previous_log), baseline_sequence)
+        if previous_log is not None
+        else baseline_sequence
+    )
+    end_sequence = event_sequence(closing_log) if closing_log is not None else event_sequence(events[-1])
+    reverted_ids = reverted_target_event_ids(sqlite_events)
+    excluded_events: list[dict[str, Any]] = []
+    anchor_exclusion = revert_plan_exclusion_reason(anchor, reverted_ids)
+    anchor_versions = event_changed_version_bump_tokens(anchor)
+    if anchor_exclusion:
+        excluded_events.append(revert_plan_event_summary(anchor, reason=anchor_exclusion))
+        return {
+            "project": project,
+            "scope": args.scope,
+            "anchor_event_id": anchor["event_id"],
+            "anchor_event": revert_plan_event_summary(anchor),
+            "complete": bool(anchor_versions),
+            "previous_log_event": revert_plan_event_summary(previous_log) if previous_log is not None else None,
+            "closing_log_event": revert_plan_event_summary(closing_log) if closing_log is not None else None,
+            "version_bump_anchor_versions": anchor_versions,
+            "version_bump_versions": [],
+            "candidate_event_ids": [],
+            "dependent_event_ids": [],
+            "revert_order_event_ids": [],
+            "candidate_events": [],
+            "excluded_events": excluded_events,
+            "revertible": False,
+            "reverted_events": [],
+            "reason": f"anchor event is not an active reversible target: {anchor_exclusion}",
+        }
+    if not anchor_versions:
+        return {
+            "project": project,
+            "scope": args.scope,
+            "anchor_event_id": anchor["event_id"],
+            "anchor_event": revert_plan_event_summary(anchor),
+            "complete": False,
+            "previous_log_event": revert_plan_event_summary(previous_log) if previous_log is not None else None,
+            "closing_log_event": revert_plan_event_summary(closing_log) if closing_log is not None else None,
+            "version_bump_anchor_versions": [],
+            "version_bump_versions": [],
+            "candidate_event_ids": [],
+            "dependent_event_ids": [],
+            "revert_order_event_ids": [],
+            "candidate_events": [],
+            "excluded_events": [],
+            "revertible": False,
+            "reverted_events": [],
+            "reason": "anchor event has no semver tokens in changed lines",
+        }
+
+    window_events = [
+        event
+        for event in events
+        if start_sequence < event_sequence(event) <= end_sequence
+    ]
+    version_event_counts: dict[str, int] = {version: 0 for version in anchor_versions}
+    versions_by_event_id: dict[str, list[str]] = {}
+    for event in window_events:
+        event_versions = event_changed_version_bump_tokens(event)
+        versions_by_event_id[str(event.get("event_id") or "")] = event_versions
+        for version in set(event_versions):
+            if version in version_event_counts:
+                version_event_counts[version] += 1
+    plan_versions = [
+        version
+        for version in anchor_versions
+        if version_event_counts.get(version, 0) >= 2
+    ]
+    plan_version_set = set(plan_versions)
+    if not plan_versions:
+        return {
+            "project": project,
+            "scope": args.scope,
+            "anchor_event_id": anchor["event_id"],
+            "anchor_event": revert_plan_event_summary(anchor),
+            "complete": False,
+            "previous_log_event": revert_plan_event_summary(previous_log) if previous_log is not None else None,
+            "closing_log_event": revert_plan_event_summary(closing_log) if closing_log is not None else None,
+            "version_bump_start_after_event_sequence": start_sequence,
+            "version_bump_end_event_sequence": end_sequence,
+            "version_bump_anchor_versions": anchor_versions,
+            "version_bump_versions": [],
+            "version_bump_version_counts": version_event_counts,
+            "candidate_event_ids": [],
+            "dependent_event_ids": [],
+            "revert_order_event_ids": [],
+            "candidate_events": [],
+            "excluded_events": [],
+            "revertible": False,
+            "reverted_events": [],
+            "reason": "anchor semver tokens are not shared by at least two events in the inferred log-bounded slice",
+        }
+
+    candidates: list[dict[str, Any]] = []
+    for event in window_events:
+        event_versions = set(versions_by_event_id.get(str(event.get("event_id") or ""), []))
+        if not event_versions & plan_version_set:
+            excluded_events.append(
+                revert_plan_event_summary(
+                    event,
+                    reason="event changed lines do not contain the selected version-bump tokens",
+                )
+            )
+            continue
+        exclusion_reason = revert_plan_exclusion_reason(event, reverted_ids)
+        if exclusion_reason:
+            excluded_events.append(revert_plan_event_summary(event, reason=exclusion_reason))
+            continue
+        candidates.append(event)
+
+    candidates, dependent_events = add_required_same_page_dependents(
+        sqlite_events,
+        candidates,
+        excluded_events,
+    )
+    targets = sorted(candidates, key=event_sequence, reverse=True)
+    check = check_revert_plan_revertible(store, targets)
+    candidate_event_ids = [event["event_id"] for event in candidates]
+    dependent_event_ids = [event["event_id"] for event in dependent_events]
+    result: dict[str, Any] = {
+        "project": project,
+        "scope": args.scope,
+        "anchor_event_id": anchor["event_id"],
+        "anchor_event": revert_plan_event_summary(anchor),
+        "complete": True,
+        "previous_log_event": revert_plan_event_summary(previous_log) if previous_log is not None else None,
+        "closing_log_event": revert_plan_event_summary(closing_log) if closing_log is not None else None,
+        "version_bump_start_after_event_sequence": start_sequence,
+        "version_bump_end_event_sequence": end_sequence,
+        "version_bump_anchor_versions": anchor_versions,
+        "version_bump_versions": plan_versions,
+        "version_bump_version_counts": version_event_counts,
+        "candidate_event_ids": candidate_event_ids,
+        "dependent_event_ids": dependent_event_ids,
+        "revert_order_event_ids": [event["event_id"] for event in targets],
+        "candidate_events": [revert_plan_event_summary(event) for event in candidates],
+        "excluded_events": excluded_events,
+        "revertible": check["revertible"],
+        "reverted_events": check["reverted_events"],
+    }
+    if not candidate_event_ids:
+        result["revertible"] = False
+        result["reason"] = "version-bump contains no active reversible events"
+    if not check["revertible"]:
+        result["reason"] = check["reason"]
+    if args.output is not None and candidate_event_ids:
+        result["suggested_revert_events_args"] = [
+            "revert-events",
+            *candidate_event_ids,
+            "--output",
+            str(args.output),
+        ]
+    return result
+
+
 def add_required_same_page_dependents(
     sqlite_events: list[dict[str, Any]],
     candidates: list[dict[str, Any]],
@@ -4301,6 +4479,19 @@ def event_changed_content_subjects(event: dict[str, Any]) -> list[str]:
     return log_entry_subjects_from_lines(
         [{"text": text} for text in event_changed_content_line_texts(event)]
     )
+
+
+def event_changed_version_bump_tokens(event: dict[str, Any]) -> list[str]:
+    versions: list[str] = []
+    seen: set[str] = set()
+    for text in event_changed_content_line_texts(event):
+        for match in VERSION_BUMP_TOKEN_RE.finditer(text):
+            version = match.group(0)
+            if version in seen:
+                continue
+            seen.add(version)
+            versions.append(version)
+    return versions
 
 
 def event_changed_content_line_texts(event: dict[str, Any]) -> list[str]:
@@ -6655,6 +6846,8 @@ def format_revert_plan(result: dict[str, Any]) -> str:
         text += "log_page_subjects: " + ", ".join(result.get("log_page_subjects") or []) + "\n"
     if result.get("content_subjects"):
         text += "content_subjects: " + ", ".join(result.get("content_subjects") or []) + "\n"
+    if result.get("version_bump_versions"):
+        text += "version_bump_versions: " + ", ".join(result.get("version_bump_versions") or []) + "\n"
     order = result.get("revert_order_event_ids") or []
     if order:
         text += "revert_order:\n"
