@@ -3923,6 +3923,144 @@ class CliHelpTests(unittest.TestCase):
             ["log_append", "page_update", "page_update", "page_update", "log_append"],
         )
 
+    def test_revert_plan_content_subjects_falls_back_to_anchor_target_for_page_create(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nold A\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            topic_source = Path(tmpdir) / "Topic.md"
+            a_source = Path(tmpdir) / "A-new.md"
+            topic_source.write_text("# Topic\nplain body\n", encoding="utf-8")
+            a_source.write_text("# A\nold A\n- see [[Topic]]\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            def run_json(*args):
+                completed = subprocess.run(
+                    [sys.executable, "-m", "grasp", "--json", "--store", str(store_path), "--project", "wiki", *args],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            topic_create = run_json(
+                "write-page",
+                "Topic",
+                "--create",
+                "--path",
+                "Topic.md",
+                "--from-file",
+                str(topic_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            a_update = run_json(
+                "write-page",
+                "A",
+                "--from-file",
+                str(a_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            closing_log = run_json(
+                "append-log",
+                "--timestamp",
+                "2026-06-28 01:00",
+                "--op",
+                "test",
+                "--summary",
+                "created [[Topic]]",
+                "--line",
+                "- linked from A",
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            plan = run_json(
+                "revert-plan",
+                topic_create["event_id"],
+                "--scope",
+                "content-subjects",
+                "--output",
+                str(root),
+            )
+            topic_text_after_plan = (root / "Topic.md").read_text(encoding="utf-8")
+            a_text_after_plan = (root / "A.md").read_text(encoding="utf-8")
+            log_text_after_plan = (root / "Log.md").read_text(encoding="utf-8")
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows_after_plan = connection.execute(
+                    """
+                    SELECT event_id, event_type
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+
+        self.assertEqual(plan["scope"], "content-subjects")
+        self.assertTrue(plan["complete"])
+        self.assertTrue(plan["revertible"])
+        self.assertEqual(plan["content_subjects"], [])
+        self.assertEqual(plan["content_subject_source"], "anchor-target")
+        self.assertIn("topic", plan["content_subject_norms"])
+        self.assertEqual(
+            plan["candidate_event_ids"],
+            [topic_create["event_id"], a_update["event_id"], closing_log["event_id"]],
+        )
+        self.assertEqual(
+            plan["revert_order_event_ids"],
+            [closing_log["event_id"], a_update["event_id"], topic_create["event_id"]],
+        )
+        self.assertEqual(
+            [event["event_type"] for event in plan["candidate_events"]],
+            ["page_create", "page_update", "log_append"],
+        )
+        self.assertEqual(plan["excluded_events"], [])
+        self.assertEqual(
+            [event["target_event_id"] for event in plan["reverted_events"]],
+            [closing_log["event_id"], a_update["event_id"], topic_create["event_id"]],
+        )
+        self.assertEqual(
+            plan["suggested_revert_events_args"],
+            [
+                "revert-events",
+                topic_create["event_id"],
+                a_update["event_id"],
+                closing_log["event_id"],
+                "--output",
+                str(root),
+            ],
+        )
+        self.assertEqual(topic_text_after_plan, "# Topic\nplain body\n")
+        self.assertEqual(a_text_after_plan, "# A\nold A\n- see [[Topic]]\n")
+        self.assertIn("created [[Topic]]", log_text_after_plan)
+        self.assertEqual(
+            [row[1] for row in sqlite_event_rows_after_plan],
+            ["page_create", "page_update", "log_append"],
+        )
+
     def test_revert_plan_same_page_dependents_handles_missing_log_batch_boundary(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"

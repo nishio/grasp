@@ -1323,3 +1323,6 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 
 ## [2026-06-28 00:49] implementation+file-back | harden revert-plan baseline detection
 - implemented: `revert-plan` initial adopt baseline detection no longer treats real `write-page --create` events before a `content-subjects` anchor as baseline; regression uses git history fixture `b644237`.
+
+## [2026-06-28 01:05] implementation+file-back | add content-subjects anchor-target fallback
+`1.8.35` lets `revert-plan --scope content-subjects` use the anchor event target when changed lines have no wikilink or Markdown path subjects; regression covers a plain created page linked by another page and the closing log.
