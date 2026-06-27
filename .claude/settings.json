@@ -1,13 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(mkdir -p ~/.grasp)",
-      "Bash(mv .grasp/grasp.sqlite ~/.grasp/grasp.sqlite)",
-      "Bash(ln -sfn /Users/nishio/grasp/raw/nishio.json ~/.grasp/nishio.json)",
       "Bash(python3 -m unittest discover -s tests)",
       "Bash(grasp link-stats *)",
-      "Bash(grasp read *)",
-      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('TITLE:',d.get\\('title'\\)\\); print\\('LINKS:',d.get\\('links'\\)\\); print\\('---LINES---'\\); [print\\(l['text']\\) for l in d.get\\('lines',[]\\)]\")"
+      "Bash(grasp read *)"
     ]
   }
 }
