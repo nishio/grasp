@@ -162,6 +162,8 @@ Dogfood in the same `1.8.42` slice confirmed the guard fails while the worktree 
 
 `1.8.57` closes a source-of-truth drift found by dogfood: [[grasp-v1-implemented]] still said the current public compatibility version was `1.8.54` after package/history had moved to `1.8.56`. `tests/test_version_metadata.py` now checks the package version against [[history]] latest/current ledger lines and the implemented current-facts version, so release ledger drift fails in CI instead of being left for a later agent to notice manually.
 
+`1.8.58` moves that guard into the normal wiki lint path. `scripts/check_wiki_version_ledger.py` checks the same package/history/current-facts consistency plus duplicate history entries and descending semver order. `scripts/lint_wiki.py` reports the version drift section and exits nonzero when the check fails, so ordinary file-back postwrite catches stale current facts without waiting for the full test suite.
+
 This does **not** yet make every authority boundary final. `sync`, `acquire`, generated Markdown backup/review policy, broader native event-derived semantic page projection, and semantic multi-page work-unit inference beyond log-batch, subject-log, log-page-subjects, content-subjects, version-bump, same-page dependency, explicit event-window, time-burst, or explicit session metadata boundaries still need migration work.
 
 ## Why This Replaces The Fast Path
@@ -218,6 +220,8 @@ Completed in `1.8.42`: repo-local ship loops now run `scripts/check_push_ownersh
 Completed in `1.8.55`: repo-local write-start now fails before the first write command if the current latest SQLite event_sequence differs from the preflight stamp baseline, closing the preflight-to-write-start store mutation gap.
 
 Completed in `1.8.57`: version metadata guard now catches drift between package version, [[history]] latest/current release ledger lines, and [[grasp-v1-implemented]] current facts.
+
+Completed in `1.8.58`: `scripts/lint_wiki.py` now runs the version ledger/current facts guard as a hard wiki lint check, backed by `scripts/check_wiki_version_ledger.py` and regression tests for current-facts drift, duplicate entries, and ordering drift.
 
 Completed in `1.8.56`: repo-local preflight/write-start/postwrite now use gitignored `.grasp/file-back.lock.json` to block overlapping normal runbook file-backs, and postwrite releases the lock only after all checks pass.
 
