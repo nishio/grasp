@@ -228,3 +228,8 @@ Completed in `1.8.45`: repo-local preflight/write-start/postwrite now reject mix
 - Whether any future portable dump should be generated from SQLite events, and what review/recovery gap would justify it.
 - What actor/session metadata is enough to attribute writes across multiple agents.
 - Whether a future portable text dump/export companion is needed so `.grasp/authority.sqlite` can stay untracked without making fresh-checkout recovery depend only on generated Markdown.
+
+## Test cadence for tight rollback slices
+- 2026-06-28 observation: full `python3 -m unittest discover -s tests` is about 69 seconds on this repo, and almost all of that wait is `tests/test_cli_help.py` (~35s) plus `tests/test_git_history_replay.py` (~29s). In a tight rollback-planning loop, running the full suite after every micro-slice can easily turn into tens of minutes of idle wait.
+- Policy: during implementation, run the smallest targeted test that covers the touched command or fixture. Run `tests.test_git_history_replay` only when git-history replay behavior, replay fixtures, or history-backed rollback planning changed. Run `tests.test_cli_help` when CLI parser/help contracts or broad CLI JSON contracts changed.
+- Ship boundary remains strict: before commit/push, run the full test suite once, plus wiki lint, runbook check, and `git diff --check`. If a commit changes file-back guards or runbooks, also run the specific guard-script tests. This keeps confidence at the boundary without paying the full-suite cost after every small edit.
