@@ -1,5 +1,6 @@
 import json
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -169,6 +170,66 @@ class FileBackPreflightScriptTests(unittest.TestCase):
         )
 
         self.assertEqual(errors, [])
+
+    def test_preflight_stamp_payload_records_git_and_file_back_context(self):
+        payload = preflight.preflight_stamp_payload(
+            session_id="file-back-session",
+            head="abc123",
+            base="origin/main",
+            base_oid="def456",
+            store=".grasp/file-back.sqlite",
+            project="grasp-wiki",
+            output="wiki",
+            journal_mode="none",
+            created_at="2026-06-27T00:00:00Z",
+        )
+
+        self.assertEqual(payload["schema_version"], preflight.PREFLIGHT_STAMP_SCHEMA_VERSION)
+        self.assertEqual(payload["kind"], preflight.PREFLIGHT_STAMP_KIND)
+        self.assertEqual(payload["session_id"], "file-back-session")
+        self.assertEqual(payload["head"], "abc123")
+        self.assertEqual(payload["base"], "origin/main")
+        self.assertEqual(payload["base_oid"], "def456")
+        self.assertEqual(payload["store"], ".grasp/file-back.sqlite")
+        self.assertEqual(payload["project"], "grasp-wiki")
+        self.assertEqual(payload["output"], "wiki")
+        self.assertEqual(payload["journal_mode"], "none")
+
+    def test_preflight_stamp_payload_marks_skipped_base(self):
+        payload = preflight.preflight_stamp_payload(
+            session_id="file-back-session",
+            head="abc123",
+            base=None,
+            base_oid=None,
+            store=".grasp/file-back.sqlite",
+            project="grasp-wiki",
+            output="wiki",
+            journal_mode="none",
+            created_at="2026-06-27T00:00:00Z",
+        )
+
+        self.assertEqual(payload["base"], "skipped")
+        self.assertIsNone(payload["base_oid"])
+
+    def test_write_preflight_stamp_creates_parent_and_json_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            stamp_path = Path(tmpdir) / ".grasp" / "file-back-preflight.json"
+            payload = preflight.preflight_stamp_payload(
+                session_id="file-back-session",
+                head="abc123",
+                base="origin/main",
+                base_oid="def456",
+                store=".grasp/file-back.sqlite",
+                project="grasp-wiki",
+                output="wiki",
+                journal_mode="none",
+                created_at="2026-06-27T00:00:00Z",
+            )
+
+            preflight.write_preflight_stamp(stamp_path, payload)
+
+            self.assertTrue(stamp_path.exists())
+            self.assertEqual(json.loads(stamp_path.read_text(encoding="utf-8")), payload)
 
     def test_write_status_command_selects_journal_or_no_journal_mode(self):
         journal_command = preflight.write_status_command(

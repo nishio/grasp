@@ -23,8 +23,8 @@ Follow these steps:
    - design rationale or changed decision -> `wiki/decisions/`
    - chronological record -> `wiki/log.md` using `## [YYYY-MM-DD HH:MM] <op> | <desc>`
    - keep file back factual and scoped; do not over-spec future work.
-   - for grasp-write-backed file back, first set one per-file-back `GRASP_SESSION_ID`, then run `git fetch origin` and `python3 scripts/check_file_back_preflight.py` (no-journal default); preflight uses the current upstream branch as its base, falls back to `origin/main`, and requires an unused session id.
-   - keep that `GRASP_SESSION_ID` for the write commands and postwrite; postwrite requires the same session id on the latest SQLite event.
+   - for grasp-write-backed file back, first set one per-file-back `GRASP_SESSION_ID`, then run `git fetch origin` and `python3 scripts/check_file_back_preflight.py` (no-journal default); preflight uses the current upstream branch as its base, falls back to `origin/main`, requires an unused session id, and writes a gitignored preflight stamp with session/head/base.
+   - keep that `GRASP_SESSION_ID` for the write commands and postwrite; postwrite requires the same session id on the latest SQLite event and checks the preflight stamp session/head/base.
    - tracked `wiki.grasp/events.jsonl` was retired and removed in `1.8.18`; normal repo file-back must not recreate or commit it.
    - `--journal` / `--with-journal` remain for legacy/ad hoc CLI audits outside the normal repo runbook. Do not use repo-runbook `--with-journal`.
 3. Run verification:
