@@ -47,11 +47,11 @@ file back は grasp write first で行う。まず gitignored store を更新す
 
 ```bash
 git fetch origin main
-$PYTHON_BIN scripts/check_file_back_preflight.py
 export GRASP_SESSION_ID="file-back-$(date -u +%Y%m%dT%H%M%SZ)-<topic>"
+$PYTHON_BIN scripts/check_file_back_preflight.py
 ```
 
-この preflight は no-journal default で `.grasp/file-back.sqlite` を import/update し、remote 分岐なし、wiki dirty なし、退役済み JSONL path の再作成なし、`write-status --no-journal --strict`、projection policy check を確認する。tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済みで、通常編集は repo に JSONL を作らない。その後、表現できる変更は `append-section` / `write-page` / `append-log` を `--output wiki --no-journal` 付きで使う。`GRASP_SESSION_ID` は同じ file-back の全 write command と postwrite で保持する。postwrite は同じ session id を要求し、SQLite events 由来の semantic log projection も確認する。任意 frontmatter merge、canonical docs、曖昧 handle、混在 hunk など grasp alpha が安全に扱えない場合だけ direct Markdown patch に fallback し、理由を `wiki/log.md` に残す。
+この preflight は no-journal default で `.grasp/file-back.sqlite` を import/update し、未使用 session id、remote 分岐なし、wiki dirty なし、退役済み JSONL path の再作成なし、`write-status --no-journal --strict`、projection policy check を確認する。tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済みで、通常編集は repo に JSONL を作らない。その後、表現できる変更は `append-section` / `write-page` / `append-log` を `--output wiki --no-journal` 付きで使う。`GRASP_SESSION_ID` は同じ file-back の全 write command と postwrite で保持する。postwrite は同じ session id を要求し、SQLite events 由来の semantic log projection も確認する。任意 frontmatter merge、canonical docs、曖昧 handle、混在 hunk など grasp alpha が安全に扱えない場合だけ direct Markdown patch に fallback し、理由を `wiki/log.md` に残す。
 
 `--journal` / `--with-journal` は CLI の legacy/ad hoc audit 用には残るが、repo runbook では `--with-journal` を使わない。JSONL 調査が必要な時は task-local の明示 path を使い、別途 migration decision を切るまで repo artifact として commit しない。
 

@@ -9,16 +9,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_DIR = SCRIPT_DIR.parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
+if str(REPO_DIR) not in sys.path:
+    sys.path.insert(0, str(REPO_DIR))
 
 from check_projection_policy import projection_policy_errors
+from grasp.sqlite_store import SQLiteStore
 
 
 DEFAULT_DIRTY_PATHS = ("wiki", "wiki.grasp/events.jsonl")
@@ -77,6 +82,33 @@ def write_status_errors(result: dict[str, Any], *, require_journal: bool = True)
     return errors
 
 
+def session_uniqueness_errors(
+    events: list[dict[str, Any]],
+    *,
+    expected_session_id: str | None,
+    skip_session_uniqueness_check: bool = False,
+) -> list[str]:
+    if skip_session_uniqueness_check:
+        return []
+    session_id = str(expected_session_id or "").strip()
+    if not session_id:
+        return ["GRASP_SESSION_ID or --session-id is required before file-back"]
+    matching_events = [
+        event
+        for event in events
+        if str(event.get("session_id") or "") == session_id
+    ]
+    if not matching_events:
+        return []
+    first = matching_events[0]
+    last = matching_events[-1]
+    return [
+        "session_id already exists before file-back; choose a unique GRASP_SESSION_ID: "
+        f"{session_id} ({len(matching_events)} events, "
+        f"first_sequence={first.get('event_sequence')}, last_sequence={last.get('event_sequence')})"
+    ]
+
+
 def parse_json_output(output: str, label: str) -> tuple[dict[str, Any] | None, str | None]:
     try:
         value = json.loads(output)
@@ -105,6 +137,14 @@ def check_dirty_paths(repo: Path, paths: tuple[str, ...]) -> list[str]:
     if error:
         return [error]
     return dirty_path_errors(status.stdout)
+
+
+def project_events(store: str, project: str) -> list[dict[str, Any]]:
+    sqlite_store = SQLiteStore(store, project=project, for_write=False)
+    try:
+        return sqlite_store.events(project=project, limit=None)
+    finally:
+        sqlite_store.close()
 
 
 def write_status_command(
@@ -146,6 +186,8 @@ def run_grasp_preflight(
     journal: str | None,
     output: str,
     require_journal: bool = True,
+    expected_session_id: str | None = None,
+    skip_session_uniqueness_check: bool = False,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -174,6 +216,16 @@ def run_grasp_preflight(
     errors.extend(write_status_errors(status_json, require_journal=require_journal))
     if write_status.returncode != 0 and not errors:
         errors.append(f"grasp write-status --strict failed with exit {write_status.returncode}")
+    if errors:
+        return errors
+
+    errors.extend(
+        session_uniqueness_errors(
+            project_events(store, project),
+            expected_session_id=expected_session_id,
+            skip_session_uniqueness_check=skip_session_uniqueness_check,
+        )
+    )
     if errors:
         return errors
 
@@ -220,6 +272,12 @@ def main() -> int:
     parser.add_argument("--store", default=".grasp/file-back.sqlite")
     parser.add_argument("--project", default="grasp-wiki")
     parser.add_argument("--journal", default="wiki.grasp/events.jsonl")
+    parser.add_argument("--session-id", default=os.environ.get("GRASP_SESSION_ID", ""), help="Unique session/work-unit id expected for the upcoming file-back. Defaults to $GRASP_SESSION_ID.")
+    parser.add_argument(
+        "--skip-session-uniqueness-check",
+        action="store_true",
+        help="Skip the unused-session-id guard for legacy/ad hoc verification.",
+    )
     parser.add_argument(
         "--no-journal",
         action="store_true",
@@ -264,6 +322,8 @@ def main() -> int:
             journal=args.journal if require_journal else None,
             output=args.output,
             require_journal=require_journal,
+            expected_session_id=args.session_id,
+            skip_session_uniqueness_check=args.skip_session_uniqueness_check,
         )
     )
     if errors:
@@ -275,6 +335,7 @@ def main() -> int:
         "file-back preflight ok: "
         f"base={args.base if not args.skip_base_check else 'skipped'} "
         f"journal_mode={args.journal if require_journal else 'none'} "
+        f"session={'skipped' if args.skip_session_uniqueness_check else args.session_id} "
         f"dirty_paths={','.join(paths)} "
         f"store={args.store} project={args.project} output={args.output}"
     )
