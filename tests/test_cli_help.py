@@ -5892,6 +5892,117 @@ class CliHelpTests(unittest.TestCase):
 
         self.assertEqual(paths, {"A.md"})
 
+    def test_revert_event_refuses_dirty_target_projection_file_before_mutation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            root = repo_root / "wiki"
+            root.mkdir(parents=True)
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            init_git_repo(repo_root)
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            update_result = json.loads(subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    "A",
+                    "--line",
+                    "# A",
+                    "--line",
+                    "- stored change",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout)
+            (root / "A.md").write_text("# A\n- local draft\n", encoding="utf-8")
+            failed_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "revert-event",
+                    update_result["event_id"],
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            peek_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_types = [
+                    row[0]
+                    for row in connection.execute(
+                        """
+                        SELECT event_type
+                        FROM events
+                        ORDER BY event_sequence
+                        """
+                    ).fetchall()
+                ]
+            finally:
+                connection.close()
+            a_text = (root / "A.md").read_text(encoding="utf-8")
+
+        peek_result = json.loads(peek_completed.stdout)
+        self.assertEqual(failed_completed.returncode, 2)
+        self.assertIn("dirty reverted target paths", failed_completed.stderr)
+        self.assertIn("A.md", failed_completed.stderr)
+        self.assertEqual(sqlite_event_types, ["page_update"])
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A", "- stored change"])
+        self.assertEqual(a_text, "# A\n- local draft\n")
+
     def test_revert_events_refuses_dirty_projection_file_outside_targets_before_mutation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir) / "repo"
