@@ -1362,3 +1362,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: `scripts/check_file_back_preflight.py` が clean preflight 後に gitignored `.grasp/file-back-preflight.json` へ session/head/base/store/project/output を記録し、`scripts/check_file_back_postwrite.py` が通常 mode で同 stamp の session/head/base 一致を検査するようにした。
 - docs/tests: unit tests、runbook checker、AGENTS/CLAUDE、`/next`、`/ship-next`、repo skill、README、history、current facts、backlog、write plan を preflight stamp guard に更新した。
 - fallback/dogfood: 今回は preflight/postwrite guard 自体と runbook を同じ差分で更新しており、wiki dirty 前提の直接 patch で file-back した。別途 `HEAD` 由来の一時 projection で preflight → `append-log --no-journal` → postwrite を実行し、stamp の session/head/base 検査が通ることを確認した。public compatibility version は `1.8.43`、schema は v8 のまま。
+
+## [2026-06-28 04:01] implementation+file back | write-start guard を追加
+- code: `scripts/check_file_back_write_start.py` を追加し、preflight 後・最初の write command 直前に preflight stamp / git dirty paths / `write-status --no-journal --strict` / SQLite authority projection / semantic log projection を import なしで検査するようにした。
+- docs/tests: unit tests、runbook checker、AGENTS/CLAUDE、`/next`、`/ship-next`、repo skill、README、history、current facts、backlog、write plan を write-start guard に更新した。
+- rationale: preflight 再実行は Markdown を store に取り込むため、preflight 後の projection 変化を隠しうる。write-start は stale store export/clobber gap を write 直前に止める運用 guard。public compatibility version は `1.8.44`、schema は v8 のまま。
