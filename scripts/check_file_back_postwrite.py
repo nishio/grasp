@@ -18,9 +18,12 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from check_file_back_preflight import (
+    DEFAULT_FILE_BACK_OUTPUT,
+    DEFAULT_FILE_BACK_STORE,
     DEFAULT_PREFLIGHT_STAMP,
     PREFLIGHT_STAMP_KIND,
     PREFLIGHT_STAMP_SCHEMA_VERSION,
+    file_back_store_output_pair_errors,
     git_ref_oid,
     parse_json_output,
     require_success,
@@ -286,6 +289,9 @@ def run_postwrite_checks(
     preflight_stamp: str = DEFAULT_PREFLIGHT_STAMP,
 ) -> list[str]:
     errors: list[str] = []
+    errors.extend(file_back_store_output_pair_errors(repo, store=store, output=output))
+    if errors:
+        return errors
     if require_preflight_stamp:
         errors.extend(
             run_preflight_stamp_check(
@@ -322,7 +328,7 @@ def run_postwrite_checks(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check guarded grasp file-back post-write conditions.")
     parser.add_argument("--repo", default=".", help="Repository root.")
-    parser.add_argument("--store", default=".grasp/file-back.sqlite")
+    parser.add_argument("--store", default=DEFAULT_FILE_BACK_STORE)
     parser.add_argument("--project", default="grasp-wiki")
     parser.add_argument("--journal", default="wiki.grasp/events.jsonl")
     parser.add_argument(
@@ -335,7 +341,7 @@ def main() -> int:
         action="store_true",
         help="Require the compatibility JSONL journal and run journal consistency guards.",
     )
-    parser.add_argument("--output", default="wiki")
+    parser.add_argument("--output", default=DEFAULT_FILE_BACK_OUTPUT)
     parser.add_argument("--skip-lint", action="store_true", help="Skip scripts/lint_wiki.py.")
     parser.add_argument("--skip-diff-check", action="store_true", help="Skip git diff --check.")
     parser.add_argument(
