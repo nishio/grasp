@@ -3732,6 +3732,197 @@ class CliHelpTests(unittest.TestCase):
             ["log_append", "page_update", "page_update", "log_append"],
         )
 
+    def test_revert_plan_subject_log_filters_mixed_log_batch_by_closing_log_subjects(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nold A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nold B\n", encoding="utf-8")
+            (root / "C.md").write_text("# C\nold C\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            a_source = Path(tmpdir) / "A-new.md"
+            b_source = Path(tmpdir) / "B-new.md"
+            c_source = Path(tmpdir) / "C-new.md"
+            a_source.write_text("# A\nnew A\n", encoding="utf-8")
+            b_source.write_text("# B\nnew B\n", encoding="utf-8")
+            c_source.write_text("# C\nnew C\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            def run_json(*args):
+                completed = subprocess.run(
+                    [sys.executable, "-m", "grasp", "--json", "--store", str(store_path), "--project", "wiki", *args],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            previous_log = run_json(
+                "append-log",
+                "--timestamp",
+                "2026-06-27 01:00",
+                "--op",
+                "test",
+                "--summary",
+                "previous batch",
+                "--line",
+                "- previous",
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            a_update = run_json(
+                "write-page",
+                "A",
+                "--from-file",
+                str(a_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            b_update = run_json(
+                "write-page",
+                "B",
+                "--from-file",
+                str(b_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            c_update = run_json(
+                "write-page",
+                "C",
+                "--from-file",
+                str(c_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            closing_log = run_json(
+                "append-log",
+                "--timestamp",
+                "2026-06-27 02:00",
+                "--op",
+                "test",
+                "--summary",
+                "subject batch for [[A]]",
+                "--line",
+                "- also touched concepts/C.md",
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            log_batch_plan = run_json(
+                "revert-plan",
+                a_update["event_id"],
+                "--scope",
+                "log-batch",
+                "--output",
+                str(root),
+            )
+            subject_plan = run_json(
+                "revert-plan",
+                a_update["event_id"],
+                "--scope",
+                "subject-log",
+                "--output",
+                str(root),
+            )
+            b_anchor_plan = run_json(
+                "revert-plan",
+                b_update["event_id"],
+                "--scope",
+                "subject-log",
+                "--output",
+                str(root),
+            )
+            a_text_after_plan = (root / "A.md").read_text(encoding="utf-8")
+            b_text_after_plan = (root / "B.md").read_text(encoding="utf-8")
+            c_text_after_plan = (root / "C.md").read_text(encoding="utf-8")
+            log_text_after_plan = (root / "Log.md").read_text(encoding="utf-8")
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows_after_plan = connection.execute(
+                    """
+                    SELECT event_id, event_type
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+
+        self.assertEqual(
+            log_batch_plan["candidate_event_ids"],
+            [a_update["event_id"], b_update["event_id"], c_update["event_id"], closing_log["event_id"]],
+        )
+        self.assertEqual(subject_plan["scope"], "subject-log")
+        self.assertTrue(subject_plan["complete"])
+        self.assertTrue(subject_plan["revertible"])
+        self.assertEqual(subject_plan["previous_log_event"]["event_id"], previous_log["event_id"])
+        self.assertEqual(subject_plan["closing_log_event"]["event_id"], closing_log["event_id"])
+        self.assertEqual(subject_plan["subject_log_subjects"], ["A", "C"])
+        self.assertEqual(
+            subject_plan["candidate_event_ids"],
+            [a_update["event_id"], c_update["event_id"], closing_log["event_id"]],
+        )
+        self.assertEqual(
+            subject_plan["revert_order_event_ids"],
+            [closing_log["event_id"], c_update["event_id"], a_update["event_id"]],
+        )
+        self.assertEqual(
+            [event["event_type"] for event in subject_plan["candidate_events"]],
+            ["page_update", "page_update", "log_append"],
+        )
+        self.assertEqual(
+            [event["event_id"] for event in subject_plan["excluded_events"]],
+            [b_update["event_id"]],
+        )
+        self.assertIn("does not match closing log subjects", subject_plan["excluded_events"][0]["reason"])
+        self.assertEqual(
+            [event["target_event_id"] for event in subject_plan["reverted_events"]],
+            [closing_log["event_id"], c_update["event_id"], a_update["event_id"]],
+        )
+        self.assertEqual(
+            subject_plan["suggested_revert_events_args"],
+            [
+                "revert-events",
+                a_update["event_id"],
+                c_update["event_id"],
+                closing_log["event_id"],
+                "--output",
+                str(root),
+            ],
+        )
+        self.assertFalse(b_anchor_plan["complete"])
+        self.assertFalse(b_anchor_plan["revertible"])
+        self.assertIn("does not match closing log subjects", b_anchor_plan["reason"])
+        self.assertEqual(a_text_after_plan, "# A\nnew A\n")
+        self.assertEqual(b_text_after_plan, "# B\nnew B\n")
+        self.assertEqual(c_text_after_plan, "# C\nnew C\n")
+        self.assertIn("subject batch", log_text_after_plan)
+        self.assertEqual(
+            [row[1] for row in sqlite_event_rows_after_plan],
+            ["log_append", "page_update", "page_update", "page_update", "log_append"],
+        )
+
     def test_revert_plan_same_page_dependents_handles_missing_log_batch_boundary(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"

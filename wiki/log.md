@@ -1301,3 +1301,9 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 - implemented: revert-plan <event-id> --scope session returns read-only rollback candidates for selected-project events sharing the anchor session_id.
 - tests: covered interleaved page_update events from two sessions, env-default event metadata, and empty-session anchors rejected by session planning.
 - docs: bumped compatibility version to 1.8.30 and narrowed remaining work-unit inference to cases beyond log-batch, same-page, explicit event-window, time-burst, or session boundaries.
+
+## [2026-06-27 23:52] implementation | add subject-log revert planning
+- implemented: revert-plan <event-id> --scope subject-log now filters a too-broad log-batch by subjects extracted from the closing log_append summary/body.
+- implemented: subject-log candidates include matching page events plus the closing log_append, then reuse the existing rollback-only safety check and suggested revert-events args.
+- tests: covered a mixed A/B/C page_update log-batch where the closing log mentions [[A]] and concepts/C.md, proving B is excluded and the plan stays read-only.
+- docs: bumped compatibility version to 1.8.31 and narrowed remaining work-unit inference to cases beyond log-batch, subject-log, same-page, explicit event-window, time-burst, or session boundaries.
