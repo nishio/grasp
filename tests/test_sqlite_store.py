@@ -382,6 +382,57 @@ class SQLiteStoreTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_append_markdown_lines_rolls_back_state_when_event_insert_fails(self):
+        class FixedUuid:
+            hex = "fixed-event-id"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                existing_event = make_journal_event(
+                    "section_append",
+                    project="wiki",
+                    event_id="fixed-event-id",
+                    created_at="2026-06-27T00:00:00+00:00",
+                    payload={
+                        "page_id": "preexisting",
+                        "title": "Preexisting",
+                        "heading": "Existing",
+                        "lines": [],
+                        "inserted_lines": [],
+                    },
+                )
+                store.import_journal_events([existing_event])
+                page_before = store.resolve_page("A")
+                self.assertEqual(
+                    [line.text for line in store.page_lines(page_before)[0]],
+                    ["# A"],
+                )
+
+                with patch("grasp.journal.uuid4", return_value=FixedUuid()):
+                    with self.assertRaises(sqlite3.IntegrityError):
+                        store.append_markdown_lines_with_event(
+                            "A",
+                            ["", "## Updates", "- changed"],
+                            event_type="section_append",
+                            payload={"heading": "Updates", "lines": ["- changed"]},
+                        )
+
+                page_after = store.resolve_page("A")
+                self.assertEqual(
+                    [line.text for line in store.page_lines(page_after)[0]],
+                    ["# A"],
+                )
+                self.assertEqual(store.event_count(), 1)
+            finally:
+                store.close()
+
     def test_import_export_to_sqlite_and_query(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             export_path = Path(tmpdir) / "export.json"

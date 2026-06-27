@@ -2686,6 +2686,10 @@ class SQLiteStore:
         return result
 
     def append_markdown_lines(self, title: str, lines: list[str]) -> dict[str, Any]:
+        with self.connection:
+            return self._append_markdown_lines_uncommitted(title, lines)
+
+    def _append_markdown_lines_uncommitted(self, title: str, lines: list[str]) -> dict[str, Any]:
         project = self._require_project()
         if not lines:
             raise ValueError("append requires at least one line")
@@ -2710,42 +2714,41 @@ class SQLiteStore:
         start_index = int(start_row["start_index"])
         appended = []
         edge_rows = []
-        with self.connection:
-            for offset, text in enumerate(lines):
-                line_index = start_index + offset
-                line_id = f"line-{uuid4().hex}"
-                appended.append(
-                    {
-                        "line_id": line_id,
-                        "line_index": line_index,
-                        "text": text,
-                        "created": now,
-                        "updated": now,
-                        "user_id": "grasp",
-                    }
-                )
-                self.connection.execute(
-                    """
-                    INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (project, line_id, page_id, line_index, text, now, now, "grasp"),
-                )
-                for target_title in parse_markdown_links(text):
-                    edge_rows.append((project, page_id, line_id, target_title, normalize_title(target_title)))
-            _insert_edge_rows(self.connection, edge_rows)
-            refresh_edge_resolutions(self.connection, project)
-            rebuild_unresolved_targets(self.connection, project)
+        for offset, text in enumerate(lines):
+            line_index = start_index + offset
+            line_id = f"line-{uuid4().hex}"
+            appended.append(
+                {
+                    "line_id": line_id,
+                    "line_index": line_index,
+                    "text": text,
+                    "created": now,
+                    "updated": now,
+                    "user_id": "grasp",
+                }
+            )
             self.connection.execute(
                 """
-                UPDATE pages
-                SET updated = ?,
-                    line_count = (SELECT COUNT(*) FROM lines WHERE project = ? AND page_id = ?)
-                WHERE project = ? AND id = ?
+                INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (now, project, page_id, project, page_id),
+                (project, line_id, page_id, line_index, text, now, now, "grasp"),
             )
-            _refresh_project_counts_sql(self.connection, project)
+            for target_title in parse_markdown_links(text):
+                edge_rows.append((project, page_id, line_id, target_title, normalize_title(target_title)))
+        _insert_edge_rows(self.connection, edge_rows)
+        refresh_edge_resolutions(self.connection, project)
+        rebuild_unresolved_targets(self.connection, project)
+        self.connection.execute(
+            """
+            UPDATE pages
+            SET updated = ?,
+                line_count = (SELECT COUNT(*) FROM lines WHERE project = ? AND page_id = ?)
+            WHERE project = ? AND id = ?
+            """,
+            (now, project, page_id, project, page_id),
+        )
+        _refresh_project_counts_sql(self.connection, project)
         page = self._page_by_id(page_id)
         return {
             "project": project,
@@ -2755,6 +2758,34 @@ class SQLiteStore:
             "appended_line_count": len(appended),
             "edge_count": len(edge_rows),
         }
+
+    def append_markdown_lines_with_event(
+        self,
+        title: str,
+        lines: list[str],
+        *,
+        event_type: str,
+        payload: dict[str, Any],
+        actor: str = "",
+        session_id: str = "",
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if event_type not in {"section_append", "log_append"}:
+            raise ValueError(f"unsupported append event_type: {event_type!r}")
+        with self.write_transaction():
+            append_result = self._append_markdown_lines_uncommitted(title, lines)
+            event_payload = {
+                "page_id": append_result["page"]["id"],
+                "title": append_result["page"]["title"],
+                **payload,
+                "inserted_lines": append_result["appended_lines"],
+            }
+            event = make_journal_event(
+                event_type,
+                project=append_result["project"],
+                payload=event_payload,
+            )
+            insert_store_event(self.connection, event, actor=actor, session_id=session_id)
+        return append_result, event
 
     def create_markdown_page(
         self,

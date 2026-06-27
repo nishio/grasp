@@ -2853,6 +2853,17 @@ class CliHelpTests(unittest.TestCase):
             ]
             page_text = (root / "A.md").read_text(encoding="utf-8")
             log_text = (root / "Log.md").read_text(encoding="utf-8")
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_id, event_type, project, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
 
         section_result = json.loads(section_completed.stdout)
         status_result = json.loads(status_completed.stdout)
@@ -2872,6 +2883,16 @@ class CliHelpTests(unittest.TestCase):
                 "event_revert",
             ],
         )
+        self.assertEqual(
+            [row[1] for row in sqlite_event_rows],
+            ["section_append", "log_append", "page_update"],
+        )
+        self.assertEqual([row[2] for row in sqlite_event_rows], ["wiki", "wiki", "wiki"])
+        self.assertEqual(sqlite_event_rows[0][0], section_result["event_id"])
+        self.assertEqual(sqlite_event_rows[1][0], log_result["event_id"])
+        self.assertEqual(sqlite_event_rows[2][0], write_result["event_id"])
+        self.assertEqual(json.loads(sqlite_event_rows[0][3])["heading"], "Updates")
+        self.assertEqual(json.loads(sqlite_event_rows[1][3])["op"], "test")
         self.assertIn("\n## Updates\n- detail [[B]]\n", page_text)
         self.assertNotIn("- rewritten [[C]]", page_text)
         self.assertEqual(log_text, "# Log\n")
