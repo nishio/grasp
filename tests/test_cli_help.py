@@ -3731,6 +3731,131 @@ class CliHelpTests(unittest.TestCase):
             ["log_append", "page_update", "page_update", "log_append"],
         )
 
+    def test_revert_plan_same_page_dependents_handles_missing_log_batch_boundary(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            def run_json(*args):
+                completed = subprocess.run(
+                    [sys.executable, "-m", "grasp", "--json", "--store", str(store_path), "--project", "wiki", *args],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            first_append = run_json(
+                "append-section",
+                "A",
+                "--heading",
+                "First",
+                "--line",
+                "- first",
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            second_append = run_json(
+                "append-section",
+                "A",
+                "--heading",
+                "Second",
+                "--line",
+                "- second",
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            blocked_without_dependents = run_json(
+                "revert-event",
+                first_append["event_id"],
+                "--output",
+                str(root),
+                "--no-journal",
+                "--dry-run",
+            )
+            plan = run_json(
+                "revert-plan",
+                first_append["event_id"],
+                "--scope",
+                "same-page-dependents",
+                "--output",
+                str(root),
+            )
+            page_text_after_plan = (root / "A.md").read_text(encoding="utf-8")
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows_after_plan = connection.execute(
+                    """
+                    SELECT event_id, event_type
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+
+        self.assertFalse(blocked_without_dependents["revertible"])
+        self.assertIn("event is not at the page tail", blocked_without_dependents["reason"])
+        self.assertTrue(plan["complete"])
+        self.assertTrue(plan["revertible"])
+        self.assertIsNone(plan["previous_log_event"])
+        self.assertIsNone(plan["closing_log_event"])
+        self.assertEqual(
+            plan["candidate_event_ids"],
+            [first_append["event_id"], second_append["event_id"]],
+        )
+        self.assertEqual(plan["dependent_event_ids"], [second_append["event_id"]])
+        self.assertEqual(
+            plan["revert_order_event_ids"],
+            [second_append["event_id"], first_append["event_id"]],
+        )
+        self.assertEqual(
+            [event["event_type"] for event in plan["candidate_events"]],
+            ["section_append", "section_append"],
+        )
+        self.assertEqual(plan["excluded_events"], [])
+        self.assertEqual(
+            [event["target_event_id"] for event in plan["reverted_events"]],
+            [second_append["event_id"], first_append["event_id"]],
+        )
+        self.assertEqual(
+            plan["suggested_revert_events_args"],
+            [
+                "revert-events",
+                first_append["event_id"],
+                second_append["event_id"],
+                "--output",
+                str(root),
+            ],
+        )
+        self.assertIn("- first", page_text_after_plan)
+        self.assertIn("- second", page_text_after_plan)
+        self.assertEqual(
+            [row[1] for row in sqlite_event_rows_after_plan],
+            ["section_append", "section_append"],
+        )
+
     def test_replay_journal_page_update_tolerates_line_id_drift_when_text_matches(self):
         def event(event_type, event_id, payload):
             return {

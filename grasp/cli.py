@@ -1160,28 +1160,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Plan a rollback event set from SQLite history.",
         description=(
             "Infer a read-only rollback plan from selected-project SQLite events. "
-            "The initial scope is log-batch: find the log_append entry that closes the work unit containing "
+            "The default scope is log-batch: find the log_append entry that closes the work unit containing "
             "the anchor event, then return active reversible events after the previous log_append through that "
-            "closing log_append. The result is intended to feed revert-events; it does not mutate store, journal, "
-            "or projection files."
+            "closing log_append. Use --scope same-page-dependents when no log-batch boundary exists and the "
+            "anchor is blocked by later active events on the same page. The result is intended to feed "
+            "revert-events; it does not mutate store, journal, or projection files."
         ),
         returns=(
             "project, scope, anchor_event_id, complete, previous_log_event|null, closing_log_event|null, "
-            "candidate_event_ids[], revert_order_event_ids[], candidate_events[], excluded_events[], "
+            "candidate_event_ids[], dependent_event_ids[]?, revert_order_event_ids[], candidate_events[], excluded_events[], "
             "revertible, reverted_events[], reason?, suggested_revert_events_args[]?"
         ),
         examples=[
             "grasp --project grasp-wiki revert-plan <event-id> --scope log-batch",
+            "grasp --project grasp-wiki revert-plan <event-id> --scope same-page-dependents",
             "grasp --project grasp-wiki --json revert-plan <event-id> --scope log-batch --output wiki",
         ],
         notes=[
             "Read-only: this command never appends event_revert and never exports Markdown.",
             "log-batch is for file-back style workflows that append one log entry after a group of page writes.",
+            "same-page-dependents mirrors revert-event --include-dependents planning without mutating.",
             "Use the returned candidate_event_ids with revert-events, then run revert-events --dry-run before mutating.",
         ],
     )
     revert_plan_parser.add_argument("event_id", help="Anchor SQLite event id inside the work unit to plan.")
-    revert_plan_parser.add_argument("--scope", choices=["log-batch"], default="log-batch", help="Planning scope to infer around the anchor event.")
+    revert_plan_parser.add_argument("--scope", choices=["log-batch", "same-page-dependents"], default="log-batch", help="Planning scope to infer around the anchor event.")
     revert_plan_parser.add_argument("--output", type=Path, help="Optional projection output folder to include in suggested revert-events args.")
 
     replay_journal_parser = add_command_parser(
@@ -3161,6 +3164,8 @@ def run_revert_plan(store: SQLiteStore, args: argparse.Namespace) -> dict[str, A
         )
     if args.scope == "log-batch":
         return log_batch_revert_plan(store, args, selected_project, sqlite_events, anchor)
+    if args.scope == "same-page-dependents":
+        return same_page_dependents_revert_plan(store, args, selected_project, sqlite_events, anchor)
     raise ValueError(f"unsupported revert-plan scope: {args.scope}")
 
 
@@ -3215,6 +3220,89 @@ def log_batch_revert_plan(
     }
     if not result["complete"]:
         result["reason"] = "no closing log_append found after anchor; treating events through current SQLite tail as an incomplete log-batch"
+    if not check["revertible"]:
+        result["reason"] = check["reason"]
+    if args.output is not None and candidate_event_ids:
+        result["suggested_revert_events_args"] = [
+            "revert-events",
+            *candidate_event_ids,
+            "--output",
+            str(args.output),
+        ]
+    return result
+
+
+def same_page_dependents_revert_plan(
+    store: SQLiteStore,
+    args: argparse.Namespace,
+    project: str,
+    sqlite_events: list[dict[str, Any]],
+    anchor: dict[str, Any],
+) -> dict[str, Any]:
+    reverted_ids = reverted_target_event_ids(sqlite_events)
+    excluded_events: list[dict[str, Any]] = []
+    anchor_exclusion = revert_plan_exclusion_reason(anchor, reverted_ids)
+    if anchor_exclusion:
+        excluded_events.append(revert_plan_event_summary(anchor, reason=anchor_exclusion))
+        return {
+            "project": project,
+            "scope": args.scope,
+            "anchor_event_id": anchor["event_id"],
+            "anchor_event": revert_plan_event_summary(anchor),
+            "complete": True,
+            "previous_log_event": None,
+            "closing_log_event": None,
+            "candidate_event_ids": [],
+            "dependent_event_ids": [],
+            "revert_order_event_ids": [],
+            "candidate_events": [],
+            "excluded_events": excluded_events,
+            "revertible": False,
+            "reverted_events": [],
+            "reason": anchor_exclusion,
+        }
+    try:
+        dependent_events = dependent_revert_events(sqlite_events, anchor)
+    except ValueError as error:
+        return {
+            "project": project,
+            "scope": args.scope,
+            "anchor_event_id": anchor["event_id"],
+            "anchor_event": revert_plan_event_summary(anchor),
+            "complete": False,
+            "previous_log_event": None,
+            "closing_log_event": None,
+            "candidate_event_ids": [anchor["event_id"]],
+            "dependent_event_ids": [],
+            "revert_order_event_ids": [anchor["event_id"]],
+            "candidate_events": [revert_plan_event_summary(anchor)],
+            "excluded_events": excluded_events,
+            "revertible": False,
+            "reverted_events": [],
+            "reason": str(error),
+        }
+
+    chronological_dependents = list(reversed(dependent_events))
+    candidates = [anchor, *chronological_dependents]
+    targets = [*dependent_events, anchor]
+    check = check_revert_plan_revertible(store, targets)
+    candidate_event_ids = [event["event_id"] for event in candidates]
+    result: dict[str, Any] = {
+        "project": project,
+        "scope": args.scope,
+        "anchor_event_id": anchor["event_id"],
+        "anchor_event": revert_plan_event_summary(anchor),
+        "complete": True,
+        "previous_log_event": None,
+        "closing_log_event": None,
+        "candidate_event_ids": candidate_event_ids,
+        "dependent_event_ids": [event["event_id"] for event in dependent_events],
+        "revert_order_event_ids": [event["event_id"] for event in targets],
+        "candidate_events": [revert_plan_event_summary(event) for event in candidates],
+        "excluded_events": excluded_events,
+        "revertible": check["revertible"],
+        "reverted_events": check["reverted_events"],
+    }
     if not check["revertible"]:
         result["reason"] = check["reason"]
     if args.output is not None and candidate_event_ids:
