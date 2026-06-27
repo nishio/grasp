@@ -129,6 +129,7 @@ Alpha:
 - `write-status` / `revert-event` / `replay-journal` による recovery surface
 - write/status は移行用の compatibility JSONL journal を使えるほか、`--no-journal` で SQLite events + Markdown projection だけの path も検証できる
 - repo-local file-back guard scripts の通常 path は `--no-journal` で、compatibility journal あり mode は明示 audit 用に残す
+- `scripts/check_file_back_runbook.py` で repo-local file-back runbook の `--no-journal` default drift を検出する
 
 スコープ外:
 
