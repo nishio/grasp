@@ -5632,6 +5632,374 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(a_text, "# A\n- local draft\n")
         self.assertEqual(b_text, "# B\n")
 
+    def test_write_page_line_refuses_dirty_target_projection_file_before_mutation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            root = repo_root / "wiki"
+            root.mkdir(parents=True)
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            init_git_repo(repo_root)
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "A.md").write_text("# A\n- local draft\n", encoding="utf-8")
+            failed_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    "A",
+                    "--line",
+                    "# A",
+                    "--line",
+                    "- replacement",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            peek_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_types = [
+                    row[0]
+                    for row in connection.execute(
+                        """
+                        SELECT event_type
+                        FROM events
+                        ORDER BY event_sequence
+                        """
+                    ).fetchall()
+                ]
+            finally:
+                connection.close()
+            a_text = (root / "A.md").read_text(encoding="utf-8")
+
+        peek_result = json.loads(peek_completed.stdout)
+        self.assertEqual(failed_completed.returncode, 2)
+        self.assertIn("dirty write target paths", failed_completed.stderr)
+        self.assertIn("A.md", failed_completed.stderr)
+        self.assertEqual(sqlite_event_types, [])
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
+        self.assertEqual(a_text, "# A\n- local draft\n")
+
+    def test_append_section_refuses_dirty_target_projection_file_before_mutation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            root = repo_root / "wiki"
+            root.mkdir(parents=True)
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            init_git_repo(repo_root)
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "A.md").write_text("# A\n- local draft\n", encoding="utf-8")
+            failed_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-section",
+                    "A",
+                    "--heading",
+                    "Notes",
+                    "--line",
+                    "- appended",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            peek_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_types = [
+                    row[0]
+                    for row in connection.execute(
+                        """
+                        SELECT event_type
+                        FROM events
+                        ORDER BY event_sequence
+                        """
+                    ).fetchall()
+                ]
+            finally:
+                connection.close()
+            a_text = (root / "A.md").read_text(encoding="utf-8")
+
+        peek_result = json.loads(peek_completed.stdout)
+        self.assertEqual(failed_completed.returncode, 2)
+        self.assertIn("dirty write target paths", failed_completed.stderr)
+        self.assertIn("A.md", failed_completed.stderr)
+        self.assertEqual(sqlite_event_types, [])
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
+        self.assertEqual(a_text, "# A\n- local draft\n")
+
+    def test_append_log_refuses_dirty_target_projection_file_before_mutation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            root = repo_root / "wiki"
+            root.mkdir(parents=True)
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            init_git_repo(repo_root)
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "Log.md").write_text("# Log\n- local draft\n", encoding="utf-8")
+            failed_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-log",
+                    "--timestamp",
+                    "2026-06-28 06:45",
+                    "--op",
+                    "test",
+                    "--summary",
+                    "blocked",
+                    "--line",
+                    "- appended",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            peek_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "Log",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_types = [
+                    row[0]
+                    for row in connection.execute(
+                        """
+                        SELECT event_type
+                        FROM events
+                        ORDER BY event_sequence
+                        """
+                    ).fetchall()
+                ]
+            finally:
+                connection.close()
+            log_text = (root / "Log.md").read_text(encoding="utf-8")
+
+        peek_result = json.loads(peek_completed.stdout)
+        self.assertEqual(failed_completed.returncode, 2)
+        self.assertIn("dirty write target paths", failed_completed.stderr)
+        self.assertIn("Log.md", failed_completed.stderr)
+        self.assertEqual(sqlite_event_types, [])
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# Log"])
+        self.assertEqual(log_text, "# Log\n- local draft\n")
+
+    def test_rename_page_refuses_dirty_target_projection_file_before_mutation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            root = repo_root / "wiki"
+            root.mkdir(parents=True)
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            init_git_repo(repo_root)
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "A.md").write_text("# A\n- local draft\n", encoding="utf-8")
+            failed_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "rename-page",
+                    "A",
+                    "Renamed",
+                    "--new-path",
+                    "Renamed.md",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            peek_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_types = [
+                    row[0]
+                    for row in connection.execute(
+                        """
+                        SELECT event_type
+                        FROM events
+                        ORDER BY event_sequence
+                        """
+                    ).fetchall()
+                ]
+            finally:
+                connection.close()
+            a_text = (root / "A.md").read_text(encoding="utf-8")
+            renamed_exists = (root / "Renamed.md").exists()
+
+        peek_result = json.loads(peek_completed.stdout)
+        self.assertEqual(failed_completed.returncode, 2)
+        self.assertIn("dirty write target paths", failed_completed.stderr)
+        self.assertIn("A.md", failed_completed.stderr)
+        self.assertEqual(sqlite_event_types, [])
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
+        self.assertEqual(a_text, "# A\n- local draft\n")
+        self.assertFalse(renamed_exists)
+
     def test_write_page_allows_other_dirty_projection_file_when_it_matches_store(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir) / "repo"

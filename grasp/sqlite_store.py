@@ -2771,6 +2771,21 @@ class SQLiteStore:
             "edge_count": len(edge_rows),
         }
 
+    def markdown_source_path_for_unique_handle(self, title: str) -> str:
+        project = self._require_project()
+        if not self._markdown_manifest_for_project(project):
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+        candidates = self.page_handle_candidates(title)
+        if not candidates:
+            raise ValueError(f"page not found: {title}")
+        if len(candidates) > 1:
+            raise ValueError(f"page handle is ambiguous: {title}; use a unique title for write alpha")
+        source_path = str(candidates[0].get("path") or "")
+        if not source_path:
+            page_id = str(candidates[0].get("page_id") or "")
+            raise ValueError(f"Markdown manifest has no source path for page_id: {page_id}")
+        return source_path
+
     def append_markdown_lines_with_event(
         self,
         title: str,
@@ -3090,6 +3105,31 @@ class SQLiteStore:
             )
             insert_store_event(self.connection, event, actor=actor, session_id=session_id)
         return update_result, event
+
+    def markdown_source_paths_for_rename_target(
+        self,
+        target: str,
+        *,
+        target_kind: str = "handle",
+        new_source_path: str | None = None,
+    ) -> set[str]:
+        project = self._require_project()
+        manifest = self._markdown_manifest_for_project(project)
+        files = manifest.get("files")
+        if not isinstance(files, dict) or not files:
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+        page = self._resolve_markdown_rename_target(target, target_kind)
+        if page is None:
+            raise ValueError(f"page not found for rename target: {target}")
+        previous_source_path, _item = self._markdown_manifest_entry_for_page(manifest, page.id)
+        source_path = (
+            _safe_markdown_relative_path(new_source_path)
+            if new_source_path is not None
+            else previous_source_path
+        )
+        if source_path in files and str(files[source_path].get("page_id") or "") != page.id:
+            raise ValueError(f"Markdown source path already belongs to another page: {source_path}")
+        return {previous_source_path, source_path}
 
     @staticmethod
     def _markdown_page_rename_event_payload(rename_result: dict[str, Any], message: str) -> dict[str, Any]:
