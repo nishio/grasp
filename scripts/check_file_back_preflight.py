@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -33,6 +34,9 @@ DEFAULT_BASE = "auto"
 FALLBACK_BASE = "origin/main"
 DEFAULT_FILE_BACK_STORE = ".grasp/file-back.sqlite"
 DEFAULT_FILE_BACK_OUTPUT = "wiki"
+DEFAULT_FILE_BACK_BOOTSTRAP_JOURNAL = ".grasp/file-back-adopt.jsonl"
+DEFAULT_FILE_BACK_BOOTSTRAP_ACTOR = "file-back-preflight"
+DEFAULT_FILE_BACK_BOOTSTRAP_SESSION_ID = "bootstrap-file-back-store"
 DEFAULT_PREFLIGHT_STAMP = ".grasp/file-back-preflight.json"
 PREFLIGHT_STAMP_KIND = "grasp_file_back_preflight"
 PREFLIGHT_STAMP_SCHEMA_VERSION = 1
@@ -276,6 +280,54 @@ def project_events(store: str, project: str) -> list[dict[str, Any]]:
         sqlite_store.close()
 
 
+def project_has_events(store: str, project: str) -> bool:
+    try:
+        return bool(project_events(store, project))
+    except sqlite3.Error:
+        return False
+
+
+def bootstrap_file_back_store_if_needed(
+    repo: Path,
+    *,
+    store: str,
+    project: str,
+    output: str,
+    require_journal: bool,
+) -> list[str]:
+    if require_journal or project_has_events(store, project):
+        return []
+    command = [
+        sys.executable,
+        "-m",
+        "grasp",
+        "--json",
+        "--store",
+        store,
+        "--actor",
+        DEFAULT_FILE_BACK_BOOTSTRAP_ACTOR,
+        "--session-id",
+        DEFAULT_FILE_BACK_BOOTSTRAP_SESSION_ID,
+        "adopt-markdown",
+        output,
+        "--project",
+        project,
+        "--journal",
+        DEFAULT_FILE_BACK_BOOTSTRAP_JOURNAL,
+        "--replace-journal",
+    ]
+    completed = run_command(command, cwd=repo)
+    error = require_success(completed, "grasp adopt-markdown bootstrap")
+    if error:
+        return [error]
+    result, json_error = parse_json_output(completed.stdout, "adopt-markdown bootstrap")
+    if result is None:
+        return [json_error or "adopt-markdown bootstrap returned no JSON"]
+    if result.get("project") != project:
+        return [f"adopt-markdown bootstrap project={result.get('project')!r}, expected {project!r}"]
+    return []
+
+
 def write_status_command(
     *,
     store: str,
@@ -320,6 +372,18 @@ def run_grasp_preflight(
 ) -> list[str]:
     errors: list[str] = []
     errors.extend(file_back_store_output_pair_errors(repo, store=store, output=output))
+    if errors:
+        return errors
+
+    errors.extend(
+        bootstrap_file_back_store_if_needed(
+            repo,
+            store=store,
+            project=project,
+            output=output,
+            require_journal=require_journal,
+        )
+    )
     if errors:
         return errors
 
