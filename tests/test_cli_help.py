@@ -39,6 +39,7 @@ COMMANDS = [
     "rename-page",
     "write-status",
     "revert-event",
+    "revert-events",
     "replay-journal",
     "sync",
     "acquire",
@@ -3445,6 +3446,141 @@ class CliHelpTests(unittest.TestCase):
         )
         self.assertEqual(files_after_revert, ["A.md"])
         self.assertEqual(a_text_after_revert, "# A\nlink [[Old]]\n")
+
+    def test_revert_events_reverts_explicit_multi_page_events_in_reverse_sequence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nold A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nold B\n", encoding="utf-8")
+            a_source = Path(tmpdir) / "A-new.md"
+            b_source = Path(tmpdir) / "B-new.md"
+            a_source.write_text("# A\nnew A\n", encoding="utf-8")
+            b_source.write_text("# B\nnew B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            def run_json(*args):
+                completed = subprocess.run(
+                    [sys.executable, "-m", "grasp", "--json", "--store", str(store_path), "--project", "wiki", *args],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            a_update = run_json(
+                "write-page",
+                "A",
+                "--from-file",
+                str(a_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            b_update = run_json(
+                "write-page",
+                "B",
+                "--from-file",
+                str(b_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            dry_run_result = run_json(
+                "revert-events",
+                a_update["event_id"],
+                b_update["event_id"],
+                "--output",
+                str(root),
+                "--no-journal",
+                "--dry-run",
+            )
+            a_text_after_dry_run = (root / "A.md").read_text(encoding="utf-8")
+            b_text_after_dry_run = (root / "B.md").read_text(encoding="utf-8")
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows_after_dry_run = connection.execute(
+                    """
+                    SELECT event_id, event_type, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            revert_result = run_json(
+                "revert-events",
+                a_update["event_id"],
+                b_update["event_id"],
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            a_text_after_revert = (root / "A.md").read_text(encoding="utf-8")
+            b_text_after_revert = (root / "B.md").read_text(encoding="utf-8")
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows_after_revert = connection.execute(
+                    """
+                    SELECT event_id, event_type, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+
+        self.assertTrue(dry_run_result["dry_run"])
+        self.assertTrue(dry_run_result["revertible"])
+        self.assertEqual(dry_run_result["requested_event_ids"], [a_update["event_id"], b_update["event_id"]])
+        self.assertEqual(dry_run_result["revert_order_event_ids"], [b_update["event_id"], a_update["event_id"]])
+        self.assertEqual(dry_run_result["would_event_count"], 2)
+        self.assertEqual(dry_run_result["event_ids"], [])
+        self.assertEqual(
+            [event["target_event_id"] for event in dry_run_result["reverted_events"]],
+            [b_update["event_id"], a_update["event_id"]],
+        )
+        self.assertEqual(a_text_after_dry_run, "# A\nnew A\n")
+        self.assertEqual(b_text_after_dry_run, "# B\nnew B\n")
+        self.assertEqual([row[1] for row in sqlite_event_rows_after_dry_run], ["page_update", "page_update"])
+        self.assertFalse(revert_result["dry_run"])
+        self.assertTrue(revert_result["revertible"])
+        self.assertEqual(revert_result["requested_event_ids"], [a_update["event_id"], b_update["event_id"]])
+        self.assertEqual(revert_result["revert_order_event_ids"], [b_update["event_id"], a_update["event_id"]])
+        self.assertEqual(revert_result["target_event_ids"], [b_update["event_id"], a_update["event_id"]])
+        self.assertEqual(revert_result["reverted_event_count"], 2)
+        self.assertEqual(len(revert_result["event_ids"]), 2)
+        self.assertEqual(
+            [event["target_event_id"] for event in revert_result["reverted_events"]],
+            [b_update["event_id"], a_update["event_id"]],
+        )
+        self.assertEqual(a_text_after_revert, "# A\nold A\n")
+        self.assertEqual(b_text_after_revert, "# B\nold B\n")
+        self.assertEqual(
+            [row[1] for row in sqlite_event_rows_after_revert],
+            ["page_update", "page_update", "event_revert", "event_revert"],
+        )
+        self.assertEqual(
+            [json.loads(row[2])["target_event_id"] for row in sqlite_event_rows_after_revert[2:]],
+            [b_update["event_id"], a_update["event_id"]],
+        )
 
     def test_replay_journal_page_update_tolerates_line_id_drift_when_text_matches(self):
         def event(event_type, event_id, payload):

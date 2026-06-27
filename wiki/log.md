@@ -1270,3 +1270,8 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 - tests: added regression coverage for reverting a page_create after a later page_rename with --include-dependents; the dependent rename is reverted first and only the final New.md projection is removed.
 - docs: updated skills/grasp/SKILL.md so agents see page_create revert, --dry-run, and --include-dependents as part of the recovery surface.
 - scope: no CLI behavior change; this fixes agent-facing documentation and locks the rename-dependent projection case into tests.
+
+## [2026-06-27 22:23] implementation | add explicit multi-event rollback
+- implemented: revert-events <event-id...> rolls back explicitly selected active SQLite events in reverse event_sequence inside one transaction.
+- dry-run: revert-events --dry-run returns requested_event_ids / revert_order_event_ids / would_event_count without mutating store, journal, or projection.
+- tests: covered two page_update events across different pages to verify multi-page rollback order and event_revert payloads.
