@@ -907,10 +907,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Append a Markdown section through the alpha write path.",
         description=(
             "Append a section to a Markdown-backed page, update the SQLite materialized index, "
-            "append a section_append journal event, and export the Markdown projection."
+            "record a section_append SQLite event, optionally append the compatibility JSONL journal, "
+            "and export the Markdown projection."
         ),
         returns=(
-            "project, page, journal, output, event_id, appended_lines[], appended_line_count, edge_count, projection"
+            "project, page, journal|null, journal_written, output, event_id, appended_lines[], appended_line_count, edge_count, projection"
         ),
         examples=[
             "grasp --project grasp-wiki append-section llm-wiki-infra-fast-path-plan --heading Updates --line '- note' --output wiki --journal wiki.grasp/events.jsonl",
@@ -925,7 +926,7 @@ def build_parser() -> argparse.ArgumentParser:
     append_section_parser.add_argument("--heading", required=True, help="Section heading text without leading ##.")
     append_section_parser.add_argument("--line", action="append", default=[], help="Body line to append. Repeat for multiple lines.")
     append_section_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
-    append_section_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
+    add_optional_write_journal_arguments(append_section_parser)
 
     append_log_parser = add_command_parser(
         subparsers,
@@ -933,10 +934,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Append a log entry through the alpha write path.",
         description=(
             "Append a dated log entry to a Markdown-backed log page, update the SQLite materialized index, "
-            "append a log_append journal event, and export the Markdown projection."
+            "record a log_append SQLite event, optionally append the compatibility JSONL journal, "
+            "and export the Markdown projection."
         ),
         returns=(
-            "project, page, journal, output, event_id, timestamp, op, summary, appended_lines[], appended_line_count, edge_count, projection"
+            "project, page, journal|null, journal_written, output, event_id, timestamp, op, summary, appended_lines[], appended_line_count, edge_count, projection"
         ),
         examples=[
             "grasp --project grasp-wiki append-log --op implementation --summary 'append-section alpha' --line '- details' --output wiki",
@@ -953,7 +955,7 @@ def build_parser() -> argparse.ArgumentParser:
     append_log_parser.add_argument("--summary", required=True, help="Short summary for the log heading.")
     append_log_parser.add_argument("--line", action="append", default=[], help="Body line to append. Repeat for multiple lines.")
     append_log_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
-    append_log_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
+    add_optional_write_journal_arguments(append_log_parser)
 
     write_page_parser = add_command_parser(
         subparsers,
@@ -961,11 +963,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Create or replace a Markdown page through the alpha write path.",
         description=(
             "Create a new Markdown-backed page with --create, or replace all stored lines of an existing page. "
-            "The command appends a page_create/page_update journal event, updates the SQLite materialized index, "
-            "and exports the Markdown projection."
+            "The command records a page_create/page_update SQLite event, updates the SQLite materialized index, "
+            "optionally appends the compatibility JSONL journal, and exports the Markdown projection."
         ),
         returns=(
-            "project, page, journal, output, event_id, event_type, source_path, previous_lines[], lines[], "
+            "project, page, journal|null, journal_written, output, event_id, event_type, source_path, previous_lines[], lines[], "
             "previous_line_count, line_count, edge_count, projection"
         ),
         examples=[
@@ -987,7 +989,7 @@ def build_parser() -> argparse.ArgumentParser:
     write_page_parser.add_argument("--path", dest="source_path", default=None, help="New Markdown projection path for --create, relative to --output and ending in .md.")
     write_page_parser.add_argument("--message", default="", help="Optional update message stored in the journal payload.")
     write_page_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
-    write_page_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
+    add_optional_write_journal_arguments(write_page_parser)
 
     rename_page_parser = add_command_parser(
         subparsers,
@@ -1000,7 +1002,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Optionally move the Markdown projection source path."
         ),
         returns=(
-            "project, page, journal, output, event_id, event_type, previous_title, title, previous_source_path, "
+            "project, page, journal|null, journal_written, output, event_id, event_type, previous_title, title, previous_source_path, "
             "source_path, previous_lines[], lines[], aliases[], heading_updated, edge_count, projection"
         ),
         examples=[
@@ -1020,7 +1022,7 @@ def build_parser() -> argparse.ArgumentParser:
     rename_page_parser.add_argument("--no-heading-update", action="store_true", help="Do not update a matching first H1 line.")
     rename_page_parser.add_argument("--message", default="", help="Optional rename message stored in the journal payload.")
     rename_page_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
-    rename_page_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
+    add_optional_write_journal_arguments(rename_page_parser)
 
     write_status_parser = add_command_parser(
         subparsers,
@@ -1031,10 +1033,11 @@ def build_parser() -> argparse.ArgumentParser:
             "the journal used by the alpha write path. When a journal is available, also compare the "
             "primary log page against the journal-regenerated projection so direct Markdown log edits "
             "can be reported as stale. With --strict, return exit status 1 when any write guard fails; "
-            "a clean journal-regenerated log projection satisfies the log-page guard even if stored lines differ."
+            "a clean journal-regenerated log projection satisfies the log-page guard even if stored lines differ. "
+            "With --no-journal, strict mode skips JSONL guards and checks the SQLite-authority projection only."
         ),
         returns=(
-            "project, output, journal, journal_exists, journal_event_count, last_event|null, "
+            "project, output, journal|null, journal_required, journal_exists, journal_event_count, last_event|null, "
             "journal_project_event_count, sqlite_event_count, sqlite_last_event|null, "
             "event_streams_match, event_stream_mismatch|null, "
             "projection, journal_log_record_count, journal_log_stale, journal_log_changed_files, "
@@ -1054,7 +1057,10 @@ def build_parser() -> argparse.ArgumentParser:
         ],
     )
     write_status_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to check.")
-    write_status_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
+    add_optional_write_journal_arguments(
+        write_status_parser,
+        no_journal_help="Skip JSONL journal checks; --strict validates only the SQLite-authority Markdown projection.",
+    )
     write_status_parser.add_argument("--strict", action="store_true", help="Exit 1 if projection, journal, or journal-derived log guards are not clean.")
 
     revert_event_parser = add_command_parser(
@@ -1064,9 +1070,10 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Revert a supported alpha write event when the current page still matches the target event. "
             "SQLite events are searched first, then the legacy JSONL journal. SQLite-sourced reverts insert "
-            "event_revert in the same transaction as the state change, then append the legacy JSONL event and export projection."
+            "event_revert in the same transaction as the state change, then optionally append the legacy JSONL event "
+            "and export projection."
         ),
-        returns="project, journal, output, event_id, target_event_id, target_event_type, target_event_source, page, removed_lines[]|restored_lines[], removed_line_count|restored_line_count, projection",
+        returns="project, journal|null, journal_written, output, event_id, target_event_id, target_event_type, target_event_source, page, removed_lines[]|restored_lines[], removed_line_count|restored_line_count, projection",
         examples=[
             "grasp --project grasp-wiki revert-event <event-id> --output wiki",
             "grasp --project grasp-wiki --json revert-event <event-id> --output wiki --journal wiki.grasp/events.jsonl",
@@ -1079,7 +1086,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     revert_event_parser.add_argument("event_id", help="Write event id to revert.")
     revert_event_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
-    revert_event_parser.add_argument("--journal", type=Path, default=None, help="JSONL journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.")
+    add_optional_write_journal_arguments(revert_event_parser)
     revert_event_parser.add_argument("--reason", default="", help="Optional reason stored in the revert event payload.")
 
     replay_journal_parser = add_command_parser(
@@ -1251,12 +1258,33 @@ def add_log_record_query_arguments(command_parser: argparse.ArgumentParser, *, i
     command_parser.add_argument("--include-superseded", action="store_true", help="Include older versions of the same log record_id. Hidden by default.")
 
 
+def add_optional_write_journal_arguments(
+    command_parser: argparse.ArgumentParser,
+    *,
+    no_journal_help: str = "Do not append a compatibility JSONL journal record; SQLite events and Markdown projection are still updated.",
+) -> None:
+    journal_group = command_parser.add_mutually_exclusive_group()
+    journal_group.add_argument(
+        "--journal",
+        type=Path,
+        default=None,
+        help="JSONL compatibility journal path. Defaults to <output>.grasp/events.jsonl beside the output folder.",
+    )
+    journal_group.add_argument("--no-journal", action="store_true", help=no_journal_help)
+
+
 def default_journal_path(folder: Path) -> Path:
     return folder.parent / f"{folder.name}.grasp" / "events.jsonl"
 
 
 def journal_path_for_output(output: Path, journal_path: Path | None) -> Path:
     return journal_path or default_journal_path(output)
+
+
+def optional_journal_path_for_output(args: argparse.Namespace) -> Path | None:
+    if getattr(args, "no_journal", False):
+        return None
+    return journal_path_for_output(args.output, args.journal)
 
 
 def adopt_markdown(
@@ -2175,7 +2203,7 @@ def run_export_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict[st
 
 
 def run_append_section(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
-    journal = journal_path_for_output(args.output, args.journal)
+    journal = optional_journal_path_for_output(args)
     section_lines = ["", f"## {args.heading}", *args.line]
     append_result, event = store.append_markdown_lines_with_event(
         args.title,
@@ -2195,7 +2223,8 @@ def run_append_section(store: SQLiteStore, args: argparse.Namespace) -> dict[str
     result = dict(append_result)
     result.update(
         {
-            "journal": str(journal),
+            "journal": str(journal) if journal is not None else None,
+            "journal_written": journal is not None,
             "output": str(args.output),
             "event_id": event["event_id"],
             "projection": projection,
@@ -2205,7 +2234,7 @@ def run_append_section(store: SQLiteStore, args: argparse.Namespace) -> dict[str
 
 
 def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
-    journal = journal_path_for_output(args.output, args.journal)
+    journal = optional_journal_path_for_output(args)
     timestamp = args.timestamp or datetime.now().strftime("%Y-%m-%d %H:%M")
     heading = f"[{timestamp}] {args.op} | {args.summary}"
     log_lines = ["", f"## {heading}", *args.line]
@@ -2229,7 +2258,8 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
     result = dict(append_result)
     result.update(
         {
-            "journal": str(journal),
+            "journal": str(journal) if journal is not None else None,
+            "journal_written": journal is not None,
             "output": str(args.output),
             "event_id": event["event_id"],
             "timestamp": timestamp,
@@ -2242,7 +2272,7 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
 
 
 def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
-    journal = journal_path_for_output(args.output, args.journal)
+    journal = optional_journal_path_for_output(args)
     replacement_lines = write_page_replacement_lines(args)
     update_result, event = store.write_markdown_page_with_event(
         args.title,
@@ -2260,7 +2290,8 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
     result = dict(update_result)
     result.update(
         {
-            "journal": str(journal),
+            "journal": str(journal) if journal is not None else None,
+            "journal_written": journal is not None,
             "output": str(args.output),
             "event_id": event["event_id"],
             "event_type": event["event_type"],
@@ -2281,7 +2312,7 @@ def write_page_replacement_lines(args: argparse.Namespace) -> list[str]:
 
 
 def run_rename_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
-    journal = journal_path_for_output(args.output, args.journal)
+    journal = optional_journal_path_for_output(args)
     rename_result, event = store.rename_markdown_page_with_event(
         args.target,
         args.new_title,
@@ -2305,7 +2336,8 @@ def run_rename_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, A
     result = dict(rename_result)
     result.update(
         {
-            "journal": str(journal),
+            "journal": str(journal) if journal is not None else None,
+            "journal_written": journal is not None,
             "output": str(args.output),
             "event_id": event["event_id"],
             "event_type": event["event_type"],
@@ -2340,24 +2372,25 @@ def remove_projection_file(output: Path, source_path: str) -> list[str]:
 
 def append_event_and_export_projection(
     store: SQLiteStore,
-    journal: Path,
+    journal: Path | None,
     event: dict[str, Any],
     export_projection: Any,
 ) -> dict[str, Any]:
-    append_journal_event(journal, event)
+    if journal is not None:
+        append_journal_event(journal, event)
     try:
         return export_projection()
     except Exception as error:
-        rollback = rollback_journal_event_after_projection_failure(store, journal, event, error)
+        rollback = rollback_event_after_projection_failure(store, journal, event, error)
         raise ValueError(
-            "projection export failed after journal append; "
+            "projection export failed after event write; "
             f"store was reverted with event {rollback['event_id']}: {error}"
         ) from error
 
 
-def rollback_journal_event_after_projection_failure(
+def rollback_event_after_projection_failure(
     store: SQLiteStore,
-    journal: Path,
+    journal: Path | None,
     target: dict[str, Any],
     error: Exception,
 ) -> dict[str, Any]:
@@ -2371,7 +2404,8 @@ def rollback_journal_event_after_projection_failure(
                 payload=rollback["payload"],
             )
             insert_store_event(store.connection, event)
-        append_journal_event(journal, event)
+        if journal is not None:
+            append_journal_event(journal, event)
         return event
     except Exception as rollback_error:
         raise ValueError(
@@ -2381,8 +2415,8 @@ def rollback_journal_event_after_projection_failure(
 
 
 def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
-    journal = journal_path_for_output(args.output, args.journal)
-    events = read_journal_events(journal)
+    journal = optional_journal_path_for_output(args)
+    events = read_journal_events(journal) if journal is not None else []
     projection = store.export_markdown(args.output, check=True)
     journal_project_events = [
         event
@@ -2392,11 +2426,15 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     sqlite_events = store.events(project=projection["project"], limit=None)
     sqlite_event_count = len(sqlite_events)
     sqlite_last_event = sqlite_events[-1] if sqlite_events else None
-    event_stream_mismatch = compare_event_streams(journal_project_events, sqlite_events)
+    event_stream_mismatch = (
+        compare_event_streams(journal_project_events, sqlite_events)
+        if journal is not None
+        else None
+    )
     journal_log_projection = None
     journal_log_changed_files: list[str] = []
     journal_log_error = None
-    if journal.exists() and events:
+    if journal is not None and journal.exists() and events:
         try:
             journal_log_projection = store.export_markdown(
                 args.output,
@@ -2408,7 +2446,8 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
             journal_log_error = str(error)
     strict_failures = write_status_strict_failures(
         projection=projection,
-        journal_exists=journal.exists(),
+        journal_exists=journal.exists() if journal is not None else False,
+        journal_required=journal is not None,
         journal_log_projection=journal_log_projection,
         journal_log_changed_files=journal_log_changed_files,
         journal_log_error=journal_log_error,
@@ -2417,8 +2456,9 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     return {
         "project": projection["project"],
         "output": str(args.output),
-        "journal": str(journal),
-        "journal_exists": journal.exists(),
+        "journal": str(journal) if journal is not None else None,
+        "journal_required": journal is not None,
+        "journal_exists": journal.exists() if journal is not None else False,
         "journal_event_count": len(events),
         "journal_project_event_count": len(journal_project_events),
         "journal_log_record_count": journal_log_record_count(events, project=projection["project"]),
@@ -2493,6 +2533,7 @@ def write_status_strict_failures(
     *,
     projection: dict[str, Any],
     journal_exists: bool,
+    journal_required: bool,
     journal_log_projection: dict[str, Any] | None,
     journal_log_changed_files: list[str],
     journal_log_error: str | None,
@@ -2518,7 +2559,7 @@ def write_status_strict_failures(
                 "extra_files": projection_extra_files,
             }
         )
-    if not journal_exists:
+    if journal_required and not journal_exists:
         failures.append({"type": "journal_missing"})
     if event_stream_mismatch is not None:
         failures.append(
@@ -2553,8 +2594,8 @@ def regenerated_projection_dirty_files(projection: dict[str, Any]) -> list[str]:
 
 
 def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
-    journal = journal_path_for_output(args.output, args.journal)
-    journal_events = read_journal_events(journal)
+    journal = optional_journal_path_for_output(args)
+    journal_events = read_journal_events(journal) if journal is not None else []
     selected_project = store._require_project()
     sqlite_events = store.events(project=selected_project, limit=None)
     target = next((event for event in sqlite_events if event["event_id"] == args.event_id), None)
@@ -2595,7 +2636,8 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     reverted = rollback["reverted"]
     source_path = rollback["source_path"]
     previous_source_path = rollback["previous_source_path"]
-    append_journal_event(journal, event)
+    if journal is not None:
+        append_journal_event(journal, event)
     removed_files = []
     if target["event_type"] == "page_rename":
         removed_files = remove_previous_projection_file(args.output, source_path, previous_source_path)
@@ -2607,7 +2649,8 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     result = dict(reverted)
     result.update(
         {
-            "journal": str(journal),
+            "journal": str(journal) if journal is not None else None,
+            "journal_written": journal is not None,
             "output": str(args.output),
             "event_id": event["event_id"],
             "target_event_id": target["event_id"],
@@ -4065,11 +4108,13 @@ def format_log_records(result: dict[str, Any]) -> str:
 
 def format_append_result(result: dict[str, Any]) -> str:
     projection = result.get("projection") or {}
+    journal = result.get("journal") or "(none)"
     return (
         "# Markdown Append\n"
         f"project: {result['project']}\n"
         f"page: {result['page']['title']}\n"
-        f"journal: {result['journal']}\n"
+        f"journal: {journal}\n"
+        f"journal_written: {str(result.get('journal_written', True)).lower()}\n"
         f"event_id: {result['event_id']}\n"
         f"appended_lines: {result['appended_line_count']}\n"
         f"edges: {result['edge_count']}\n"
@@ -4079,11 +4124,13 @@ def format_append_result(result: dict[str, Any]) -> str:
 
 def format_write_page_result(result: dict[str, Any]) -> str:
     projection = result.get("projection") or {}
+    journal = result.get("journal") or "(none)"
     return (
         "# Write Page\n"
         f"project: {result['project']}\n"
         f"page: {result['page']['title']}\n"
-        f"journal: {result['journal']}\n"
+        f"journal: {journal}\n"
+        f"journal_written: {str(result.get('journal_written', True)).lower()}\n"
         f"event_id: {result['event_id']}\n"
         f"event_type: {result.get('event_type', '')}\n"
         f"source_path: {result.get('source_path', '')}\n"
@@ -4096,6 +4143,7 @@ def format_write_page_result(result: dict[str, Any]) -> str:
 
 def format_rename_page_result(result: dict[str, Any]) -> str:
     projection = result.get("projection") or {}
+    journal = result.get("journal") or "(none)"
     return (
         "# Rename Page\n"
         f"project: {result['project']}\n"
@@ -4104,7 +4152,8 @@ def format_rename_page_result(result: dict[str, Any]) -> str:
         f"title: {result['title']}\n"
         f"previous_source_path: {result['previous_source_path']}\n"
         f"source_path: {result['source_path']}\n"
-        f"journal: {result['journal']}\n"
+        f"journal: {journal}\n"
+        f"journal_written: {str(result.get('journal_written', True)).lower()}\n"
         f"event_id: {result['event_id']}\n"
         f"heading_updated: {str(result['heading_updated']).lower()}\n"
         f"edges: {result['edge_count']}\n"
@@ -4118,11 +4167,13 @@ def format_write_status(result: dict[str, Any]) -> str:
     journal_log_projection = result.get("journal_log_projection") or {}
     last_event = result.get("last_event") or {}
     sqlite_last_event = result.get("sqlite_last_event") or {}
+    journal = result.get("journal") or "(none)"
     text = (
         "# Write Status\n"
         f"project: {result['project']}\n"
         f"output: {result['output']}\n"
-        f"journal: {result['journal']}\n"
+        f"journal: {journal}\n"
+        f"journal_required: {str(result.get('journal_required', True)).lower()}\n"
         f"journal_exists: {str(result['journal_exists']).lower()}\n"
         f"journal_events: {result['journal_event_count']}\n"
         f"journal_project_events: {result.get('journal_project_event_count', 0)}\n"
@@ -4154,11 +4205,13 @@ def format_write_status(result: dict[str, Any]) -> str:
 def format_revert_event(result: dict[str, Any]) -> str:
     projection = result.get("projection") or {}
     line_count = result.get("removed_line_count", result.get("restored_line_count", 0))
+    journal = result.get("journal") or "(none)"
     return (
         "# Revert Event\n"
         f"project: {result['project']}\n"
         f"page: {result['page'].get('title', result['page'].get('id', ''))}\n"
-        f"journal: {result['journal']}\n"
+        f"journal: {journal}\n"
+        f"journal_written: {str(result.get('journal_written', True)).lower()}\n"
         f"event_id: {result['event_id']}\n"
         f"target_event_id: {result['target_event_id']}\n"
         f"target_event_type: {result['target_event_type']}\n"
