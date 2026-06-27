@@ -1431,3 +1431,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - reason: the previous guard stopped store changes before the first write, but a multi-command file-back could still overlap another normal runbook writer between write commands and only be detected at postwrite.
 - tests/docs: added lock acquire/check/release regression coverage, runbook checker fragments, AGENTS/CLAUDE, /next, /ship-next, repo skill, README, history, current facts, and write plan updates. Public compatibility version is 1.8.56; schema remains v8.
 - dogfood: preflight acquired the lock, write-start checked it, and this no-journal file-back used grasp writes under the same GRASP_SESSION_ID.
+## [2026-06-28 07:26] implementation+file-back | guard version ledger drift
+
+- code: `tests/test_version_metadata.py` now checks package version against `grasp.__version__`, `pyproject.toml`, [[history]] latest/current release ledger lines, and [[grasp-v1-implemented]] current public compatibility version.
+- reason: dogfood found a stale current fact: after `1.8.56`, [[grasp-v1-implemented]] still said current public compatibility version was `1.8.54` while package/history were `1.8.56`.
+- docs: bumped public/package version to `1.8.57`, updated [[history]], [[grasp-v1-implemented]], and [[sqlite-ssot-write-plan]]. schema remains v8.

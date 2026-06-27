@@ -160,6 +160,8 @@ Dogfood in the same `1.8.42` slice confirmed the guard fails while the worktree 
 
 `1.8.56` adds the missing repo-local file-back lock for the multi-command window. `scripts/check_file_back_preflight.py` now acquires gitignored `.grasp/file-back.lock.json` after a clean preflight; `write-start` and `postwrite` require the same session/store/project/output lock, and postwrite releases it only after all checks pass. This does not make arbitrary direct writes impossible, but it makes normal runbook writers fail before starting when another guarded file-back is in progress.
 
+`1.8.57` closes a source-of-truth drift found by dogfood: [[grasp-v1-implemented]] still said the current public compatibility version was `1.8.54` after package/history had moved to `1.8.56`. `tests/test_version_metadata.py` now checks the package version against [[history]] latest/current ledger lines and the implemented current-facts version, so release ledger drift fails in CI instead of being left for a later agent to notice manually.
+
 This does **not** yet make every authority boundary final. `sync`, `acquire`, generated Markdown backup/review policy, broader native event-derived semantic page projection, and semantic multi-page work-unit inference beyond log-batch, subject-log, log-page-subjects, content-subjects, version-bump, same-page dependency, explicit event-window, time-burst, or explicit session metadata boundaries still need migration work.
 
 ## Why This Replaces The Fast Path
@@ -214,6 +216,8 @@ Completed in `1.8.41`: repo-local preflight default base now resolves the curren
 Completed in `1.8.42`: repo-local ship loops now run `scripts/check_push_ownership.py` after commit and before push, blocking dirty worktrees, behind branches, and normal protected-branch pushes.
 
 Completed in `1.8.55`: repo-local write-start now fails before the first write command if the current latest SQLite event_sequence differs from the preflight stamp baseline, closing the preflight-to-write-start store mutation gap.
+
+Completed in `1.8.57`: version metadata guard now catches drift between package version, [[history]] latest/current release ledger lines, and [[grasp-v1-implemented]] current facts.
 
 Completed in `1.8.56`: repo-local preflight/write-start/postwrite now use gitignored `.grasp/file-back.lock.json` to block overlapping normal runbook file-backs, and postwrite releases the lock only after all checks pass.
 
