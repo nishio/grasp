@@ -1410,3 +1410,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: revert-event, revert-events, and revert-event --include-dependents now reject dirty target projection paths unless they match the current store projection before mutation.
 - risk: 1.8.51 blocked unrelated dirty projection files, but a local draft in the recovered target path could still be overwritten or removed during recovery export.
 - tests: added regression coverage that dirty target A.md blocks revert before event_revert insertion while preserving both store state and the local draft. public compatibility version is 1.8.52; schema remains v8.
+
+## [2026-06-28 06:45] implementation+file-back | guard dirty write target files
+- code: append-section, append-log, write-page, and rename-page now reject dirty target projection paths before mutation unless they already match the current store projection.
+- exception: write-page --from-file may still use the target projection file itself as the replacement input, preserving the direct patch fallback.
+- tests: added regression coverage for dirty target drafts in write-page --line, append-section, append-log, and rename-page. public compatibility version is 1.8.53; schema remains v8.
