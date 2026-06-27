@@ -26,10 +26,10 @@ argument-hint: [focus]
 1. 何が変わったかを把握する。
 2. useful facts を development wiki に file back する。
 3. 検証を走らせる。
-4. 検証が通った時だけ commit し、current branch を `origin` へ push する。
+4. 検証が通った時だけ commit し、`$PYTHON_BIN scripts/check_push_ownership.py` を通してから current branch を `origin` へ push する。
 5. 日本語で短く結果と次候補を返す。
 
-検証失敗、merge/rebase が必要な remote divergence、または stage 対象が曖昧な user hunk がある時は、commit/push せずに止めて、blocking output と判断理由を日本語で出す。
+検証失敗、merge/rebase が必要な remote divergence、push ownership guard 失敗、または stage 対象が曖昧な user hunk がある時は、commit/push せずに止めて、blocking output と判断理由を日本語で出す。
 
 ## Commands
 
@@ -86,6 +86,7 @@ git diff --check
 - `git diff HEAD -- <path>` で stage 対象が自分の意図した変更だけか確認する。
 - 共有 `main` では、確定した path だけを単一コマンドで atomic に stage + commit する。
 - commit message は concise にする。
+- commit 後、push 前に `git fetch origin` と `$PYTHON_BIN scripts/check_push_ownership.py` を実行する。この guard は dirty worktree、behind branch、通常 ship-loop からの protected branch（`main` / `master`）push を止める。
 - current branch を `origin` へ push する。
 - 直後に `git log --oneline --decorate -1` と `git status --short --branch` で着地を確認する。
 
@@ -98,6 +99,7 @@ git diff --check
 - file-back runbook checker が通っている。
 - `git diff --check` が通っている。
 - file-back / projection 周りを触った時は `scripts/check_file_back_postwrite.py`（no-journal default、SQLite events 由来の semantic log projection check を含む）が通っている。
+- commit 後の `scripts/check_push_ownership.py` が通っている。
 - commit と push が成功している、または clean tree のため commit 不要と判断している。
 - 失敗時は commit/push していない。
 

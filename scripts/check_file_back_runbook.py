@@ -26,6 +26,8 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "current upstream（なければ `origin/main`）",
             "未使用 session id を要求",
             "postwrite は同じ session id を要求",
+            "python3 scripts/check_push_ownership.py",
+            "protected branch",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
             "repo runbook では `--with-journal` を使わない",
         ),
@@ -53,6 +55,8 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "current upstream（なければ `origin/main`）",
             "未使用 session id を要求",
             "postwrite は同じ session id を要求",
+            "python3 scripts/check_push_ownership.py",
+            "protected branch",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
             "repo runbook では `--with-journal` を使わない",
         ),
@@ -81,6 +85,8 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "current upstream（なければ `origin/main`）",
             "未使用 session id",
             "postwrite は同じ session id を要求",
+            "$PYTHON_BIN scripts/check_push_ownership.py",
+            "protected branch",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
             "repo runbook では `--with-journal` を使わない",
         ),
@@ -106,6 +112,8 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "preflight uses the current upstream branch as its base",
             "requires an unused session id",
             "postwrite requires the same session id",
+            "python3 scripts/check_push_ownership.py",
+            "protected branches",
             "tracked `wiki.grasp/events.jsonl` was retired and removed in `1.8.18`",
             "Do not use repo-runbook `--with-journal`",
         ),
@@ -131,6 +139,8 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "current upstream（なければ `origin/main`）",
             "未使用 session id",
             "postwrite は同じ session id を要求",
+            "python3 scripts/check_push_ownership.py",
+            "protected branch",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
         ),
         forbidden=(
@@ -151,6 +161,8 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "current upstream（なければ `origin/main`）",
             "未使用 session id を要求",
             "postwrite は同じ session id を要求",
+            "python3 scripts/check_push_ownership.py",
+            "protected branch",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役済み",
         ),
         forbidden=(
@@ -194,7 +206,7 @@ def main() -> int:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
-    print("file-back runbook ok: no-journal default, retired journal, semantic log guard, and session uniqueness marker documented")
+    print("file-back runbook ok: no-journal default, retired journal, semantic log guard, session marker, and push ownership guard documented")
     return 0
 
 

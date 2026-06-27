@@ -60,7 +60,7 @@ file back は **grasp write first**。通常編集の authority は SQLite store
 `python3 scripts/lint_wiki.py`（孤立・壊れたリンク・未登録）→ 意味的 lint（実装済み事実・backlog・decision の矛盾 / stale open q）→ log に `## [YYYY-MM-DD HH:MM] lint | <summary>`。
 
 ### Ship loop
-Claude Code では `/ship-next`（`.claude/commands/ship-next.md`）、Codex では `/next`（repo-local plugin `plugins/grasp-next/commands/next.md`）で、差分理解 → wiki file back → `python3 -m unittest discover -s tests` / `python3 scripts/lint_wiki.py` / `python3 scripts/check_file_back_runbook.py` / `git diff --check` → commit → push → "what's next?" 提示までを一つの作業ループとして閉じる。空差分なら empty commit せず、current backlog から次候補だけ答える。Codex で `/next` を出すには、`.agents/plugins/marketplace.json` の repo marketplace から `grasp-next` plugin を install / enable する。
+Claude Code では `/ship-next`（`.claude/commands/ship-next.md`）、Codex では `/next`（repo-local plugin `plugins/grasp-next/commands/next.md`）で、差分理解 → wiki file back → `python3 -m unittest discover -s tests` / `python3 scripts/lint_wiki.py` / `python3 scripts/check_file_back_runbook.py` / `git diff --check` → commit → `python3 scripts/check_push_ownership.py` → push → "what's next?" 提示までを一つの作業ループとして閉じる。空差分なら empty commit せず、current backlog から次候補だけ答える。Codex で `/next` を出すには、`.agents/plugins/marketplace.json` の repo marketplace から `grasp-next` plugin を install / enable する。
 
 ## 運用方針
 
@@ -68,6 +68,6 @@ Claude Code では `/ship-next`（`.claude/commands/ship-next.md`）、Codex で
 - 作業前の primary worktree が既に多数変更済みなら、既存差分と混ぜないために別 `git worktree` を切って作業する。
 - 作業用 worktree での作業後は、取りこぼしがないよう main へ merge / fast-forward してから撤収する。撤収前に作業用 worktree 側の `git status --short` を clean にし、必要なら `git diff` で差分の残りを確認してから `git worktree remove` する。main 側の未コミット変更はユーザ作業として扱い、勝手に clean しない。
 - 並行 session が同じ `main` を同時にコミットしていると、`git add` 後に index がクリアされ HEAD が動くことがある（実例: file back の commit が空振りした）。共有 main への file back / commit は **確定した自分のファイルだけを単一コマンドで `git add <paths> && git commit`** と atomic に行い、直後に `git log` / `git status` で着地を検証する。他 session の未コミット hunk（自分が書いていない page）は staging に混ぜない。`git diff HEAD -- <path>` で各ファイルが自分の変更だけか確認してから add する。
-- push は staged path ではなく branch 上の ahead commit 全体を送る。共有 `main` で file back / ship する前に `git fetch origin main` → `git log --left-right --cherry-pick origin/main...main` → `git status --short` を確認し、自分の作業でない unknown ahead commit や dirty `wiki/` path、または unexpected recreated `wiki.grasp/events.jsonl` があれば `main` へ push しない。isolated worktree / branch に逃がし、必要なら後で人間が merge 順を決める。
+- push は staged path ではなく branch 上の ahead commit 全体を送る。通常 ship loop では commit 後・push 前に `git fetch origin` → `python3 scripts/check_push_ownership.py` を通す。この guard は dirty worktree、behind branch、通常 ship-loop からの protected branch（`main` / `master`）push を止める。共有 `main` に直接 push しない。isolated worktree / branch に逃がし、必要なら後で人間が merge 順を決める。明示的に main push を選ぶ時だけ `--allow-protected-branch` と `git log --left-right --cherry-pick origin/main...main` で unknown ahead commit を人間が確認する。
 - `gh` や HTTPS push が使えず GitHub connector で PR を merge した場合、remote には connector 由来の merge commit ができ、local main には手元の別 merge / follow-up commit が残って `ahead/behind` に分岐しうる。以後の ship 前に `git fetch origin main` → `git log --left-right --cherry-pick origin/main...main` で remote merge commit と local follow-up を照合し、重複 merge commit をそのまま押し込まない。必要なら remote merge commit を取り込んだ上で follow-up だけを rebase/cherry-pick する。
 - ソースは参考、無批判採用しない。スキーマも実験で改善する。
