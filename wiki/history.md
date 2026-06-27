@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.36`（更新: 2026-06-28 01:15、store: schema `8`、compat: schema `8` compatible）: `revert-plan --scope content-subjects` が、semantic match で選んだ page event を実際に戻すために必要な後続 same-page dependents も `dependent_event_ids` として候補に足すようにした。これにより、`[[Topic]]` を含む先行 update のあと同じ page に link を含まない cleanup update がある場合でも、plan は cleanup を除外したまま不可逆になるのではなく、`candidate_event_ids` / `revert_order_event_ids` に含めて rollback-only safety check を通す。schema は不変
 - `1.8.35`（更新: 2026-06-28 00:56、store: schema `8`、compat: schema `8` compatible）: `revert-plan --scope content-subjects` が anchor changed lines に `[[wikilink]]` / Markdown path subjects を持たない場合、anchor の event target を fallback subject として使うようにした。これにより、新規 page の本文自体には link が無いが、同じ作業単位で他 page や closing log がその page に link するケースで、created page を anchor にしても `page_create` / 周辺 `page_update` / closing `log_append` を read-only candidate set にできる。JSON result は `content_subject_source`（`changed-lines` または `anchor-target`）を返す。schema は不変
 - `1.8.34`（更新: 2026-06-28 00:45、store: schema `8`、compat: schema `8` compatible）: `revert-plan` の初期 adopt baseline 判定を修正。`adopt-markdown` 由来の initial `page_create` / `log_entry_import` は引き続き scan 開始前に除外するが、その後の実作業で作られた `write-page --create` の `page_create` が anchor より前にあっても baseline と誤判定しない。regression test は `b644237` の `content-subjects` fixture で `sqlite-ssot-write-plan.md` 作成を `grasp-backlog.md` anchor update より前に置き、候補に含まれることを確認する。schema は不変
 - `1.8.33`（更新: 2026-06-28 00:38、store: schema `8`、compat: schema `8` compatible）: `revert-plan --scope content-subjects` を追加。log/session/window などの明示 boundary が作業単位を説明しない履歴で、anchor event の changed lines から `[[wikilink]]` / Markdown path subjects を抽出し、同じ selected project の page events を changed subjects / event target overlap で read-only rollback candidate set として返す。scan は初期 adopt baseline を避け、使える場合は次の log boundary を上限にする。regression test は実 git history replay corpus の `b644237`（`sqlite-ssot-write-plan` 新設）を使い、`log-page-subjects` では `index.md` update が候補化されない一方、content subjects では `grasp-backlog.md` / `sqlite-ssot-write-plan.md` / `index.md` / `llm-wiki-infra-fast-path-plan.md` / `log.md` を候補化し、plan が projection を変更しないことを確認する。schema は不変
@@ -175,6 +176,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.35`
+- Current public compatibility version: `1.8.36`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.35`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.36`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
