@@ -1145,3 +1145,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 ## [2026-06-27 16:50] implementation | write projection failure rollback to SQLite events
 - Projection export failure rollback now reverts store state and inserts SQLite `event_revert` in the same write transaction.
 - The existing failed export regression now asserts the SQLite event stream matches the legacy journal sequence.
+
+## [2026-06-27 17:01] implementation | strict-check SQLite and journal event stream mismatch
+- `write-status` now checks whether selected-project SQLite events appear in the legacy JSONL journal in order.
+- `write-status --strict` fails with `event_stream_mismatch` when that compatibility audit fails.
+- README recovery surface was updated to remove the deleted `write-diff` command.
