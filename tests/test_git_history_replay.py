@@ -1053,20 +1053,6 @@ class GitHistoryReplayTests(unittest.TestCase):
                 journal_path,
             )
             update_results_by_path = {}
-            update_results_by_path["grasp-backlog.md"] = run_grasp_json(
-                "--store",
-                store_path,
-                "--project",
-                "wiki",
-                "write-page",
-                "grasp-backlog",
-                "--from-file",
-                after_root / "grasp-backlog.md",
-                "--output",
-                root,
-                "--journal",
-                journal_path,
-            )
             update_results_by_path[SQLITE_SSOT_PLAN_PATH] = run_grasp_json(
                 "--store",
                 store_path,
@@ -1079,6 +1065,20 @@ class GitHistoryReplayTests(unittest.TestCase):
                 SQLITE_SSOT_PLAN_PATH,
                 "--from-file",
                 after_root / SQLITE_SSOT_PLAN_PATH,
+                "--output",
+                root,
+                "--journal",
+                journal_path,
+            )
+            update_results_by_path["grasp-backlog.md"] = run_grasp_json(
+                "--store",
+                store_path,
+                "--project",
+                "wiki",
+                "write-page",
+                "grasp-backlog",
+                "--from-file",
+                after_root / "grasp-backlog.md",
                 "--output",
                 root,
                 "--journal",
@@ -1135,8 +1135,8 @@ class GitHistoryReplayTests(unittest.TestCase):
             }
 
         expected_candidate_paths = [
-            "grasp-backlog.md",
             SQLITE_SSOT_PLAN_PATH,
+            "grasp-backlog.md",
             "index.md",
             "llm-wiki-infra-fast-path-plan.md",
             "log.md",
@@ -1149,6 +1149,10 @@ class GitHistoryReplayTests(unittest.TestCase):
         self.assertEqual(
             content_plan["candidate_event_ids"],
             [update_results_by_path[path]["event_id"] for path in expected_candidate_paths],
+        )
+        self.assertEqual(
+            [event["source_path"] for event in content_plan["candidate_events"]],
+            expected_candidate_paths,
         )
         self.assertEqual(
             content_plan["revert_order_event_ids"],

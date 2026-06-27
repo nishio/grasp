@@ -4431,13 +4431,37 @@ def last_log_boundary_before(events: list[dict[str, Any]], sequence: int) -> dic
 
 def initial_baseline_end_sequence_before(events: list[dict[str, Any]], sequence: int) -> int:
     end_sequence = 0
+    saw_log_entry_import = False
     for event in events:
         if event_sequence(event) >= sequence:
             break
-        if event.get("event_type") not in {"page_create", "log_entry_import"}:
-            break
-        end_sequence = event_sequence(event)
+        event_type = event.get("event_type")
+        if (
+            event_type == "page_create"
+            and not saw_log_entry_import
+            and event_is_initial_markdown_page_create(event)
+        ):
+            end_sequence = event_sequence(event)
+            continue
+        if event_type == "log_entry_import":
+            saw_log_entry_import = True
+            end_sequence = event_sequence(event)
+            continue
+        break
     return end_sequence
+
+
+def event_is_initial_markdown_page_create(event: dict[str, Any]) -> bool:
+    if event.get("event_type") != "page_create":
+        return False
+    payload = event.get("payload") or {}
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("source_hash"):
+        return True
+    if "message" in payload:
+        return False
+    return True
 
 
 def revert_plan_exclusion_reason(event: dict[str, Any], reverted_ids: set[str]) -> str | None:
