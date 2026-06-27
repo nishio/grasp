@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.34`（更新: 2026-06-28 00:45、store: schema `8`、compat: schema `8` compatible）: `revert-plan` の初期 adopt baseline 判定を修正。`adopt-markdown` 由来の initial `page_create` / `log_entry_import` は引き続き scan 開始前に除外するが、その後の実作業で作られた `write-page --create` の `page_create` が anchor より前にあっても baseline と誤判定しない。regression test は `b644237` の `content-subjects` fixture で `sqlite-ssot-write-plan.md` 作成を `grasp-backlog.md` anchor update より前に置き、候補に含まれることを確認する。schema は不変
 - `1.8.33`（更新: 2026-06-28 00:38、store: schema `8`、compat: schema `8` compatible）: `revert-plan --scope content-subjects` を追加。log/session/window などの明示 boundary が作業単位を説明しない履歴で、anchor event の changed lines から `[[wikilink]]` / Markdown path subjects を抽出し、同じ selected project の page events を changed subjects / event target overlap で read-only rollback candidate set として返す。scan は初期 adopt baseline を避け、使える場合は次の log boundary を上限にする。regression test は実 git history replay corpus の `b644237`（`sqlite-ssot-write-plan` 新設）を使い、`log-page-subjects` では `index.md` update が候補化されない一方、content subjects では `grasp-backlog.md` / `sqlite-ssot-write-plan.md` / `index.md` / `llm-wiki-infra-fast-path-plan.md` / `log.md` を候補化し、plan が projection を変更しないことを確認する。schema は不変
 - `1.8.32`（更新: 2026-06-28 00:09、store: schema `8`、compat: schema `8` compatible）: `revert-plan --scope log-page-subjects` を追加。legacy/direct Markdown history のように closing log entry が `log_append` ではなく `log.md` の `page_update` として入った場合、`previous_lines` / `lines` の差分から新規 log lines だけを読み、`[[wikilink]]` や Markdown path subjects に一致する page events と closing log page update だけを read-only rollback candidate set として返す。regression test は実 git history replay corpus の `3eaab75`（source digest policy correction）を使い、`subject-log` では closing `log_append` 不在で不能な一方、log page update subjects から4 content pages + `log.md` update を候補化し `index.md` update を除外することを確認する。`page_update` event payload には今後 `source_path` / `graph_role` も入れる。schema は不変
 - `1.8.31`（更新: 2026-06-27 23:52、store: schema `8`、compat: schema `8` compatible）: `revert-plan --scope subject-log` を追加。log-batch 境界が広すぎる時、closing `log_append` の summary/body にある `[[wikilink]]` や Markdown path を log subjects として抽出し、同じ batch 内で subject に一致する page events と closing log だけを read-only rollback candidate set として返す。regression test は A/B/C page_update が同じ log-batch に混在し、closing log が `[[A]]` と `concepts/C.md` だけを挙げる場合に B を除外し、A/C/closing log だけを候補化することを確認する。schema は不変
@@ -173,6 +174,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.33`
+- Current public compatibility version: `1.8.34`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.33`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.34`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

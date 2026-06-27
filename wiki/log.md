@@ -1320,3 +1320,6 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 - implemented: content-subjects skips the initial adopt baseline, uses the next log boundary as a scan cap when present, and reuses the rollback-only safety check without mutating store, journal, or projection.
 - tests: covered real git history replay commit b644237, where log-page-subjects misses index.md but content-subjects selects grasp-backlog.md, sqlite-ssot-write-plan.md, index.md, llm-wiki-infra-fast-path-plan.md, and log.md.
 - docs: bumped compatibility version to 1.8.33 and narrowed remaining work-unit inference to cases beyond log-batch, subject-log, log-page-subjects, content-subjects, same-page, explicit event-window, time-burst, or session boundaries.
+
+## [2026-06-28 00:49] implementation+file-back | harden revert-plan baseline detection
+- implemented: `revert-plan` initial adopt baseline detection no longer treats real `write-page --create` events before a `content-subjects` anchor as baseline; regression uses git history fixture `b644237`.
