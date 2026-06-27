@@ -1137,3 +1137,7 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 ## [2026-06-27 16:22] implementation | write adopt-markdown initial events to SQLite
 - `adopt-markdown` now inserts initial `page_create` / `log_entry_import` events into SQLite `events` before appending legacy JSONL.
 - Fresh adoption now gives `log-records` / `history` a SQLite event stream immediately; tests update expected initial SQLite event sequences.
+
+## [2026-06-27 16:40] implementation | remove unclear write-diff command
+- Removed the `write-diff` command and its store helper instead of redefining it under SQLite SSoT.
+- Projection drift checks remain through `export-markdown --check` / `write-status --strict`; a future diff command should use a purpose-specific name.

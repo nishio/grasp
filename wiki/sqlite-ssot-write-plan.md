@@ -25,7 +25,7 @@ It supersedes [[llm-wiki-infra-fast-path-plan]] as an implementation plan. The o
 - **Events live inside SQLite**. The durable event stream is an `events` table written in the same transaction as state changes.
 - **Markdown is export-only projection**. `wiki/` is still emitted for review, backup, publish, and interoperability, but normal edits do not start from Markdown patch + import.
 - **Write operations are one SQLite transaction**. A write command opens the canonical store, takes the write transaction (`BEGIN IMMEDIATE` or equivalent), appends event rows, updates materialized state, and commits once.
-- **Recovery is grasp-native**. `history`, `write-diff`, `revert-event`, and export/replay checks replace the old escape hatch of manually editing `events.jsonl` / `wiki/` and using git checkout.
+- **Recovery is grasp-native**. `history`, `revert-event`, and export/replay checks replace the old escape hatch of manually editing `events.jsonl` / `wiki/` and using git checkout. `write-diff` was removed in `1.8.8`; if a diff/review surface becomes necessary, create a purpose-named command instead of preserving the old vague one.
 
 ## Phase 0 Authority Contract (2026-06-27)
 
@@ -56,7 +56,9 @@ It supersedes [[llm-wiki-infra-fast-path-plan]] as an implementation plan. The o
 
 `1.8.7` moves `adopt-markdown` initial event insertion into SQLite events. Initial `page_create` and `log_entry_import` records are inserted into SQLite with duplicate-skip before the compatibility JSONL append, so fresh adoption produces a SQLite event stream immediately.
 
-This does **not** yet make every recovery path atomic at the new authority boundary. Projection failure rollback, `write-diff`, `sync`, and `acquire` still need SQLite events / recovery migration work.
+`1.8.8` removes `write-diff` instead of redefining it under SQLite SSoT. The old current-filesystem-to-stored-projection diff had no clear milestone purpose once `export-markdown --check` / `write-status --strict` already covered no-op checks. A future diff/review surface should use a purpose-specific name such as `projection-diff` / `check-projection`.
+
+This does **not** yet make every recovery path atomic at the new authority boundary. Projection failure rollback, `sync`, and `acquire` still need SQLite events / recovery migration work.
 
 ## Why This Replaces The Fast Path
 
@@ -81,7 +83,7 @@ Therefore, adding more guards to `events.jsonl` is only a temporary mitigation. 
 | 2. Events table | JSONL is no longer the write authority | Add `events` table with monotonic sequence, event id, type, payload, actor/session metadata, created_at, and migration/import from existing JSONL where needed | Done in `1.8.0`: existing event types can be represented and queried from SQLite without reading `events.jsonl` |
 | 3. Write command migration | Core write verbs update SQLite SSoT | Move `write-page`, `write-page --create`, `rename-page`, log record import, and append-style helpers to the transaction helper | In progress: `adopt-markdown`, `write-page` / `write-page --create`, `append-section` / `append-log`, `rename-page`, and `import-log-records` write SQLite events; projection rollback still needs migration |
 | 4. Export-only Markdown | Projection becomes a read side effect, not authority | Make `export-markdown` read from canonical SQLite. Keep `--check`; make direct `import --markdown` an adoption/emergency path, not reconcile default | Fresh export is stable, no-op diff is clean, and normal file-back never needs Markdown direct patch |
-| 5. Native review/recovery | Losing git-diffable JSONL is compensated | Rebuild `history`, `write-diff`, `revert-event`, status, and replay/check surfaces from SQLite events/state | In progress: `write-status` shows SQLite event count / last event; SQLite-sourced `revert-event` writes state + `event_revert` atomically; `log-records` / `history` read SQLite log events when available; `write-diff` still needs SQLite-native framing |
+| 5. Native review/recovery | Losing git-diffable JSONL is compensated | Rebuild `history`, `revert-event`, status, and replay/check surfaces from SQLite events/state; add a purpose-named projection diff only if needed | In progress: `write-status` shows SQLite event count / last event; SQLite-sourced `revert-event` writes state + `event_revert` atomically; `log-records` / `history` read SQLite log events when available; old `write-diff` removed in `1.8.8` |
 | 6. File-back cutover | Daily wiki edits use the new authority path | Update file-back skill / repo commands to call canonical SQLite write first, then export Markdown, lint, and commit projection | Three consecutive file-backs land through SQLite SSoT without direct Markdown patch fallback |
 | 7. Retire JSONL authority | Old alpha artifacts cannot mislead implementers | Mark `wiki.grasp/events.jsonl` as legacy import/audit artifact or remove it from the active path; update docs/AGENTS when the command surface changes | No current instruction tells Codex to treat JSONL as the write authority |
 
@@ -89,17 +91,17 @@ Therefore, adding more guards to `events.jsonl` is only a temporary mitigation. 
 
 Do not start with file-back integration. Continue from the authority substrate into events.
 
-1. Rebase `write-diff` onto SQLite authority framing and decide whether it should compare filesystem to stored projection, SQLite events, or both.
-2. Decide how projection export failure rollback should be represented once SQLite events are authoritative.
+1. Decide how projection export failure rollback should be represented once SQLite events are authoritative.
+2. Clarify generated Markdown backup/review policy only if a concrete recovery workflow needs it.
 3. Then move file-back workflow only after native recovery is usable.
 
-Completed in `1.7.39`: Phase 0 authority contract and Phase 1 connection/transaction helper. Completed in `1.8.0`: Phase 2 events table plus JSONL migration/query helpers. Completed in `1.8.1`: first Phase 3 command migration for `write-page` / `write-page --create`. Completed in `1.8.2`: `append-section` / `append-log` transaction migration. Completed in `1.8.3`: `rename-page` transaction migration. Completed in `1.8.4`: `write-status` SQLite event visibility. Completed in `1.8.5`: SQLite-sourced `revert-event` target lookup and state+event transaction. Completed in `1.8.6`: SQLite-sourced `log-records` / `history` for migrated `log_entry_import` rows plus `import-log-records` SQLite event insertion. Completed in `1.8.7`: `adopt-markdown` initial event insertion into SQLite events. Not completed: SQLite-native `write-diff` framing, projection failure rollback policy, file-back cutover.
+Completed in `1.7.39`: Phase 0 authority contract and Phase 1 connection/transaction helper. Completed in `1.8.0`: Phase 2 events table plus JSONL migration/query helpers. Completed in `1.8.1`: first Phase 3 command migration for `write-page` / `write-page --create`. Completed in `1.8.2`: `append-section` / `append-log` transaction migration. Completed in `1.8.3`: `rename-page` transaction migration. Completed in `1.8.4`: `write-status` SQLite event visibility. Completed in `1.8.5`: SQLite-sourced `revert-event` target lookup and state+event transaction. Completed in `1.8.6`: SQLite-sourced `log-records` / `history` for migrated `log_entry_import` rows plus `import-log-records` SQLite event insertion. Completed in `1.8.7`: `adopt-markdown` initial event insertion into SQLite events. Completed in `1.8.8`: removed unclear `write-diff` command. Not completed: projection failure rollback policy, file-back cutover.
 
 ## Carry Forward From The Old Plan
 
 - Keep the git history replay harness. It is still the best corpus for page create/update/rename/revert behavior.
 - Keep rename/identity as the highest-risk correctness target.
-- Keep `write-status`, `write-diff`, `revert-event`, and `history` as user-facing recovery concepts; rebase them onto SQLite events.
+- Keep `write-status`, `revert-event`, and `history` as user-facing recovery concepts; rebase them onto SQLite events. Do not preserve `write-diff` without a clear workflow; create a purpose-named projection review command later if needed.
 - Keep Markdown projection, but treat it as generated output and backup, not as edit input.
 
 ## Do Not Carry Forward
