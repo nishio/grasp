@@ -77,6 +77,19 @@ EDGE_RESOLUTION_PATHS = [
     "index.md",
     "log.md",
 ]
+SQLITE_SSOT_PLAN_COMMIT = "b6442374663b49a197b14bc60c27cef8c841fcfc"
+SQLITE_SSOT_PLAN_PATH = "sqlite-ssot-write-plan.md"
+SQLITE_SSOT_PLAN_TITLE = "SQLite SSoT write plan"
+SQLITE_SSOT_PLAN_EXISTING_PATHS = [
+    "grasp-backlog.md",
+    "index.md",
+    "llm-wiki-infra-fast-path-plan.md",
+    "log.md",
+]
+SQLITE_SSOT_PLAN_PATHS = [
+    *SQLITE_SSOT_PLAN_EXISTING_PATHS,
+    SQLITE_SSOT_PLAN_PATH,
+]
 CONTINUOUS_REPLAY_SEQUENCES = [
     {
         "name": "rename-then-revert-design-decision",
@@ -1004,6 +1017,145 @@ class GitHistoryReplayTests(unittest.TestCase):
         self.assertFalse(index_anchor_plan["complete"])
         self.assertFalse(index_anchor_plan["revertible"])
         self.assertIn("does not match closing log page subjects", index_anchor_plan["reason"])
+        self.assertEqual(projected_texts_after_plan, after_fixture)
+
+    def test_revert_plan_content_subjects_uses_changed_page_subjects_in_git_history(self):
+        try:
+            before_fixture = {
+                path: git_show_file(f"{SQLITE_SSOT_PLAN_COMMIT}^", path)
+                for path in SQLITE_SSOT_PLAN_EXISTING_PATHS
+            }
+            after_fixture = {
+                path: git_show_file(SQLITE_SSOT_PLAN_COMMIT, path)
+                for path in SQLITE_SSOT_PLAN_PATHS
+            }
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            raise unittest.SkipTest(f"git history fixture unavailable: {exc}") from exc
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            after_root = Path(tmpdir) / "after"
+            after_root.mkdir()
+            write_fixture_files(root, before_fixture)
+            write_fixture_files(after_root, after_fixture)
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            run_grasp_json(
+                "--store",
+                store_path,
+                "adopt-markdown",
+                root,
+                "--project",
+                "wiki",
+                "--journal",
+                journal_path,
+            )
+            update_results_by_path = {}
+            update_results_by_path["grasp-backlog.md"] = run_grasp_json(
+                "--store",
+                store_path,
+                "--project",
+                "wiki",
+                "write-page",
+                "grasp-backlog",
+                "--from-file",
+                after_root / "grasp-backlog.md",
+                "--output",
+                root,
+                "--journal",
+                journal_path,
+            )
+            update_results_by_path[SQLITE_SSOT_PLAN_PATH] = run_grasp_json(
+                "--store",
+                store_path,
+                "--project",
+                "wiki",
+                "write-page",
+                SQLITE_SSOT_PLAN_TITLE,
+                "--create",
+                "--path",
+                SQLITE_SSOT_PLAN_PATH,
+                "--from-file",
+                after_root / SQLITE_SSOT_PLAN_PATH,
+                "--output",
+                root,
+                "--journal",
+                journal_path,
+            )
+            for relative_path in [
+                path
+                for path in SQLITE_SSOT_PLAN_EXISTING_PATHS
+                if path != "grasp-backlog.md"
+            ]:
+                update_results_by_path[relative_path] = run_grasp_json(
+                    "--store",
+                    store_path,
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    Path(relative_path).stem,
+                    "--from-file",
+                    after_root / relative_path,
+                    "--output",
+                    root,
+                    "--journal",
+                    journal_path,
+                )
+
+            anchor_event_id = update_results_by_path["grasp-backlog.md"]["event_id"]
+            content_plan = run_grasp_json(
+                "--store",
+                store_path,
+                "--project",
+                "wiki",
+                "revert-plan",
+                anchor_event_id,
+                "--scope",
+                "content-subjects",
+                "--output",
+                root,
+            )
+            log_page_plan = run_grasp_json(
+                "--store",
+                store_path,
+                "--project",
+                "wiki",
+                "revert-plan",
+                anchor_event_id,
+                "--scope",
+                "log-page-subjects",
+                "--output",
+                root,
+            )
+            projected_texts_after_plan = {
+                path: (root / path).read_text(encoding="utf-8")
+                for path in SQLITE_SSOT_PLAN_PATHS
+            }
+
+        expected_candidate_paths = [
+            "grasp-backlog.md",
+            SQLITE_SSOT_PLAN_PATH,
+            "index.md",
+            "llm-wiki-infra-fast-path-plan.md",
+            "log.md",
+        ]
+        self.assertEqual(content_plan["scope"], "content-subjects")
+        self.assertTrue(content_plan["complete"])
+        self.assertTrue(content_plan["revertible"])
+        self.assertIn("sqlite-ssot-write-plan", content_plan["content_subject_norms"])
+        self.assertIn("llm-wiki-infra-fast-path-plan", content_plan["content_subject_norms"])
+        self.assertEqual(
+            content_plan["candidate_event_ids"],
+            [update_results_by_path[path]["event_id"] for path in expected_candidate_paths],
+        )
+        self.assertEqual(
+            content_plan["revert_order_event_ids"],
+            [update_results_by_path[path]["event_id"] for path in reversed(expected_candidate_paths)],
+        )
+        self.assertNotIn(update_results_by_path["index.md"]["event_id"], log_page_plan["candidate_event_ids"])
+        self.assertIn(update_results_by_path["index.md"]["event_id"], content_plan["candidate_event_ids"])
         self.assertEqual(projected_texts_after_plan, after_fixture)
 
     def test_actual_consecutive_wiki_history_replay_cleanly(self):

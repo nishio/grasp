@@ -1314,3 +1314,9 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 - implemented: page_update SQLite event payloads now include source_path and graph_role; older page_update events are matched through page_id-derived current handles/source paths.
 - tests: covered real git history replay commit 3eaab75, proving subject-log is incomplete without log_append while log-page-subjects selects the four subject pages plus log.md and excludes index.md without mutating projection.
 - docs: bumped compatibility version to 1.8.32 and narrowed remaining work-unit inference to cases beyond log-batch, subject-log, log-page-subjects, same-page, explicit event-window, time-burst, or session boundaries.
+
+## [2026-06-28 00:38] implementation | add content subject revert planning
+- implemented: revert-plan <event-id> --scope content-subjects now extracts wikilink/Markdown path subjects from the anchor event changed lines and matches page events by changed-subject or event-target overlap.
+- implemented: content-subjects skips the initial adopt baseline, uses the next log boundary as a scan cap when present, and reuses the rollback-only safety check without mutating store, journal, or projection.
+- tests: covered real git history replay commit b644237, where log-page-subjects misses index.md but content-subjects selects grasp-backlog.md, sqlite-ssot-write-plan.md, index.md, llm-wiki-infra-fast-path-plan.md, and log.md.
+- docs: bumped compatibility version to 1.8.33 and narrowed remaining work-unit inference to cases beyond log-batch, subject-log, log-page-subjects, content-subjects, same-page, explicit event-window, time-burst, or session boundaries.
