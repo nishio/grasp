@@ -1175,3 +1175,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - Updated AGENTS/CLAUDE, `/next`, repo `grasp` skill, and local `file-back` skill so `wiki.grasp/events.jsonl` is described as a transition compatibility/audit journal, not normal edit authority.
 - Recovery wording now routes through `scripts/check_file_back_postwrite.py` where available instead of spelling raw projection checks in the active path.
 - Dogfood: this file-back started with `scripts/check_file_back_preflight.py` and used grasp `write-page` / `append-log` only for wiki changes.
+
+## [2026-06-27 18:25] implementation+file back | write commands に --no-journal を追加
+- code: Markdown-backed `append-section` / `append-log` / `write-page` / `rename-page` / `revert-event` に `--no-journal` を追加し、SQLite events + Markdown projection を更新しつつ compatibility JSONL append を省略できるようにした。`write-status --no-journal --strict` は JSONL guards を外し、SQLite-authority projection だけを strict check する。
+- tests: no-journal write が `journal=null` / `journal_written=false` を返し、compatibility journal を変更せず SQLite events と projection を更新する統合テストを追加。既存 journal strict failure と journal あり write path の targeted tests も確認。
+- file back: [[history]] / [[grasp-v1-implemented]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新。public compatibility version は `1.8.12`、schema は v8 のまま。repo file-back は当面 compatibility journal あり guard を継続し、次は guarded dogfood streak と `--no-journal` cutover 判断。

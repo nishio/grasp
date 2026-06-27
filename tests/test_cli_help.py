@@ -3174,6 +3174,274 @@ class CliHelpTests(unittest.TestCase):
         self.assertTrue(replay_result["ok"])
         self.assertEqual(replay_result["file_count"], 2)
 
+    def test_no_journal_writes_update_store_and_projection_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            original_journal_text = journal_path.read_text(encoding="utf-8")
+            section_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-section",
+                    "A",
+                    "--heading",
+                    "Updates",
+                    "--line",
+                    "- detail [[B]]",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            log_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-log",
+                    "--timestamp",
+                    "2026-06-26 01:00",
+                    "--op",
+                    "test",
+                    "--summary",
+                    "no journal",
+                    "--line",
+                    "- log detail",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            log_result = json.loads(log_completed.stdout)
+            write_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    "A",
+                    "--line",
+                    "# A",
+                    "--line",
+                    "- rewritten [[C]]",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            revert_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "revert-event",
+                    log_result["event_id"],
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            rename_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "rename-page",
+                    "A",
+                    "Renamed A",
+                    "--new-path",
+                    "Renamed.md",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            rename_result = json.loads(rename_completed.stdout)
+            revert_rename_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "revert-event",
+                    rename_result["event_id"],
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            status_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                    "--strict",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            export_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--check",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_type, project
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            journal_text_after_writes = journal_path.read_text(encoding="utf-8")
+            page_text = (root / "A.md").read_text(encoding="utf-8")
+            log_text = (root / "Log.md").read_text(encoding="utf-8")
+            renamed_exists_after_revert = (root / "Renamed.md").exists()
+
+        section_result = json.loads(section_completed.stdout)
+        write_result = json.loads(write_completed.stdout)
+        revert_result = json.loads(revert_completed.stdout)
+        revert_rename_result = json.loads(revert_rename_completed.stdout)
+        status_result = json.loads(status_completed.stdout)
+        export_result = json.loads(export_completed.stdout)
+        self.assertIsNone(section_result["journal"])
+        self.assertFalse(section_result["journal_written"])
+        self.assertIsNone(log_result["journal"])
+        self.assertFalse(log_result["journal_written"])
+        self.assertIsNone(write_result["journal"])
+        self.assertFalse(write_result["journal_written"])
+        self.assertIsNone(revert_result["journal"])
+        self.assertFalse(revert_result["journal_written"])
+        self.assertIsNone(rename_result["journal"])
+        self.assertFalse(rename_result["journal_written"])
+        self.assertIsNone(revert_rename_result["journal"])
+        self.assertFalse(revert_rename_result["journal_written"])
+        self.assertEqual(journal_text_after_writes, original_journal_text)
+        self.assertEqual(
+            [row[0] for row in sqlite_event_rows],
+            [
+                "page_create",
+                "page_create",
+                "section_append",
+                "log_append",
+                "page_update",
+                "event_revert",
+                "page_rename",
+                "event_revert",
+            ],
+        )
+        self.assertEqual([row[1] for row in sqlite_event_rows], ["wiki"] * 8)
+        self.assertTrue(status_result["strict_ok"])
+        self.assertEqual(status_result["strict_failures"], [])
+        self.assertFalse(status_result["journal_required"])
+        self.assertFalse(status_result["journal_exists"])
+        self.assertTrue(status_result["event_streams_match"])
+        self.assertEqual(status_result["sqlite_event_count"], 8)
+        self.assertTrue(status_result["projection"]["ok"])
+        self.assertTrue(export_result["ok"])
+        self.assertEqual(page_text, "# A\n- rewritten [[C]]\n")
+        self.assertEqual(log_text, "# Log\n")
+        self.assertFalse(renamed_exists_after_revert)
+
     def test_write_status_reports_stale_log_after_direct_markdown_import(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
