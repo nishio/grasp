@@ -109,6 +109,15 @@ class FileBackPreflightScriptTests(unittest.TestCase):
                 require_journal=True,
             )
 
+    def test_resolve_require_journal_defaults_to_no_journal(self):
+        self.assertFalse(preflight.resolve_require_journal(no_journal=False, with_journal=False))
+        self.assertFalse(preflight.resolve_require_journal(no_journal=True, with_journal=False))
+        self.assertTrue(preflight.resolve_require_journal(no_journal=False, with_journal=True))
+
+    def test_resolve_require_journal_rejects_conflicting_flags(self):
+        with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+            preflight.resolve_require_journal(no_journal=True, with_journal=True)
+
     def test_parse_json_output_rejects_non_object(self):
         value, error = preflight.parse_json_output("[]", "command")
 

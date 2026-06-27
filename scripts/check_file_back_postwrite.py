@@ -1,7 +1,8 @@
 """Check that a grasp write-first file-back landed cleanly.
 
-Run this after grasp write commands updated wiki/ and wiki.grasp/events.jsonl,
-before staging or committing the projection.
+Run this after grasp write commands updated wiki/, before staging or committing
+the projection. The default mode is no-journal; compatibility journal checks
+are explicit opt-in.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ if str(SCRIPT_DIR) not in sys.path:
 from check_file_back_preflight import (
     parse_json_output,
     require_success,
+    resolve_require_journal,
     run_command,
     write_status_command,
     write_status_errors,
@@ -125,7 +127,12 @@ def main() -> int:
     parser.add_argument(
         "--no-journal",
         action="store_true",
-        help="Use write-status --no-journal and skip compatibility journal guards.",
+        help="Use write-status --no-journal and skip compatibility journal guards. This is the default.",
+    )
+    parser.add_argument(
+        "--with-journal",
+        action="store_true",
+        help="Require the compatibility JSONL journal and run journal consistency guards.",
     )
     parser.add_argument("--output", default="wiki")
     parser.add_argument("--skip-lint", action="store_true", help="Skip scripts/lint_wiki.py.")
@@ -133,13 +140,17 @@ def main() -> int:
     args = parser.parse_args()
 
     repo = Path(args.repo).resolve()
+    try:
+        require_journal = resolve_require_journal(no_journal=args.no_journal, with_journal=args.with_journal)
+    except ValueError as error:
+        parser.error(str(error))
     errors = run_postwrite_checks(
         repo,
         store=args.store,
         project=args.project,
-        journal=None if args.no_journal else args.journal,
+        journal=args.journal if require_journal else None,
         output=args.output,
-        require_journal=not args.no_journal,
+        require_journal=require_journal,
         lint=not args.skip_lint,
         diff_check=not args.skip_diff_check,
     )
@@ -151,7 +162,7 @@ def main() -> int:
     print(
         "file-back postwrite ok: "
         f"store={args.store} project={args.project} output={args.output} "
-        f"journal_mode={'none' if args.no_journal else args.journal} "
+        f"journal_mode={args.journal if require_journal else 'none'} "
         f"lint={'skipped' if args.skip_lint else 'ok'} "
         f"diff_check={'skipped' if args.skip_diff_check else 'ok'}"
     )

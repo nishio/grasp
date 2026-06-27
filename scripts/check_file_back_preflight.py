@@ -1,7 +1,8 @@
 """Check that grasp write-first file-back can start safely.
 
 The check is intentionally repo-facing: run it after fetching the upstream base
-and before any grasp write command touches wiki/ or wiki.grasp/events.jsonl.
+and before any grasp write command touches wiki/. The default mode is
+no-journal; compatibility journal checks are explicit opt-in.
 """
 from __future__ import annotations
 
@@ -197,6 +198,12 @@ def run_grasp_preflight(
     return errors
 
 
+def resolve_require_journal(*, no_journal: bool, with_journal: bool) -> bool:
+    if no_journal and with_journal:
+        raise ValueError("--no-journal and --with-journal are mutually exclusive")
+    return with_journal
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check guarded grasp file-back preflight conditions.")
     parser.add_argument("--repo", default=".", help="Repository root.")
@@ -208,7 +215,12 @@ def main() -> int:
     parser.add_argument(
         "--no-journal",
         action="store_true",
-        help="Use write-status --no-journal and do not require the compatibility journal to be clean.",
+        help="Use write-status --no-journal and do not require the compatibility journal to be clean. This is the default.",
+    )
+    parser.add_argument(
+        "--with-journal",
+        action="store_true",
+        help="Require the compatibility JSONL journal and run journal consistency guards.",
     )
     parser.add_argument("--output", default="wiki")
     parser.add_argument(
@@ -220,8 +232,12 @@ def main() -> int:
     args = parser.parse_args()
 
     repo = Path(args.repo).resolve()
+    try:
+        require_journal = resolve_require_journal(no_journal=args.no_journal, with_journal=args.with_journal)
+    except ValueError as error:
+        parser.error(str(error))
     paths = tuple(args.dirty_paths) if args.dirty_paths else (
-        DEFAULT_NO_JOURNAL_DIRTY_PATHS if args.no_journal else DEFAULT_DIRTY_PATHS
+        DEFAULT_DIRTY_PATHS if require_journal else DEFAULT_NO_JOURNAL_DIRTY_PATHS
     )
     errors: list[str] = []
     if not args.skip_base_check:
@@ -237,9 +253,9 @@ def main() -> int:
             repo,
             store=args.store,
             project=args.project,
-            journal=None if args.no_journal else args.journal,
+            journal=args.journal if require_journal else None,
             output=args.output,
-            require_journal=not args.no_journal,
+            require_journal=require_journal,
         )
     )
     if errors:
@@ -250,7 +266,7 @@ def main() -> int:
     print(
         "file-back preflight ok: "
         f"base={args.base if not args.skip_base_check else 'skipped'} "
-        f"journal_mode={'none' if args.no_journal else args.journal} "
+        f"journal_mode={args.journal if require_journal else 'none'} "
         f"dirty_paths={','.join(paths)} "
         f"store={args.store} project={args.project} output={args.output}"
     )
