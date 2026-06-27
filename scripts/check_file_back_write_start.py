@@ -3,7 +3,7 @@
 Run this after check_file_back_preflight.py and immediately before the first
 grasp write command. Unlike preflight, this script never imports Markdown into
 the store; it only verifies that the preflight stamp, git-tracked projection,
-and SQLite-authority projection checks are still clean.
+SQLite event stream, and SQLite-authority projection checks are still clean.
 """
 from __future__ import annotations
 
@@ -18,6 +18,8 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from check_file_back_postwrite import (
     DEFAULT_PREFLIGHT_STAMP,
+    event_sequence,
+    load_preflight_stamp,
     run_preflight_stamp_check,
     run_projection_check,
     run_semantic_log_projection_check,
@@ -30,8 +32,39 @@ from check_file_back_preflight import (
     DEFAULT_NO_JOURNAL_DIRTY_PATHS,
     check_dirty_paths,
     file_back_store_output_pair_errors,
+    latest_event_sequence,
+    project_events,
+    resolve_repo_path,
     resolve_require_journal,
 )
+
+
+def run_preflight_event_sequence_unchanged_check(
+    repo: Path,
+    *,
+    stamp_path: Path,
+    store: str,
+    project: str,
+) -> list[str]:
+    stamp, error = load_preflight_stamp(stamp_path)
+    if stamp is None:
+        return [error or "preflight stamp returned no JSON"]
+    if "sqlite_event_sequence" not in stamp:
+        return ["preflight stamp sqlite_event_sequence is missing"]
+    baseline = event_sequence(stamp.get("sqlite_event_sequence"))
+    if stamp.get("sqlite_event_sequence") is not None and baseline is None:
+        return [f"preflight stamp sqlite_event_sequence={stamp.get('sqlite_event_sequence')!r}, expected integer or null"]
+    try:
+        current = latest_event_sequence(project_events(str(resolve_repo_path(repo, store)), project))
+    except Exception as error:
+        return [f"could not inspect SQLite events before file-back write-start: {error}"]
+    if current == baseline:
+        return []
+    return [
+        "SQLite events changed after preflight before write-start; "
+        "rerun check_file_back_preflight.py before writing "
+        f"(preflight_event_sequence={baseline}, current_event_sequence={current})"
+    ]
 
 
 def run_write_start_checks(
@@ -53,16 +86,25 @@ def run_write_start_checks(
     if errors:
         return errors
     if require_preflight_stamp:
-        errors.extend(
-            run_preflight_stamp_check(
-                repo,
-                stamp_path=Path(preflight_stamp) if Path(preflight_stamp).is_absolute() else repo / preflight_stamp,
-                expected_session_id=expected_session_id,
-                store=store,
-                project=project,
-                output=output,
-            )
+        stamp_path = Path(preflight_stamp) if Path(preflight_stamp).is_absolute() else repo / preflight_stamp
+        stamp_errors = run_preflight_stamp_check(
+            repo,
+            stamp_path=stamp_path,
+            expected_session_id=expected_session_id,
+            store=store,
+            project=project,
+            output=output,
         )
+        errors.extend(stamp_errors)
+        if not stamp_errors:
+            errors.extend(
+                run_preflight_event_sequence_unchanged_check(
+                    repo,
+                    stamp_path=stamp_path,
+                    store=store,
+                    project=project,
+                )
+            )
     errors.extend(check_dirty_paths(repo, dirty_paths))
     errors.extend(
         run_write_status(
@@ -159,6 +201,7 @@ def main() -> int:
         f"journal_mode={args.journal if require_journal else 'none'} "
         f"session={args.session_id if not args.skip_preflight_stamp_check else 'skipped'} "
         f"preflight_stamp={'skipped' if args.skip_preflight_stamp_check else args.preflight_stamp} "
+        f"event_sequence={'skipped' if args.skip_preflight_stamp_check else 'unchanged'} "
         f"semantic_log={'skipped' if args.skip_semantic_log_check else 'ok'} "
         f"dirty_paths={','.join(paths)}"
     )
