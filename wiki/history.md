@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.60`（更新: 2026-06-28 08:04、store: schema `8`、compat: schema `8` compatible）: `log-records` / `history` の JSON result に `result_mode: event-stream`、`current_state: false`、`current_state_hint`、`staleness_signals[]` を追加し、text formatter も同じ mode/current-state header を出すようにした。これにより、log entry import 由来の過去 transition record を現在状態の主張として読む stale-log gap を command output 側で明示する。schema は不変
 - `1.8.59`（更新: 2026-06-28 07:49、store: schema `8`、compat: schema `8` compatible）: `revert-plan --scope event-window` / `time-burst` / `session` も、選択した page event を戻すために必要な後続 same-page dependents を候補へ足し、`dependent_event_ids` として返すようにした。base selection は明示 window / time gap / session のままだが、その外側に同一 page cleanup があると rollback-only safety check が不可逆になる gap を塞ぐ。schema は不変
 - `1.8.58`（更新: 2026-06-28 07:36、store: schema `8`、compat: schema `8` compatible）: version ledger / current facts drift guard を wiki lint の hard check に昇格した。`scripts/check_wiki_version_ledger.py` は package metadata、[[history]] latest/current ledger、[[grasp-v1-implemented]] current facts の一致、history version entry の重複、semver 降順を検査する。`scripts/lint_wiki.py` は同 checker を呼び、drift があれば exit 1 にする。これにより、full test suite だけでなく通常 file-back postwrite の wiki lint でも stale current facts を止める。schema は不変
 - `1.8.57`（更新: 2026-06-28 07:26、store: schema `8`、compat: schema `8` compatible）: release ledger / current facts の version drift guard を追加した。`tests/test_version_metadata.py` は `grasp.__version__`、`pyproject.toml`、[[history]] の latest entry / current public compatibility version / package metadata version、[[grasp-v1-implemented]] の current public compatibility version が同じ値であることを検査する。きっかけは `1.8.56` 後も current facts の public compatibility version だけ `1.8.54` に残っていた dogfood gap。schema は不変
@@ -199,6 +200,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.59`
+- Current public compatibility version: `1.8.60`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.59`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.60`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

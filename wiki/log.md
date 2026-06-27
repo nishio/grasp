@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-28 08:04] implementation+file-back | `history` / `log-records` を event stream として明示
+- code: `log-records` / `history` の JSON result に `result_mode=event-stream`、`current_state=false`、`current_state_hint`、`staleness_signals[]` を追加し、text formatter も同じ header を出すようにした。`history <query>` は current projection の読み先として `read <query>` を hint する。
+- tests: SQLite events 優先の `history` / `log-records` test で JSON/text の mode/current-state fields を検査。schema は v8 のまま、public compatibility version は `1.8.60`。
+- file back: [[history]] / [[grasp-v1-implemented]] / [[grasp-backlog]] / [[sqlite-ssot-write-plan]] を更新し、log entry import record は過去 transition event であって現在状態ではない、という stale-log guard の実装済み部分を current facts へ移した。
+
 ## [2026-06-27 13:37] implementation+file back | `append-section` / `append-log` を SQLite state+event 1 transaction に移行
 - code: `SQLiteStore.append_markdown_lines_with_event()` を追加し、append lines update と SQLite `events` row insert を同じ `BEGIN IMMEDIATE` transaction で commit するようにした。CLI `append-section` / `append-log` はこの helper を使う。既存互換のため legacy `events.jsonl` append と Markdown projection export は継続。
 - tests: CLI append が SQLite events table に `section_append` / `log_append` を残すこと、duplicate event id で SQLite event insert が失敗した時に appended lines が rollback されることを追加。`python3 -m unittest discover -s tests` は 113 tests OK。
