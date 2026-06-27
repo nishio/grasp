@@ -1390,3 +1390,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: `scripts/check_file_back_preflight.py` が no-journal mode で selected-project SQLite events の無い file-back store を検出した場合、`adopt-markdown` で gitignored `.grasp/file-back-adopt.jsonl` に bootstrap audit を作ってから通常の `import --markdown` / `write-status --no-journal --strict` / projection check に進むようにした。
 - tests/docs: preflight unit tests、runbook checker、AGENTS/CLAUDE、`/next`、`/ship-next`、repo skill、README、history、current facts、write plan を fresh store bootstrap guard に更新した。
 - dogfood: fresh isolated worktree の `.grasp/file-back.sqlite` が未初期化でも、`GRASP_SESSION_ID=file-back-20260627T200500Z-bootstrap-repro python3 scripts/check_file_back_preflight.py` が通った。public compatibility version は `1.8.48`、schema は v8 のまま。
+
+## [2026-06-28 05:13] implementation+file back | preflight bootstrap の SQLite error 境界を狭める
+- code: `scripts/check_file_back_preflight.py` は repo 基準で解決した store path がまだ無い場合と `events` table が無い場合だけ bootstrap 可能な empty state と扱い、locked / malformed / unopenable existing store などその他 SQLite error では adoption せず preflight failure にする。
+- tests: preflight unit tests は missing store file、missing `events` table、malformed DB、unopenable existing store、repo-relative store resolution、locked DB で bootstrap しないことを固定した。
+- dogfood: fresh worktree で最初の preflight が `unable to open database file` を返したため、missing store file を bootstrappable として扱う判定を追加し、その後 `GRASP_SESSION_ID=file-back-20260627T203300Z-bootstrap-error-boundary python3 scripts/check_file_back_preflight.py` と write-start が通った。public compatibility version は `1.8.49`、schema は v8 のまま。
