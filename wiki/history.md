@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.55`（更新: 2026-06-28 07:35、store: schema `8`、compat: schema `8` compatible）: repo-local `scripts/check_file_back_write_start.py` が preflight stamp の latest SQLite `event_sequence` と write-start 時点の current latest `event_sequence` を比較し、最初の write command 前に store が進んでいた場合は preflight 再実行を要求して failure にするようにした。これにより、preflight と write-start の間に別 writer が `.grasp/file-back.sqlite` を更新し、postwrite で自分の write 後に初めて session window mismatch として検出される gap を mutation 前に止める。schema は不変
 - `1.8.54`（更新: 2026-06-28 07:15、store: schema `8`、compat: schema `8` compatible）: repo-local file-back postwrite guard の session marker 検査を latest event だけから、preflight 後に増えた全 SQLite events へ拡張した。`scripts/check_file_back_preflight.py` は preflight stamp schema v2 として latest SQLite `event_sequence` を記録し、`scripts/check_file_back_postwrite.py` はその baseline より後の event がすべて期待 `GRASP_SESSION_ID` を持つことを検査する。これにより、途中の `write-page` だけ session id なしで実行され、最後の `append-log` だけ session id 付きなので latest-event guard を通る gap を防ぐ。schema は不変
 - `1.8.53`（更新: 2026-06-28 06:45、store: schema `8`、compat: schema `8` compatible）: Markdown-backed write commands の dirty target path guard を mutation 前へ追加した。`append-section` / `append-log` / `write-page` / `rename-page` は対象 projection path 自体が Git dirty でも、current store projection と一致する場合だけ mutation 前 guard を通す。対象 path が local draft など store と異なる内容なら、store state や SQLite event rows を変更する前に拒否する。`write-page --from-file` は対象 projection file 自身を replacement input として使う direct patch fallback を維持する。schema は不変
 - `1.8.52`（更新: 2026-06-28 06:30、store: schema `8`、compat: schema `8` compatible）: Markdown-backed recovery commands の dirty target path guard を強化した。`revert-event` / `revert-events` / `revert-event --include-dependents` は reverted target path 自体が Git dirty でも、current store projection と一致する場合だけ mutation 前 guard を通す。target path が local draft など store と異なる内容なら、store state や SQLite `event_revert` rows を変更する前に拒否する。schema は不変
@@ -194,6 +195,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.54`
+- Current public compatibility version: `1.8.55`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.54`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.55`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
