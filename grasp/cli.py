@@ -52,6 +52,20 @@ STORE_WRITE_COMMANDS = {
 REVERSIBLE_EVENT_TYPES = {"page_create", "section_append", "log_append", "page_update", "page_rename"}
 
 
+class GraspCliError(ValueError):
+    def __init__(self, message: str, *, diagnostic: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.diagnostic = diagnostic
+
+
+class ProjectionExportRollbackError(GraspCliError):
+    pass
+
+
+class ProjectionExportRollbackFailedError(GraspCliError):
+    pass
+
+
 class GraspHelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
     pass
 
@@ -923,6 +937,7 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "Alpha write surface: Markdown-backed projects only; rename is still out of scope.",
             "The default journal path is <output-folder-name>.grasp/events.jsonl beside the output folder.",
+            "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
     )
     append_section_parser.add_argument("title", help="Target page title or unique handle.")
@@ -950,6 +965,7 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "Default target title is Log.",
             "Alpha write surface: Markdown-backed projects only; rename is still out of scope.",
+            "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
     )
     append_log_parser.add_argument("--title", default="Log", help="Target log page title or unique handle.")
@@ -982,6 +998,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Alpha write surface: Markdown-backed projects and unique handles only.",
             "--path is required with --create and deliberately ignored for existing-page updates.",
             "Rename and source-path changes for existing pages are handled by rename-page.",
+            "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
     )
     write_page_parser.add_argument("title", help="Target page title or unique handle.")
@@ -1016,6 +1033,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Alpha write surface: Markdown-backed projects only.",
             "The first H1 is updated only when it currently matches the old title.",
             "References like [[old-title]] are preserved as text and resolve through the old-title alias.",
+            "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
     )
     rename_page_parser.add_argument("target", help="Target page handle by default, or page id/path with --target.")
@@ -2398,9 +2416,10 @@ def append_event_and_export_projection(
         return export_projection()
     except Exception as error:
         rollback = rollback_event_after_projection_failure(store, journal, event, error)
-        raise ValueError(
+        raise ProjectionExportRollbackError(
             "projection export failed after event write; "
-            f"store was reverted with event {rollback['event_id']}: {error}"
+            f"store was reverted with event {rollback['rollback_event_id']}: {error}",
+            diagnostic=rollback,
         ) from error
 
 
@@ -2422,11 +2441,46 @@ def rollback_event_after_projection_failure(
             insert_store_event(store.connection, event)
         if journal is not None:
             append_journal_event(journal, event)
-        return event
+        return {
+            "type": "projection_export_rollback",
+            "rolled_back": True,
+            "target_event_id": target["event_id"],
+            "target_event_type": target["event_type"],
+            "target_event_project": target["project"],
+            "rollback_event_id": event["event_id"],
+            "rollback_event_type": event["event_type"],
+            "rollback_event": event,
+            "journal": str(journal) if journal is not None else None,
+            "journal_written": journal is not None,
+            "reason": reason,
+            "original_error": {
+                "type": type(error).__name__,
+                "message": str(error),
+            },
+        }
     except Exception as rollback_error:
-        raise ValueError(
+        diagnostic = {
+            "type": "projection_export_rollback_failed",
+            "rolled_back": False,
+            "target_event_id": target.get("event_id"),
+            "target_event_type": target.get("event_type"),
+            "target_event_project": target.get("project"),
+            "journal": str(journal) if journal is not None else None,
+            "journal_written": False,
+            "reason": reason,
+            "original_error": {
+                "type": type(error).__name__,
+                "message": str(error),
+            },
+            "rollback_error": {
+                "type": type(rollback_error).__name__,
+                "message": str(rollback_error),
+            },
+        }
+        raise ProjectionExportRollbackFailedError(
             "projection export failed and automatic store rollback failed; "
-            f"original error: {error}; rollback error: {rollback_error}"
+            f"original error: {error}; rollback error: {rollback_error}",
+            diagnostic=diagnostic,
         ) from rollback_error
 
 
@@ -3301,6 +3355,11 @@ def main(argv: list[str] | None = None) -> int:
             store = SQLiteStore(args.store, project=args.project, for_write=store_for_write)
         try:
             result = run_command(store, args)
+        except GraspCliError as error:
+            if args.json:
+                emit_cli_error_result(error)
+                return 2
+            parser.error(str(error))
         except ValueError as error:
             parser.error(str(error))
     finally:
@@ -3373,6 +3432,14 @@ def emit_error_result(error: MarkdownCollisionError) -> None:
         ensure_ascii=False,
         indent=2,
     )
+    sys.stderr.write("\n")
+
+
+def emit_cli_error_result(error: GraspCliError) -> None:
+    result: dict[str, Any] = {"error": str(error)}
+    if error.diagnostic is not None:
+        result["diagnostic"] = error.diagnostic
+    json.dump(result, sys.stderr, ensure_ascii=False, indent=2)
     sys.stderr.write("\n")
 
 

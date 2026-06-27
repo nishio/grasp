@@ -3064,8 +3064,22 @@ class CliHelpTests(unittest.TestCase):
 
         peek_result = json.loads(peek_completed.stdout)
         replay_result = json.loads(replay_completed.stdout)
+        failed_error = json.loads(failed_completed.stderr)
+        rollback_diagnostic = failed_error["diagnostic"]
         self.assertEqual(failed_completed.returncode, 2)
         self.assertIn("store was reverted with event", failed_completed.stderr)
+        self.assertEqual(rollback_diagnostic["type"], "projection_export_rollback")
+        self.assertTrue(rollback_diagnostic["rolled_back"])
+        self.assertEqual(rollback_diagnostic["target_event_id"], journal_events[1]["event_id"])
+        self.assertEqual(rollback_diagnostic["target_event_type"], "section_append")
+        self.assertEqual(rollback_diagnostic["target_event_project"], "wiki")
+        self.assertEqual(rollback_diagnostic["rollback_event_id"], journal_events[-1]["event_id"])
+        self.assertEqual(rollback_diagnostic["rollback_event_type"], "event_revert")
+        self.assertEqual(rollback_diagnostic["rollback_event"], journal_events[-1])
+        self.assertEqual(rollback_diagnostic["journal"], str(journal_path))
+        self.assertTrue(rollback_diagnostic["journal_written"])
+        self.assertEqual(rollback_diagnostic["original_error"]["type"], "IsADirectoryError")
+        self.assertIn("projection export failed", rollback_diagnostic["reason"])
         self.assertEqual([event["event_type"] for event in journal_events], ["page_create", "section_append", "event_revert"])
         self.assertEqual([row[1] for row in sqlite_event_rows], ["page_create", "section_append", "event_revert"])
         self.assertEqual([row[0] for row in sqlite_event_rows], [event["event_id"] for event in journal_events])
@@ -3080,6 +3094,104 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
         self.assertEqual(replay_text, "# A\n")
         self.assertEqual(replay_result["written_files"], ["A.md"])
+
+    def test_projection_export_failure_no_journal_reports_rollback_diagnostic(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "A.md").unlink()
+            (root / "A.md").mkdir()
+            failed_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-section",
+                    "A",
+                    "--heading",
+                    "Broken export",
+                    "--line",
+                    "- should rollback",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            peek_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_id, event_type, project, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+
+        failed_error = json.loads(failed_completed.stderr)
+        rollback_diagnostic = failed_error["diagnostic"]
+        peek_result = json.loads(peek_completed.stdout)
+        self.assertEqual(failed_completed.returncode, 2)
+        self.assertEqual(rollback_diagnostic["type"], "projection_export_rollback")
+        self.assertTrue(rollback_diagnostic["rolled_back"])
+        self.assertEqual(rollback_diagnostic["target_event_type"], "section_append")
+        self.assertEqual(rollback_diagnostic["target_event_project"], "wiki")
+        self.assertEqual(rollback_diagnostic["rollback_event_type"], "event_revert")
+        self.assertIsNone(rollback_diagnostic["journal"])
+        self.assertFalse(rollback_diagnostic["journal_written"])
+        self.assertEqual(rollback_diagnostic["original_error"]["type"], "IsADirectoryError")
+        self.assertEqual([row[1] for row in sqlite_event_rows], ["section_append", "event_revert"])
+        self.assertEqual(rollback_diagnostic["target_event_id"], sqlite_event_rows[0][0])
+        self.assertEqual(rollback_diagnostic["rollback_event_id"], sqlite_event_rows[1][0])
+        sqlite_revert_payload = json.loads(sqlite_event_rows[1][3])
+        self.assertEqual(sqlite_revert_payload["target_event_id"], sqlite_event_rows[0][0])
+        self.assertEqual(sqlite_revert_payload["target_event_type"], "section_append")
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
 
     def test_append_section_and_log_update_store_journal_and_projection(self):
         with tempfile.TemporaryDirectory() as tmpdir:
