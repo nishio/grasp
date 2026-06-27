@@ -1210,7 +1210,8 @@ def build_parser() -> argparse.ArgumentParser:
             "log-batch is for file-back style workflows that append one log entry after a group of page writes.",
             "subject-log filters a log-batch to page events named by the closing log entry subjects, and includes the closing log_append.",
             "log-page-subjects handles legacy/direct Markdown history where the closing log entry is inside a log page_update.",
-            "content-subjects matches page events by subjects extracted from changed page lines, falling back to the anchor target when changed lines contain no subjects; it also includes required later same-page dependents so the plan is executable.",
+            "content-subjects matches page events by subjects extracted from changed page lines, falling back to the anchor target when changed lines contain no subjects.",
+            "Inferred plans add required later same-page dependents for selected page events and report them as dependent_event_ids.",
             "same-page-dependents mirrors revert-event --include-dependents planning without mutating.",
             "event-window is explicit sequence planning: pass --before and/or --after to bound the event_sequence window.",
             "time-burst is explicit temporal planning: pass --max-gap-seconds to bound adjacent event gaps; it does not cross log_append boundaries.",
@@ -3289,9 +3290,15 @@ def log_batch_revert_plan(
             continue
         candidates.append(event)
 
+    candidates, dependent_events = add_required_same_page_dependents(
+        sqlite_events,
+        candidates,
+        excluded_events,
+    )
     targets = sorted(candidates, key=event_sequence, reverse=True)
     check = check_revert_plan_revertible(store, targets)
     candidate_event_ids = [event["event_id"] for event in candidates]
+    dependent_event_ids = [event["event_id"] for event in dependent_events]
     result: dict[str, Any] = {
         "project": project,
         "scope": args.scope,
@@ -3303,6 +3310,7 @@ def log_batch_revert_plan(
         "batch_start_after_event_sequence": start_sequence,
         "batch_end_event_sequence": end_sequence,
         "candidate_event_ids": candidate_event_ids,
+        "dependent_event_ids": dependent_event_ids,
         "revert_order_event_ids": [event["event_id"] for event in targets],
         "candidate_events": [revert_plan_event_summary(event) for event in candidates],
         "excluded_events": excluded_events,
@@ -3448,9 +3456,15 @@ def subject_log_revert_plan(
             continue
         candidates.append(event)
 
+    candidates, dependent_events = add_required_same_page_dependents(
+        sqlite_events,
+        candidates,
+        excluded_events,
+    )
     targets = sorted(candidates, key=event_sequence, reverse=True)
     check = check_revert_plan_revertible(store, targets)
     candidate_event_ids = [event["event_id"] for event in candidates]
+    dependent_event_ids = [event["event_id"] for event in dependent_events]
     result: dict[str, Any] = {
         "project": project,
         "scope": args.scope,
@@ -3464,6 +3478,7 @@ def subject_log_revert_plan(
         "subject_log_subjects": subjects,
         "subject_log_subject_norms": sorted(subject_norms),
         "candidate_event_ids": candidate_event_ids,
+        "dependent_event_ids": dependent_event_ids,
         "revert_order_event_ids": [event["event_id"] for event in targets],
         "candidate_events": [revert_plan_event_summary(event) for event in candidates],
         "excluded_events": excluded_events,
@@ -3621,9 +3636,15 @@ def log_page_subjects_revert_plan(
             continue
         candidates.append(event)
 
+    candidates, dependent_events = add_required_same_page_dependents(
+        sqlite_events,
+        candidates,
+        excluded_events,
+    )
     targets = sorted(candidates, key=event_sequence, reverse=True)
     check = check_revert_plan_revertible(store, targets)
     candidate_event_ids = [event["event_id"] for event in candidates]
+    dependent_event_ids = [event["event_id"] for event in dependent_events]
     result: dict[str, Any] = {
         "project": project,
         "scope": args.scope,
@@ -3637,6 +3658,7 @@ def log_page_subjects_revert_plan(
         "log_page_subjects": subjects,
         "log_page_subject_norms": sorted(subject_norms),
         "candidate_event_ids": candidate_event_ids,
+        "dependent_event_ids": dependent_event_ids,
         "revert_order_event_ids": [event["event_id"] for event in targets],
         "candidate_events": [revert_plan_event_summary(event) for event in candidates],
         "excluded_events": excluded_events,
@@ -3812,7 +3834,7 @@ def add_required_same_page_dependents(
     candidate_by_id = {str(event.get("event_id") or ""): event for event in candidates}
     dependent_by_id: dict[str, dict[str, Any]] = {}
     for candidate in list(candidates):
-        if not semantic_plan_candidate_needs_same_page_dependents(candidate):
+        if not inferred_plan_candidate_needs_same_page_dependents(candidate):
             continue
         try:
             dependents = dependent_revert_events(sqlite_events, candidate)
@@ -3835,7 +3857,7 @@ def add_required_same_page_dependents(
     return all_candidates, dependent_events
 
 
-def semantic_plan_candidate_needs_same_page_dependents(event: dict[str, Any]) -> bool:
+def inferred_plan_candidate_needs_same_page_dependents(event: dict[str, Any]) -> bool:
     if event.get("event_type") == "log_append":
         return False
     if event_targets_log_page(event):
@@ -6613,6 +6635,8 @@ def format_revert_plan(result: dict[str, Any]) -> str:
         f"revertible: {str(result.get('revertible', False)).lower()}\n"
         f"candidate_events: {len(result.get('candidate_event_ids') or [])}\n"
     )
+    if "dependent_event_ids" in result:
+        text += f"dependent_events: {len(result.get('dependent_event_ids') or [])}\n"
     if result.get("previous_log_event"):
         text += f"previous_log_event: {result['previous_log_event'].get('event_id')}\n"
     if result.get("closing_log_event"):

@@ -1329,3 +1329,6 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 
 ## [2026-06-28 01:15] implementation+file-back | make content-subjects dependency-complete
 `1.8.36` adds same-page dependency closure to `revert-plan --scope content-subjects`, so semantic candidate sets include required later page events before rollback-only safety checking.
+
+## [2026-06-28 02:09] implementation+file-back | make inferred revert plans dependency-complete
+`1.8.37` extends same-page dependency closure from content-subjects to log-batch, subject-log, and log-page-subjects, so inferred plans include required later cleanup events before rollback-only safety checking.
