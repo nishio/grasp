@@ -4061,6 +4061,131 @@ class CliHelpTests(unittest.TestCase):
             ["page_create", "page_update", "log_append"],
         )
 
+    def test_revert_plan_content_subjects_includes_required_same_page_dependents(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nold [[Topic]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nunrelated\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            (root / "Topic.md").write_text("# Topic\n", encoding="utf-8")
+            first_source = Path(tmpdir) / "A-first.md"
+            first_source.write_text("# A\nnew [[Topic]]\n", encoding="utf-8")
+            cleanup_source = Path(tmpdir) / "A-cleanup.md"
+            cleanup_source.write_text("# A\nnew [[Topic]]\nlocal cleanup\n", encoding="utf-8")
+            b_source = Path(tmpdir) / "B-new.md"
+            b_source.write_text("# B\nunrelated edit\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            def run_json(*args):
+                completed = subprocess.run(
+                    [sys.executable, "-m", "grasp", "--json", "--store", str(store_path), "--project", "wiki", *args],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            a_update = run_json(
+                "write-page",
+                "A",
+                "--from-file",
+                str(first_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            b_update = run_json(
+                "write-page",
+                "B",
+                "--from-file",
+                str(b_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            a_cleanup = run_json(
+                "write-page",
+                "A",
+                "--from-file",
+                str(cleanup_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            log_append = run_json(
+                "append-log",
+                "--op",
+                "implementation",
+                "--summary",
+                "topic update",
+                "--line",
+                "- changed [[Topic]]",
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            projected_before_plan = {
+                path.name: path.read_text(encoding="utf-8")
+                for path in sorted(root.glob("*.md"))
+            }
+            plan = run_json(
+                "revert-plan",
+                a_update["event_id"],
+                "--scope",
+                "content-subjects",
+                "--output",
+                str(root),
+            )
+            projected_after_plan = {
+                path.name: path.read_text(encoding="utf-8")
+                for path in sorted(root.glob("*.md"))
+            }
+
+        self.assertEqual(plan["scope"], "content-subjects")
+        self.assertTrue(plan["complete"])
+        self.assertTrue(plan["revertible"])
+        self.assertIn("topic", plan["content_subject_norms"])
+        self.assertEqual(plan["dependent_event_ids"], [a_cleanup["event_id"]])
+        self.assertEqual(
+            plan["candidate_event_ids"],
+            [a_update["event_id"], a_cleanup["event_id"], log_append["event_id"]],
+        )
+        self.assertEqual(
+            plan["revert_order_event_ids"],
+            [log_append["event_id"], a_cleanup["event_id"], a_update["event_id"]],
+        )
+        self.assertEqual(
+            [event["target_event_id"] for event in plan["reverted_events"]],
+            [log_append["event_id"], a_cleanup["event_id"], a_update["event_id"]],
+        )
+        self.assertNotIn(
+            a_cleanup["event_id"],
+            [event["event_id"] for event in plan["excluded_events"]],
+        )
+        self.assertIn(
+            b_update["event_id"],
+            [event["event_id"] for event in plan["excluded_events"]],
+        )
+        self.assertEqual(projected_after_plan, projected_before_plan)
+
     def test_revert_plan_same_page_dependents_handles_missing_log_batch_boundary(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"

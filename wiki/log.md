@@ -1326,3 +1326,6 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 
 ## [2026-06-28 01:05] implementation+file-back | add content-subjects anchor-target fallback
 `1.8.35` lets `revert-plan --scope content-subjects` use the anchor event target when changed lines have no wikilink or Markdown path subjects; regression covers a plain created page linked by another page and the closing log.
+
+## [2026-06-28 01:15] implementation+file-back | make content-subjects dependency-complete
+`1.8.36` adds same-page dependency closure to `revert-plan --scope content-subjects`, so semantic candidate sets include required later page events before rollback-only safety checking.
