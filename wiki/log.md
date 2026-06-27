@@ -1,5 +1,9 @@
 # Log
 
+## [2026-06-27 10:51] file back | sqlite-write-concurrency §Updates — 使い捨て store は store≠authority の症状、SSoT 化が構成上 throwaway を消す（cutover は3点）
+- store を捨てて作り直せるのは cache だから。store=authority にすると唯一コピーになり単一 canonical 永続 store にならざるを得ない（read 用 default store は既存）
+- cutover 残作業は (1) write path を canonical store 経由化+WAL/busy_timeout (2) events を SQLite テーブル化し write を1 tx に (3) export 一方向化、の3つ
+
 ## [2026-06-27 02:31] file back | sqlite-write-concurrency §Updates + native-authority §Updates — SQLite を本体/SSoT に・journal も SQLite 内へ（nishio 方向）
 - 方向: SQLite=SSoT、journal も SQLite 内（events テーブル）、Markdown は必要時に吐く projection（= option D）。DB の write serialization が並行を source で防ぐ唯一の形
 - git-diff 喪失は受容（event journal は詳細すぎて人間 review 対象でない）。但し incident を救った『素の git ファイルを手 reconcile』脱出口を失うので grasp-native recovery で置換が cutover 条件
