@@ -1177,7 +1177,7 @@ def build_parser() -> argparse.ArgumentParser:
             "closing log_append. Use --scope subject-log when the log-batch boundary is too broad but its closing "
             "log entry names the intended pages with wikilinks or Markdown paths. Use --scope log-page-subjects "
             "when legacy/direct Markdown history updated a log page with write-page instead of log_append. "
-            "Use --scope content-subjects when page content changes share wikilinks or Markdown path subjects "
+            "Use --scope content-subjects when page content changes share wikilinks, Markdown path subjects, or the anchor page target "
             "but no explicit log/session/window boundary describes the work unit. "
             "Use --scope same-page-dependents when no log-batch boundary exists and the "
             "anchor is blocked by later active events on the same page. Use --scope event-window with --before/--after "
@@ -1190,7 +1190,7 @@ def build_parser() -> argparse.ArgumentParser:
         returns=(
             "project, scope, anchor_event_id, complete, previous_log_event|null, closing_log_event|null, "
             "candidate_event_ids[], dependent_event_ids[]?, subject_log_subjects[]?, log_page_subjects[]?, "
-            "content_subjects[]?, window_before?, window_after?, max_gap_seconds?, session_id?, session_actor?, boundary_events[]?, "
+            "content_subjects[]?, content_subject_source?, window_before?, window_after?, max_gap_seconds?, session_id?, session_actor?, boundary_events[]?, "
             "revert_order_event_ids[], candidate_events[], excluded_events[], revertible, reverted_events[], "
             "reason?, suggested_revert_events_args[]?"
         ),
@@ -1210,7 +1210,7 @@ def build_parser() -> argparse.ArgumentParser:
             "log-batch is for file-back style workflows that append one log entry after a group of page writes.",
             "subject-log filters a log-batch to page events named by the closing log entry subjects, and includes the closing log_append.",
             "log-page-subjects handles legacy/direct Markdown history where the closing log entry is inside a log page_update.",
-            "content-subjects matches page events by subjects extracted from changed page lines; it is semantic but intentionally heuristic.",
+            "content-subjects matches page events by subjects extracted from changed page lines, falling back to the anchor target when changed lines contain no subjects; it is semantic but intentionally heuristic.",
             "same-page-dependents mirrors revert-event --include-dependents planning without mutating.",
             "event-window is explicit sequence planning: pass --before and/or --after to bound the event_sequence window.",
             "time-burst is explicit temporal planning: pass --max-gap-seconds to bound adjacent event gaps; it does not cross log_append boundaries.",
@@ -3687,6 +3687,8 @@ def content_subjects_revert_plan(
     anchor_subjects = event_changed_content_subjects(anchor)
     anchor_subject_norms = {normalize_title(subject) for subject in anchor_subjects}
     anchor_target_norms = event_target_subject_norms(anchor, page_target_norms)
+    plan_subject_norms = anchor_subject_norms or anchor_target_norms
+    content_subject_source = "changed-lines" if anchor_subject_norms else "anchor-target"
     if anchor_exclusion:
         excluded_events.append(revert_plan_event_summary(anchor, reason=anchor_exclusion))
         return {
@@ -3694,11 +3696,12 @@ def content_subjects_revert_plan(
             "scope": args.scope,
             "anchor_event_id": anchor["event_id"],
             "anchor_event": revert_plan_event_summary(anchor),
-            "complete": bool(anchor_subject_norms),
+            "complete": bool(plan_subject_norms),
             "previous_log_event": revert_plan_event_summary(previous_log) if previous_log is not None else None,
             "closing_log_event": revert_plan_event_summary(closing_log) if closing_log is not None else None,
             "content_subjects": anchor_subjects,
-            "content_subject_norms": sorted(anchor_subject_norms),
+            "content_subject_norms": sorted(plan_subject_norms),
+            "content_subject_source": content_subject_source,
             "anchor_target_norms": sorted(anchor_target_norms),
             "candidate_event_ids": [],
             "revert_order_event_ids": [],
@@ -3708,7 +3711,7 @@ def content_subjects_revert_plan(
             "reverted_events": [],
             "reason": f"anchor event is not an active reversible target: {anchor_exclusion}",
         }
-    if not anchor_subject_norms:
+    if not plan_subject_norms:
         return {
             "project": project,
             "scope": args.scope,
@@ -3719,6 +3722,7 @@ def content_subjects_revert_plan(
             "closing_log_event": revert_plan_event_summary(closing_log) if closing_log is not None else None,
             "content_subjects": anchor_subjects,
             "content_subject_norms": [],
+            "content_subject_source": content_subject_source,
             "anchor_target_norms": sorted(anchor_target_norms),
             "candidate_event_ids": [],
             "revert_order_event_ids": [],
@@ -3726,7 +3730,7 @@ def content_subjects_revert_plan(
             "excluded_events": [],
             "revertible": False,
             "reverted_events": [],
-            "reason": "anchor event changed lines have no wikilink or Markdown path subjects",
+            "reason": "anchor event has no changed-line subjects or target subjects",
         }
 
     candidates: list[dict[str, Any]] = []
@@ -3737,8 +3741,8 @@ def content_subjects_revert_plan(
         event_changed_norms = {normalize_title(subject) for subject in event_changed_subjects}
         event_target_norms = event_target_subject_norms(event, page_target_norms)
         is_anchor = event.get("event_id") == anchor.get("event_id")
-        matches_subject = bool(event_changed_norms & anchor_subject_norms)
-        matches_target = bool(event_target_norms & anchor_subject_norms)
+        matches_subject = bool(event_changed_norms & plan_subject_norms)
+        matches_target = bool(event_target_norms & plan_subject_norms)
         mentions_anchor_target = bool(event_changed_norms & anchor_target_norms)
         if not (is_anchor or matches_subject or matches_target or mentions_anchor_target):
             excluded_events.append(
@@ -3768,7 +3772,8 @@ def content_subjects_revert_plan(
         "content_start_after_event_sequence": start_sequence,
         "content_end_event_sequence": end_sequence,
         "content_subjects": anchor_subjects,
-        "content_subject_norms": sorted(anchor_subject_norms),
+        "content_subject_norms": sorted(plan_subject_norms),
+        "content_subject_source": content_subject_source,
         "anchor_target_norms": sorted(anchor_target_norms),
         "candidate_event_ids": candidate_event_ids,
         "revert_order_event_ids": [event["event_id"] for event in targets],
