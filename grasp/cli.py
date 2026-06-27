@@ -1231,7 +1231,7 @@ def build_parser() -> argparse.ArgumentParser:
             "log-page-subjects handles legacy/direct Markdown history where the closing log entry is inside a log page_update.",
             "content-subjects matches page events by subjects extracted from changed page lines, falling back to the anchor target when changed lines contain no subjects.",
             "version-bump matches page events whose changed lines share a semver token with the anchor; the token must occur in at least two events in the inferred log-bounded slice.",
-            "Inferred plans add required later same-page dependents for selected page events and report them as dependent_event_ids.",
+            "Plans add required later same-page dependents for selected page events and report them as dependent_event_ids, even when the dependency falls outside the base window/burst/session selection.",
             "same-page-dependents mirrors revert-event --include-dependents planning without mutating.",
             "event-window is explicit sequence planning: pass --before and/or --after to bound the event_sequence window.",
             "time-burst is explicit temporal planning: pass --max-gap-seconds to bound adjacent event gaps; it does not cross log_append boundaries.",
@@ -4507,6 +4507,7 @@ def event_window_revert_plan(
             "window_start_event_sequence": event_sequence(window_events[0]) if window_events else None,
             "window_end_event_sequence": event_sequence(window_events[-1]) if window_events else None,
             "candidate_event_ids": [],
+            "dependent_event_ids": [],
             "revert_order_event_ids": [],
             "candidate_events": [],
             "excluded_events": excluded_events,
@@ -4522,9 +4523,15 @@ def event_window_revert_plan(
             continue
         candidates.append(event)
 
+    candidates, dependent_events = add_required_same_page_dependents(
+        sqlite_events,
+        candidates,
+        excluded_events,
+    )
     targets = sorted(candidates, key=event_sequence, reverse=True)
     check = check_revert_plan_revertible(store, targets)
     candidate_event_ids = [event["event_id"] for event in candidates]
+    dependent_event_ids = [event["event_id"] for event in dependent_events]
     result: dict[str, Any] = {
         "project": project,
         "scope": args.scope,
@@ -4538,6 +4545,7 @@ def event_window_revert_plan(
         "window_start_event_sequence": event_sequence(window_events[0]) if window_events else None,
         "window_end_event_sequence": event_sequence(window_events[-1]) if window_events else None,
         "candidate_event_ids": candidate_event_ids,
+        "dependent_event_ids": dependent_event_ids,
         "revert_order_event_ids": [event["event_id"] for event in targets],
         "candidate_events": [revert_plan_event_summary(event) for event in candidates],
         "excluded_events": excluded_events,
@@ -4593,6 +4601,7 @@ def time_burst_revert_plan(
             "closing_log_event": None,
             "max_gap_seconds": max_gap_seconds,
             "candidate_event_ids": [],
+            "dependent_event_ids": [],
             "revert_order_event_ids": [],
             "candidate_events": [],
             "excluded_events": excluded_events,
@@ -4633,9 +4642,15 @@ def time_burst_revert_plan(
             continue
         candidates.append(event)
 
+    candidates, dependent_events = add_required_same_page_dependents(
+        sqlite_events,
+        candidates,
+        excluded_events,
+    )
     targets = sorted(candidates, key=event_sequence, reverse=True)
     check = check_revert_plan_revertible(store, targets)
     candidate_event_ids = [event["event_id"] for event in candidates]
+    dependent_event_ids = [event["event_id"] for event in dependent_events]
     result: dict[str, Any] = {
         "project": project,
         "scope": args.scope,
@@ -4650,6 +4665,7 @@ def time_burst_revert_plan(
         "burst_start_created_at": burst_events[0].get("created_at") if burst_events else None,
         "burst_end_created_at": burst_events[-1].get("created_at") if burst_events else None,
         "candidate_event_ids": candidate_event_ids,
+        "dependent_event_ids": dependent_event_ids,
         "revert_order_event_ids": [event["event_id"] for event in targets],
         "candidate_events": [revert_plan_event_summary(event) for event in candidates],
         "excluded_events": excluded_events,
@@ -4698,6 +4714,7 @@ def session_revert_plan(
             "session_actor": session_actor,
             "session_event_ids": [event["event_id"] for event in sqlite_events if event.get("session_id") == session_id] if session_id else [],
             "candidate_event_ids": [],
+            "dependent_event_ids": [],
             "revert_order_event_ids": [],
             "candidate_events": [],
             "excluded_events": excluded_events,
@@ -4718,6 +4735,7 @@ def session_revert_plan(
             "session_actor": session_actor,
             "session_event_ids": [],
             "candidate_event_ids": [],
+            "dependent_event_ids": [],
             "revert_order_event_ids": [],
             "candidate_events": [],
             "excluded_events": [],
@@ -4739,9 +4757,15 @@ def session_revert_plan(
             continue
         candidates.append(event)
 
+    candidates, dependent_events = add_required_same_page_dependents(
+        sqlite_events,
+        candidates,
+        excluded_events,
+    )
     targets = sorted(candidates, key=event_sequence, reverse=True)
     check = check_revert_plan_revertible(store, targets)
     candidate_event_ids = [event["event_id"] for event in candidates]
+    dependent_event_ids = [event["event_id"] for event in dependent_events]
     result: dict[str, Any] = {
         "project": project,
         "scope": args.scope,
@@ -4756,6 +4780,7 @@ def session_revert_plan(
         "session_start_event_sequence": event_sequence(session_events[0]) if session_events else None,
         "session_end_event_sequence": event_sequence(session_events[-1]) if session_events else None,
         "candidate_event_ids": candidate_event_ids,
+        "dependent_event_ids": dependent_event_ids,
         "revert_order_event_ids": [event["event_id"] for event in targets],
         "candidate_events": [revert_plan_event_summary(event) for event in candidates],
         "excluded_events": excluded_events,

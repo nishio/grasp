@@ -5062,6 +5062,178 @@ class CliHelpTests(unittest.TestCase):
             ],
         )
 
+    def test_revert_plan_explicit_scopes_include_required_same_page_dependents(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nold A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nold B\n", encoding="utf-8")
+            a_source = Path(tmpdir) / "A-new.md"
+            b_source = Path(tmpdir) / "B-new.md"
+            a_cleanup_source = Path(tmpdir) / "A-cleanup.md"
+            a_source.write_text("# A\nnew A\n", encoding="utf-8")
+            b_source.write_text("# B\nnew B\n", encoding="utf-8")
+            a_cleanup_source.write_text("# A\nnew A\ncleanup\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            def run_json(*args, session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        "codex",
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            a_update = run_json(
+                "write-page",
+                "A",
+                "--from-file",
+                str(a_source),
+                "--output",
+                str(root),
+                "--no-journal",
+                session_id="work-1",
+            )
+            b_update = run_json(
+                "write-page",
+                "B",
+                "--from-file",
+                str(b_source),
+                "--output",
+                str(root),
+                "--no-journal",
+                session_id="work-1",
+            )
+            a_cleanup = run_json(
+                "write-page",
+                "A",
+                "--from-file",
+                str(a_cleanup_source),
+                "--output",
+                str(root),
+                "--no-journal",
+                session_id="cleanup-work",
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                connection.executemany(
+                    """
+                    UPDATE events
+                    SET created_at = ?
+                    WHERE event_id = ?
+                    """,
+                    [
+                        ("2026-06-27T00:00:00+00:00", a_update["event_id"]),
+                        ("2026-06-27T00:01:00+00:00", b_update["event_id"]),
+                        ("2026-06-27T00:10:00+00:00", a_cleanup["event_id"]),
+                    ],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            event_window_plan = run_json(
+                "revert-plan",
+                a_update["event_id"],
+                "--scope",
+                "event-window",
+                "--after",
+                "1",
+                "--output",
+                str(root),
+            )
+            time_burst_plan = run_json(
+                "revert-plan",
+                a_update["event_id"],
+                "--scope",
+                "time-burst",
+                "--max-gap-seconds",
+                "120",
+                "--output",
+                str(root),
+            )
+            session_plan = run_json(
+                "revert-plan",
+                a_update["event_id"],
+                "--scope",
+                "session",
+                "--output",
+                str(root),
+            )
+            projected_after_plan = {
+                path.name: path.read_text(encoding="utf-8")
+                for path in sorted(root.glob("*.md"))
+            }
+
+        for plan in (event_window_plan, time_burst_plan, session_plan):
+            self.assertTrue(plan["complete"])
+            self.assertTrue(plan["revertible"])
+            self.assertEqual(plan["dependent_event_ids"], [a_cleanup["event_id"]])
+            self.assertEqual(
+                plan["candidate_event_ids"],
+                [a_update["event_id"], b_update["event_id"], a_cleanup["event_id"]],
+            )
+            self.assertEqual(
+                plan["revert_order_event_ids"],
+                [a_cleanup["event_id"], b_update["event_id"], a_update["event_id"]],
+            )
+            self.assertEqual(
+                [event["target_event_id"] for event in plan["reverted_events"]],
+                [a_cleanup["event_id"], b_update["event_id"], a_update["event_id"]],
+            )
+            self.assertEqual(
+                plan["suggested_revert_events_args"],
+                [
+                    "revert-events",
+                    a_update["event_id"],
+                    b_update["event_id"],
+                    a_cleanup["event_id"],
+                    "--output",
+                    str(root),
+                ],
+            )
+        self.assertEqual(event_window_plan["window_after"], 1)
+        self.assertEqual(time_burst_plan["max_gap_seconds"], 120.0)
+        self.assertEqual(session_plan["session_event_ids"], [a_update["event_id"], b_update["event_id"]])
+        self.assertEqual(
+            [event.get("session_id") for event in session_plan["candidate_events"]],
+            ["work-1", "work-1", "cleanup-work"],
+        )
+        self.assertEqual(projected_after_plan["A.md"], "# A\nnew A\ncleanup\n")
+        self.assertEqual(projected_after_plan["B.md"], "# B\nnew B\n")
+
     def test_write_event_metadata_defaults_from_environment(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
