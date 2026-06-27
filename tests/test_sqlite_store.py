@@ -5,7 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from grasp.journal import journal_event_json, make_journal_event
 from grasp.sqlite_store import (
+    SCHEMA_VERSION,
     SQLiteStore,
     canonical_store_path,
     connect_sqlite_store,
@@ -81,6 +83,43 @@ OTHER_FIXTURE = {
 
 
 class SQLiteStoreTests(unittest.TestCase):
+    def test_schema_v8_materializes_events_table(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = Path(tmpdir) / "store.sqlite"
+            ensure_store_schema(store_path)
+            connection = sqlite3.connect(store_path)
+            try:
+                schema_version = connection.execute(
+                    "SELECT value FROM metadata WHERE key = 'schema_version'",
+                ).fetchone()[0]
+                events_table = connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'events'",
+                ).fetchone()
+                columns = {
+                    row[1]
+                    for row in connection.execute("PRAGMA table_info(events)").fetchall()
+                }
+            finally:
+                connection.close()
+
+        self.assertEqual(SCHEMA_VERSION, "8")
+        self.assertEqual(schema_version, "8")
+        self.assertIsNotNone(events_table)
+        self.assertEqual(
+            columns,
+            {
+                "event_sequence",
+                "event_id",
+                "schema_version",
+                "event_type",
+                "project",
+                "created_at",
+                "actor",
+                "session_id",
+                "payload_json",
+            },
+        )
+
     def test_canonical_store_path_prefers_env_then_repo_root(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "repo"
@@ -183,6 +222,119 @@ class SQLiteStoreTests(unittest.TestCase):
                 "second-writer": "after-first-commit",
             },
         )
+
+    def test_imports_and_queries_legacy_journal_events(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = Path(tmpdir) / "store.sqlite"
+            ensure_store_schema(store_path)
+            events = [
+                make_journal_event(
+                    "page_create",
+                    project="wiki",
+                    event_id="evt-1",
+                    created_at="2026-06-27T00:00:00+00:00",
+                    payload={
+                        "page_id": "page-a",
+                        "title": "A",
+                        "source_path": "A.md",
+                        "lines": [{"line_id": "page-a:0", "text": "# A"}],
+                    },
+                ),
+                make_journal_event(
+                    "page_update",
+                    project="wiki",
+                    event_id="evt-2",
+                    created_at="2026-06-27T00:01:00+00:00",
+                    payload={
+                        "page_id": "page-a",
+                        "title": "A",
+                        "previous_lines": [{"line_id": "page-a:0", "text": "# A"}],
+                        "lines": [{"line_id": "page-a:0", "text": "# A"}, {"line_id": "page-a:1", "text": "body"}],
+                    },
+                ),
+                make_journal_event(
+                    "log_append",
+                    project="other",
+                    event_id="evt-3",
+                    created_at="2026-06-27T00:02:00+00:00",
+                    payload={
+                        "page_id": "log-page",
+                        "title": "Log",
+                        "inserted_lines": [{"line_id": "log-page:1", "text": "entry"}],
+                    },
+                ),
+            ]
+
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                summary = store.import_journal_events(events, actor="codex", session_id="s1")
+                self.assertEqual(summary["events"], 3)
+                self.assertEqual(summary["imported"], 2)
+                self.assertEqual(summary["skipped"], 0)
+                self.assertEqual(summary["filtered"], 1)
+                self.assertEqual(summary["project"], "wiki")
+
+                duplicate_summary = store.import_journal_events(events, actor="codex", session_id="s1")
+                self.assertEqual(duplicate_summary["imported"], 0)
+                self.assertEqual(duplicate_summary["skipped"], 2)
+                self.assertEqual(duplicate_summary["filtered"], 1)
+
+                stored_events = store.events(limit=None)
+                self.assertEqual([event["event_id"] for event in stored_events], ["evt-1", "evt-2"])
+                self.assertEqual([event["event_sequence"] for event in stored_events], [1, 2])
+                self.assertEqual(stored_events[0]["actor"], "codex")
+                self.assertEqual(stored_events[0]["session_id"], "s1")
+                self.assertEqual(stored_events[1]["payload"]["lines"][1]["text"], "body")
+
+                update_events = store.events(event_type="page_update")
+                self.assertEqual([event["event_id"] for event in update_events], ["evt-2"])
+                self.assertEqual(store.event_count(event_type="page_update"), 1)
+                with self.assertRaisesRegex(ValueError, "unsupported journal event_type"):
+                    store.events(event_type="unknown")
+            finally:
+                store.close()
+
+    def test_imports_journal_events_from_jsonl_path_without_project_filter(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "events.jsonl"
+            ensure_store_schema(store_path)
+            events = [
+                make_journal_event(
+                    "section_append",
+                    project="wiki",
+                    event_id="evt-wiki",
+                    created_at="2026-06-27T00:00:00+00:00",
+                    payload={
+                        "page_id": "page-a",
+                        "title": "A",
+                        "inserted_lines": [{"line_id": "page-a:1", "text": "body"}],
+                    },
+                ),
+                make_journal_event(
+                    "section_append",
+                    project="other",
+                    event_id="evt-other",
+                    created_at="2026-06-27T00:01:00+00:00",
+                    payload={
+                        "page_id": "page-b",
+                        "title": "B",
+                        "inserted_lines": [{"line_id": "page-b:1", "text": "body"}],
+                    },
+                ),
+            ]
+            journal_path.write_text("".join(journal_event_json(event) for event in events), encoding="utf-8")
+
+            store = SQLiteStore(store_path, for_write=True)
+            try:
+                summary = store.import_journal_events(journal_path, actor="migration")
+                self.assertEqual(summary["source"], str(journal_path))
+                self.assertEqual(summary["imported"], 2)
+                self.assertEqual(summary["filtered"], 0)
+                self.assertEqual(store.event_count(), 2)
+                self.assertEqual([event["event_id"] for event in store.events(project="other")], ["evt-other"])
+            finally:
+                store.close()
 
     def test_import_export_to_sqlite_and_query(self):
         with tempfile.TemporaryDirectory() as tmpdir:

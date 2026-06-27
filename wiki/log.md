@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-27 13:18] implementation+file back | SQLite SSoT Phase 2 events table と JSONL migration helper
+- code: SQLite schema を v8 に上げ、`events` table（`event_sequence` / `event_id` / `event_type` / `project` / `created_at` / `actor` / `session_id` / `payload_json`）を追加。`SQLiteStore.import_journal_events()` は legacy JSONL path または event dict list を duplicate skip / project filter 付きで SQLite events に移行し、`events()` / `event_count()` は selected project・明示 project・event type で query する。
+- tests: schema v8 events table、in-memory event import + duplicate skip + filter、JSONL path import + cross-project query を追加。`python3 -m unittest discover -s tests` は 111 tests OK。
+- file back: [[history]] / [[grasp-v1-implemented]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新。public compatibility version は `1.8.0`、schema は v8。既存 write command の state+event 1 transaction 化と SQLite events 由来 recovery surface は未実装で、次 slice。
+
 ## [2026-06-27 12:44] implementation | SQLite SSoT Phase 0 contract + Phase 1 write transaction substrate
 - [[sqlite-ssot-write-plan]] に Phase 0 authority contract を固定: repo-local `.grasp/authority.sqlite`（`$GRASP_CANONICAL_STORE` override）が authoring SSoT default、`wiki/` は git-tracked projection/recovery snapshot、`wiki.grasp/events.jsonl` は legacy audit/migration input、`.grasp/authority.sqlite` 自体は現時点では git tracked にしない。
 - code: `canonical_store_path()`、write connection setup（WAL / busy_timeout / `synchronous=NORMAL`）、`sqlite_write_transaction()`（`BEGIN IMMEDIATE` + commit/rollback）を追加。CLI は store 更新系 command を write-configured connection で開く。

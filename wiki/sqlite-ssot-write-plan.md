@@ -40,7 +40,9 @@ It supersedes [[llm-wiki-infra-fast-path-plan]] as an implementation plan. The o
 
 `1.7.39` adds the first substrate slice: `canonical_store_path()`, write-oriented SQLite connection setup with WAL + busy timeout, and `sqlite_write_transaction()` using `BEGIN IMMEDIATE`. Tests cover WAL/busy_timeout configuration, commit/rollback, and deterministic lock contention between two writers.
 
-This does **not** yet make existing write commands atomic at the new authority boundary. `write-page`, `rename-page`, `append-*`, `sync`, and `acquire` can open write-configured connections, but their state change + event append + projection export migration is Phase 3 work after the events table exists.
+`1.8.0` adds the Phase 2 events table substrate: SQLite schema v8 stores legacy journal events with monotonic sequence, event id/type/project/created_at, actor/session metadata, and canonical payload JSON. `SQLiteStore.import_journal_events()` migrates JSONL or in-memory event dicts with duplicate skip, and `SQLiteStore.events()` / `event_count()` query by project and event type.
+
+This does **not** yet make existing write commands atomic at the new authority boundary. `write-page`, `rename-page`, `append-*`, `sync`, and `acquire` can open write-configured connections, but their state change + event insert + projection export migration is still Phase 3 work.
 
 ## Why This Replaces The Fast Path
 
@@ -62,7 +64,7 @@ Therefore, adding more guards to `events.jsonl` is only a temporary mitigation. 
 |---|---|---|---|
 | 0. Authority contract | No ambiguity about what is canonical | Decide canonical store path, backup/export policy, migration story from `wiki.grasp/events.jsonl`, and whether Markdown projection remains git-tracked snapshot | A short decision/update says exactly where the SSoT lives and how another checkout recovers it |
 | 1. SQLite write substrate | Concurrent writers serialize at the real authority layer | Add canonical-store open path, WAL, busy timeout, transaction helper, and a test that two writers cannot interleave state/event/projection semantics | A write transaction can update state + event rows atomically; second writer waits or fails deterministically |
-| 2. Events table | JSONL is no longer the write authority | Add `events` table with monotonic sequence, event id, type, payload, actor/session metadata, created_at, and migration/import from existing JSONL where needed | Existing event types can be represented and queried from SQLite without reading `events.jsonl` |
+| 2. Events table | JSONL is no longer the write authority | Add `events` table with monotonic sequence, event id, type, payload, actor/session metadata, created_at, and migration/import from existing JSONL where needed | Done in `1.8.0`: existing event types can be represented and queried from SQLite without reading `events.jsonl` |
 | 3. Write command migration | Core write verbs update SQLite SSoT | Move `write-page`, `write-page --create`, `rename-page`, log record import, and append-style helpers to the transaction helper | Each command commits state + event atomically and does not need a journal file to be correct |
 | 4. Export-only Markdown | Projection becomes a read side effect, not authority | Make `export-markdown` read from canonical SQLite. Keep `--check`; make direct `import --markdown` an adoption/emergency path, not reconcile default | Fresh export is stable, no-op diff is clean, and normal file-back never needs Markdown direct patch |
 | 5. Native review/recovery | Losing git-diffable JSONL is compensated | Rebuild `history`, `write-diff`, `revert-event`, status, and replay/check surfaces from SQLite events/state | A bad write can be diagnosed and reverted without hand-editing JSONL or Markdown |
@@ -73,12 +75,11 @@ Therefore, adding more guards to `events.jsonl` is only a temporary mitigation. 
 
 Do not start with file-back integration. Continue from the authority substrate into events.
 
-1. Add the `events` table with monotonic sequence, event id/type/payload, created_at, actor/session metadata, and JSONL migration/test fixtures.
-2. Port one low-risk command (`write-page` on a temp project) to state + event in one SQLite transaction.
-3. Add a concurrency regression test at command level that would have failed under the old path.
-4. Only then move `append-log`, `rename-page`, and file-back workflow.
+1. Port one low-risk command (`write-page` on a temp project) to state + event in one SQLite transaction.
+2. Add a concurrency regression test at command level that would have failed under the old path.
+3. Only then move `append-log`, `rename-page`, and file-back workflow.
 
-Completed in `1.7.39`: Phase 0 authority contract and Phase 1 connection/transaction helper. Not completed: events table, command migration, file-back cutover.
+Completed in `1.7.39`: Phase 0 authority contract and Phase 1 connection/transaction helper. Completed in `1.8.0`: Phase 2 events table plus JSONL migration/query helpers. Not completed: command migration, file-back cutover.
 
 ## Carry Forward From The Old Plan
 

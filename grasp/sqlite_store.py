@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
 
+from .journal import EVENT_TYPES, read_journal_events, validate_journal_event
 from .cosense import (
     CrossProjectLink,
     CosenseStore,
@@ -51,7 +52,7 @@ from .markdown import (
 )
 
 
-SCHEMA_VERSION = "7"
+SCHEMA_VERSION = "8"
 IMPORT_CACHE_MANIFEST_VERSION = 1
 CANONICAL_STORE_ENV = "GRASP_CANONICAL_STORE"
 SQLITE_BUSY_TIMEOUT_MS = 30_000
@@ -88,6 +89,18 @@ CREATE TABLE projects (
   lines INTEGER NOT NULL,
   edges INTEGER NOT NULL,
   unresolved_targets INTEGER NOT NULL
+);
+
+CREATE TABLE events (
+  event_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT NOT NULL UNIQUE,
+  schema_version INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  project TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  actor TEXT NOT NULL DEFAULT '',
+  session_id TEXT NOT NULL DEFAULT '',
+  payload_json TEXT NOT NULL
 );
 
 CREATE TABLE pages (
@@ -171,6 +184,9 @@ CREATE TABLE unresolved_target_examples (
 
 CREATE INDEX idx_pages_project_norm_title ON pages(project, norm_title);
 CREATE INDEX idx_pages_project_title ON pages(project, title);
+CREATE INDEX idx_events_project_sequence ON events(project, event_sequence);
+CREATE INDEX idx_events_project_type_sequence ON events(project, event_type, event_sequence);
+CREATE INDEX idx_events_created_at ON events(created_at);
 CREATE INDEX idx_page_handles_project_handle_norm ON page_handles(project, handle_norm);
 CREATE INDEX idx_page_handles_project_source_path ON page_handles(project, source_path);
 CREATE INDEX idx_lines_project_page_index ON lines(project, page_id, line_index);
@@ -247,6 +263,88 @@ def sqlite_write_transaction(connection: sqlite3.Connection):
         raise
     else:
         connection.commit()
+
+
+def store_event_payload_json(payload: dict[str, Any]) -> str:
+    if not isinstance(payload, dict):
+        raise ValueError("store event payload must be an object")
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def insert_store_event(
+    connection: sqlite3.Connection,
+    event: dict[str, Any],
+    *,
+    actor: str = "",
+    session_id: str = "",
+    if_exists: str = "error",
+) -> bool:
+    if if_exists not in {"error", "skip"}:
+        raise ValueError(f"unsupported event duplicate policy: {if_exists!r}")
+    validate_journal_event(event)
+    project = normalize_project_name(event["project"])
+    if not project:
+        raise ValueError("store event requires non-empty project")
+    payload_json = store_event_payload_json(event["payload"])
+    try:
+        connection.execute(
+            """
+            INSERT INTO events (
+              event_id,
+              schema_version,
+              event_type,
+              project,
+              created_at,
+              actor,
+              session_id,
+              payload_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event["event_id"],
+                int(event["schema_version"]),
+                event["event_type"],
+                project,
+                event["created_at"],
+                str(actor or ""),
+                str(session_id or ""),
+                payload_json,
+            ),
+        )
+    except sqlite3.IntegrityError:
+        if if_exists == "skip" and _store_event_exists(connection, str(event["event_id"])):
+            return False
+        raise
+    return True
+
+
+def store_event_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    try:
+        payload = json.loads(row["payload_json"])
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid store event payload JSON for {row['event_id']}: {exc}") from exc
+    event = {
+        "schema_version": int(row["schema_version"]),
+        "event_id": row["event_id"],
+        "event_type": row["event_type"],
+        "project": row["project"],
+        "created_at": row["created_at"],
+        "payload": payload,
+    }
+    validate_journal_event(event)
+    event["event_sequence"] = row["event_sequence"]
+    event["actor"] = row["actor"]
+    event["session_id"] = row["session_id"]
+    return event
+
+
+def _store_event_exists(connection: sqlite3.Connection, event_id: str) -> bool:
+    row = connection.execute(
+        "SELECT 1 FROM events WHERE event_id = ?",
+        (event_id,),
+    ).fetchone()
+    return row is not None
 
 
 def import_export_to_sqlite(
@@ -1349,6 +1447,116 @@ class SQLiteStore:
             "unresolved_targets": self._count_if_exists("unresolved_targets", project=project),
             "acquisition": acquisition,
         }
+
+    def import_journal_events(
+        self,
+        events_or_path: str | Path | list[dict[str, Any]],
+        *,
+        actor: str = "",
+        session_id: str = "",
+        project: str | None = None,
+    ) -> dict[str, Any]:
+        source_path: Path | None = None
+        if isinstance(events_or_path, (str, Path)):
+            source_path = Path(events_or_path)
+            events = read_journal_events(source_path)
+        else:
+            events = list(events_or_path)
+
+        project_filter = normalize_project_name(project) if project is not None else self.project
+        imported = 0
+        skipped = 0
+        filtered = 0
+        with self.write_transaction():
+            for event in events:
+                validate_journal_event(event)
+                event_project = normalize_project_name(event["project"])
+                if project_filter and event_project != project_filter:
+                    filtered += 1
+                    continue
+                if insert_store_event(
+                    self.connection,
+                    event,
+                    actor=actor,
+                    session_id=session_id,
+                    if_exists="skip",
+                ):
+                    imported += 1
+                else:
+                    skipped += 1
+        summary: dict[str, Any] = {
+            "events": len(events),
+            "imported": imported,
+            "skipped": skipped,
+            "filtered": filtered,
+            "project": project_filter,
+        }
+        if source_path is not None:
+            summary["source"] = str(source_path)
+        return summary
+
+    def events(
+        self,
+        *,
+        project: str | None = None,
+        event_type: str | None = None,
+        limit: int | None = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        project_filter = normalize_project_name(project) if project is not None else self._selected_project_or_none()
+        clauses: list[str] = []
+        params: list[Any] = []
+        if project_filter:
+            clauses.append("project = ?")
+            params.append(project_filter)
+        if event_type is not None:
+            if event_type not in EVENT_TYPES:
+                raise ValueError(f"unsupported journal event_type: {event_type!r}")
+            clauses.append("event_type = ?")
+            params.append(event_type)
+        query = """
+            SELECT
+              event_sequence,
+              event_id,
+              schema_version,
+              event_type,
+              project,
+              created_at,
+              actor,
+              session_id,
+              payload_json
+            FROM events
+        """
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY event_sequence"
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            params.extend([max(0, int(limit)), max(0, int(offset))])
+        rows = self.connection.execute(query, params).fetchall()
+        return [store_event_from_row(row) for row in rows]
+
+    def event_count(
+        self,
+        *,
+        project: str | None = None,
+        event_type: str | None = None,
+    ) -> int:
+        project_filter = normalize_project_name(project) if project is not None else self._selected_project_or_none()
+        clauses: list[str] = []
+        params: list[Any] = []
+        if project_filter:
+            clauses.append("project = ?")
+            params.append(project_filter)
+        if event_type is not None:
+            if event_type not in EVENT_TYPES:
+                raise ValueError(f"unsupported journal event_type: {event_type!r}")
+            clauses.append("event_type = ?")
+            params.append(event_type)
+        query = "SELECT COUNT(*) FROM events"
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        return int(self.connection.execute(query, params).fetchone()[0])
 
     def metadata(self) -> dict[str, str]:
         return {
