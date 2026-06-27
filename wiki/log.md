@@ -1456,3 +1456,9 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: `revert-plan --scope event-window`, `time-burst`, and `session` now run the same required later same-page dependent closure as the semantic scopes and report additions in `dependent_event_ids`.
 - tests: added a CLI regression where the explicit base selection includes `A` and `B`, but a later same-page `A` cleanup outside the window / time gap / session must be included for rollback-only safety to pass.
 - docs: bumped public/package version to `1.8.59` and updated [[history]], [[grasp-v1-implemented]], and [[sqlite-ssot-write-plan]]. schema remains v8.
+
+## [2026-06-28 08:29] implementation+file-back | cover page_update revert in real history replay
+
+- tests: added a continuous git history replay sequence for commit `3eaab75` that applies six existing-page `page_update` events, then reverts only the `grasp-backlog.md` update.
+- coverage: expected projection is mixed state: the reverted page matches the parent revision while the other five pages remain at the updated commit; `replay-journal --check` and direct re-import stay clean.
+- docs: bumped public/package version to `1.8.62` and updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[sqlite-ssot-write-plan]]. schema remains v8.
