@@ -1352,3 +1352,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: `scripts/check_file_back_preflight.py` の default `--base` を `auto` にし、current upstream tracking branch を優先、upstream が無い時だけ `origin/main` に fallback するようにした。明示 `--base <ref>` は維持。
 - docs/tests: preflight unit tests、runbook checker、AGENTS/CLAUDE、`/next`、`/ship-next`、repo skill、README、history、current facts、backlog、write plan を current-upstream base policy に更新した。
 - dogfood: `GRASP_SESSION_ID=file-back-20260627T180001Z-preflight-auto-base` で default preflight が `base=origin/codex/recovery-gap-scan` を報告し、PR branch 上の継続 file-back で manual `--base` override が不要なことを確認した。public compatibility version は `1.8.41`、schema は v8 のまま。
+
+## [2026-06-28 03:19] implementation+file back | push ownership guard を ship loop に追加
+- code: `scripts/check_push_ownership.py` を追加し、dirty worktree、behind branch、通常 ship-loop からの protected branch（`main` / `master`）push を failure にするようにした。feature branch の ahead push と新規 branch push は許容する。
+- docs/tests: unit tests、runbook checker、AGENTS/CLAUDE、`/next`、`/ship-next`、repo skill、README、history、current facts、backlog、write plan を push ownership guard に更新した。
+- dogfood: 未コミット差分がある状態で `python3 scripts/check_push_ownership.py` が dirty worktree を検出して失敗することを確認した。commit 後に同 guard を再実行して push 前 gate として確認する。public compatibility version は `1.8.42`、schema は v8 のまま。

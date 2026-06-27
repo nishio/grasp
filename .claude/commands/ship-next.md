@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(python3 -m unittest discover -s tests:*), Bash(python3 scripts/lint_wiki.py:*), Bash(python3 scripts/check_projection_policy.py:*), Bash(python3 scripts/check_file_back_preflight.py:*), Bash(python3 scripts/check_file_back_postwrite.py:*), Bash(python3 scripts/check_file_back_runbook.py:*), Bash(python3 -m grasp:*), Bash(git diff --check:*), Bash(date:*), Bash(rg:*), Bash(sed:*), Read, Edit, MultiEdit, TodoWrite
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git fetch:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(python3 -m unittest discover -s tests:*), Bash(python3 scripts/lint_wiki.py:*), Bash(python3 scripts/check_projection_policy.py:*), Bash(python3 scripts/check_file_back_preflight.py:*), Bash(python3 scripts/check_file_back_postwrite.py:*), Bash(python3 scripts/check_file_back_runbook.py:*), Bash(python3 scripts/check_push_ownership.py:*), Bash(python3 -m grasp:*), Bash(git diff --check:*), Bash(date:*), Bash(rg:*), Bash(sed:*), Read, Edit, MultiEdit, TodoWrite
 description: File back grasp work, commit, push, and propose what to build next in Japanese
 ---
 
@@ -34,7 +34,7 @@ Follow these steps:
    - if file-back / projection behavior changed, `python3 scripts/check_file_back_postwrite.py` (no-journal default; includes SQLite events semantic log projection check)
    - `git diff --check`
    - If relevant, run one small dogfood command and file back any important observation.
-4. Stage all intentional changes, commit once with a concise message, and push the current branch to `origin`.
+4. Stage all intentional changes, commit once with a concise message, run `python3 scripts/check_push_ownership.py`, and push the current branch to `origin`.
 5. Finish with a short Japanese summary:
    - commit hash and pushed branch
    - verification results
@@ -45,5 +45,6 @@ Constraints:
 
 - Do not revert unrelated user changes.
 - Do not commit if verification fails; report the failure and the blocking output.
-- Do not create a branch unless the user explicitly asked for one.
-- Use the current branch; this repo usually ships directly on `main`.
+- Do not push if `python3 scripts/check_push_ownership.py` fails; it blocks dirty worktrees, behind branches, and normal ship-loop pushes from protected branches such as `main`.
+- Do not create a branch unless the user explicitly asked for one or the safety guard requires an isolated branch/PR.
+- Use the current branch when it is not protected; normal ship-loop pushes from `main` / `master` are blocked unless an explicit ownership review chooses `--allow-protected-branch`.
