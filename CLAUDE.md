@@ -49,13 +49,13 @@ grasp/
 ### Ingest / File back
 設計対話や Codex の作業ログを raw/ に置いて ingest、または会話の洞察を file back。実装済み事実なら `entities/`、未実装なら [[grasp-backlog]]、判断なら `decisions/` に。log に `## [YYYY-MM-DD HH:MM] <op> | <desc>`。
 
-`wiki.grasp/events.jsonl` がある場合、file back は **grasp write first**。`events.jsonl` は transition 中の互換/audit journal で、通常編集の authority は SQLite store 側に置く。まず `git fetch origin main` 後に `python3 scripts/check_file_back_preflight.py` を走らせ、remote 分岐なし / wiki・journal dirty なし / `write-status --strict` / SQLite authority projection を確認してから、`append-section` / `write-page` / `append-log` を `--journal wiki.grasp/events.jsonl --output wiki` 付きで使う。write 後に `python3 scripts/check_file_back_postwrite.py` が通らない時、または任意 frontmatter merge / canonical docs など grasp alpha が表現できない時だけ direct Markdown patch に fallback し、理由を log に残す。
+file back は **grasp write first**。通常編集の authority は SQLite store 側に置き、`wiki.grasp/events.jsonl` は transition 中の互換/audit artifact として active write path から外す。まず `git fetch origin main` 後に `python3 scripts/check_file_back_preflight.py --no-journal` を走らせ、remote 分岐なし / wiki dirty なし / `write-status --no-journal --strict` / SQLite authority projection を確認してから、`append-section` / `write-page` / `append-log` を `--no-journal --output wiki` 付きで使う。write 後に `python3 scripts/check_file_back_postwrite.py --no-journal` が通らない時、または任意 frontmatter merge / canonical docs など grasp alpha が表現できない時だけ direct Markdown patch に fallback し、理由を log に残す。
 
-`--no-journal` cutover を検証する時は、同じ checker を `python3 scripts/check_file_back_preflight.py --no-journal` / `python3 scripts/check_file_back_postwrite.py --no-journal` で使う。この mode は `write-status --no-journal --strict` を呼び、dirty path default も `wiki` のみにする。repo の通常 file-back は明示 cutover まで上記の compatibility journal あり path を使う。
+互換/audit journal も明示的に更新する必要がある時だけ、`python3 scripts/check_file_back_preflight.py` / `python3 scripts/check_file_back_postwrite.py` と `--journal wiki.grasp/events.jsonl` 付き write commands を使う。
 
-同じ SQLite store / `wiki.grasp/events.jsonl` に対する write 系 command は **直列実行**する。並列に `write-page` などを投げると compatibility journal append と store update の順序が interleave し、projection が一時的に stale になる。起きた場合は対象 page を直列で再 `write-page --from-file` し、`python3 scripts/check_file_back_postwrite.py` / `replay-journal --check` で clean に戻す。
+同じ SQLite store に対する write 系 command は **直列実行**する。並列に `write-page` などを投げると store update と projection export の順序が interleave し、projection が一時的に stale になる。起きた場合は対象 page を直列で再 `write-page --from-file --no-journal` し、`python3 scripts/check_file_back_postwrite.py --no-journal` で clean に戻す。
 
-複数 wiki page を direct patch fallback してから `write-page` で journal に戻す場合も、**1 page patch → 直列 `write-page --from-file` → 次 page** の順にする。`write-page` は全 Markdown projection を export するため、まだ store に入っていない別 page の direct patch は projection に上書きされる。
+複数 wiki page を direct patch fallback してから grasp store に戻す場合も、**1 page patch → 直列 `write-page --from-file --no-journal` → 次 page** の順にする。`write-page` は全 Markdown projection を export するため、まだ store に入っていない別 page の direct patch は projection に上書きされる。
 
 ### Lint
 `python3 scripts/lint_wiki.py`（孤立・壊れたリンク・未登録）→ 意味的 lint（実装済み事実・backlog・decision の矛盾 / stale open q）→ log に `## [YYYY-MM-DD HH:MM] lint | <summary>`。
