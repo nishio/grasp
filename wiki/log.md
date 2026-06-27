@@ -1200,3 +1200,9 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - code: `scripts/check_file_back_preflight.py` / `scripts/check_file_back_postwrite.py` の default を no-journal mode に切替。compatibility JSONL journal checks は `--with-journal` の明示 opt-in にした。`--no-journal` は既存 runbook 用の明示互換フラグとして残した。
 - tests: `resolve_require_journal()` の default / conflict tests を追加し、preflight / postwrite の no-flag smoke で `journal_mode=none` を確認。
 - file back: [[history]] / [[grasp-v1-implemented]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新。public compatibility version は `1.8.16`、schema は v8 のまま。
+
+## [2026-06-27 19:15] implementation+file back | file-back runbook drift guard を no-journal default 表記に追従
+- docs: AGENTS/CLAUDE、Codex `/next`、Claude `/ship-next` から guard script の旧 `--no-journal` 明示を外し、通常 pre/postwrite はフラグなし no-journal default とした。write commands の `--no-journal --output wiki` は通常 path として維持。
+- docs: compatibility JSONL audit は `scripts/check_file_back_preflight.py --with-journal` / `scripts/check_file_back_postwrite.py --with-journal` と `--journal wiki.grasp/events.jsonl --output wiki` の明示手順にした。
+- code: `scripts/check_file_back_runbook.py` が旧 `check_file_back_* --no-journal` guard 表記と `--with-journal` audit 手順漏れを検出するようにし、regression test を追加。
+- file back: [[history]] / [[grasp-v1-implemented]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新。public compatibility version は `1.8.17`、schema は v8 のまま。

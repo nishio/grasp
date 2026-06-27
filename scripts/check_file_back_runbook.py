@@ -18,13 +18,17 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
     RunbookRule(
         "AGENTS.md",
         required=(
-            "python3 scripts/check_file_back_preflight.py --no-journal",
+            "python3 scripts/check_file_back_preflight.py`（no-journal default）",
             "`--no-journal --output wiki`",
-            "python3 scripts/check_file_back_postwrite.py --no-journal",
+            "python3 scripts/check_file_back_postwrite.py`（no-journal default）",
             "互換/audit journal も明示的に更新する必要がある時だけ",
+            "python3 scripts/check_file_back_preflight.py --with-journal",
+            "python3 scripts/check_file_back_postwrite.py --with-journal",
+            "`--journal wiki.grasp/events.jsonl --output wiki`",
         ),
         forbidden=(
-            "`--journal wiki.grasp/events.jsonl --output wiki`",
+            "check_file_back_preflight.py --no-journal",
+            "check_file_back_postwrite.py --no-journal",
             "wiki・journal dirty",
             "repo の通常 file-back は明示 cutover",
         ),
@@ -32,13 +36,17 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
     RunbookRule(
         "CLAUDE.md",
         required=(
-            "python3 scripts/check_file_back_preflight.py --no-journal",
+            "python3 scripts/check_file_back_preflight.py`（no-journal default）",
             "`--no-journal --output wiki`",
-            "python3 scripts/check_file_back_postwrite.py --no-journal",
+            "python3 scripts/check_file_back_postwrite.py`（no-journal default）",
             "互換/audit journal も明示的に更新する必要がある時だけ",
+            "python3 scripts/check_file_back_preflight.py --with-journal",
+            "python3 scripts/check_file_back_postwrite.py --with-journal",
+            "`--journal wiki.grasp/events.jsonl --output wiki`",
         ),
         forbidden=(
-            "`--journal wiki.grasp/events.jsonl --output wiki`",
+            "check_file_back_preflight.py --no-journal",
+            "check_file_back_postwrite.py --no-journal",
             "wiki・journal dirty",
             "repo の通常 file-back は明示 cutover",
         ),
@@ -46,25 +54,34 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
     RunbookRule(
         "plugins/grasp-next/commands/next.md",
         required=(
-            "$PYTHON_BIN scripts/check_file_back_preflight.py --no-journal",
+            "$PYTHON_BIN scripts/check_file_back_preflight.py",
+            "この preflight は no-journal default",
             "`--output wiki --no-journal`",
-            "scripts/check_file_back_postwrite.py --no-journal",
+            "scripts/check_file_back_postwrite.py`（no-journal default）",
             "互換/audit journal も明示的に更新する必要がある時だけ",
+            "scripts/check_file_back_preflight.py --with-journal",
+            "scripts/check_file_back_postwrite.py --with-journal",
+            "`--journal wiki.grasp/events.jsonl --output wiki`",
         ),
         forbidden=(
-            "`--output wiki --journal wiki.grasp/events.jsonl`",
+            "check_file_back_preflight.py --no-journal",
+            "check_file_back_postwrite.py --no-journal",
             "wiki/journal dirty",
         ),
     ),
     RunbookRule(
         ".claude/commands/ship-next.md",
         required=(
-            "python3 scripts/check_file_back_preflight.py --no-journal",
-            "python3 scripts/check_file_back_postwrite.py --no-journal",
+            "python3 scripts/check_file_back_preflight.py` (no-journal default)",
+            "python3 scripts/check_file_back_postwrite.py` (no-journal default)",
+            "python3 scripts/check_file_back_preflight.py --with-journal",
+            "python3 scripts/check_file_back_postwrite.py --with-journal",
+            "--journal wiki.grasp/events.jsonl --output wiki",
         ),
         forbidden=(
+            "check_file_back_preflight.py --no-journal",
+            "check_file_back_postwrite.py --no-journal",
             "first run `git fetch origin main` and `python3 scripts/check_file_back_preflight.py`.",
-            "changed, `python3 scripts/check_file_back_postwrite.py`",
         ),
     ),
     RunbookRule(
