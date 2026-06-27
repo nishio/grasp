@@ -275,6 +275,92 @@ class FileBackPreflightScriptTests(unittest.TestCase):
             self.assertTrue(stamp_path.exists())
             self.assertEqual(json.loads(stamp_path.read_text(encoding="utf-8")), payload)
 
+    def test_file_back_lock_payload_records_session_and_context(self):
+        payload = preflight.file_back_lock_payload(
+            session_id="file-back-session",
+            store=".grasp/file-back.sqlite",
+            project="grasp-wiki",
+            output="wiki",
+            created_at="2026-06-28T00:00:00Z",
+        )
+
+        self.assertEqual(payload["schema_version"], preflight.FILE_BACK_LOCK_SCHEMA_VERSION)
+        self.assertEqual(payload["kind"], preflight.FILE_BACK_LOCK_KIND)
+        self.assertEqual(payload["session_id"], "file-back-session")
+        self.assertEqual(payload["store"], ".grasp/file-back.sqlite")
+        self.assertEqual(payload["project"], "grasp-wiki")
+        self.assertEqual(payload["output"], "wiki")
+
+    def test_acquire_file_back_lock_creates_lock_and_allows_same_session(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lock_path = Path(tmpdir) / ".grasp" / "file-back.lock.json"
+            kwargs = {
+                "session_id": "file-back-session",
+                "store": ".grasp/file-back.sqlite",
+                "project": "grasp-wiki",
+                "output": "wiki",
+            }
+
+            self.assertEqual(preflight.acquire_file_back_lock(lock_path, **kwargs), [])
+            self.assertTrue(lock_path.exists())
+            self.assertEqual(preflight.acquire_file_back_lock(lock_path, **kwargs), [])
+
+    def test_acquire_file_back_lock_rejects_other_active_session(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lock_path = Path(tmpdir) / ".grasp" / "file-back.lock.json"
+            self.assertEqual(
+                preflight.acquire_file_back_lock(
+                    lock_path,
+                    session_id="other-session",
+                    store=".grasp/file-back.sqlite",
+                    project="grasp-wiki",
+                    output="wiki",
+                ),
+                [],
+            )
+
+            errors = preflight.acquire_file_back_lock(
+                lock_path,
+                session_id="file-back-session",
+                store=".grasp/file-back.sqlite",
+                project="grasp-wiki",
+                output="wiki",
+            )
+
+        self.assertTrue(errors)
+        self.assertIn("another file-back lock is active", errors[0])
+        self.assertIn("other-session", "\n".join(errors))
+
+    def test_file_back_lock_check_and_release_require_same_session(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lock_path = Path(tmpdir) / ".grasp" / "file-back.lock.json"
+            self.assertEqual(
+                preflight.acquire_file_back_lock(
+                    lock_path,
+                    session_id="file-back-session",
+                    store=".grasp/file-back.sqlite",
+                    project="grasp-wiki",
+                    output="wiki",
+                ),
+                [],
+            )
+
+            self.assertEqual(
+                preflight.run_file_back_lock_check(
+                    lock_path,
+                    expected_session_id="file-back-session",
+                    store=".grasp/file-back.sqlite",
+                    project="grasp-wiki",
+                    output="wiki",
+                ),
+                [],
+            )
+            errors = preflight.release_file_back_lock(lock_path, expected_session_id="other-session")
+            self.assertIn("refusing to release", errors[0])
+            self.assertTrue(lock_path.exists())
+            self.assertEqual(preflight.release_file_back_lock(lock_path, expected_session_id="file-back-session"), [])
+            self.assertFalse(lock_path.exists())
+
     def test_latest_event_sequence_returns_max_sequence(self):
         self.assertEqual(
             preflight.latest_event_sequence(

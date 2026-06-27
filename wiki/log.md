@@ -1425,3 +1425,9 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: scripts/check_file_back_write_start.py now compares the preflight stamp latest SQLite event_sequence with the current latest event_sequence before the first write command, and fails before mutation if the store advanced.
 - tests/docs: added write-start regression coverage, runbook checker fragments, AGENTS/CLAUDE, /next, /ship-next, repo skill, README, history, current facts, and write plan updates. Public compatibility version is 1.8.55; schema remains v8.
 - dogfood: preflight and the new write-start event_sequence=unchanged guard passed before this no-journal wiki file-back used grasp writes.
+
+## [2026-06-28 07:55] implementation+file-back | guard overlapping file-back sessions
+- code: repo-local preflight now acquires gitignored .grasp/file-back.lock.json after clean checks; write-start and postwrite require the same session/store/project/output lock, and postwrite releases it only after all checks pass.
+- reason: the previous guard stopped store changes before the first write, but a multi-command file-back could still overlap another normal runbook writer between write commands and only be detected at postwrite.
+- tests/docs: added lock acquire/check/release regression coverage, runbook checker fragments, AGENTS/CLAUDE, /next, /ship-next, repo skill, README, history, current facts, and write plan updates. Public compatibility version is 1.8.56; schema remains v8.
+- dogfood: preflight acquired the lock, write-start checked it, and this no-journal file-back used grasp writes under the same GRASP_SESSION_ID.
