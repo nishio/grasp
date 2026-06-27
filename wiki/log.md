@@ -1129,3 +1129,7 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 ## [2026-06-27 14:56] implementation | migrate revert-event to SQLite events
 - `revert-event` now resolves target events from SQLite `events` first and falls back to legacy JSONL.
 - SQLite-sourced reverts commit state rollback and SQLite `event_revert` insert in one transaction, then append legacy JSONL and export Markdown.
+
+## [2026-06-27 15:20] implementation | query log history from SQLite events
+- `import-log-records` now inserts new/updated `log_entry_import` records into SQLite `events` before appending legacy JSONL.
+- `log-records` and `history` prefer SQLite `log_entry_import` rows and fall back to JSONL when the selected store has no migrated log records.
