@@ -1280,3 +1280,8 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 - implemented: revert-plan <event-id> --scope log-batch infers a file-back style rollback candidate set from SQLite log_append boundaries without mutation.
 - dogfood: the planner identifies the previous 1.8.25 file-back as four page_update events plus its closing log_append and reports reverse event_sequence rollback order.
 - tests: covered a two-page update plus closing log_append and verified revert-plan leaves files and SQLite events unchanged.
+
+## [2026-06-27 22:55] implementation | add same-page revert planning
+- implemented: revert-plan <event-id> --scope same-page-dependents infers anchor + later active same-page reversible rollback candidates without requiring log-batch boundaries.
+- tests: covered a later append blocking a plain revert-event dry-run while same-page-dependents returns a two-event read-only plan.
+- docs: bumped compatibility version to 1.8.27 and narrowed the remaining revert-planning backlog to multi-page histories without log-batch or same-page boundaries.
