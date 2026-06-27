@@ -2,7 +2,8 @@
 
 The check is intentionally repo-facing: run it after fetching the upstream base
 and before any grasp write command touches wiki/. The default mode is
-no-journal; compatibility journal checks are explicit opt-in.
+no-journal and also guards that the retired repo JSONL journal path stays clean.
+Compatibility journal checks are explicit opt-in for legacy/ad hoc audits.
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ from check_projection_policy import projection_policy_errors
 
 
 DEFAULT_DIRTY_PATHS = ("wiki", "wiki.grasp/events.jsonl")
-DEFAULT_NO_JOURNAL_DIRTY_PATHS = ("wiki",)
+DEFAULT_NO_JOURNAL_DIRTY_PATHS = ("wiki", "wiki.grasp/events.jsonl")
 
 
 def run_command(args: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -39,7 +40,7 @@ def dirty_path_errors(status_output: str) -> list[str]:
     lines = [line for line in status_output.splitlines() if line.strip()]
     if not lines:
         return []
-    return ["dirty wiki/journal paths before file-back:\n" + "\n".join(lines)]
+    return ["dirty file-back paths before file-back:\n" + "\n".join(lines)]
 
 
 def base_divergence_errors(log_output: str, base: str) -> list[str]:
@@ -227,7 +228,7 @@ def main() -> int:
         "--dirty-path",
         action="append",
         dest="dirty_paths",
-        help="Path that must be clean before file-back. Defaults to wiki and wiki.grasp/events.jsonl; with --no-journal, defaults to wiki only.",
+        help="Path that must be clean before file-back. Defaults to wiki and the retired repo JSONL journal path.",
     )
     args = parser.parse_args()
 

@@ -64,6 +64,8 @@ ln -s "$PWD/skills/grasp" ~/.claude/skills/grasp
 
 AI は必要に応じて `grasp read` / `search` / `backlinks` / `related` などを呼び分けます。Skill 側の使い方は [skills/grasp/SKILL.md](skills/grasp/SKILL.md)、各コマンドの正確な引数と JSON 形状は `grasp <command> --help` が正典です。
 
+この repo の開発 wiki dogfood では、repo-local file-back guard scripts は no-journal が default です。tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役済みで、通常 file-back は repo に JSONL を作りません。
+
 ## 最初に覚えるコマンド
 
 | command | 何をするか |

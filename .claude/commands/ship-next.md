@@ -24,7 +24,8 @@ Follow these steps:
    - chronological record -> `wiki/log.md` using `## [YYYY-MM-DD HH:MM] <op> | <desc>`
    - keep file back factual and scoped; do not over-spec future work.
    - for grasp-write-backed file back, first run `git fetch origin main` and `python3 scripts/check_file_back_preflight.py` (no-journal default).
-   - if compatibility journal audit is explicitly required, use `python3 scripts/check_file_back_preflight.py --with-journal`, `python3 scripts/check_file_back_postwrite.py --with-journal`, and write commands with `--journal wiki.grasp/events.jsonl --output wiki`.
+   - tracked `wiki.grasp/events.jsonl` was retired and removed in `1.8.18`; normal repo file-back must not recreate or commit it.
+   - `--journal` / `--with-journal` remain for legacy/ad hoc CLI audits outside the normal repo runbook. Do not use repo-runbook `--with-journal`.
 3. Run verification:
    - `python3 -m unittest discover -s tests`
    - `python3 scripts/lint_wiki.py`

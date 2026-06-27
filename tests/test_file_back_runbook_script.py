@@ -51,6 +51,19 @@ python3 scripts/check_file_back_postwrite.py --no-journal
         self.assertTrue(any("check_file_back_preflight.py --no-journal" in error for error in errors))
         self.assertTrue(any("check_file_back_postwrite.py --no-journal" in error for error in errors))
 
+    def test_default_rules_reject_repo_with_journal_runbook(self):
+        stale_text = """
+python3 scripts/check_file_back_preflight.py --with-journal
+python3 scripts/check_file_back_postwrite.py --with-journal
+--journal wiki.grasp/events.jsonl --output wiki
+"""
+
+        errors = runbook.check_text(stale_text, runbook.DEFAULT_RULES[0])
+
+        self.assertTrue(any("check_file_back_preflight.py --with-journal" in error for error in errors))
+        self.assertTrue(any("check_file_back_postwrite.py --with-journal" in error for error in errors))
+        self.assertTrue(any("--journal wiki.grasp/events.jsonl --output wiki" in error for error in errors))
+
 
 if __name__ == "__main__":
     unittest.main()
