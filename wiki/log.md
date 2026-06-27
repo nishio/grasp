@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-28 08:17] implementation+file-back | `history` に current projection target を追加
+- code: `history <query>` が `current_state_target` を返し、current page handle 解決を `resolved_unique` / `ambiguous` / `unresolved` / `unavailable` で明示するようにした。unique なら `read --page-id <id>`、ambiguous なら候補ごとの `read_args` / `read_command`、journal-only fallback なら `unavailable` を返す。text 出力にも target status と候補を出す。
+- tests: SQLite source の resolved target、alias collision の ambiguous target、missing store journal fallback の unavailable target を CLI regression で固定。schema は v8 のまま、public compatibility version は `1.8.61`。
+- file back: [[history]] / [[grasp-v1-implemented]] / [[grasp-backlog]] / [[sqlite-ssot-write-plan]] を更新し、stale-log guard の current projection pointer backlog は実装済みに移した。
+
 ## [2026-06-28 08:04] implementation+file-back | `history` / `log-records` を event stream として明示
 - code: `log-records` / `history` の JSON result に `result_mode=event-stream`、`current_state=false`、`current_state_hint`、`staleness_signals[]` を追加し、text formatter も同じ header を出すようにした。`history <query>` は current projection の読み先として `read <query>` を hint する。
 - tests: SQLite events 優先の `history` / `log-records` test で JSON/text の mode/current-state fields を検査。schema は v8 のまま、public compatibility version は `1.8.60`。
