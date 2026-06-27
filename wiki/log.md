@@ -1250,3 +1250,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - implemented: write-status now returns semantic_log_projection / semantic_log_stale / semantic_log_changed_files for SQLite events-derived log projection.
 - strict: write-status --strict fails with semantic_log_stale when the generated SQLite log projection drifts; projects without a log page skip the semantic check.
 - tests: added no-journal strict drift coverage and preflight diagnostics for semantic_log_* status fields.
+
+## [2026-06-27 20:34] implementation | surface projection rollback diagnostics
+- implemented: write command projection export failures now raise a structured rollback diagnostic on --json stderr after automatic event_revert rollback.
+- covered: both compatibility journal and --no-journal paths report target_event_id / rollback_event_id / journal_written / original_error.
+- scope: this starts the SQLite authority rollback policy slice; remaining general revert policy still needs a concrete multi-event or planning definition.
