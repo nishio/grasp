@@ -1133,3 +1133,7 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 ## [2026-06-27 15:20] implementation | query log history from SQLite events
 - `import-log-records` now inserts new/updated `log_entry_import` records into SQLite `events` before appending legacy JSONL.
 - `log-records` and `history` prefer SQLite `log_entry_import` rows and fall back to JSONL when the selected store has no migrated log records.
+
+## [2026-06-27 16:22] implementation | write adopt-markdown initial events to SQLite
+- `adopt-markdown` now inserts initial `page_create` / `log_entry_import` events into SQLite `events` before appending legacy JSONL.
+- Fresh adoption now gives `log-records` / `history` a SQLite event stream immediately; tests update expected initial SQLite event sequences.

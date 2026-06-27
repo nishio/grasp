@@ -181,12 +181,12 @@ def build_parser() -> argparse.ArgumentParser:
         "adopt-markdown",
         help="Adopt an existing Markdown wiki into the store and event journal.",
         description=(
-            "Import a Markdown folder into the SQLite materialized index and append page_create events "
-            "to a durable JSONL journal. Log pages and type: log-entry files are also split into log_entry_import records. "
+            "Import a Markdown folder into the SQLite materialized index, insert initial page_create/log_entry_import "
+            "events into SQLite events, and append compatibility records to a durable JSONL journal. "
             "This is the Phase 1 bridge toward native authority + Markdown projection."
         ),
         returns=(
-            "store, project, journal, journal_events, adopted_pages, log_entry_records, "
+            "store, project, journal, journal_events, sqlite_events_inserted, sqlite_events_skipped, adopted_pages, log_entry_records, "
             "pages, lines, edges, unresolved_targets, markdown_import"
         ),
         examples=[
@@ -1308,6 +1308,13 @@ def adopt_markdown(
     ]
     log_entry_events = markdown_log_entry_import_events(mirror.records, project=adopted_project)
     events = [*page_events, *log_entry_events]
+    sqlite_event_summary = {"imported": 0, "skipped": 0}
+    if events:
+        event_store = SQLiteStore(store_path, project=adopted_project, for_write=True)
+        try:
+            sqlite_event_summary = event_store.import_journal_events(events, project=adopted_project)
+        finally:
+            event_store.close()
     if replace_journal:
         journal.parent.mkdir(parents=True, exist_ok=True)
         journal.write_text("", encoding="utf-8")
@@ -1319,6 +1326,8 @@ def adopt_markdown(
         {
             "journal": str(journal),
             "journal_events": len(events),
+            "sqlite_events_inserted": sqlite_event_summary["imported"],
+            "sqlite_events_skipped": sqlite_event_summary["skipped"],
             "adopted_pages": len(page_events),
             "log_entry_records": len(log_entry_events),
         }
@@ -3905,6 +3914,8 @@ def format_adopt_markdown(result: dict[str, Any]) -> str:
         format_import(result)
         + f"journal: {result['journal']}\n"
         + f"journal_events: {result['journal_events']}\n"
+        + f"sqlite_events_inserted: {result.get('sqlite_events_inserted', 0)}\n"
+        + f"sqlite_events_skipped: {result.get('sqlite_events_skipped', 0)}\n"
         + f"adopted_pages: {result['adopted_pages']}\n"
     )
 
