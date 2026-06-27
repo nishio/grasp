@@ -1211,3 +1211,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - preflight: `git fetch origin main` + `python3 scripts/check_file_back_preflight.py` が `journal_mode=none` で通った。
 - write: `append-log --output wiki --no-journal` で本 log entry を追加し、`wiki.grasp/events.jsonl` は触らない。direct Markdown patch fallback は使っていない。
 - next: 同じ path をあと2回、実作業の file-back で通し、generated Markdown backup/review policy の必要性を実観測で判断する。
+
+## [2026-06-27 19:24] dogfood | no-journal default file-back streak 2
+- preflight: `python3 scripts/check_file_back_preflight.py` が `journal_mode=none` で通った。
+- write: `append-log --output wiki --no-journal` で本 log entry を追加した。`wiki.grasp/events.jsonl` は無変更、direct Markdown patch fallback なし。
+- observation: streak 2 でも generated Markdown backup/review policy の追加を要する concrete gap は出ていない。次は同じ path の streak 3 を通して Phase 6 の dogfood proof を閉じる。
