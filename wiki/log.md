@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-27 13:37] implementation+file back | `append-section` / `append-log` を SQLite state+event 1 transaction に移行
+- code: `SQLiteStore.append_markdown_lines_with_event()` を追加し、append lines update と SQLite `events` row insert を同じ `BEGIN IMMEDIATE` transaction で commit するようにした。CLI `append-section` / `append-log` はこの helper を使う。既存互換のため legacy `events.jsonl` append と Markdown projection export は継続。
+- tests: CLI append が SQLite events table に `section_append` / `log_append` を残すこと、duplicate event id で SQLite event insert が失敗した時に appended lines が rollback されることを追加。`python3 -m unittest discover -s tests` は 113 tests OK。
+- file back: [[history]] / [[grasp-v1-implemented]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新。public compatibility version は `1.8.2`、schema は v8 のまま。次は `rename-page` と SQLite events 由来 recovery。
+
 ## [2026-06-27 13:34] file back | [[ai-agent-implementation-experiment]] を新設し、grasp を AI agent 実装実験として説明
 - [[ai-agent-implementation-experiment]]: 初見エンジニア向けに、local graph store と AI agent による継続的実装 dogfood の二重性を整理。
 - index.md concepts 表へ追加。write-first は current main に対して page_create → index page_update → append-log の順で実行。

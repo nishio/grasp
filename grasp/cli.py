@@ -2141,16 +2141,13 @@ def run_export_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict[st
 def run_append_section(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = journal_path_for_output(args.output, args.journal)
     section_lines = ["", f"## {args.heading}", *args.line]
-    append_result = store.append_markdown_lines(args.title, section_lines)
-    event = make_journal_event(
-        "section_append",
-        project=append_result["project"],
+    append_result, event = store.append_markdown_lines_with_event(
+        args.title,
+        section_lines,
+        event_type="section_append",
         payload={
-            "page_id": append_result["page"]["id"],
-            "title": append_result["page"]["title"],
             "heading": args.heading,
             "lines": args.line,
-            "inserted_lines": append_result["appended_lines"],
         },
     )
     projection = append_event_and_export_projection(
@@ -2176,18 +2173,15 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
     timestamp = args.timestamp or datetime.now().strftime("%Y-%m-%d %H:%M")
     heading = f"[{timestamp}] {args.op} | {args.summary}"
     log_lines = ["", f"## {heading}", *args.line]
-    append_result = store.append_markdown_lines(args.title, log_lines)
-    event = make_journal_event(
-        "log_append",
-        project=append_result["project"],
+    append_result, event = store.append_markdown_lines_with_event(
+        args.title,
+        log_lines,
+        event_type="log_append",
         payload={
-            "page_id": append_result["page"]["id"],
-            "title": append_result["page"]["title"],
             "timestamp": timestamp,
             "op": args.op,
             "summary": args.summary,
             "lines": args.line,
-            "inserted_lines": append_result["appended_lines"],
         },
     )
     projection = append_event_and_export_projection(

@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.2`（更新: 2026-06-27 13:37、store: schema `8`、compat: schema `8` compatible）: `append-section` / `append-log` の SQLite SSoT migration。append する lines 更新と SQLite `events` row insert を同じ `BEGIN IMMEDIATE` transaction で commit する `SQLiteStore.append_markdown_lines_with_event()` を追加し、CLI `append-section` / `append-log` から使うようにした。legacy `events.jsonl` append と Markdown projection export は互換のため継続する。tests は CLI append が SQLite events に `section_append` / `log_append` を残すこと、event id duplicate で events insert が失敗した時に appended lines が rollback されることを確認する。`rename-page` / `revert-event` / SQLite events 由来 recovery は未移行
 - `1.8.1`（更新: 2026-06-27 13:28、store: schema `8`、compat: schema `8` compatible）: `write-page` / `write-page --create` の SQLite SSoT migration 第一弾。Markdown page state update と SQLite `events` row insert を同じ `BEGIN IMMEDIATE` transaction で commit する `SQLiteStore.write_markdown_page_with_event()` を追加し、CLI `write-page` から使うようにした。legacy `events.jsonl` append と Markdown projection export は互換のため継続する。tests は CLI `write-page --create` が SQLite events に `page_create` を残すこと、event id duplicate で events insert が失敗した時に page state が rollback されることを確認する。`append-*` / `rename-page` / `revert-event` / SQLite events 由来 recovery は未移行
 - `1.8.0`（更新: 2026-06-27 13:18、store: schema `8`、compat: `1.7.x` store は rebuild）: SQLite SSoT write plan Phase 2 の入口として `events` table を追加した。event は monotonic `event_sequence`、unique `event_id`、journal `schema_version` / `event_type` / `project` / `created_at`、`actor` / `session_id`、canonical `payload_json` を持つ。`SQLiteStore.import_journal_events()` は legacy JSONL または event dict list を duplicate skip 付きで SQLite events へ移行し、`SQLiteStore.events()` / `event_count()` は project / event_type で query できる。既存 write command はまだ JSONL authority で、state+event 1 transaction migration は未実装
 - `1.7.39`（更新: 2026-06-27 12:44、store: schema `7`、compat: schema `7` compatible）: SQLite SSoT write plan の Phase 0 authority contract を file back し、Phase 1 substrate として `canonical_store_path()`（default repo `.grasp/authority.sqlite`, `$GRASP_CANONICAL_STORE` override）、write connection setup（WAL / busy_timeout / `synchronous=NORMAL`）、`sqlite_write_transaction()`（`BEGIN IMMEDIATE` + commit/rollback）を追加した。CLI は store 更新系 command を write-configured connection で開く。tests は WAL/busy_timeout、commit/rollback、2 writer lock contention を確認する。events table / command migration は未実装、schema は不変
@@ -141,6 +142,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.1`
+- Current public compatibility version: `1.8.2`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.1`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.2`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
