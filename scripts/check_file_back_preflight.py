@@ -28,6 +28,8 @@ from grasp.sqlite_store import SQLiteStore
 
 DEFAULT_DIRTY_PATHS = ("wiki", "wiki.grasp/events.jsonl")
 DEFAULT_NO_JOURNAL_DIRTY_PATHS = ("wiki", "wiki.grasp/events.jsonl")
+DEFAULT_BASE = "auto"
+FALLBACK_BASE = "origin/main"
 
 
 def run_command(args: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -53,6 +55,20 @@ def base_divergence_errors(log_output: str, base: str) -> list[str]:
     if not lines:
         return []
     return [f"branch differs from {base}; reconcile before file-back:\n" + "\n".join(lines)]
+
+
+def resolve_git_base(repo: Path, requested_base: str) -> str:
+    if requested_base != DEFAULT_BASE:
+        return requested_base
+    upstream = run_command(
+        ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+        cwd=repo,
+    )
+    if upstream.returncode == 0:
+        upstream_name = upstream.stdout.strip()
+        if upstream_name:
+            return upstream_name
+    return FALLBACK_BASE
 
 
 def write_status_errors(result: dict[str, Any], *, require_journal: bool = True) -> list[str]:
@@ -267,7 +283,11 @@ def resolve_require_journal(*, no_journal: bool, with_journal: bool) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check guarded grasp file-back preflight conditions.")
     parser.add_argument("--repo", default=".", help="Repository root.")
-    parser.add_argument("--base", default="origin/main", help="Fetched git base to compare with HEAD.")
+    parser.add_argument(
+        "--base",
+        default=DEFAULT_BASE,
+        help="Fetched git base to compare with HEAD. 'auto' prefers the current upstream branch, then origin/main.",
+    )
     parser.add_argument("--skip-base-check", action="store_true", help="Skip the base divergence check.")
     parser.add_argument("--store", default=".grasp/file-back.sqlite")
     parser.add_argument("--project", default="grasp-wiki")
@@ -306,8 +326,10 @@ def main() -> int:
         DEFAULT_DIRTY_PATHS if require_journal else DEFAULT_NO_JOURNAL_DIRTY_PATHS
     )
     errors: list[str] = []
+    resolved_base = args.base
     if not args.skip_base_check:
-        errors.extend(check_git_base(repo, args.base))
+        resolved_base = resolve_git_base(repo, args.base)
+        errors.extend(check_git_base(repo, resolved_base))
     errors.extend(check_dirty_paths(repo, paths))
     if errors:
         for error in errors:
@@ -333,7 +355,7 @@ def main() -> int:
 
     print(
         "file-back preflight ok: "
-        f"base={args.base if not args.skip_base_check else 'skipped'} "
+        f"base={resolved_base if not args.skip_base_check else 'skipped'} "
         f"journal_mode={args.journal if require_journal else 'none'} "
         f"session={'skipped' if args.skip_session_uniqueness_check else args.session_id} "
         f"dirty_paths={','.join(paths)} "
