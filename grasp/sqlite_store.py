@@ -2526,6 +2526,36 @@ class SQLiteStore:
             )
         return projections
 
+    def markdown_projection_text_for_source_path(self, source_path: str | Path) -> str | None:
+        project = self._require_project()
+        source_path = _safe_markdown_relative_path(source_path)
+        manifest = self._markdown_manifest_for_project(project)
+        files = manifest.get("files")
+        if not isinstance(files, dict) or not files:
+            raise ValueError(f"project is not a Markdown mirror project or has no Markdown manifest: {project}")
+        item = files.get(source_path)
+        if not isinstance(item, dict):
+            return None
+        page_id = str(item.get("page_id") or "")
+        if not page_id:
+            return None
+        lines = self.connection.execute(
+            """
+            SELECT text
+            FROM lines
+            WHERE project = ? AND page_id = ?
+            ORDER BY line_index
+            """,
+            (project, page_id),
+        ).fetchall()
+        return markdown_projection_text(
+            source_path,
+            page_id=page_id,
+            title=str(item.get("title") or ""),
+            aliases=[str(alias) for alias in item.get("aliases") or []],
+            lines=[row["text"] for row in lines],
+        )
+
     def _markdown_index_projection_text(self, project: str, files: dict[str, Any]) -> str:
         groups: dict[str, list[tuple[str, str, str]]] = {}
         for relative_path in sorted(str(path) for path in files):
@@ -2669,6 +2699,9 @@ class SQLiteStore:
         if len(candidates) > 1:
             raise ValueError(f"page handle is ambiguous: {title}; use a unique title for append alpha")
         page_id = str(candidates[0]["page_id"])
+        source_path = str(candidates[0].get("path") or "")
+        if not source_path:
+            raise ValueError(f"Markdown manifest has no source path for page_id: {page_id}")
         now = int(time.time())
         start_row = self.connection.execute(
             """
@@ -2720,6 +2753,7 @@ class SQLiteStore:
         return {
             "project": project,
             "page": page.to_summary() if page is not None else {"id": page_id, "title": title},
+            "source_path": source_path,
             "start_index": start_index,
             "appended_lines": appended,
             "appended_line_count": len(appended),
@@ -2744,6 +2778,7 @@ class SQLiteStore:
                 "page_id": append_result["page"]["id"],
                 "title": append_result["page"]["title"],
                 **payload,
+                "source_path": append_result["source_path"],
                 "inserted_lines": append_result["appended_lines"],
             }
             event = make_journal_event(
