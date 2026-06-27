@@ -3075,7 +3075,69 @@ class SQLiteStore:
             insert_store_event(self.connection, event, actor=actor, session_id=session_id)
         return update_result, event
 
+    @staticmethod
+    def _markdown_page_rename_event_payload(rename_result: dict[str, Any], message: str) -> dict[str, Any]:
+        return {
+            "page_id": rename_result["page"]["id"],
+            "previous_title": rename_result["previous_title"],
+            "title": rename_result["title"],
+            "previous_source_path": rename_result["previous_source_path"],
+            "source_path": rename_result["source_path"],
+            "previous_aliases": rename_result["previous_aliases"],
+            "aliases": rename_result["aliases"],
+            "previous_lines": rename_result["previous_lines"],
+            "lines": rename_result["lines"],
+            "heading_updated": rename_result["heading_updated"],
+            "message": message,
+        }
+
+    def rename_markdown_page_with_event(
+        self,
+        target: str,
+        new_title: str,
+        *,
+        target_kind: str = "handle",
+        new_source_path: str | None = None,
+        update_heading: bool = True,
+        message: str = "",
+        actor: str = "",
+        session_id: str = "",
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        with self.write_transaction():
+            rename_result = self._rename_markdown_page_uncommitted(
+                target,
+                new_title,
+                target_kind=target_kind,
+                new_source_path=new_source_path,
+                update_heading=update_heading,
+            )
+            event = make_journal_event(
+                "page_rename",
+                project=rename_result["project"],
+                payload=self._markdown_page_rename_event_payload(rename_result, message),
+            )
+            insert_store_event(self.connection, event, actor=actor, session_id=session_id)
+        return rename_result, event
+
     def rename_markdown_page(
+        self,
+        target: str,
+        new_title: str,
+        *,
+        target_kind: str = "handle",
+        new_source_path: str | None = None,
+        update_heading: bool = True,
+    ) -> dict[str, Any]:
+        with self.connection:
+            return self._rename_markdown_page_uncommitted(
+                target,
+                new_title,
+                target_kind=target_kind,
+                new_source_path=new_source_path,
+                update_heading=update_heading,
+            )
+
+    def _rename_markdown_page_uncommitted(
         self,
         target: str,
         new_title: str,
@@ -3143,7 +3205,7 @@ class SQLiteStore:
             new_source_path=source_path,
             previous_aliases=previous_aliases,
         )
-        edge_count = self._apply_markdown_page_identity(
+        edge_count = self._apply_markdown_page_identity_uncommitted(
             project,
             page_id,
             title=new_title,
@@ -3590,6 +3652,30 @@ class SQLiteStore:
         graph_role: str,
         updated: int,
     ) -> int:
+        with self.connection:
+            return self._apply_markdown_page_identity_uncommitted(
+                project,
+                page_id,
+                title=title,
+                source_path=source_path,
+                aliases=aliases,
+                lines=lines,
+                graph_role=graph_role,
+                updated=updated,
+            )
+
+    def _apply_markdown_page_identity_uncommitted(
+        self,
+        project: str,
+        page_id: str,
+        *,
+        title: str,
+        source_path: str,
+        aliases: list[str],
+        lines: list[dict[str, Any]],
+        graph_role: str,
+        updated: int,
+    ) -> int:
         title = title.strip()
         source_path = _safe_markdown_relative_path(source_path)
         norm_title = normalize_title(title)
@@ -3647,45 +3733,44 @@ class SQLiteStore:
             source_path=source_path,
             graph_role=graph_role,
         )
-        with self.connection:
-            self.connection.execute(
-                """
-                UPDATE pages
-                SET title = ?, norm_title = ?, updated = ?
-                WHERE project = ? AND id = ?
-                """,
-                (title, norm_title, updated, project, page_id),
-            )
-            edge_count = self._replace_markdown_page_line_payloads_uncommitted(
-                project,
-                page_id,
-                lines,
-                graph_role=graph_role,
-                updated=updated,
-            )
-            self.connection.execute(
-                "DELETE FROM page_handles WHERE project = ? AND page_id = ?",
-                (project, page_id),
-            )
-            _insert_page_handles(self.connection, handle_rows)
-            refresh_edge_resolutions(self.connection, project)
-            rebuild_unresolved_targets(self.connection, project)
-            _refresh_project_counts_sql(self.connection, project)
-            _write_metadata(
-                self.connection,
-                {
-                    f"project.{project}.title_aliases": json.dumps(
-                        alias_map,
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    ),
-                    f"project.{project}.markdown_manifest": json.dumps(
-                        manifest,
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    ),
-                },
-            )
+        self.connection.execute(
+            """
+            UPDATE pages
+            SET title = ?, norm_title = ?, updated = ?
+            WHERE project = ? AND id = ?
+            """,
+            (title, norm_title, updated, project, page_id),
+        )
+        edge_count = self._replace_markdown_page_line_payloads_uncommitted(
+            project,
+            page_id,
+            lines,
+            graph_role=graph_role,
+            updated=updated,
+        )
+        self.connection.execute(
+            "DELETE FROM page_handles WHERE project = ? AND page_id = ?",
+            (project, page_id),
+        )
+        _insert_page_handles(self.connection, handle_rows)
+        refresh_edge_resolutions(self.connection, project)
+        rebuild_unresolved_targets(self.connection, project)
+        _refresh_project_counts_sql(self.connection, project)
+        _write_metadata(
+            self.connection,
+            {
+                f"project.{project}.title_aliases": json.dumps(
+                    alias_map,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                f"project.{project}.markdown_manifest": json.dumps(
+                    manifest,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            },
+        )
         return edge_count
 
     def page_lines_around(

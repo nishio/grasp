@@ -1117,3 +1117,7 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 Added revert_events support to the continuous git history replay table.
 Added a 0db1449 sequence that creates llm-wiki-infra-fast-path-plan, updates the existing pages, then reverts the page_create event while keeping the updates.
 Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
+
+## [2026-06-27 14:12] implementation | migrate rename-page to SQLite events transaction
+- `rename-page` / `rename` now use `SQLiteStore.rename_markdown_page_with_event()`, committing rename state and SQLite `events` insert in one `BEGIN IMMEDIATE` transaction while keeping legacy JSONL journal append and Markdown projection export.
+- Added regression coverage for SQLite `page_rename` rows and rollback when event insert fails.

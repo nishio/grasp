@@ -433,6 +433,61 @@ class SQLiteStoreTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_rename_markdown_page_rolls_back_state_when_event_insert_fails(self):
+        class FixedUuid:
+            hex = "fixed-event-id"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nlink [[Old]]\n", encoding="utf-8")
+            (root / "Old.md").write_text("# Old\nbody\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                existing_event = make_journal_event(
+                    "page_rename",
+                    project="wiki",
+                    event_id="fixed-event-id",
+                    created_at="2026-06-27T00:00:00+00:00",
+                    payload={
+                        "page_id": "preexisting",
+                        "previous_title": "Previous",
+                        "title": "Preexisting",
+                        "previous_source_path": "Previous.md",
+                        "source_path": "Preexisting.md",
+                        "previous_aliases": [],
+                        "aliases": [],
+                        "previous_lines": [],
+                        "lines": [],
+                        "heading_updated": False,
+                    },
+                )
+                store.import_journal_events([existing_event])
+                old_before = store.resolve_page("Old")
+                self.assertIsNotNone(old_before)
+                self.assertEqual(old_before.title, "Old")
+
+                with patch("grasp.journal.uuid4", return_value=FixedUuid()):
+                    with self.assertRaises(sqlite3.IntegrityError):
+                        store.rename_markdown_page_with_event("Old", "New")
+
+                old_after = store.resolve_page("Old")
+                new_after = store.resolve_page("New")
+                self.assertIsNotNone(old_after)
+                self.assertEqual(old_after.id, old_before.id)
+                self.assertEqual(old_after.title, "Old")
+                self.assertIsNone(new_after)
+                self.assertEqual(
+                    [line.text for line in store.page_lines(old_after)[0]],
+                    ["# Old", "body"],
+                )
+                self.assertEqual(store.event_count(), 1)
+            finally:
+                store.close()
+
     def test_import_export_to_sqlite_and_query(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             export_path = Path(tmpdir) / "export.json"
