@@ -64,7 +64,7 @@ ln -s "$PWD/skills/grasp" ~/.claude/skills/grasp
 
 AI は必要に応じて `grasp read` / `search` / `backlinks` / `related` などを呼び分けます。Skill 側の使い方は [skills/grasp/SKILL.md](skills/grasp/SKILL.md)、各コマンドの正確な引数と JSON 形状は `grasp <command> --help` が正典です。
 
-この repo の開発 wiki dogfood では、repo-local file-back guard scripts は no-journal が default です。tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役済みで、通常 file-back は repo に JSONL を作りません。
+この repo の開発 wiki dogfood では、repo-local file-back guard scripts は no-journal が default です。tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役済みで、通常 file-back は repo に JSONL を作りません。postwrite は SQLite events 由来の semantic log projection も確認します。
 
 ## 最初に覚えるコマンド
 
@@ -130,7 +130,7 @@ Alpha:
 - SQLite store を authority とする `export-markdown --check` の projection freshness gate
 - `write-status` / `revert-event` / `replay-journal` による recovery surface
 - write/status は移行用の compatibility JSONL journal を使えるほか、`--no-journal` で SQLite events + Markdown projection だけの path も検証できる
-- repo-local file-back guard scripts は no-journal が default で、compatibility journal あり mode は明示 audit 用に残す
+- repo-local file-back guard scripts は no-journal が default で、postwrite は SQLite events 由来の semantic log projection も確認し、compatibility journal あり mode は明示 audit 用に残す
 - `scripts/check_file_back_runbook.py` で repo-local file-back runbook の `--no-journal` default drift を検出する
 
 スコープ外:
