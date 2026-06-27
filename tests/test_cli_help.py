@@ -3856,6 +3856,124 @@ class CliHelpTests(unittest.TestCase):
             ["section_append", "section_append"],
         )
 
+    def test_revert_plan_event_window_handles_multi_page_sequence_without_log_batch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nold A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nold B\n", encoding="utf-8")
+            a_source = Path(tmpdir) / "A-new.md"
+            b_source = Path(tmpdir) / "B-new.md"
+            a_source.write_text("# A\nnew A\n", encoding="utf-8")
+            b_source.write_text("# B\nnew B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            def run_json(*args):
+                completed = subprocess.run(
+                    [sys.executable, "-m", "grasp", "--json", "--store", str(store_path), "--project", "wiki", *args],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            a_update = run_json(
+                "write-page",
+                "A",
+                "--from-file",
+                str(a_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            b_update = run_json(
+                "write-page",
+                "B",
+                "--from-file",
+                str(b_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            plan = run_json(
+                "revert-plan",
+                a_update["event_id"],
+                "--scope",
+                "event-window",
+                "--after",
+                "1",
+                "--output",
+                str(root),
+            )
+            a_text_after_plan = (root / "A.md").read_text(encoding="utf-8")
+            b_text_after_plan = (root / "B.md").read_text(encoding="utf-8")
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows_after_plan = connection.execute(
+                    """
+                    SELECT event_id, event_type
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+
+        self.assertEqual(plan["scope"], "event-window")
+        self.assertTrue(plan["complete"])
+        self.assertTrue(plan["revertible"])
+        self.assertIsNone(plan["previous_log_event"])
+        self.assertIsNone(plan["closing_log_event"])
+        self.assertEqual(plan["window_before"], 0)
+        self.assertEqual(plan["window_after"], 1)
+        self.assertEqual(
+            plan["candidate_event_ids"],
+            [a_update["event_id"], b_update["event_id"]],
+        )
+        self.assertEqual(
+            plan["revert_order_event_ids"],
+            [b_update["event_id"], a_update["event_id"]],
+        )
+        self.assertEqual(
+            [event["event_type"] for event in plan["candidate_events"]],
+            ["page_update", "page_update"],
+        )
+        self.assertEqual(plan["excluded_events"], [])
+        self.assertEqual(
+            [event["target_event_id"] for event in plan["reverted_events"]],
+            [b_update["event_id"], a_update["event_id"]],
+        )
+        self.assertEqual(
+            plan["suggested_revert_events_args"],
+            [
+                "revert-events",
+                a_update["event_id"],
+                b_update["event_id"],
+                "--output",
+                str(root),
+            ],
+        )
+        self.assertEqual(a_text_after_plan, "# A\nnew A\n")
+        self.assertEqual(b_text_after_plan, "# B\nnew B\n")
+        self.assertEqual([row[1] for row in sqlite_event_rows_after_plan], ["page_update", "page_update"])
+
     def test_replay_journal_page_update_tolerates_line_id_drift_when_text_matches(self):
         def event(event_type, event_id, payload):
             return {
