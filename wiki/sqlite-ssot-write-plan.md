@@ -70,6 +70,8 @@ It supersedes [[llm-wiki-infra-fast-path-plan]] as an implementation plan. The o
 
 `scripts/check_file_back_postwrite.py` wraps the write-after verification. It checks `write-status --strict`, `export-markdown --json --check` projection policy, `scripts/lint_wiki.py`, and `git diff --check` after grasp writes have updated `wiki/` and `wiki.grasp/events.jsonl`. This makes the post-write side of the Phase 6 dogfood loop executable too.
 
+Active runbooks now call `wiki.grasp/events.jsonl` a compatibility/audit journal and state that normal edit authority is on the SQLite store side. Recovery instructions route through `scripts/check_file_back_postwrite.py` instead of spelling raw projection checks in the main path.
+
 This does **not** yet make every authority boundary final. `sync`, `acquire`, generated Markdown backup/review policy, and file-back cutover still need migration work.
 
 ## Why This Replaces The Fast Path
@@ -97,7 +99,7 @@ Therefore, adding more guards to `events.jsonl` is only a temporary mitigation. 
 | 4. Export-only Markdown | Projection becomes a read side effect, not authority | Make `export-markdown` read from canonical SQLite. Keep `--check`; make direct `import --markdown` an adoption/emergency path, not reconcile default | In progress: `export-markdown` returns `projection_policy` proving SQLite authority and git-tracked projection role; remaining proof is normal file-back without direct Markdown patch |
 | 5. Native review/recovery | Losing git-diffable JSONL is compensated | Rebuild `history`, `revert-event`, status, and replay/check surfaces from SQLite events/state; add a purpose-named projection diff only if needed | In progress: `write-status` shows SQLite event count / last event and strict-fails SQLite/JSONL event stream mismatch; SQLite-sourced `revert-event` and projection failure rollback write state + `event_revert` atomically; `log-records` / `history` read SQLite log events when available; old `write-diff` removed in `1.8.8` |
 | 6. File-back cutover | Daily wiki edits use the new authority path | Update file-back skill / repo commands to call canonical SQLite write first, then export Markdown, lint, and commit projection | In progress: repo-local and local user-level file-back instructions now run executable preflight and postwrite checks around the grasp write path; done when three consecutive file-backs land through SQLite SSoT without direct Markdown patch fallback |
-| 7. Retire JSONL authority | Old alpha artifacts cannot mislead implementers | Mark `wiki.grasp/events.jsonl` as legacy import/audit artifact or remove it from the active path; update docs/AGENTS when the command surface changes | No current instruction tells Codex to treat JSONL as the write authority |
+| 7. Retire JSONL authority | Old alpha artifacts cannot mislead implementers | Mark `wiki.grasp/events.jsonl` as compatibility/audit artifact or remove it from the active path; update docs/AGENTS when the command surface changes | In progress: active runbooks now label `events.jsonl` compatibility/audit and SQLite-side authority, but the compatibility journal is still passed to write commands |
 
 ## Immediate Next Slice
 

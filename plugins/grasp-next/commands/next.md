@@ -50,9 +50,9 @@ git fetch origin main
 $PYTHON_BIN scripts/check_file_back_preflight.py
 ```
 
-この preflight は `.grasp/file-back.sqlite` を import/update し、remote 分岐なし、wiki/journal dirty なし、`write-status --strict`、`export-markdown --json --check | scripts/check_projection_policy.py` 相当を確認する。その後、表現できる変更は `append-section` / `write-page` / `append-log` を `--output wiki --journal wiki.grasp/events.jsonl` 付きで使う。任意 frontmatter merge、canonical docs、曖昧 handle、混在 hunk など grasp alpha が安全に扱えない場合だけ direct Markdown patch に fallback し、理由を `wiki/log.md` に残す。
+この preflight は `.grasp/file-back.sqlite` を import/update し、remote 分岐なし、wiki/journal dirty なし、`write-status --strict`、projection policy check を確認する。`wiki.grasp/events.jsonl` は transition 中の互換/audit journal で、通常編集の authority は SQLite store 側に置く。その後、表現できる変更は `append-section` / `write-page` / `append-log` を `--output wiki --journal wiki.grasp/events.jsonl` 付きで使う。任意 frontmatter merge、canonical docs、曖昧 handle、混在 hunk など grasp alpha が安全に扱えない場合だけ direct Markdown patch に fallback し、理由を `wiki/log.md` に残す。
 
-同じ `.grasp/file-back.sqlite` / `wiki.grasp/events.jsonl` への write 系 command は直列に実行する。並列 write で projection が stale になったら、対象 page を直列で `write-page --from-file` し直してから `write-status --strict` / `export-markdown --check` + `scripts/check_projection_policy.py` / `replay-journal --check` を通す。
+同じ `.grasp/file-back.sqlite` / `wiki.grasp/events.jsonl` への write 系 command は直列に実行する。並列 write で projection が stale になったら、対象 page を直列で `write-page --from-file` し直してから `scripts/check_file_back_postwrite.py` / `replay-journal --check` を通す。
 
 複数 wiki page を direct patch fallback してから journal に戻す場合も、1 page patch → `write-page --from-file` → 次 page の順で行う。`write-page` の projection export は全 page を書くため、未反映の direct patch は上書きされる。
 
