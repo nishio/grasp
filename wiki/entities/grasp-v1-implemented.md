@@ -53,7 +53,7 @@ v1 stable scope 外:
 
 ## store
 
-- current public compatibility version は `1.8.54`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.8.57`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - authoring SSoT substrate 用の canonical store path helper は `$GRASP_CANONICAL_STORE` → `<repo>/.grasp/authority.sqlite` → `$GRASP_HOME/authority.sqlite` → `~/.grasp/authority.sqlite`。これは Phase 0/1 helper であり、既存 default read/import store path とは分ける。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
@@ -191,6 +191,7 @@ parser が link から除外するもの:
 - `1.8.45` 以降、repo-local preflight / write-start / postwrite guard は default store `.grasp/file-back.sqlite` と default output `wiki` を pair として扱い、片方だけ temp path にした混在を failure にする。temp dogfood は temp store + temp output を使う必要がある。
 - `1.8.46` 以降、package metadata drift guard として `grasp.__version__` と `pyproject.toml` の `[project] version` を `tests/test_version_metadata.py` が照合する。`1.8.45` 時点で `pyproject.toml` は `1.8.45`、`grasp.__version__` は `1.8.42` のまま残っていたため、実行時に参照される package version と release ledger がずれるリスクを test で固定した。schema は不変。
 - `1.8.47` 以降、root CLI は `grasp --version` を受け付け、`grasp.__version__` を `grasp <version>` として表示する。`tests/test_version_metadata.py` は CLI version output も package version と一致することを検査する。
+- `1.8.57` 以降、`tests/test_version_metadata.py` は package metadata だけでなく [[history]] の latest entry / current public compatibility version / package metadata version と、本ページの current public compatibility version も package version と一致することを検査する。`1.8.56` 後に本ページの current public compatibility version だけ `1.8.54` に残っていたため、wiki current facts と release ledger の drift を test で固定した。
 - `1.8.55` 以降、repo-local `scripts/check_file_back_write_start.py` は preflight stamp の latest SQLite `event_sequence` と write-start 時点の current latest `event_sequence` を比較し、preflight 後・最初の write command 前に store が進んだ場合は failure にする。これは preflight と write-start の間に別 writer が `.grasp/file-back.sqlite` を更新した時、postwrite で自分の write 後に検出するのではなく、mutation 前に preflight 再実行を要求する guard。
 - `1.8.56` 以降、repo-local file-back guard は gitignored lock `.grasp/file-back.lock.json` を使う。preflight は clean run 後に lock を取得し、write-start / postwrite は同じ session/store/project/output の lock を要求する。postwrite は全 checks が clean な時だけ lock を解放する。通常 runbook 同士では、複数 write command の file-back 中に別 writer が割り込むことを preflight 時点で止める。
 - SQLite write substrate: `connect_sqlite_store(..., for_write=True)` は WAL / `busy_timeout` / `synchronous=NORMAL` を設定し、`sqlite_write_transaction()` は `BEGIN IMMEDIATE` で write lock を取り commit/rollback する。CLI は store 更新系 command を write-configured connection で開く。
