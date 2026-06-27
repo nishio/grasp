@@ -32,6 +32,49 @@ class FileBackPreflightScriptTests(unittest.TestCase):
         self.assertIn("remote commit", errors[0])
         self.assertIn("local commit", errors[0])
 
+    def test_resolve_git_base_keeps_explicit_base(self):
+        original_run_command = preflight.run_command
+
+        def fake_run_command(args, *, cwd):
+            self.fail(f"unexpected command: {args}")
+
+        try:
+            preflight.run_command = fake_run_command
+            base = preflight.resolve_git_base(Path("."), "origin/main")
+        finally:
+            preflight.run_command = original_run_command
+
+        self.assertEqual(base, "origin/main")
+
+    def test_resolve_git_base_auto_prefers_current_upstream(self):
+        original_run_command = preflight.run_command
+
+        def fake_run_command(args, *, cwd):
+            self.assertEqual(args[-1], "@{upstream}")
+            return subprocess.CompletedProcess(args, 0, "origin/codex/work\n", "")
+
+        try:
+            preflight.run_command = fake_run_command
+            base = preflight.resolve_git_base(Path("."), "auto")
+        finally:
+            preflight.run_command = original_run_command
+
+        self.assertEqual(base, "origin/codex/work")
+
+    def test_resolve_git_base_auto_falls_back_to_origin_main_without_upstream(self):
+        original_run_command = preflight.run_command
+
+        def fake_run_command(args, *, cwd):
+            return subprocess.CompletedProcess(args, 128, "", "no upstream")
+
+        try:
+            preflight.run_command = fake_run_command
+            base = preflight.resolve_git_base(Path("."), "auto")
+        finally:
+            preflight.run_command = original_run_command
+
+        self.assertEqual(base, "origin/main")
+
     def test_write_status_errors_accepts_clean_strict_status(self):
         self.assertEqual(
             preflight.write_status_errors(

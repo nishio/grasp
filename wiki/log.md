@@ -1347,3 +1347,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: `scripts/check_file_back_preflight.py` が `$GRASP_SESSION_ID` / `--session-id` を読み、selected project の既存 SQLite events に同じ `session_id` がある場合は通常 preflight を failure にする。legacy/ad hoc verification だけ `--skip-session-uniqueness-check` で省略できる。
 - tests/docs: preflight unit tests と runbook checker を更新し、AGENTS/CLAUDE、`/next`、`/ship-next`、repo skill、README は export `GRASP_SESSION_ID` → preflight 未使用性確認 → write → postwrite 同一性確認の順序を要求する。
 - dogfood: 新 session `file-back-20260627T174500Z-session-uniqueness` の preflight は通り、旧 `file-back-20260627T172244Z-session-postwrite` を指定した preflight は既存10 eventsを検出して失敗した。public compatibility version は `1.8.40`、schema は v8 のまま。
+
+## [2026-06-28 03:00] implementation+file back | preflight default base を current upstream にする
+- code: `scripts/check_file_back_preflight.py` の default `--base` を `auto` にし、current upstream tracking branch を優先、upstream が無い時だけ `origin/main` に fallback するようにした。明示 `--base <ref>` は維持。
+- docs/tests: preflight unit tests、runbook checker、AGENTS/CLAUDE、`/next`、`/ship-next`、repo skill、README、history、current facts、backlog、write plan を current-upstream base policy に更新した。
+- dogfood: `GRASP_SESSION_ID=file-back-20260627T180001Z-preflight-auto-base` で default preflight が `base=origin/codex/recovery-gap-scan` を報告し、PR branch 上の継続 file-back で manual `--base` override が不要なことを確認した。public compatibility version は `1.8.41`、schema は v8 のまま。
