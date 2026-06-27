@@ -14,6 +14,7 @@ from grasp.sqlite_store import (
     ensure_store_schema,
     import_cache_manifest_path,
     import_export_to_sqlite,
+    import_markdown_folder_to_sqlite,
     sqlite_write_transaction,
 )
 
@@ -333,6 +334,51 @@ class SQLiteStoreTests(unittest.TestCase):
                 self.assertEqual(summary["filtered"], 0)
                 self.assertEqual(store.event_count(), 2)
                 self.assertEqual([event["event_id"] for event in store.events(project="other")], ["evt-other"])
+            finally:
+                store.close()
+
+    def test_write_markdown_page_rolls_back_state_when_event_insert_fails(self):
+        class FixedUuid:
+            hex = "fixed-event-id"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                existing_event = make_journal_event(
+                    "page_update",
+                    project="wiki",
+                    event_id="fixed-event-id",
+                    created_at="2026-06-27T00:00:00+00:00",
+                    payload={
+                        "page_id": "preexisting",
+                        "title": "Preexisting",
+                        "previous_lines": [],
+                        "lines": [],
+                    },
+                )
+                store.import_journal_events([existing_event])
+                page_before = store.resolve_page("A")
+                self.assertEqual(
+                    [line.text for line in store.page_lines(page_before)[0]],
+                    ["# A"],
+                )
+
+                with patch("grasp.journal.uuid4", return_value=FixedUuid()):
+                    with self.assertRaises(sqlite3.IntegrityError):
+                        store.write_markdown_page_with_event("A", lines=["# A", "changed"])
+
+                page_after = store.resolve_page("A")
+                self.assertEqual(
+                    [line.text for line in store.page_lines(page_after)[0]],
+                    ["# A"],
+                )
+                self.assertEqual(store.event_count(), 1)
             finally:
                 store.close()
 

@@ -2214,40 +2214,12 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
 def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = journal_path_for_output(args.output, args.journal)
     replacement_lines = write_page_replacement_lines(args)
-    if args.create:
-        if not args.source_path:
-            raise ValueError("write-page --create requires --path")
-        update_result = store.create_markdown_page(
-            args.title,
-            source_path=args.source_path,
-            lines=replacement_lines,
-        )
-        event_type = "page_create"
-        payload = {
-            "page_id": update_result["page"]["id"],
-            "title": update_result["page"]["title"],
-            "source_path": update_result["source_path"],
-            "aliases": update_result["aliases"],
-            "graph_role": update_result["graph_role"],
-            "message": args.message,
-            "lines": update_result["lines"],
-        }
-    else:
-        if args.source_path:
-            raise ValueError("write-page --path is only valid with --create")
-        update_result = store.replace_markdown_page_lines(args.title, replacement_lines)
-        event_type = "page_update"
-        payload = {
-            "page_id": update_result["page"]["id"],
-            "title": update_result["page"]["title"],
-            "message": args.message,
-            "previous_lines": update_result["previous_lines"],
-            "lines": update_result["lines"],
-        }
-    event = make_journal_event(
-        event_type,
-        project=update_result["project"],
-        payload=payload,
+    update_result, event = store.write_markdown_page_with_event(
+        args.title,
+        lines=replacement_lines,
+        create=args.create,
+        source_path=args.source_path,
+        message=args.message,
     )
     projection = append_event_and_export_projection(
         store,
@@ -2261,7 +2233,7 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
             "journal": str(journal),
             "output": str(args.output),
             "event_id": event["event_id"],
-            "event_type": event_type,
+            "event_type": event["event_type"],
             "projection": projection,
         }
     )

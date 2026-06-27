@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-27 13:28] implementation+file back | `write-page` を SQLite state+event 1 transaction に移行
+- code: `SQLiteStore.write_markdown_page_with_event()` を追加し、`write-page` / `write-page --create` が Markdown page state update と SQLite `events` row insert を同じ `BEGIN IMMEDIATE` transaction で commit するようにした。既存互換のため legacy `events.jsonl` append と Markdown projection export は継続。
+- tests: CLI `write-page --create` が SQLite events table に `page_create` を残すこと、duplicate event id で SQLite event insert が失敗した時に page state が rollback されることを追加。`python3 -m unittest discover -s tests` は 112 tests OK。
+- file back: [[history]] / [[grasp-v1-implemented]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新。public compatibility version は `1.8.1`、schema は v8 のまま。次は `append-section` / `append-log` / `rename-page` と SQLite events 由来 recovery。
+
 ## [2026-06-27 13:18] implementation+file back | SQLite SSoT Phase 2 events table と JSONL migration helper
 - code: SQLite schema を v8 に上げ、`events` table（`event_sequence` / `event_id` / `event_type` / `project` / `created_at` / `actor` / `session_id` / `payload_json`）を追加。`SQLiteStore.import_journal_events()` は legacy JSONL path または event dict list を duplicate skip / project filter 付きで SQLite events に移行し、`events()` / `event_count()` は selected project・明示 project・event type で query する。
 - tests: schema v8 events table、in-memory event import + duplicate skip + filter、JSONL path import + cross-project query を追加。`python3 -m unittest discover -s tests` は 111 tests OK。
