@@ -90,6 +90,14 @@ SQLITE_SSOT_PLAN_PATHS = [
     *SQLITE_SSOT_PLAN_EXISTING_PATHS,
     SQLITE_SSOT_PLAN_PATH,
 ]
+INFERRED_PLAN_DEPENDENTS_COMMIT = "5f1b82161e16c7ee813ee34ee7a2636215119515"
+INFERRED_PLAN_DEPENDENTS_PATHS = [
+    "entities/grasp-v1-implemented.md",
+    "grasp-backlog.md",
+    "history.md",
+    "sqlite-ssot-write-plan.md",
+    "log.md",
+]
 CONTINUOUS_REPLAY_SEQUENCES = [
     {
         "name": "rename-then-revert-design-decision",
@@ -1160,6 +1168,119 @@ class GitHistoryReplayTests(unittest.TestCase):
         )
         self.assertNotIn(update_results_by_path["index.md"]["event_id"], log_page_plan["candidate_event_ids"])
         self.assertIn(update_results_by_path["index.md"]["event_id"], content_plan["candidate_event_ids"])
+        self.assertEqual(projected_texts_after_plan, after_fixture)
+
+    def test_revert_plan_version_bump_uses_shared_semver_in_git_history(self):
+        try:
+            before_fixture = {
+                path: git_show_file(f"{INFERRED_PLAN_DEPENDENTS_COMMIT}^", path)
+                for path in INFERRED_PLAN_DEPENDENTS_PATHS
+            }
+            after_fixture = {
+                path: git_show_file(INFERRED_PLAN_DEPENDENTS_COMMIT, path)
+                for path in INFERRED_PLAN_DEPENDENTS_PATHS
+            }
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            raise unittest.SkipTest(f"git history fixture unavailable: {exc}") from exc
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            after_root = Path(tmpdir) / "after"
+            after_root.mkdir()
+            write_fixture_files(root, before_fixture)
+            write_fixture_files(after_root, after_fixture)
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            run_grasp_json(
+                "--store",
+                store_path,
+                "adopt-markdown",
+                root,
+                "--project",
+                "wiki",
+                "--journal",
+                journal_path,
+            )
+            update_results_by_path = {}
+            for relative_path in INFERRED_PLAN_DEPENDENTS_PATHS:
+                update_results_by_path[relative_path] = run_grasp_json(
+                    "--store",
+                    store_path,
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    Path(relative_path).stem,
+                    "--from-file",
+                    after_root / relative_path,
+                    "--output",
+                    root,
+                    "--journal",
+                    journal_path,
+                )
+
+            anchor_event_id = update_results_by_path["history.md"]["event_id"]
+            version_plan = run_grasp_json(
+                "--store",
+                store_path,
+                "--project",
+                "wiki",
+                "revert-plan",
+                anchor_event_id,
+                "--scope",
+                "version-bump",
+                "--output",
+                root,
+            )
+            content_plan = run_grasp_json(
+                "--store",
+                store_path,
+                "--project",
+                "wiki",
+                "revert-plan",
+                anchor_event_id,
+                "--scope",
+                "content-subjects",
+                "--output",
+                root,
+            )
+            log_page_plan = run_grasp_json(
+                "--store",
+                store_path,
+                "--project",
+                "wiki",
+                "revert-plan",
+                anchor_event_id,
+                "--scope",
+                "log-page-subjects",
+                "--output",
+                root,
+            )
+            projected_texts_after_plan = {
+                path: (root / path).read_text(encoding="utf-8")
+                for path in INFERRED_PLAN_DEPENDENTS_PATHS
+            }
+
+        self.assertEqual(version_plan["scope"], "version-bump")
+        self.assertTrue(version_plan["complete"])
+        self.assertTrue(version_plan["revertible"])
+        self.assertEqual(version_plan["version_bump_versions"], ["1.8.37"])
+        self.assertEqual(
+            version_plan["candidate_event_ids"],
+            [update_results_by_path[path]["event_id"] for path in INFERRED_PLAN_DEPENDENTS_PATHS],
+        )
+        self.assertEqual(
+            [event["source_path"] for event in version_plan["candidate_events"]],
+            INFERRED_PLAN_DEPENDENTS_PATHS,
+        )
+        self.assertEqual(
+            version_plan["revert_order_event_ids"],
+            [update_results_by_path[path]["event_id"] for path in reversed(INFERRED_PLAN_DEPENDENTS_PATHS)],
+        )
+        self.assertNotEqual(content_plan["candidate_event_ids"], version_plan["candidate_event_ids"])
+        self.assertFalse(log_page_plan["complete"])
+        self.assertIn("no newly added wikilink or Markdown path subjects", log_page_plan["reason"])
         self.assertEqual(projected_texts_after_plan, after_fixture)
 
     def test_actual_consecutive_wiki_history_replay_cleanly(self):

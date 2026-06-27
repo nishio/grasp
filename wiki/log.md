@@ -1332,3 +1332,7 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 
 ## [2026-06-28 02:09] implementation+file-back | make inferred revert plans dependency-complete
 `1.8.37` extends same-page dependency closure from content-subjects to log-batch, subject-log, and log-page-subjects, so inferred plans include required later cleanup events before rollback-only safety checking.
+
+## [2026-06-28 02:03] implementation+file-back | add version-bump revert plan
+`1.8.38` adds `revert-plan --scope version-bump`, using shared semver tokens in a log-bounded slice to recover release/file-back version update work units that subject-based scopes cannot infer.
+Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-page file-back is selected by the shared version token while `content-subjects` and `log-page-subjects` remain insufficient.
