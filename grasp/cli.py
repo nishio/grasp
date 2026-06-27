@@ -880,7 +880,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "project, output, check, ok, file_count, checked_files, written_files, written_count, "
-            "regenerated_files, changed_files, missing_files, extra_files"
+            "regenerated_files, projection_policy, changed_files, missing_files, extra_files"
         ),
         examples=[
             "grasp --project grasp-wiki export-markdown --output wiki --check",
@@ -889,8 +889,9 @@ def build_parser() -> argparse.ArgumentParser:
             "grasp --project grasp-wiki export-markdown --output wiki",
         ],
         notes=[
-            "This initial projection preserves stored lines and paths; formatting synthesis comes later.",
-            "--check is the no-op gate for adopting an existing Markdown wiki before write dogfood.",
+            "The projection authority is SQLite; Markdown is a git-tracked output for review, backup, publish, and recovery.",
+            "This projection preserves stored lines and paths; formatting synthesis comes later.",
+            "--check is the projection freshness gate for ship loops and file-back cutover.",
             "--regenerate-log replays log page events and appends latest record-per-file log_entry_import records.",
         ],
     )
@@ -3955,15 +3956,24 @@ def format_adopt_markdown(result: dict[str, Any]) -> str:
 
 
 def format_export_markdown(result: dict[str, Any]) -> str:
+    policy = result.get("projection_policy") or {}
     parts = [
         "# Markdown Projection\n",
         f"project: {result['project']}\n",
         f"output: {result['output']}\n",
         f"check: {str(result['check']).lower()}\n",
+        f"authority: {policy.get('authority', '')}\n",
+        f"base: {policy.get('base', '')}\n",
+        f"output_role: {policy.get('output_role', '')}\n",
+        f"write_mode: {policy.get('write_mode', '')}\n",
         f"ok: {str(result['ok']).lower()}\n",
         f"files: {result['file_count']}\n",
         f"written: {result['written_count']}\n",
     ]
+    generated_overlays = policy.get("generated_overlays") or []
+    if generated_overlays:
+        parts.append("generated_overlays:\n")
+        parts.extend(f"- {overlay}\n" for overlay in generated_overlays)
     for key, label in (
         ("regenerated_files", "regenerated"),
         ("changed_files", "changed"),
