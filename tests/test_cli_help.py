@@ -59,6 +59,27 @@ def run_grasp_help(*args: str) -> str:
     return completed.stdout
 
 
+def init_git_repo(root: Path) -> None:
+    subprocess.run(["git", "init"], cwd=root, check=True, text=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=root, check=True, text=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=grasp-test",
+            "-c",
+            "user.email=grasp-test@example.invalid",
+            "commit",
+            "-m",
+            "initial",
+        ],
+        cwd=root,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+
 class CliHelpTests(unittest.TestCase):
     def test_root_help_declares_mechanics_ssot(self):
         help_text = run_grasp_help()
@@ -5423,6 +5444,293 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(sqlite_revert_payload["target_event_type"], "section_append")
         self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
 
+    def test_write_page_refuses_export_when_other_projection_file_is_dirty(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            root = repo_root / "wiki"
+            root.mkdir(parents=True)
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            init_git_repo(repo_root)
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "B.md").write_text("# B\n- local draft\n", encoding="utf-8")
+            failed_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    "A",
+                    "--line",
+                    "# A",
+                    "--line",
+                    "- replacement",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            peek_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_id, event_type, project, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            a_text = (root / "A.md").read_text(encoding="utf-8")
+            b_text = (root / "B.md").read_text(encoding="utf-8")
+
+        failed_error = json.loads(failed_completed.stderr)
+        rollback_diagnostic = failed_error["diagnostic"]
+        peek_result = json.loads(peek_completed.stdout)
+        self.assertEqual(failed_completed.returncode, 2)
+        self.assertEqual(rollback_diagnostic["type"], "projection_export_rollback")
+        self.assertTrue(rollback_diagnostic["rolled_back"])
+        self.assertEqual(rollback_diagnostic["target_event_type"], "page_update")
+        self.assertEqual(rollback_diagnostic["rollback_event_type"], "event_revert")
+        self.assertEqual(rollback_diagnostic["original_error"]["type"], "ValueError")
+        self.assertIn("dirty paths outside the current write target", rollback_diagnostic["original_error"]["message"])
+        self.assertIn("B.md", rollback_diagnostic["original_error"]["message"])
+        self.assertEqual([row[1] for row in sqlite_event_rows], ["page_update", "event_revert"])
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
+        self.assertEqual(a_text, "# A\n")
+        self.assertEqual(b_text, "# B\n- local draft\n")
+
+    def test_write_page_allows_dirty_projection_file_when_it_is_the_target(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            root = repo_root / "wiki"
+            root.mkdir(parents=True)
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            init_git_repo(repo_root)
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "A.md").write_text("# A\n- local draft\n", encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    "A",
+                    "--from-file",
+                    str(root / "A.md"),
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            peek_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_id, event_type, project, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            a_text = (root / "A.md").read_text(encoding="utf-8")
+            b_text = (root / "B.md").read_text(encoding="utf-8")
+
+        result = json.loads(completed.stdout)
+        peek_result = json.loads(peek_completed.stdout)
+        self.assertEqual(result["source_path"], "A.md")
+        self.assertEqual(result["projection"]["written_files"], [])
+        self.assertEqual([row[1] for row in sqlite_event_rows], ["page_update"])
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A", "- local draft"])
+        self.assertEqual(a_text, "# A\n- local draft\n")
+        self.assertEqual(b_text, "# B\n")
+
+    def test_write_page_allows_other_dirty_projection_file_when_it_matches_store(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            root = repo_root / "wiki"
+            root.mkdir(parents=True)
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            init_git_repo(repo_root)
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    "A",
+                    "--line",
+                    "# A",
+                    "--line",
+                    "- first stored change",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    "B",
+                    "--line",
+                    "# B",
+                    "--line",
+                    "- second stored change",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_types = [
+                    row[0]
+                    for row in connection.execute(
+                        """
+                        SELECT event_type
+                        FROM events
+                        ORDER BY event_sequence
+                        """
+                    ).fetchall()
+                ]
+            finally:
+                connection.close()
+            a_text = (root / "A.md").read_text(encoding="utf-8")
+            b_text = (root / "B.md").read_text(encoding="utf-8")
+
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["source_path"], "B.md")
+        self.assertEqual(result["projection"]["written_files"], ["B.md"])
+        self.assertEqual(sqlite_event_types, ["page_update", "page_update"])
+        self.assertEqual(a_text, "# A\n- first stored change\n")
+        self.assertEqual(b_text, "# B\n- second stored change\n")
+
     def test_append_section_and_log_update_store_journal_and_projection(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
@@ -5666,12 +5974,16 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(sqlite_event_rows[5][0], write_result["event_id"])
         self.assertEqual(sqlite_event_rows[6][0], revert_write_result["event_id"])
         self.assertEqual(json.loads(sqlite_event_rows[2][3])["heading"], "Updates")
+        self.assertEqual(json.loads(sqlite_event_rows[2][3])["source_path"], "A.md")
         self.assertEqual(json.loads(sqlite_event_rows[3][3])["op"], "test")
+        self.assertEqual(json.loads(sqlite_event_rows[3][3])["source_path"], "Log.md")
         self.assertEqual(json.loads(sqlite_event_rows[4][3])["target_event_id"], log_result["event_id"])
         self.assertEqual(json.loads(sqlite_event_rows[6][3])["target_event_id"], write_result["event_id"])
         self.assertIn("\n## Updates\n- detail [[B]]\n", page_text)
         self.assertNotIn("- rewritten [[C]]", page_text)
         self.assertEqual(log_text, "# Log\n")
+        self.assertEqual(section_result["source_path"], "A.md")
+        self.assertEqual(log_result["source_path"], "Log.md")
         self.assertEqual(section_result["edge_count"], 1)
         self.assertEqual(section_result["projection"]["written_files"], ["A.md"])
         self.assertEqual(log_result["projection"]["written_files"], ["Log.md"])

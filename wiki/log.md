@@ -1395,3 +1395,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: `scripts/check_file_back_preflight.py` は repo 基準で解決した store path がまだ無い場合と `events` table が無い場合だけ bootstrap 可能な empty state と扱い、locked / malformed / unopenable existing store などその他 SQLite error では adoption せず preflight failure にする。
 - tests: preflight unit tests は missing store file、missing `events` table、malformed DB、unopenable existing store、repo-relative store resolution、locked DB で bootstrap しないことを固定した。
 - dogfood: fresh worktree で最初の preflight が `unable to open database file` を返したため、missing store file を bootstrappable として扱う判定を追加し、その後 `GRASP_SESSION_ID=file-back-20260627T203300Z-bootstrap-error-boundary python3 scripts/check_file_back_preflight.py` と write-start が通った。public compatibility version は `1.8.49`、schema は v8 のまま。
+
+## [2026-06-28 05:20] implementation+file back | direct patch projection clobber guard
+- code: Markdown-backed write commands now refuse Git dirty projection paths outside the current target unless those paths already match the current store projection; append-section/log also expose source_path in result and event payload.
+- dogfood: initial guard blocked the next wiki page because the previous page was already stored but still git-dirty, so 1.8.50 compares dirty files against store projection before blocking.
+- tests: added regression coverage for blocking unrelated dirty B.md, allowing target dirty direct patch fallback, and allowing prior stored dirty pages during multi-page file-back. public compatibility version is 1.8.50; schema remains v8.
