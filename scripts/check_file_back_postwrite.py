@@ -8,6 +8,7 @@ explicit opt-in.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -17,8 +18,13 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from check_file_back_preflight import (
+    DEFAULT_PREFLIGHT_STAMP,
+    PREFLIGHT_STAMP_KIND,
+    PREFLIGHT_STAMP_SCHEMA_VERSION,
+    git_ref_oid,
     parse_json_output,
     require_success,
+    resolve_repo_path,
     resolve_require_journal,
     run_command,
     write_status_command,
@@ -82,6 +88,102 @@ def session_metadata_errors(result: dict[str, object], *, expected_session_id: s
     elif expected and actual != expected:
         errors.append(f"write-status sqlite_last_event session_id={actual!r}, expected {expected!r}")
     return errors
+
+
+def load_preflight_stamp(path: Path) -> tuple[dict[str, object] | None, str | None]:
+    if not path.exists():
+        return None, f"preflight stamp is missing: {path}"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        return None, f"preflight stamp {path} is not valid JSON: {error}"
+    except OSError as error:
+        return None, f"preflight stamp {path} could not be read: {error}"
+    if not isinstance(value, dict):
+        return None, f"preflight stamp {path} returned {type(value).__name__}, expected object"
+    return value, None
+
+
+def preflight_stamp_errors(
+    stamp: dict[str, object],
+    *,
+    expected_session_id: str,
+    current_head: str,
+    current_base_oid: str | None,
+    store: str,
+    project: str,
+    output: str,
+) -> list[str]:
+    errors: list[str] = []
+    if stamp.get("schema_version") != PREFLIGHT_STAMP_SCHEMA_VERSION:
+        errors.append(
+            "preflight stamp schema_version="
+            f"{stamp.get('schema_version')!r}, expected {PREFLIGHT_STAMP_SCHEMA_VERSION!r}"
+        )
+    if stamp.get("kind") != PREFLIGHT_STAMP_KIND:
+        errors.append(f"preflight stamp kind={stamp.get('kind')!r}, expected {PREFLIGHT_STAMP_KIND!r}")
+    expected = str(expected_session_id or "").strip()
+    stamped_session = str(stamp.get("session_id") or "").strip()
+    if not expected:
+        errors.append("preflight stamp check requires GRASP_SESSION_ID or --session-id")
+    elif stamped_session != expected:
+        errors.append(f"preflight stamp session_id={stamped_session!r}, expected {expected!r}")
+    stamped_head = str(stamp.get("head") or "").strip()
+    if not stamped_head:
+        errors.append("preflight stamp head is missing")
+    elif stamped_head != current_head:
+        errors.append(f"current HEAD={current_head!r} differs from preflight stamp head={stamped_head!r}")
+    base = stamp.get("base")
+    if base is None:
+        errors.append("preflight stamp base is missing")
+    elif not isinstance(base, str):
+        errors.append(f"preflight stamp base={base!r}, expected string")
+    elif base != "skipped":
+        stamped_base_oid = str(stamp.get("base_oid") or "").strip()
+        if not stamped_base_oid:
+            errors.append(f"preflight stamp base_oid is missing for base={base!r}")
+        elif current_base_oid != stamped_base_oid:
+            errors.append(
+                f"current base {base} oid={current_base_oid!r} differs from "
+                f"preflight stamp base_oid={stamped_base_oid!r}"
+            )
+    for key, expected_value in (("store", store), ("project", project), ("output", output)):
+        actual_value = str(stamp.get(key) or "")
+        if actual_value != expected_value:
+            errors.append(f"preflight stamp {key}={actual_value!r}, expected {expected_value!r}")
+    return errors
+
+
+def run_preflight_stamp_check(
+    repo: Path,
+    *,
+    stamp_path: Path,
+    expected_session_id: str,
+    store: str,
+    project: str,
+    output: str,
+) -> list[str]:
+    stamp, error = load_preflight_stamp(stamp_path)
+    if stamp is None:
+        return [error or "preflight stamp returned no JSON"]
+    current_head, error = git_ref_oid(repo, "HEAD")
+    if error:
+        return [error]
+    base = stamp.get("base")
+    current_base_oid = None
+    if isinstance(base, str) and base and base != "skipped":
+        current_base_oid, error = git_ref_oid(repo, base)
+        if error:
+            return [error]
+    return preflight_stamp_errors(
+        stamp,
+        expected_session_id=expected_session_id,
+        current_head=current_head or "",
+        current_base_oid=current_base_oid,
+        store=store,
+        project=project,
+        output=output,
+    )
 
 
 def run_projection_check(repo: Path, *, store: str, project: str, output: str) -> list[str]:
@@ -180,8 +282,21 @@ def run_postwrite_checks(
     semantic_log_check: bool,
     require_session: bool = True,
     expected_session_id: str = "",
+    require_preflight_stamp: bool = True,
+    preflight_stamp: str = DEFAULT_PREFLIGHT_STAMP,
 ) -> list[str]:
     errors: list[str] = []
+    if require_preflight_stamp:
+        errors.extend(
+            run_preflight_stamp_check(
+                repo,
+                stamp_path=resolve_repo_path(repo, preflight_stamp),
+                expected_session_id=expected_session_id,
+                store=store,
+                project=project,
+                output=output,
+            )
+        )
     errors.extend(
         run_write_status(
             repo,
@@ -238,6 +353,16 @@ def main() -> int:
         action="store_true",
         help="Skip the latest-event session marker guard for legacy/ad hoc verification.",
     )
+    parser.add_argument(
+        "--preflight-stamp",
+        default=DEFAULT_PREFLIGHT_STAMP,
+        help="Gitignored JSON stamp created by preflight.",
+    )
+    parser.add_argument(
+        "--skip-preflight-stamp-check",
+        action="store_true",
+        help="Skip the preflight stamp guard for legacy/ad hoc verification.",
+    )
     args = parser.parse_args()
 
     repo = Path(args.repo).resolve()
@@ -257,6 +382,8 @@ def main() -> int:
         semantic_log_check=not args.skip_semantic_log_check,
         require_session=not args.skip_session_check,
         expected_session_id=args.session_id,
+        require_preflight_stamp=not args.skip_preflight_stamp_check,
+        preflight_stamp=args.preflight_stamp,
     )
     if errors:
         for error in errors:
@@ -269,6 +396,7 @@ def main() -> int:
         f"journal_mode={args.journal if require_journal else 'none'} "
         f"semantic_log={'skipped' if args.skip_semantic_log_check else 'ok'} "
         f"session={'skipped' if args.skip_session_check else args.session_id} "
+        f"preflight_stamp={'skipped' if args.skip_preflight_stamp_check else args.preflight_stamp} "
         f"lint={'skipped' if args.skip_lint else 'ok'} "
         f"diff_check={'skipped' if args.skip_diff_check else 'ok'}"
     )

@@ -56,6 +56,7 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
         semantic_log_check=True,
         require_session=True,
         expected_session_id="file-back-session",
+        require_preflight_stamp=False,
     ):
         original_run_command = postwrite.run_command
         try:
@@ -72,6 +73,7 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
                 semantic_log_check=semantic_log_check,
                 require_session=require_session,
                 expected_session_id=expected_session_id,
+                require_preflight_stamp=require_preflight_stamp,
             )
         finally:
             postwrite.run_command = original_run_command
@@ -188,6 +190,137 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
             ),
             [],
         )
+
+    def test_preflight_stamp_errors_accepts_matching_stamp(self):
+        stamp = {
+            "schema_version": postwrite.PREFLIGHT_STAMP_SCHEMA_VERSION,
+            "kind": postwrite.PREFLIGHT_STAMP_KIND,
+            "session_id": "file-back-session",
+            "head": "abc123",
+            "base": "origin/main",
+            "base_oid": "def456",
+            "store": ".grasp/file-back.sqlite",
+            "project": "grasp-wiki",
+            "output": "wiki",
+        }
+
+        errors = postwrite.preflight_stamp_errors(
+            stamp,
+            expected_session_id="file-back-session",
+            current_head="abc123",
+            current_base_oid="def456",
+            store=".grasp/file-back.sqlite",
+            project="grasp-wiki",
+            output="wiki",
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_preflight_stamp_errors_accepts_skipped_base(self):
+        stamp = {
+            "schema_version": postwrite.PREFLIGHT_STAMP_SCHEMA_VERSION,
+            "kind": postwrite.PREFLIGHT_STAMP_KIND,
+            "session_id": "file-back-session",
+            "head": "abc123",
+            "base": "skipped",
+            "base_oid": None,
+            "store": ".grasp/file-back.sqlite",
+            "project": "grasp-wiki",
+            "output": "wiki",
+        }
+
+        errors = postwrite.preflight_stamp_errors(
+            stamp,
+            expected_session_id="file-back-session",
+            current_head="abc123",
+            current_base_oid=None,
+            store=".grasp/file-back.sqlite",
+            project="grasp-wiki",
+            output="wiki",
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_preflight_stamp_errors_rejects_session_head_base_and_context_mismatch(self):
+        stamp = {
+            "schema_version": 0,
+            "kind": "other",
+            "session_id": "other-session",
+            "head": "old-head",
+            "base": "origin/main",
+            "base_oid": "old-base",
+            "store": "other.sqlite",
+            "project": "other-project",
+            "output": "other-output",
+        }
+
+        errors = postwrite.preflight_stamp_errors(
+            stamp,
+            expected_session_id="file-back-session",
+            current_head="new-head",
+            current_base_oid="new-base",
+            store=".grasp/file-back.sqlite",
+            project="grasp-wiki",
+            output="wiki",
+        )
+        joined = "\n".join(errors)
+
+        self.assertIn("schema_version", joined)
+        self.assertIn("kind", joined)
+        self.assertIn("session_id", joined)
+        self.assertIn("current HEAD", joined)
+        self.assertIn("current base origin/main", joined)
+        self.assertIn("store", joined)
+        self.assertIn("project", joined)
+        self.assertIn("output", joined)
+
+    def test_preflight_stamp_errors_require_expected_session_id(self):
+        stamp = {
+            "schema_version": postwrite.PREFLIGHT_STAMP_SCHEMA_VERSION,
+            "kind": postwrite.PREFLIGHT_STAMP_KIND,
+            "session_id": "file-back-session",
+            "head": "abc123",
+            "base": "skipped",
+            "base_oid": None,
+            "store": ".grasp/file-back.sqlite",
+            "project": "grasp-wiki",
+            "output": "wiki",
+        }
+
+        errors = postwrite.preflight_stamp_errors(
+            stamp,
+            expected_session_id="",
+            current_head="abc123",
+            current_base_oid=None,
+            store=".grasp/file-back.sqlite",
+            project="grasp-wiki",
+            output="wiki",
+        )
+
+        self.assertTrue(any("GRASP_SESSION_ID" in error for error in errors))
+
+    def test_preflight_stamp_errors_rejects_missing_base(self):
+        stamp = {
+            "schema_version": postwrite.PREFLIGHT_STAMP_SCHEMA_VERSION,
+            "kind": postwrite.PREFLIGHT_STAMP_KIND,
+            "session_id": "file-back-session",
+            "head": "abc123",
+            "store": ".grasp/file-back.sqlite",
+            "project": "grasp-wiki",
+            "output": "wiki",
+        }
+
+        errors = postwrite.preflight_stamp_errors(
+            stamp,
+            expected_session_id="file-back-session",
+            current_head="abc123",
+            current_base_oid=None,
+            store=".grasp/file-back.sqlite",
+            project="grasp-wiki",
+            output="wiki",
+        )
+
+        self.assertTrue(any("base is missing" in error for error in errors))
 
     def test_postwrite_rejects_dirty_projection_policy(self):
         def fake_run_command(args, *, cwd):
