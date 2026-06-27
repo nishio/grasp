@@ -3313,6 +3313,139 @@ class CliHelpTests(unittest.TestCase):
         )
         self.assertEqual(page_text_after_revert, "# A\n")
 
+    def test_revert_event_include_dependents_handles_create_then_rename(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nlink [[Old]]\n", encoding="utf-8")
+            source = Path(tmpdir) / "OldSource.md"
+            source.write_text("# Old\nbody\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            def run_json(*args):
+                completed = subprocess.run(
+                    [sys.executable, "-m", "grasp", "--json", "--store", str(store_path), "--project", "wiki", *args],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            create_result = run_json(
+                "write-page",
+                "Old",
+                "--create",
+                "--path",
+                "Old.md",
+                "--from-file",
+                str(source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            rename_result = run_json(
+                "rename-page",
+                "Old",
+                "New",
+                "--new-path",
+                "New.md",
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            dry_run_result = run_json(
+                "revert-event",
+                create_result["event_id"],
+                "--output",
+                str(root),
+                "--no-journal",
+                "--dry-run",
+                "--include-dependents",
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows_after_dry_run = connection.execute(
+                    """
+                    SELECT event_id, event_type, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            files_after_dry_run = sorted(path.name for path in root.iterdir() if path.is_file())
+            revert_result = run_json(
+                "revert-event",
+                create_result["event_id"],
+                "--output",
+                str(root),
+                "--no-journal",
+                "--include-dependents",
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows_after_revert = connection.execute(
+                    """
+                    SELECT event_id, event_type, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            files_after_revert = sorted(path.name for path in root.iterdir() if path.is_file())
+            a_text_after_revert = (root / "A.md").read_text(encoding="utf-8")
+
+        self.assertTrue(dry_run_result["dry_run"])
+        self.assertTrue(dry_run_result["revertible"])
+        self.assertEqual(dry_run_result["target_event_id"], create_result["event_id"])
+        self.assertEqual(dry_run_result["target_event_type"], "page_create")
+        self.assertEqual(dry_run_result["included_dependent_event_ids"], [rename_result["event_id"]])
+        self.assertEqual(
+            [event["target_event_type"] for event in dry_run_result["reverted_events"]],
+            ["page_rename", "page_create"],
+        )
+        self.assertEqual(dry_run_result["would_remove_files"], ["New.md"])
+        self.assertEqual([row[1] for row in sqlite_event_rows_after_dry_run], ["page_create", "page_rename"])
+        self.assertEqual(files_after_dry_run, ["A.md", "New.md"])
+        self.assertFalse(revert_result["dry_run"])
+        self.assertEqual(revert_result["target_event_id"], create_result["event_id"])
+        self.assertEqual(revert_result["target_event_type"], "page_create")
+        self.assertEqual(revert_result["included_dependent_event_ids"], [rename_result["event_id"]])
+        self.assertEqual(revert_result["reverted_event_count"], 2)
+        self.assertEqual(
+            [event["target_event_type"] for event in revert_result["reverted_events"]],
+            ["page_rename", "page_create"],
+        )
+        self.assertEqual(revert_result["projection"]["removed_files"], ["New.md"])
+        self.assertEqual(
+            [row[1] for row in sqlite_event_rows_after_revert],
+            ["page_create", "page_rename", "event_revert", "event_revert"],
+        )
+        self.assertEqual(
+            [json.loads(row[2])["target_event_id"] for row in sqlite_event_rows_after_revert[2:]],
+            [rename_result["event_id"], create_result["event_id"]],
+        )
+        self.assertEqual(files_after_revert, ["A.md"])
+        self.assertEqual(a_text_after_revert, "# A\nlink [[Old]]\n")
+
     def test_replay_journal_page_update_tolerates_line_id_drift_when_text_matches(self):
         def event(event_type, event_id, payload):
             return {
