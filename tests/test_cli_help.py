@@ -2371,6 +2371,17 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_id, event_type, project, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
             new_text = (root / "New.md").read_text(encoding="utf-8")
             revert_completed = subprocess.run(
                 [
@@ -2424,6 +2435,11 @@ class CliHelpTests(unittest.TestCase):
         revert_result = json.loads(revert_completed.stdout)
         replay_after_revert = json.loads(replay_after_revert_completed.stdout)
         self.assertEqual([event["event_type"] for event in journal_events], ["page_create", "page_create", "event_revert"])
+        self.assertEqual(len(sqlite_event_rows), 1)
+        self.assertEqual(sqlite_event_rows[0][0], create_result["event_id"])
+        self.assertEqual(sqlite_event_rows[0][1], "page_create")
+        self.assertEqual(sqlite_event_rows[0][2], "wiki")
+        self.assertEqual(json.loads(sqlite_event_rows[0][3])["source_path"], "New.md")
         self.assertEqual(create_result["event_type"], "page_create")
         self.assertEqual(create_result["source_path"], "New.md")
         self.assertEqual(create_result["previous_line_count"], 0)

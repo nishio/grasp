@@ -17,7 +17,7 @@ from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
 
-from .journal import EVENT_TYPES, read_journal_events, validate_journal_event
+from .journal import EVENT_TYPES, make_journal_event, read_journal_events, validate_journal_event
 from .cosense import (
     CrossProjectLink,
     CosenseStore,
@@ -2763,6 +2763,20 @@ class SQLiteStore:
         source_path: str | Path,
         lines: list[str],
     ) -> dict[str, Any]:
+        with self.connection:
+            return self._create_markdown_page_uncommitted(
+                title,
+                source_path=source_path,
+                lines=lines,
+            )
+
+    def _create_markdown_page_uncommitted(
+        self,
+        title: str,
+        *,
+        source_path: str | Path,
+        lines: list[str],
+    ) -> dict[str, Any]:
         project = self._require_project()
         manifest = self._markdown_manifest_for_project(project)
         files = manifest.get("files")
@@ -2851,63 +2865,62 @@ class SQLiteStore:
             if alias_norm and alias_norm != norm_title:
                 alias_map[alias_norm] = title
 
-        with self.connection:
-            self.connection.execute(
-                """
-                INSERT INTO pages (project, id, title, norm_title, created, updated, views, line_count)
-                VALUES (?, ?, ?, ?, ?, ?, 0, ?)
-                """,
-                (project, page_id, title, norm_title, now, now, len(line_payloads)),
-            )
-            self.connection.executemany(
-                """
-                INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+        self.connection.execute(
+            """
+            INSERT INTO pages (project, id, title, norm_title, created, updated, views, line_count)
+            VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+            """,
+            (project, page_id, title, norm_title, now, now, len(line_payloads)),
+        )
+        self.connection.executemany(
+            """
+            INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
                 (
-                    (
-                        project,
-                        line["line_id"],
-                        page_id,
-                        line["line_index"],
-                        line["text"],
-                        line["created"],
-                        line["updated"],
-                        line["user_id"],
-                    )
-                    for line in line_payloads
-                ),
-            )
-            _insert_edge_rows(self.connection, edge_rows)
-            _insert_page_handles(
-                self.connection,
-                _page_handle_rows_for_markdown_page(
                     project,
-                    page_id=page_id,
-                    title=title,
-                    aliases=aliases,
-                    source_path=source_path,
-                    graph_role=graph_role,
+                    line["line_id"],
+                    page_id,
+                    line["line_index"],
+                    line["text"],
+                    line["created"],
+                    line["updated"],
+                    line["user_id"],
+                )
+                for line in line_payloads
+            ),
+        )
+        _insert_edge_rows(self.connection, edge_rows)
+        _insert_page_handles(
+            self.connection,
+            _page_handle_rows_for_markdown_page(
+                project,
+                page_id=page_id,
+                title=title,
+                aliases=aliases,
+                source_path=source_path,
+                graph_role=graph_role,
+            ),
+        )
+        refresh_edge_resolutions(self.connection, project)
+        rebuild_unresolved_targets(self.connection, project)
+        _refresh_project_counts_sql(self.connection, project)
+        _write_metadata(
+            self.connection,
+            {
+                f"project.{project}.title_aliases": json.dumps(
+                    alias_map,
+                    ensure_ascii=False,
+                    sort_keys=True,
                 ),
-            )
-            refresh_edge_resolutions(self.connection, project)
-            rebuild_unresolved_targets(self.connection, project)
-            _refresh_project_counts_sql(self.connection, project)
-            _write_metadata(
-                self.connection,
-                {
-                    f"project.{project}.title_aliases": json.dumps(
-                        alias_map,
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    ),
-                    f"project.{project}.markdown_manifest": json.dumps(
-                        manifest,
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    ),
-                },
-            )
+                f"project.{project}.markdown_manifest": json.dumps(
+                    manifest,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            },
+        )
 
         page = self._page_by_id(page_id)
         return {
@@ -2924,6 +2937,10 @@ class SQLiteStore:
         }
 
     def replace_markdown_page_lines(self, title: str, lines: list[str]) -> dict[str, Any]:
+        with self.connection:
+            return self._replace_markdown_page_lines_uncommitted(title, lines)
+
+    def _replace_markdown_page_lines_uncommitted(self, title: str, lines: list[str]) -> dict[str, Any]:
         project = self._require_project()
         manifest = self._markdown_manifest_for_project(project)
         if not manifest:
@@ -2957,7 +2974,7 @@ class SQLiteStore:
                     "user_id": "grasp",
                 }
             )
-        edge_count = self._replace_markdown_page_line_payloads(
+        edge_count = self._replace_markdown_page_line_payloads_uncommitted(
             project,
             page_id,
             next_lines,
@@ -2975,6 +2992,57 @@ class SQLiteStore:
             "line_count": len(next_lines),
             "edge_count": edge_count,
         }
+
+    def write_markdown_page_with_event(
+        self,
+        title: str,
+        *,
+        lines: list[str],
+        create: bool = False,
+        source_path: str | Path | None = None,
+        message: str = "",
+        actor: str = "",
+        session_id: str = "",
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if create and not source_path:
+            raise ValueError("write-page --create requires --path")
+        if not create and source_path:
+            raise ValueError("write-page --path is only valid with --create")
+
+        with self.write_transaction():
+            if create:
+                update_result = self._create_markdown_page_uncommitted(
+                    title,
+                    source_path=source_path or "",
+                    lines=lines,
+                )
+                event_type = "page_create"
+                payload = {
+                    "page_id": update_result["page"]["id"],
+                    "title": update_result["page"]["title"],
+                    "source_path": update_result["source_path"],
+                    "aliases": update_result["aliases"],
+                    "graph_role": update_result["graph_role"],
+                    "message": message,
+                    "lines": update_result["lines"],
+                }
+            else:
+                update_result = self._replace_markdown_page_lines_uncommitted(title, lines)
+                event_type = "page_update"
+                payload = {
+                    "page_id": update_result["page"]["id"],
+                    "title": update_result["page"]["title"],
+                    "message": message,
+                    "previous_lines": update_result["previous_lines"],
+                    "lines": update_result["lines"],
+                }
+            event = make_journal_event(
+                event_type,
+                project=update_result["project"],
+                payload=payload,
+            )
+            insert_store_event(self.connection, event, actor=actor, session_id=session_id)
+        return update_result, event
 
     def rename_markdown_page(
         self,
