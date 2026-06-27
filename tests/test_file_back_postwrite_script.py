@@ -78,6 +78,34 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
         finally:
             postwrite.run_command = original_run_command
 
+    def test_postwrite_rejects_mixed_store_output_before_other_guards(self):
+        original_run_command = postwrite.run_command
+
+        def fake_run_command(args, *, cwd):
+            self.fail(f"pair guard should run before command: {args}")
+
+        try:
+            postwrite.run_command = fake_run_command
+            errors = postwrite.run_postwrite_checks(
+                Path("/repo"),
+                store=".grasp/file-back.sqlite",
+                project="grasp-wiki",
+                journal=None,
+                output="/tmp/wiki",
+                require_journal=False,
+                lint=True,
+                diff_check=True,
+                semantic_log_check=True,
+                require_session=True,
+                expected_session_id="file-back-session",
+                require_preflight_stamp=True,
+            )
+        finally:
+            postwrite.run_command = original_run_command
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("mixed file-back store/output pair", errors[0])
+
     def test_postwrite_accepts_clean_status_projection_lint_and_diff(self):
         seen_semantic_log_args = None
 

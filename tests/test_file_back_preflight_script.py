@@ -76,6 +76,45 @@ class FileBackPreflightScriptTests(unittest.TestCase):
 
         self.assertEqual(base, "origin/main")
 
+    def test_file_back_store_output_pair_accepts_default_pair(self):
+        errors = preflight.file_back_store_output_pair_errors(
+            Path("/repo"),
+            store=".grasp/file-back.sqlite",
+            output="wiki",
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_file_back_store_output_pair_accepts_temp_pair(self):
+        errors = preflight.file_back_store_output_pair_errors(
+            Path("/repo"),
+            store="/tmp/file-back.sqlite",
+            output="/tmp/wiki",
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_file_back_store_output_pair_rejects_default_store_temp_output(self):
+        errors = preflight.file_back_store_output_pair_errors(
+            Path("/repo"),
+            store=".grasp/file-back.sqlite",
+            output="/tmp/wiki",
+        )
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("mixed file-back store/output pair", errors[0])
+        self.assertIn("temporary output against the repo file-back store", errors[0])
+
+    def test_file_back_store_output_pair_rejects_temp_store_default_output(self):
+        errors = preflight.file_back_store_output_pair_errors(
+            Path("/repo"),
+            store="/tmp/file-back.sqlite",
+            output="wiki",
+        )
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("mixed file-back store/output pair", errors[0])
+
     def test_write_status_errors_accepts_clean_strict_status(self):
         self.assertEqual(
             preflight.write_status_errors(
@@ -317,6 +356,29 @@ class FileBackPreflightScriptTests(unittest.TestCase):
         self.assertNotIn(None, errors)
         self.assertIn("strict_ok", "\n".join(errors))
         self.assertIn("event_streams_match", "\n".join(errors))
+
+    def test_run_grasp_preflight_rejects_mixed_store_output_before_import(self):
+        original_run_command = preflight.run_command
+
+        def fake_run_command(args, *, cwd):
+            self.fail(f"unexpected command before pair guard: {args}")
+
+        try:
+            preflight.run_command = fake_run_command
+            errors = preflight.run_grasp_preflight(
+                Path("/repo"),
+                store=".grasp/file-back.sqlite",
+                project="grasp-wiki",
+                journal=None,
+                output="/tmp/wiki",
+                require_journal=False,
+                expected_session_id="file-back-session",
+            )
+        finally:
+            preflight.run_command = original_run_command
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("mixed file-back store/output pair", errors[0])
 
     def test_run_grasp_preflight_no_journal_uses_no_journal_write_status(self):
         original_run_command = preflight.run_command
