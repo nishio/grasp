@@ -1247,16 +1247,32 @@ class CliHelpTests(unittest.TestCase):
                 json.loads(line)
                 for line in journal_path.read_text(encoding="utf-8").splitlines()
             ]
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_id, event_type, project, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
 
         adopt_result = json.loads(adopt_completed.stdout)
         check_result = json.loads(check_completed.stdout)
         dirty_result = json.loads(dirty_completed.stdout)
 
         self.assertEqual(adopt_result["journal_events"], 2)
+        self.assertEqual(adopt_result["sqlite_events_inserted"], 2)
+        self.assertEqual(adopt_result["sqlite_events_skipped"], 0)
         self.assertEqual(adopt_result["adopted_pages"], 2)
         self.assertEqual([event["event_type"] for event in journal_events], ["page_create", "page_create"])
         self.assertEqual(journal_events[0]["project"], "wiki")
         self.assertIn("lines", journal_events[0]["payload"])
+        self.assertEqual([row[1] for row in sqlite_event_rows], ["page_create", "page_create"])
+        self.assertEqual([row[0] for row in sqlite_event_rows], [event["event_id"] for event in journal_events])
+        self.assertEqual(json.loads(sqlite_event_rows[0][3])["source_path"], "A.md")
         self.assertTrue(check_result["ok"])
         self.assertEqual(check_result["changed_files"], [])
         self.assertEqual(dirty_completed.returncode, 1)
@@ -1342,6 +1358,17 @@ class CliHelpTests(unittest.TestCase):
                 json.loads(line)
                 for line in journal_path.read_text(encoding="utf-8").splitlines()
             ]
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_id, event_type, project, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
 
         adopt_result = json.loads(adopt_completed.stdout)
         replay_result = json.loads(replay_completed.stdout)
@@ -1350,10 +1377,17 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(adopt_result["adopted_pages"], 2)
         self.assertEqual(adopt_result["log_entry_records"], 2)
         self.assertEqual(adopt_result["journal_events"], 4)
+        self.assertEqual(adopt_result["sqlite_events_inserted"], 4)
+        self.assertEqual(adopt_result["sqlite_events_skipped"], 0)
         self.assertEqual(
             [event["event_type"] for event in journal_events],
             ["page_create", "page_create", "log_entry_import", "log_entry_import"],
         )
+        self.assertEqual(
+            [row[1] for row in sqlite_event_rows],
+            ["page_create", "page_create", "log_entry_import", "log_entry_import"],
+        )
+        self.assertEqual([row[0] for row in sqlite_event_rows], [event["event_id"] for event in journal_events])
         self.assertEqual(log_events[0]["payload"]["timestamp"], "2026-06-26 01:00")
         self.assertEqual(log_events[0]["payload"]["op"], "implementation")
         self.assertEqual(log_events[0]["payload"]["summary"], "first entry")
@@ -1552,6 +1586,7 @@ class CliHelpTests(unittest.TestCase):
                     """
                     SELECT event_type, project, payload_json
                     FROM events
+                    WHERE event_type = 'log_entry_import'
                     ORDER BY event_sequence
                     """
                 ).fetchall()
@@ -1765,10 +1800,11 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(payload["subject_source"], "frontmatter")
         self.assertEqual(payload["sources"], ["raw/session.txt"])
         self.assertEqual(payload["body_line_count"], 1)
-        self.assertEqual(history_alpha["event_source"], "journal")
-        self.assertEqual(history_alpha["sqlite_event_count"], 0)
+        self.assertEqual(history_alpha["event_source"], "sqlite")
+        self.assertEqual(history_alpha["sqlite_event_count"], 1)
         self.assertEqual(history_alpha["matched_records"], 1)
         self.assertEqual(history_alpha["records"][0]["subjects"], ["Alpha", "Beta"])
+        self.assertEqual(history_gamma["event_source"], "sqlite")
         self.assertEqual(history_gamma["matched_records"], 0)
 
     def test_record_per_file_log_entry_update_appends_new_version(self):
@@ -2611,14 +2647,15 @@ class CliHelpTests(unittest.TestCase):
         status_after_revert = json.loads(status_after_revert_completed.stdout)
         replay_after_revert = json.loads(replay_after_revert_completed.stdout)
         self.assertEqual([event["event_type"] for event in journal_events], ["page_create", "page_create", "event_revert"])
-        self.assertEqual(len(sqlite_event_rows), 1)
-        self.assertEqual(sqlite_event_rows[0][0], create_result["event_id"])
-        self.assertEqual(sqlite_event_rows[0][1], "page_create")
-        self.assertEqual(sqlite_event_rows[0][2], "wiki")
-        self.assertEqual(json.loads(sqlite_event_rows[0][3])["source_path"], "New.md")
+        self.assertEqual(len(sqlite_event_rows), 2)
+        self.assertEqual([row[1] for row in sqlite_event_rows], ["page_create", "page_create"])
+        self.assertEqual(sqlite_event_rows[0][0], journal_events[0]["event_id"])
+        self.assertEqual(sqlite_event_rows[1][0], create_result["event_id"])
+        self.assertEqual(sqlite_event_rows[1][2], "wiki")
+        self.assertEqual(json.loads(sqlite_event_rows[1][3])["source_path"], "New.md")
         self.assertEqual(status_after_create["journal_event_count"], 2)
         self.assertEqual(status_after_create["last_event"]["event_id"], create_result["event_id"])
-        self.assertEqual(status_after_create["sqlite_event_count"], 1)
+        self.assertEqual(status_after_create["sqlite_event_count"], 2)
         self.assertEqual(status_after_create["sqlite_last_event"]["event_id"], create_result["event_id"])
         self.assertEqual(status_after_create["sqlite_last_event"]["event_type"], "page_create")
         self.assertEqual(create_result["event_type"], "page_create")
@@ -2635,11 +2672,11 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(revert_result["target_event_source"], "sqlite")
         self.assertEqual(revert_result["removed_line_count"], 2)
         self.assertEqual(revert_result["projection"]["removed_files"], ["New.md"])
-        self.assertEqual([row[1] for row in sqlite_event_rows_after_revert], ["page_create", "event_revert"])
-        self.assertEqual(sqlite_event_rows_after_revert[1][0], revert_result["event_id"])
-        sqlite_revert_payload = json.loads(sqlite_event_rows_after_revert[1][3])
+        self.assertEqual([row[1] for row in sqlite_event_rows_after_revert], ["page_create", "page_create", "event_revert"])
+        self.assertEqual(sqlite_event_rows_after_revert[2][0], revert_result["event_id"])
+        sqlite_revert_payload = json.loads(sqlite_event_rows_after_revert[2][3])
         self.assertEqual(sqlite_revert_payload["target_event_id"], create_result["event_id"])
-        self.assertEqual(status_after_revert["sqlite_event_count"], 2)
+        self.assertEqual(status_after_revert["sqlite_event_count"], 3)
         self.assertEqual(status_after_revert["sqlite_last_event"]["event_id"], revert_result["event_id"])
         self.assertEqual(status_after_revert["sqlite_last_event"]["event_type"], "event_revert")
         self.assertFalse(new_exists_after_revert)
@@ -3074,18 +3111,26 @@ class CliHelpTests(unittest.TestCase):
         )
         self.assertEqual(
             [row[1] for row in sqlite_event_rows],
-            ["section_append", "log_append", "event_revert", "page_update", "event_revert"],
+            [
+                "page_create",
+                "page_create",
+                "section_append",
+                "log_append",
+                "event_revert",
+                "page_update",
+                "event_revert",
+            ],
         )
-        self.assertEqual([row[2] for row in sqlite_event_rows], ["wiki", "wiki", "wiki", "wiki", "wiki"])
-        self.assertEqual(sqlite_event_rows[0][0], section_result["event_id"])
-        self.assertEqual(sqlite_event_rows[1][0], log_result["event_id"])
-        self.assertEqual(sqlite_event_rows[2][0], revert_result["event_id"])
-        self.assertEqual(sqlite_event_rows[3][0], write_result["event_id"])
-        self.assertEqual(sqlite_event_rows[4][0], revert_write_result["event_id"])
-        self.assertEqual(json.loads(sqlite_event_rows[0][3])["heading"], "Updates")
-        self.assertEqual(json.loads(sqlite_event_rows[1][3])["op"], "test")
-        self.assertEqual(json.loads(sqlite_event_rows[2][3])["target_event_id"], log_result["event_id"])
-        self.assertEqual(json.loads(sqlite_event_rows[4][3])["target_event_id"], write_result["event_id"])
+        self.assertEqual([row[2] for row in sqlite_event_rows], ["wiki"] * 7)
+        self.assertEqual(sqlite_event_rows[2][0], section_result["event_id"])
+        self.assertEqual(sqlite_event_rows[3][0], log_result["event_id"])
+        self.assertEqual(sqlite_event_rows[4][0], revert_result["event_id"])
+        self.assertEqual(sqlite_event_rows[5][0], write_result["event_id"])
+        self.assertEqual(sqlite_event_rows[6][0], revert_write_result["event_id"])
+        self.assertEqual(json.loads(sqlite_event_rows[2][3])["heading"], "Updates")
+        self.assertEqual(json.loads(sqlite_event_rows[3][3])["op"], "test")
+        self.assertEqual(json.loads(sqlite_event_rows[4][3])["target_event_id"], log_result["event_id"])
+        self.assertEqual(json.loads(sqlite_event_rows[6][3])["target_event_id"], write_result["event_id"])
         self.assertIn("\n## Updates\n- detail [[B]]\n", page_text)
         self.assertNotIn("- rewritten [[C]]", page_text)
         self.assertEqual(log_text, "# Log\n")
@@ -3582,18 +3627,16 @@ class CliHelpTests(unittest.TestCase):
             [event["event_type"] for event in journal_events],
             ["page_create", "page_create", "page_rename", "event_revert"],
         )
-        self.assertEqual(len(sqlite_event_rows), 2)
-        self.assertEqual(sqlite_event_rows[0][0], rename_result["event_id"])
-        self.assertEqual(sqlite_event_rows[0][1], "page_rename")
-        self.assertEqual(sqlite_event_rows[0][2], "wiki")
-        sqlite_rename_payload = json.loads(sqlite_event_rows[0][3])
+        self.assertEqual([row[1] for row in sqlite_event_rows], ["page_create", "page_create", "page_rename", "event_revert"])
+        self.assertEqual(sqlite_event_rows[2][0], rename_result["event_id"])
+        self.assertEqual(sqlite_event_rows[2][2], "wiki")
+        sqlite_rename_payload = json.loads(sqlite_event_rows[2][3])
         self.assertEqual(sqlite_rename_payload["previous_title"], "Old")
         self.assertEqual(sqlite_rename_payload["title"], "New")
         self.assertEqual(sqlite_rename_payload["previous_source_path"], "Old.md")
         self.assertEqual(sqlite_rename_payload["source_path"], "New.md")
-        self.assertEqual(sqlite_event_rows[1][0], revert_result["event_id"])
-        self.assertEqual(sqlite_event_rows[1][1], "event_revert")
-        sqlite_revert_payload = json.loads(sqlite_event_rows[1][3])
+        self.assertEqual(sqlite_event_rows[3][0], revert_result["event_id"])
+        sqlite_revert_payload = json.loads(sqlite_event_rows[3][3])
         self.assertEqual(sqlite_revert_payload["target_event_id"], rename_result["event_id"])
         self.assertEqual(sqlite_revert_payload["target_event_type"], "page_rename")
         self.assertEqual(rename_result["previous_title"], "Old")
