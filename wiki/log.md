@@ -1216,3 +1216,13 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - preflight: `python3 scripts/check_file_back_preflight.py` が `journal_mode=none` で通った。
 - write: `append-log --output wiki --no-journal` で本 log entry を追加した。`wiki.grasp/events.jsonl` は無変更、direct Markdown patch fallback なし。
 - observation: streak 2 でも generated Markdown backup/review policy の追加を要する concrete gap は出ていない。次は同じ path の streak 3 を通して Phase 6 の dogfood proof を閉じる。
+
+## [2026-06-27 19:27] dogfood | no-journal default file-back streak 3
+- preflight: `python3 scripts/check_file_back_preflight.py` が `journal_mode=none` で通った。
+- write: `append-log --output wiki --no-journal` で本 log entry を追加した。`wiki.grasp/events.jsonl` は無変更、direct Markdown patch fallback なし。
+- observation: streak 1-3 で generated Markdown backup/review policy の追加を要する concrete gap は出ていない。次は [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新し、Phase 6 dogfood proof を完了扱いにする。
+
+## [2026-06-27 19:27] file back | Phase 6 dogfood proof を完了扱いに更新
+- file back: [[sqlite-ssot-write-plan]] の Phase 6 を repo-local dogfood done にし、Immediate Next Slice を `wiki.grasp/events.jsonl` artifact policy へ進めた。
+- file back: [[grasp-backlog]] から no-journal default dogfood streak を未実装項目として外し、残課題を native events semantic projection / JSONL artifact policy / concrete gap が出た場合の generated Markdown backup-review policy に更新。
+- proof: streak 1-3 は preflight/postwrite をフラグなし no-journal default で通し、write は `--no-journal --output wiki`、`wiki.grasp/events.jsonl` 無変更、direct Markdown patch fallback なし。
