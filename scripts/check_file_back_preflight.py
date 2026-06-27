@@ -280,11 +280,25 @@ def project_events(store: str, project: str) -> list[dict[str, Any]]:
         sqlite_store.close()
 
 
-def project_has_events(store: str, project: str) -> bool:
+def is_missing_events_table_error(error: sqlite3.Error) -> bool:
+    return isinstance(error, sqlite3.OperationalError) and "no such table: events" in str(error)
+
+
+def is_missing_store_file_error(error: sqlite3.Error, store: str) -> bool:
+    return (
+        isinstance(error, sqlite3.OperationalError)
+        and "unable to open database file" in str(error)
+        and not Path(store).exists()
+    )
+
+
+def project_event_state(store: str, project: str) -> tuple[bool, str | None]:
     try:
-        return bool(project_events(store, project))
-    except sqlite3.Error:
-        return False
+        return bool(project_events(store, project)), None
+    except sqlite3.Error as error:
+        if is_missing_events_table_error(error) or is_missing_store_file_error(error, store):
+            return False, None
+        return False, f"could not inspect file-back store events: {error}"
 
 
 def bootstrap_file_back_store_if_needed(
@@ -295,7 +309,13 @@ def bootstrap_file_back_store_if_needed(
     output: str,
     require_journal: bool,
 ) -> list[str]:
-    if require_journal or project_has_events(store, project):
+    if require_journal:
+        return []
+    event_store = str(resolve_repo_path(repo, store))
+    has_events, error = project_event_state(event_store, project)
+    if error:
+        return [error]
+    if has_events:
         return []
     command = [
         sys.executable,
@@ -417,7 +437,7 @@ def run_grasp_preflight(
 
     errors.extend(
         session_uniqueness_errors(
-            project_events(store, project),
+            project_events(str(resolve_repo_path(repo, store)), project),
             expected_session_id=expected_session_id,
             skip_session_uniqueness_check=skip_session_uniqueness_check,
         )

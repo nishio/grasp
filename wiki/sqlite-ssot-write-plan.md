@@ -144,6 +144,8 @@ Dogfood in the same `1.8.42` slice confirmed the guard fails while the worktree 
 
 `1.8.48` closes the fresh isolated worktree bootstrap gap in that preflight boundary. When no selected-project SQLite events exist in no-journal mode, `scripts/check_file_back_preflight.py` now runs `adopt-markdown` into the repo file-back store with a gitignored `.grasp/file-back-adopt.jsonl` audit journal before continuing to the normal import, `write-status --no-journal --strict`, and projection checks. This keeps a new `.grasp/file-back.sqlite` from failing on `semantic_log_error='event stream does not contain a page_create or page_update seed for log page'` while still avoiding tracked JSONL.
 
+`1.8.49` narrows that bootstrap boundary after dogfood showed a fresh worktree can raise `unable to open database file` before `.grasp/` exists. The guard now resolves the store path against the repo, treats a missing store file and missing `events` table as bootstrappable empty state, and fails preflight for other SQLite errors such as locked, malformed, or unopenable existing stores instead of running adoption over an unknown database condition.
+
 This does **not** yet make every authority boundary final. `sync`, `acquire`, generated Markdown backup/review policy, broader native event-derived semantic page projection, and semantic multi-page work-unit inference beyond log-batch, subject-log, log-page-subjects, content-subjects, version-bump, same-page dependency, explicit event-window, time-burst, or explicit session metadata boundaries still need migration work.
 
 ## Why This Replaces The Fast Path
