@@ -1275,3 +1275,8 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 - implemented: revert-events <event-id...> rolls back explicitly selected active SQLite events in reverse event_sequence inside one transaction.
 - dry-run: revert-events --dry-run returns requested_event_ids / revert_order_event_ids / would_event_count without mutating store, journal, or projection.
 - tests: covered two page_update events across different pages to verify multi-page rollback order and event_revert payloads.
+
+## [2026-06-27 22:41] implementation | add log-batch revert planning
+- implemented: revert-plan <event-id> --scope log-batch infers a file-back style rollback candidate set from SQLite log_append boundaries without mutation.
+- dogfood: the planner identifies the previous 1.8.25 file-back as four page_update events plus its closing log_append and reports reverse event_sequence rollback order.
+- tests: covered a two-page update plus closing log_append and verified revert-plan leaves files and SQLite events unchanged.
