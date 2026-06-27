@@ -64,6 +64,17 @@ python3 scripts/check_file_back_postwrite.py --with-journal
         self.assertTrue(any("check_file_back_postwrite.py --with-journal" in error for error in errors))
         self.assertTrue(any("--journal wiki.grasp/events.jsonl --output wiki" in error for error in errors))
 
+    def test_default_rules_reject_stamp_skip_flags(self):
+        stale_text = """
+python3 scripts/check_file_back_preflight.py --skip-preflight-stamp
+python3 scripts/check_file_back_postwrite.py --skip-preflight-stamp-check
+"""
+
+        errors = runbook.check_text(stale_text, runbook.DEFAULT_RULES[0])
+
+        self.assertTrue(any("--skip-preflight-stamp" in error for error in errors))
+        self.assertTrue(any("--skip-preflight-stamp-check" in error for error in errors))
+
 
 if __name__ == "__main__":
     unittest.main()
