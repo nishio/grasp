@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grasp"
-version = "1.8.23"
+version = "1.8.24"
 description = "CLI for reading a local Scrapbox/Cosense-style graph knowledge store"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}

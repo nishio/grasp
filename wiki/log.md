@@ -1260,3 +1260,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 implemented: revert-event --dry-run now runs existing revert safety guards inside a rollback-only SQLite write transaction and reports dry_run / revertible / reason / would_* fields without writing event_revert, journal, or projection.
 tests: covered reversible page_create dry-run and non-revertible section_append dependency/tail guard dry-run.
 file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], and [[grasp-backlog]] now treat dry-run diagnostics as implemented; remaining work is mutating multi-event / dependency-aware general revert policy.
+
+## [2026-06-27 21:22] implementation | add dependent revert execution
+- implemented: revert-event --include-dependents now reverts later active same-page SQLite events in reverse event_sequence before the requested target.
+- dry-run: --dry-run --include-dependents returns the same sequence as included_dependent_event_ids / would_event_count / reverted_events without writing event_revert, journal, or projection.
+- tests: covered two append events where the earlier append is normally blocked by tail guard but succeeds when the later append is included as a dependent.

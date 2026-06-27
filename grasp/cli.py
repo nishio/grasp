@@ -1096,12 +1096,14 @@ def build_parser() -> argparse.ArgumentParser:
             "SQLite events are searched first, then the legacy JSONL journal. SQLite-sourced reverts insert "
             "event_revert in the same transaction as the state change, then optionally append the legacy JSONL event "
             "and export projection. With --dry-run, run the same safety checks inside a rolled-back transaction and "
-            "report whether the event is currently revertible without writing state, journal, or projection files."
+            "report whether the event is currently revertible without writing state, journal, or projection files. "
+            "With --include-dependents, first revert later active same-page SQLite events that block the target."
         ),
-        returns="project, journal|null, journal_written, output, dry_run, revertible, event_id|null, target_event_id, target_event_type, target_event_source, page, removed_lines[]|restored_lines[], removed_line_count|restored_line_count, projection|null, reason?",
+        returns="project, journal|null, journal_written, output, dry_run, revertible, event_id|null, event_ids[]?, target_event_id, target_event_type, target_event_source, included_dependent_event_ids[]?, reverted_events[]?, page, removed_lines[]|restored_lines[], removed_line_count|restored_line_count, projection|null, reason?",
         examples=[
             "grasp --project grasp-wiki revert-event <event-id> --output wiki",
             "grasp --project grasp-wiki --json revert-event <event-id> --output wiki --no-journal --dry-run",
+            "grasp --project grasp-wiki --json revert-event <event-id> --output wiki --no-journal --include-dependents",
             "grasp --project grasp-wiki --json revert-event <event-id> --output wiki --journal wiki.grasp/events.jsonl",
         ],
         notes=[
@@ -1109,6 +1111,7 @@ def build_parser() -> argparse.ArgumentParser:
             "section_append/log_append require their inserted lines to remain at page tail.",
             "page_update/page_rename require the current lines and path/title state to match the target event.",
             "--dry-run is the planning surface for dependency-aware/general revert work: it never appends event_revert.",
+            "--include-dependents is SQLite-only and reverts later active same-page events in reverse event order before the target.",
         ],
     )
     revert_event_parser.add_argument("event_id", help="Write event id to revert.")
@@ -1116,6 +1119,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_optional_write_journal_arguments(revert_event_parser)
     revert_event_parser.add_argument("--reason", default="", help="Optional reason stored in the revert event payload.")
     revert_event_parser.add_argument("--dry-run", action="store_true", help="Check whether the event is currently revertible without changing store, journal, or projection files.")
+    revert_event_parser.add_argument("--include-dependents", action="store_true", help="Also revert later active same-page SQLite events that must be undone before the target.")
 
     replay_journal_parser = add_command_parser(
         subparsers,
@@ -2805,6 +2809,15 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
                 reason=f"event is already reverted: {args.event_id}",
             )
         raise ValueError(f"event is already reverted: {args.event_id}")
+    if args.include_dependents:
+        return run_revert_event_with_dependents(
+            store,
+            args,
+            journal=journal,
+            target=target,
+            target_source=target_source,
+            sqlite_events=sqlite_events,
+        )
     if args.dry_run:
         return run_revert_event_dry_run(
             store,
@@ -2860,10 +2873,271 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     return result
 
 
+def run_revert_event_with_dependents(
+    store: SQLiteStore,
+    args: argparse.Namespace,
+    *,
+    journal: Path | None,
+    target: dict[str, Any],
+    target_source: str,
+    sqlite_events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if target_source != "sqlite":
+        reason = "--include-dependents requires a SQLite-sourced target event"
+        if args.dry_run:
+            return non_revertible_dry_run_result(
+                args,
+                journal=journal,
+                project=target.get("project"),
+                target=target,
+                target_source=target_source,
+                reason=reason,
+            )
+        raise ValueError(reason)
+    try:
+        dependent_events = dependent_revert_events(sqlite_events, target)
+    except ValueError as error:
+        if args.dry_run:
+            return non_revertible_dry_run_result(
+                args,
+                journal=journal,
+                project=target.get("project"),
+                target=target,
+                target_source=target_source,
+                reason=str(error),
+            )
+        raise
+    targets = [*dependent_events, target]
+    if args.dry_run:
+        return run_revert_event_sequence_dry_run(
+            store,
+            args,
+            journal=journal,
+            targets=targets,
+            requested_target=target,
+            dependent_events=dependent_events,
+        )
+
+    records: list[dict[str, Any]] = []
+    with store.write_transaction():
+        for current_target in targets:
+            rollback = revert_journal_event_in_store(store, current_target, reason=args.reason, uncommitted=True)
+            reverted = rollback["reverted"]
+            event = make_journal_event(
+                "event_revert",
+                project=reverted["project"],
+                payload=rollback["payload"],
+            )
+            insert_store_event(store.connection, event)
+            records.append({"target": current_target, "rollback": rollback, "event": event})
+    if journal is not None:
+        for record in records:
+            append_journal_event(journal, record["event"])
+    removed_files = remove_projection_files_for_revert_records(args.output, records)
+    projection = store.export_markdown(args.output, check=False)
+    projection["removed_files"] = removed_files
+    projection["removed_count"] = len(removed_files)
+    return revert_sequence_result(
+        args,
+        journal=journal,
+        requested_target=target,
+        target_source="sqlite",
+        dependent_events=dependent_events,
+        records=records,
+        projection=projection,
+        dry_run=False,
+        journal_written=journal is not None,
+    )
+
+
 class RevertDryRunComplete(Exception):
     def __init__(self, result: dict[str, Any]):
         super().__init__("revert dry run complete")
         self.result = result
+
+
+def dependent_revert_events(
+    sqlite_events: list[dict[str, Any]],
+    target: dict[str, Any],
+) -> list[dict[str, Any]]:
+    target_page_id = event_payload_page_id(target)
+    if not target_page_id:
+        raise ValueError("target event payload is missing page_id")
+    target_sequence = int(target.get("event_sequence") or -1)
+    reverted_event_ids = {
+        str(event.get("payload", {}).get("target_event_id") or "")
+        for event in sqlite_events
+        if event.get("event_type") == "event_revert"
+    }
+    dependents: list[dict[str, Any]] = []
+    for event in sqlite_events:
+        sequence = int(event.get("event_sequence") or -1)
+        if sequence <= target_sequence:
+            continue
+        event_type = event.get("event_type")
+        if event_type == "event_revert":
+            continue
+        if event.get("event_id") in reverted_event_ids:
+            continue
+        if event_payload_page_id(event) != target_page_id:
+            continue
+        if event_type not in REVERSIBLE_EVENT_TYPES:
+            raise ValueError(
+                f"later same-page event is not reversible with this alpha command: {event.get('event_id')} ({event_type})"
+            )
+        dependents.append(event)
+    return sorted(dependents, key=lambda event: int(event.get("event_sequence") or 0), reverse=True)
+
+
+def event_payload_page_id(event: dict[str, Any]) -> str:
+    return str(event.get("payload", {}).get("page_id") or "")
+
+
+def run_revert_event_sequence_dry_run(
+    store: SQLiteStore,
+    args: argparse.Namespace,
+    *,
+    journal: Path | None,
+    targets: list[dict[str, Any]],
+    requested_target: dict[str, Any],
+    dependent_events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    try:
+        with store.write_transaction():
+            records: list[dict[str, Any]] = []
+            for current_target in targets:
+                rollback = revert_journal_event_in_store(store, current_target, reason=args.reason, uncommitted=True)
+                records.append({"target": current_target, "rollback": rollback, "event": None})
+            result = revert_sequence_result(
+                args,
+                journal=journal,
+                requested_target=requested_target,
+                target_source="sqlite",
+                dependent_events=dependent_events,
+                records=records,
+                projection=None,
+                dry_run=True,
+                journal_written=False,
+                would_remove_files=projection_files_removed_for_revert_records(args.output, records),
+            )
+            raise RevertDryRunComplete(result)
+    except RevertDryRunComplete as complete:
+        return complete.result
+    except ValueError as error:
+        return non_revertible_dry_run_result(
+            args,
+            journal=journal,
+            project=requested_target.get("project"),
+            target=requested_target,
+            target_source="sqlite",
+            reason=str(error),
+        )
+
+
+def revert_sequence_result(
+    args: argparse.Namespace,
+    *,
+    journal: Path | None,
+    requested_target: dict[str, Any],
+    target_source: str,
+    dependent_events: list[dict[str, Any]],
+    records: list[dict[str, Any]],
+    projection: dict[str, Any] | None,
+    dry_run: bool,
+    journal_written: bool,
+    would_remove_files: list[str] | None = None,
+) -> dict[str, Any]:
+    requested_record = records[-1]
+    reverted = requested_record["rollback"]["reverted"]
+    result = dict(reverted)
+    event_ids = [
+        record["event"]["event_id"]
+        for record in records
+        if record.get("event") is not None
+    ]
+    result.update(
+        {
+            "journal": str(journal) if journal is not None else None,
+            "journal_written": journal_written,
+            "would_write_journal": journal is not None if dry_run else None,
+            "output": str(args.output),
+            "dry_run": dry_run,
+            "revertible": True,
+            "event_id": None if dry_run else event_ids[-1],
+            "event_ids": event_ids,
+            "would_event_type": "event_revert",
+            "would_event_count": len(records) if dry_run else None,
+            "reverted_event_count": 0 if dry_run else len(records),
+            "target_event_id": requested_target["event_id"],
+            "target_event_type": requested_target["event_type"],
+            "target_event_source": target_source,
+            "included_dependent_event_ids": [event["event_id"] for event in dependent_events],
+            "included_dependent_count": len(dependent_events),
+            "reverted_events": [
+                revert_record_summary(record, dry_run=dry_run)
+                for record in records
+            ],
+            "projection": projection,
+            "would_export_projection": True if dry_run else None,
+            "would_remove_files": would_remove_files if dry_run else None,
+        }
+    )
+    if not dry_run:
+        result.pop("would_write_journal", None)
+        result.pop("would_event_count", None)
+        result.pop("would_export_projection", None)
+        result.pop("would_remove_files", None)
+    return result
+
+
+def revert_record_summary(record: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
+    target = record["target"]
+    event = record.get("event")
+    return {
+        "event_id": None if dry_run or event is None else event["event_id"],
+        "would_event_type": "event_revert",
+        "target_event_id": target["event_id"],
+        "target_event_type": target["event_type"],
+        "target_event_source": "sqlite",
+    }
+
+
+def projection_files_removed_for_revert_records(output: Path, records: list[dict[str, Any]]) -> list[str]:
+    removed: list[str] = []
+    for record in records:
+        target = record["target"]
+        rollback = record["rollback"]
+        for source_path in projection_files_removed_by_revert(
+            output,
+            target["event_type"],
+            source_path=rollback["source_path"],
+            previous_source_path=rollback["previous_source_path"],
+        ):
+            if source_path not in removed:
+                removed.append(source_path)
+    return removed
+
+
+def remove_projection_files_for_revert_records(output: Path, records: list[dict[str, Any]]) -> list[str]:
+    removed: list[str] = []
+    for record in records:
+        target = record["target"]
+        rollback = record["rollback"]
+        event_type = target["event_type"]
+        if event_type == "page_rename":
+            file_paths = remove_previous_projection_file(
+                output,
+                rollback["source_path"],
+                rollback["previous_source_path"],
+            )
+        elif event_type == "page_create":
+            file_paths = remove_projection_file(output, rollback["source_path"])
+        else:
+            file_paths = []
+        for source_path in file_paths:
+            if source_path not in removed:
+                removed.append(source_path)
+    return removed
 
 
 def run_revert_event_dry_run(
@@ -4568,7 +4842,13 @@ def format_revert_event(result: dict[str, Any]) -> str:
         f"lines: {line_count}\n"
         f"projection_written: {projection.get('written_count', 0)}\n"
     )
+    if "included_dependent_count" in result:
+        text += f"included_dependents: {result.get('included_dependent_count', 0)}\n"
+    if result.get("reverted_event_count"):
+        text += f"reverted_events: {result.get('reverted_event_count', 0)}\n"
     if result.get("dry_run"):
+        if result.get("would_event_count"):
+            text += f"would_events: {result.get('would_event_count', 0)}\n"
         text += f"would_write_journal: {str(result.get('would_write_journal', False)).lower()}\n"
         text += f"would_export_projection: {str(result.get('would_export_projection', False)).lower()}\n"
         would_remove_files = result.get("would_remove_files") or []
