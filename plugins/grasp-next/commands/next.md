@@ -46,12 +46,11 @@ argument-hint: [focus]
 `wiki.grasp/events.jsonl` がある場合は grasp write first で file back する。まず gitignored store を更新する:
 
 ```bash
-$PYTHON_BIN -m grasp --store .grasp/file-back.sqlite import --markdown wiki --project grasp-wiki
-$PYTHON_BIN -m grasp --store .grasp/file-back.sqlite --project grasp-wiki write-status --output wiki --journal wiki.grasp/events.jsonl --strict
-$PYTHON_BIN -m grasp --json --store .grasp/file-back.sqlite --project grasp-wiki export-markdown --output wiki --check | $PYTHON_BIN scripts/check_projection_policy.py
+git fetch origin main
+$PYTHON_BIN scripts/check_file_back_preflight.py
 ```
 
-その後、表現できる変更は `append-section` / `write-page` / `append-log` を `--output wiki --journal wiki.grasp/events.jsonl` 付きで使う。任意 frontmatter merge、canonical docs、曖昧 handle、混在 hunk など grasp alpha が安全に扱えない場合だけ direct Markdown patch に fallback し、理由を `wiki/log.md` に残す。
+この preflight は `.grasp/file-back.sqlite` を import/update し、remote 分岐なし、wiki/journal dirty なし、`write-status --strict`、`export-markdown --json --check | scripts/check_projection_policy.py` 相当を確認する。その後、表現できる変更は `append-section` / `write-page` / `append-log` を `--output wiki --journal wiki.grasp/events.jsonl` 付きで使う。任意 frontmatter merge、canonical docs、曖昧 handle、混在 hunk など grasp alpha が安全に扱えない場合だけ direct Markdown patch に fallback し、理由を `wiki/log.md` に残す。
 
 同じ `.grasp/file-back.sqlite` / `wiki.grasp/events.jsonl` への write 系 command は直列に実行する。並列 write で projection が stale になったら、対象 page を直列で `write-page --from-file` し直してから `write-status --strict` / `export-markdown --check` + `scripts/check_projection_policy.py` / `replay-journal --check` を通す。
 

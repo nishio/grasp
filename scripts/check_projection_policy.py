@@ -10,6 +10,43 @@ import sys
 from typing import Any
 
 
+def projection_policy_errors(
+    result: dict[str, Any],
+    *,
+    authority: str = "sqlite",
+    base: str = "stored_markdown_lines",
+    output_role: str = "git_tracked_projection",
+    write_mode: str = "check",
+) -> list[str]:
+    errors: list[str] = []
+    if result.get("ok") is not True:
+        errors.append(
+            "projection is not clean: "
+            f"changed={result.get('changed_files') or []} "
+            f"missing={result.get('missing_files') or []} "
+            f"extra={result.get('extra_files') or []}"
+        )
+        return errors
+    policy = result.get("projection_policy")
+    if not isinstance(policy, dict):
+        return ["missing projection_policy object"]
+
+    expected = {
+        "authority": authority,
+        "base": base,
+        "output_role": output_role,
+    }
+    for key, expected_value in expected.items():
+        if policy.get(key) != expected_value:
+            errors.append(f"projection_policy.{key}={policy.get(key)!r}, expected {expected_value!r}")
+    if write_mode != "any" and policy.get("write_mode") != write_mode:
+        errors.append(f"projection_policy.write_mode={policy.get('write_mode')!r}, expected {write_mode!r}")
+
+    if not isinstance(policy.get("generated_overlays"), list):
+        errors.append("projection_policy.generated_overlays must be a list")
+    return errors
+
+
 def fail(message: str) -> int:
     print(message, file=sys.stderr)
     return 1
@@ -40,31 +77,19 @@ def main() -> int:
     result = load_stdin_json()
     if result is None:
         return 1
-    if result.get("ok") is not True:
-        return fail(
-            "projection is not clean: "
-            f"changed={result.get('changed_files') or []} "
-            f"missing={result.get('missing_files') or []} "
-            f"extra={result.get('extra_files') or []}"
-        )
+    errors = projection_policy_errors(
+        result,
+        authority=args.authority,
+        base=args.base,
+        output_role=args.output_role,
+        write_mode=args.write_mode,
+    )
+    if errors:
+        return fail(errors[0])
     policy = result.get("projection_policy")
-    if not isinstance(policy, dict):
-        return fail("missing projection_policy object")
-
-    expected = {
-        "authority": args.authority,
-        "base": args.base,
-        "output_role": args.output_role,
-    }
-    for key, expected_value in expected.items():
-        if policy.get(key) != expected_value:
-            return fail(f"projection_policy.{key}={policy.get(key)!r}, expected {expected_value!r}")
-    if args.write_mode != "any" and policy.get("write_mode") != args.write_mode:
-        return fail(f"projection_policy.write_mode={policy.get('write_mode')!r}, expected {args.write_mode!r}")
-
-    overlays = policy.get("generated_overlays")
-    if not isinstance(overlays, list):
-        return fail("projection_policy.generated_overlays must be a list")
+    assert isinstance(policy, dict)
+    overlays = policy["generated_overlays"]
+    assert isinstance(overlays, list)
     print(
         "projection_policy ok: "
         f"authority={policy['authority']} "
