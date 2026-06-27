@@ -60,6 +60,13 @@ def write_status_errors(result: dict[str, Any], *, require_journal: bool = True)
         errors.append(f"write-status strict_ok={result.get('strict_ok')!r}, expected True")
     if projection_ok is not True:
         errors.append(f"write-status projection ok={projection_ok!r}, expected True")
+    if result.get("semantic_log_stale") is True:
+        errors.append("write-status semantic_log_stale is true")
+    if result.get("semantic_log_error"):
+        errors.append(f"write-status semantic_log_error={result.get('semantic_log_error')!r}")
+    semantic_policy_errors = result.get("semantic_log_policy_errors")
+    if semantic_policy_errors:
+        errors.append(f"write-status semantic_log_policy_errors={semantic_policy_errors!r}")
     if require_journal:
         if result.get("journal_exists") is not True:
             errors.append("write-status journal_exists is not true")

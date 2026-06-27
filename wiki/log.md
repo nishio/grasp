@@ -1245,3 +1245,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - implemented: check_file_back_postwrite.py runs export-markdown --regenerate-log --check by default and verifies sqlite source / sqlite-events-log overlay.
 - escape hatch: --skip-semantic-log-check skips only this additional semantic log projection check.
 - file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], and [[grasp-backlog]] now treat the repo postwrite guard as implemented.
+
+## [2026-06-27 20:17] implementation | surface semantic log projection in write-status
+- implemented: write-status now returns semantic_log_projection / semantic_log_stale / semantic_log_changed_files for SQLite events-derived log projection.
+- strict: write-status --strict fails with semantic_log_stale when the generated SQLite log projection drifts; projects without a log page skip the semantic check.
+- tests: added no-journal strict drift coverage and preflight diagnostics for semantic_log_* status fields.
