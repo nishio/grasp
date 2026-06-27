@@ -1206,3 +1206,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - docs: compatibility JSONL audit は `scripts/check_file_back_preflight.py --with-journal` / `scripts/check_file_back_postwrite.py --with-journal` と `--journal wiki.grasp/events.jsonl --output wiki` の明示手順にした。
 - code: `scripts/check_file_back_runbook.py` が旧 `check_file_back_* --no-journal` guard 表記と `--with-journal` audit 手順漏れを検出するようにし、regression test を追加。
 - file back: [[history]] / [[grasp-v1-implemented]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]] を更新。public compatibility version は `1.8.17`、schema は v8 のまま。
+
+## [2026-06-27 19:21] dogfood | no-journal default file-back streak 1
+- preflight: `git fetch origin main` + `python3 scripts/check_file_back_preflight.py` が `journal_mode=none` で通った。
+- write: `append-log --output wiki --no-journal` で本 log entry を追加し、`wiki.grasp/events.jsonl` は触らない。direct Markdown patch fallback は使っていない。
+- next: 同じ path をあと2回、実作業の file-back で通し、generated Markdown backup/review policy の必要性を実観測で判断する。
