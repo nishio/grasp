@@ -13,6 +13,11 @@ def clean_write_status():
         "journal_exists": True,
         "event_streams_match": True,
         "journal_log_stale": False,
+        "sqlite_last_event": {
+            "event_id": "evt-1",
+            "event_type": "page_update",
+            "session_id": "file-back-session",
+        },
     }
 
 
@@ -43,7 +48,15 @@ def clean_semantic_log_projection():
 
 
 class FileBackPostwriteScriptTests(unittest.TestCase):
-    def run_with_fake_commands(self, fake_run_command, *, require_journal=True, semantic_log_check=True):
+    def run_with_fake_commands(
+        self,
+        fake_run_command,
+        *,
+        require_journal=True,
+        semantic_log_check=True,
+        require_session=True,
+        expected_session_id="file-back-session",
+    ):
         original_run_command = postwrite.run_command
         try:
             postwrite.run_command = fake_run_command
@@ -57,6 +70,8 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
                 lint=True,
                 diff_check=True,
                 semantic_log_check=semantic_log_check,
+                require_session=require_session,
+                expected_session_id=expected_session_id,
             )
         finally:
             postwrite.run_command = original_run_command
@@ -106,6 +121,73 @@ class FileBackPostwriteScriptTests(unittest.TestCase):
         self.assertIsNotNone(seen_write_status_args)
         self.assertIn("--no-journal", seen_write_status_args)
         self.assertNotIn("--journal", seen_write_status_args)
+
+    def test_postwrite_rejects_missing_expected_session_id(self):
+        def fake_run_command(args, *, cwd):
+            if "write-status" in args:
+                return subprocess.CompletedProcess(args, 0, json.dumps(clean_write_status()), "")
+            if "export-markdown" in args:
+                if "--regenerate-log" in args:
+                    return subprocess.CompletedProcess(args, 0, json.dumps(clean_semantic_log_projection()), "")
+                return subprocess.CompletedProcess(args, 0, json.dumps(clean_projection()), "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        errors = self.run_with_fake_commands(fake_run_command, expected_session_id="")
+
+        self.assertTrue(any("GRASP_SESSION_ID" in error for error in errors))
+
+    def test_postwrite_rejects_empty_latest_event_session_id(self):
+        def fake_run_command(args, *, cwd):
+            if "write-status" in args:
+                payload = clean_write_status()
+                payload["sqlite_last_event"]["session_id"] = ""
+                return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+            if "export-markdown" in args:
+                if "--regenerate-log" in args:
+                    return subprocess.CompletedProcess(args, 0, json.dumps(clean_semantic_log_projection()), "")
+                return subprocess.CompletedProcess(args, 0, json.dumps(clean_projection()), "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        errors = self.run_with_fake_commands(fake_run_command)
+
+        self.assertTrue(any("empty session_id" in error for error in errors))
+
+    def test_postwrite_rejects_latest_event_session_mismatch(self):
+        def fake_run_command(args, *, cwd):
+            if "write-status" in args:
+                payload = clean_write_status()
+                payload["sqlite_last_event"]["session_id"] = "other-session"
+                return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+            if "export-markdown" in args:
+                if "--regenerate-log" in args:
+                    return subprocess.CompletedProcess(args, 0, json.dumps(clean_semantic_log_projection()), "")
+                return subprocess.CompletedProcess(args, 0, json.dumps(clean_projection()), "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        errors = self.run_with_fake_commands(fake_run_command)
+
+        self.assertTrue(any("expected 'file-back-session'" in error for error in errors))
+
+    def test_postwrite_can_skip_session_check_for_legacy_audits(self):
+        def fake_run_command(args, *, cwd):
+            if "write-status" in args:
+                payload = clean_write_status()
+                payload["sqlite_last_event"]["session_id"] = ""
+                return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+            if "export-markdown" in args:
+                if "--regenerate-log" in args:
+                    return subprocess.CompletedProcess(args, 0, json.dumps(clean_semantic_log_projection()), "")
+                return subprocess.CompletedProcess(args, 0, json.dumps(clean_projection()), "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        self.assertEqual(
+            self.run_with_fake_commands(
+                fake_run_command,
+                require_session=False,
+                expected_session_id="",
+            ),
+            [],
+        )
 
     def test_postwrite_rejects_dirty_projection_policy(self):
         def fake_run_command(args, *, cwd):

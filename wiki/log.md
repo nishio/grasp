@@ -1336,3 +1336,9 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 ## [2026-06-28 02:03] implementation+file-back | add version-bump revert plan
 `1.8.38` adds `revert-plan --scope version-bump`, using shared semver tokens in a log-bounded slice to recover release/file-back version update work units that subject-based scopes cannot infer.
 Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-page file-back is selected by the shared version token while `content-subjects` and `log-page-subjects` remain insufficient.
+
+## [2026-06-28 02:27] implementation+file-back | require file-back session marker in postwrite
+- code: `scripts/check_file_back_postwrite.py` now requires a non-empty expected session id by default and checks latest `sqlite_last_event.session_id` against `$GRASP_SESSION_ID` / `--session-id`. Legacy/ad hoc checks must opt out with `--skip-session-check`.
+- docs/tests: runbook checker, AGENTS/CLAUDE, `/next`, `/ship-next`, repo skill, README, history, current facts, backlog, and write plan now require normal file-backs to keep one `GRASP_SESSION_ID` through postwrite.
+- dogfood: postwrite passed with `GRASP_SESSION_ID=file-back-20260627T172244Z-session-postwrite`; `revert-plan --scope session` on the latest log update returned 8 same-session candidate events with `revertible=true`.
+- rationale: this does not add another fuzzy inference scope; it ensures new repo file-backs preserve metadata for existing `revert-plan --scope session`.

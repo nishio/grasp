@@ -22,6 +22,8 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "`--no-journal --output wiki`",
             "python3 scripts/check_file_back_postwrite.py`（no-journal default）",
             "SQLite events 由来の semantic log projection",
+            "`GRASP_SESSION_ID`",
+            "postwrite は同じ session id を要求",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
             "repo runbook では `--with-journal` を使わない",
         ),
@@ -30,6 +32,7 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "check_file_back_postwrite.py --no-journal",
             "check_file_back_preflight.py --with-journal",
             "check_file_back_postwrite.py --with-journal",
+            "--skip-session-check",
             "--journal wiki.grasp/events.jsonl --output wiki",
             "wiki・journal dirty",
             "repo の通常 file-back は明示 cutover",
@@ -43,6 +46,8 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "`--no-journal --output wiki`",
             "python3 scripts/check_file_back_postwrite.py`（no-journal default）",
             "SQLite events 由来の semantic log projection",
+            "`GRASP_SESSION_ID`",
+            "postwrite は同じ session id を要求",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
             "repo runbook では `--with-journal` を使わない",
         ),
@@ -51,6 +56,7 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "check_file_back_postwrite.py --no-journal",
             "check_file_back_preflight.py --with-journal",
             "check_file_back_postwrite.py --with-journal",
+            "--skip-session-check",
             "--journal wiki.grasp/events.jsonl --output wiki",
             "wiki・journal dirty",
             "repo の通常 file-back は明示 cutover",
@@ -65,6 +71,8 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "`--output wiki --no-journal`",
             "scripts/check_file_back_postwrite.py`（no-journal default",
             "SQLite events 由来の semantic log projection",
+            "`GRASP_SESSION_ID`",
+            "postwrite は同じ session id を要求",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
             "repo runbook では `--with-journal` を使わない",
         ),
@@ -73,6 +81,7 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "check_file_back_postwrite.py --no-journal",
             "check_file_back_preflight.py --with-journal",
             "check_file_back_postwrite.py --with-journal",
+            "--skip-session-check",
             "--journal wiki.grasp/events.jsonl --output wiki",
             "wiki/journal dirty",
             "transition 中の互換/audit artifact",
@@ -84,6 +93,8 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "python3 scripts/check_file_back_preflight.py` (no-journal default)",
             "python3 scripts/check_file_back_postwrite.py` (no-journal default",
             "SQLite events semantic log projection",
+            "`GRASP_SESSION_ID`",
+            "postwrite requires the same session id",
             "tracked `wiki.grasp/events.jsonl` was retired and removed in `1.8.18`",
             "Do not use repo-runbook `--with-journal`",
         ),
@@ -92,6 +103,7 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "check_file_back_postwrite.py --no-journal",
             "check_file_back_preflight.py --with-journal",
             "check_file_back_postwrite.py --with-journal",
+            "--skip-session-check",
             "--journal wiki.grasp/events.jsonl --output wiki",
             "first run `git fetch origin main` and `python3 scripts/check_file_back_preflight.py`.",
         ),
@@ -103,12 +115,15 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "python3 scripts/check_file_back_preflight.py`（no-journal default）",
             "python3 scripts/check_file_back_postwrite.py`（no-journal default）",
             "SQLite events 由来の semantic log projection",
+            "`GRASP_SESSION_ID`",
+            "postwrite は同じ session id を要求",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
         ),
         forbidden=(
             "wiki・journal dirty",
             "`--no-journal` cutover 検証時",
             "transition 中の compatibility/audit artifact",
+            "--skip-session-check",
             "--journal wiki.grasp/events.jsonl",
         ),
     ),
@@ -117,10 +132,13 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
         required=(
             "repo-local file-back guard scripts は no-journal が default",
             "SQLite events 由来の semantic log projection",
+            "`GRASP_SESSION_ID`",
+            "postwrite は同じ session id を要求",
             "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役済み",
         ),
         forbidden=(
             "journal あり mode と `--no-journal` mode の両方を検査できる",
+            "--skip-session-check",
         ),
     ),
 )
@@ -158,7 +176,7 @@ def main() -> int:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
-    print("file-back runbook ok: no-journal default, retired journal, and semantic log guard documented")
+    print("file-back runbook ok: no-journal default, retired journal, semantic log guard, and session marker documented")
     return 0
 
 
