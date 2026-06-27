@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.40`（更新: 2026-06-28 02:50、store: schema `8`、compat: schema `8` compatible）: repo-local `scripts/check_file_back_preflight.py` が通常 file-back の session id 再利用を検出するようにした。既定では `$GRASP_SESSION_ID`（または `--session-id`）が必須で、同じ selected project の SQLite events に既に同じ `session_id` があれば failure にする。これにより `revert-plan --scope session` が複数 file-back を誤って束ねる回復 gap を preflight で防ぐ。legacy/ad hoc 検証だけ `--skip-session-uniqueness-check` で明示的に省略できる。schema は不変
 - `1.8.39`（更新: 2026-06-28 02:23、store: schema `8`、compat: schema `8` compatible）: repo-local `scripts/check_file_back_postwrite.py` が通常 file-back の session marker を検査するようにした。既定では `$GRASP_SESSION_ID`（または `--session-id`）が必須で、`write-status` の latest `sqlite_last_event.session_id` が同じ値でない場合は failure にする。legacy/ad hoc 検証だけ `--skip-session-check` で明示的に省略できる。runbook checker / AGENTS / CLAUDE / `/next` / `/ship-next` / repo skill / README も、通常 file-back で一意な `GRASP_SESSION_ID` を設定し postwrite まで保持することを要求する。schema は不変
 - `1.8.38`（更新: 2026-06-28 02:03、store: schema `8`、compat: schema `8` compatible）: `revert-plan --scope version-bump` を追加。同じ log-bounded slice 内で anchor event の changed lines にある semver token が複数 events に共有される場合、その token を `version_bump_versions` として使い、release / file-back version update の multi-page rollback candidate set を read-only に返す。regression test は実 git history commit `5f1b821` の `1.8.37` file-back を replay し、link/path subjects では束ねられない5 page update を `1.8.37` token で候補化する。schema は不変
 - `1.8.37`（更新: 2026-06-28 02:09、store: schema `8`、compat: schema `8` compatible）: `revert-plan --scope log-batch` / `subject-log` / `log-page-subjects` も、選ばれた page event を戻すために必要な後続 same-page dependents を `dependent_event_ids` として候補に足すようにした。これにより、closing log 後の同一 page cleanup update が current lines mismatch を作る場合でも、inferred plan は semantic candidate set を実行可能な rollback candidate set へ閉じる。`content-subjects` の `1.8.36` 挙動と同じ helper に揃えた。schema は不変
@@ -179,6 +180,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.39`
+- Current public compatibility version: `1.8.40`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.39`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.40`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

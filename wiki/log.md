@@ -1342,3 +1342,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - docs/tests: runbook checker, AGENTS/CLAUDE, `/next`, `/ship-next`, repo skill, README, history, current facts, backlog, and write plan now require normal file-backs to keep one `GRASP_SESSION_ID` through postwrite.
 - dogfood: postwrite passed with `GRASP_SESSION_ID=file-back-20260627T172244Z-session-postwrite`; `revert-plan --scope session` on the latest log update returned 8 same-session candidate events with `revertible=true`.
 - rationale: this does not add another fuzzy inference scope; it ensures new repo file-backs preserve metadata for existing `revert-plan --scope session`.
+
+## [2026-06-28 02:50] implementation+file back | preflight で file-back session id 再利用を検出
+- code: `scripts/check_file_back_preflight.py` が `$GRASP_SESSION_ID` / `--session-id` を読み、selected project の既存 SQLite events に同じ `session_id` がある場合は通常 preflight を failure にする。legacy/ad hoc verification だけ `--skip-session-uniqueness-check` で省略できる。
+- tests/docs: preflight unit tests と runbook checker を更新し、AGENTS/CLAUDE、`/next`、`/ship-next`、repo skill、README は export `GRASP_SESSION_ID` → preflight 未使用性確認 → write → postwrite 同一性確認の順序を要求する。
+- dogfood: 新 session `file-back-20260627T174500Z-session-uniqueness` の preflight は通り、旧 `file-back-20260627T172244Z-session-postwrite` を指定した preflight は既存10 eventsを検出して失敗した。public compatibility version は `1.8.40`、schema は v8 のまま。
