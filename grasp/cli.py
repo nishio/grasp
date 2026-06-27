@@ -2359,12 +2359,14 @@ def rollback_journal_event_after_projection_failure(
 ) -> dict[str, Any]:
     reason = f"projection export failed: {type(error).__name__}: {error}"
     try:
-        rollback = revert_journal_event_in_store(store, target, reason=reason)
-        event = make_journal_event(
-            "event_revert",
-            project=rollback["reverted"]["project"],
-            payload=rollback["payload"],
-        )
+        with store.write_transaction():
+            rollback = revert_journal_event_in_store(store, target, reason=reason, uncommitted=True)
+            event = make_journal_event(
+                "event_revert",
+                project=rollback["reverted"]["project"],
+                payload=rollback["payload"],
+            )
+            insert_store_event(store.connection, event)
         append_journal_event(journal, event)
         return event
     except Exception as rollback_error:
