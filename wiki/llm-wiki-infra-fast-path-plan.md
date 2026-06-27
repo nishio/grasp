@@ -1,14 +1,23 @@
 ---
 type: plan
-summary: 既存 backlog とは別に、最速で LLM Wiki の日常インフラとして grasp を dogfood するための計画表。目標は native authority + Markdown projection へ一気に完成移行することではなく、file-back の普段使いを grasp write 経由にする最短 slice を切ること。
+summary: 旧 fast-path 計画。2026-06-26 時点では、最速で LLM Wiki の日常 file-back を grasp write 経由にするため、events.jsonl + SQLite materialized index + Markdown projection の短い phase を切った。2026-06-27 の並行 write / SQLite SSoT 議論後は、現行実装計画ではなく prototype / replay harness の履歴として扱う。現行計画は [[sqlite-ssot-write-plan]]。
 sources:
   - [[native-authority-markdown-projection]]
   - [[write-layer-alpha-and-replay-test]]
   - [[persistence-custom-format]]
   - [[grasp-backlog]]
+  - [[sqlite-ssot-write-plan]]
 ---
 
 # LLM Wiki infra fast-path plan
+
+## Status 2026-06-27: Superseded as current plan
+
+このページは **旧計画**。削除しない。`1.7.x` の write alpha 実装、journal/replay/status/revert harness、file-back dogfood の経緯を読むための履歴として残す。
+
+ただし、**これを次の実装順として使わない**。Phase 0-7 は `events.jsonl` を replayable authority、SQLite を materialized index、Markdown を projection とする暫定構成を前提にしていた。2026-06-26 の parallel agent write incident と 2026-06-27 の [[sqlite-write-concurrency]] Updates で、方針は **SQLite を SSoT にし events も SQLite table に入れる**へ更新された。
+
+現行の実装計画は [[sqlite-ssot-write-plan]]。本ページから引き続き使うものは、過去 git history replay harness、rename/identity の検証 corpus、`write-status` / `write-diff` / `revert-event` の user-facing recovery 価値。使わないものは、`events.jsonl` を強化して file-back cutover へ進む前提と、`import --markdown` を通常 reconcile にする前提。
 
 このページは [[grasp-backlog]] とは別の **実行計画表**。全 backlog を正規化しない。目的は「LLM Wiki の日常 file-back / draft / index 更新が、最短で grasp 経由で回る」状態を作り、authoring dogfood loop を太くすること。
 

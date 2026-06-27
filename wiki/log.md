@@ -1,5 +1,10 @@
 # Log
 
+## [2026-06-27 11:08] file back | [[sqlite-ssot-write-plan]] を新設し、旧 fast-path 計画を superseded と明示
+- [[llm-wiki-infra-fast-path-plan]] は `1.7.x` alpha / replay harness の履歴として残すが、現行の次実装順ではないと先頭に明記。`events.jsonl` を強化して file-back cutover へ進む前提と、`import --markdown` を通常 reconcile にする前提は使わない。
+- 新規 [[sqlite-ssot-write-plan]] を current implementation plan として追加。SQLite を canonical SSoT、events を SQLite table、Markdown を export-only projection にし、canonical store / WAL+busy_timeout / 1 transaction write / native recovery を先に作ってから file-back cutover する phase に整理。
+- [[grasp-backlog]] と index を更新し、durable journal policy は SQLite primary + events table 方向決定済み、未実装は store 永続場所・既存 JSONL migration・generated Markdown backup/review policy・actor/session metadata とした。
+
 ## [2026-06-27 10:51] file back | sqlite-write-concurrency §Updates — 使い捨て store は store≠authority の症状、SSoT 化が構成上 throwaway を消す（cutover は3点）
 - store を捨てて作り直せるのは cache だから。store=authority にすると唯一コピーになり単一 canonical 永続 store にならざるを得ない（read 用 default store は既存）
 - cutover 残作業は (1) write path を canonical store 経由化+WAL/busy_timeout (2) events を SQLite テーブル化し write を1 tx に (3) export 一方向化、の3つ
