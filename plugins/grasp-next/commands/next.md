@@ -50,9 +50,9 @@ git fetch origin main
 $PYTHON_BIN scripts/check_file_back_preflight.py
 ```
 
-この preflight は no-journal default で `.grasp/file-back.sqlite` を import/update し、remote 分岐なし、wiki dirty なし、`write-status --no-journal --strict`、projection policy check を確認する。`wiki.grasp/events.jsonl` は transition 中の互換/audit artifact で、通常編集の active path からは外す。その後、表現できる変更は `append-section` / `write-page` / `append-log` を `--output wiki --no-journal` 付きで使う。任意 frontmatter merge、canonical docs、曖昧 handle、混在 hunk など grasp alpha が安全に扱えない場合だけ direct Markdown patch に fallback し、理由を `wiki/log.md` に残す。
+この preflight は no-journal default で `.grasp/file-back.sqlite` を import/update し、remote 分岐なし、wiki dirty なし、退役済み JSONL path の再作成なし、`write-status --no-journal --strict`、projection policy check を確認する。tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済みで、通常編集は repo に JSONL を作らない。その後、表現できる変更は `append-section` / `write-page` / `append-log` を `--output wiki --no-journal` 付きで使う。任意 frontmatter merge、canonical docs、曖昧 handle、混在 hunk など grasp alpha が安全に扱えない場合だけ direct Markdown patch に fallback し、理由を `wiki/log.md` に残す。
 
-互換/audit journal も明示的に更新する必要がある時だけ、`scripts/check_file_back_preflight.py --with-journal` / `scripts/check_file_back_postwrite.py --with-journal` と `--journal wiki.grasp/events.jsonl --output wiki` 付き write commands を使う。
+`--journal` / `--with-journal` は CLI の legacy/ad hoc audit 用には残るが、repo runbook では `--with-journal` を使わない。JSONL 調査が必要な時は task-local の明示 path を使い、別途 migration decision を切るまで repo artifact として commit しない。
 
 同じ `.grasp/file-back.sqlite` への write 系 command は直列に実行する。並列 write で projection が stale になったら、対象 page を直列で `write-page --from-file --no-journal` し直してから `scripts/check_file_back_postwrite.py` を通す。
 

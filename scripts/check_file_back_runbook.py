@@ -21,16 +21,18 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "python3 scripts/check_file_back_preflight.py`（no-journal default）",
             "`--no-journal --output wiki`",
             "python3 scripts/check_file_back_postwrite.py`（no-journal default）",
-            "互換/audit journal も明示的に更新する必要がある時だけ",
-            "python3 scripts/check_file_back_preflight.py --with-journal",
-            "python3 scripts/check_file_back_postwrite.py --with-journal",
-            "`--journal wiki.grasp/events.jsonl --output wiki`",
+            "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
+            "repo runbook では `--with-journal` を使わない",
         ),
         forbidden=(
             "check_file_back_preflight.py --no-journal",
             "check_file_back_postwrite.py --no-journal",
+            "check_file_back_preflight.py --with-journal",
+            "check_file_back_postwrite.py --with-journal",
+            "--journal wiki.grasp/events.jsonl --output wiki",
             "wiki・journal dirty",
             "repo の通常 file-back は明示 cutover",
+            "transition 中の互換/audit artifact",
         ),
     ),
     RunbookRule(
@@ -39,16 +41,18 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "python3 scripts/check_file_back_preflight.py`（no-journal default）",
             "`--no-journal --output wiki`",
             "python3 scripts/check_file_back_postwrite.py`（no-journal default）",
-            "互換/audit journal も明示的に更新する必要がある時だけ",
-            "python3 scripts/check_file_back_preflight.py --with-journal",
-            "python3 scripts/check_file_back_postwrite.py --with-journal",
-            "`--journal wiki.grasp/events.jsonl --output wiki`",
+            "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
+            "repo runbook では `--with-journal` を使わない",
         ),
         forbidden=(
             "check_file_back_preflight.py --no-journal",
             "check_file_back_postwrite.py --no-journal",
+            "check_file_back_preflight.py --with-journal",
+            "check_file_back_postwrite.py --with-journal",
+            "--journal wiki.grasp/events.jsonl --output wiki",
             "wiki・journal dirty",
             "repo の通常 file-back は明示 cutover",
+            "transition 中の互換/audit artifact",
         ),
     ),
     RunbookRule(
@@ -58,15 +62,17 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "この preflight は no-journal default",
             "`--output wiki --no-journal`",
             "scripts/check_file_back_postwrite.py`（no-journal default）",
-            "互換/audit journal も明示的に更新する必要がある時だけ",
-            "scripts/check_file_back_preflight.py --with-journal",
-            "scripts/check_file_back_postwrite.py --with-journal",
-            "`--journal wiki.grasp/events.jsonl --output wiki`",
+            "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
+            "repo runbook では `--with-journal` を使わない",
         ),
         forbidden=(
             "check_file_back_preflight.py --no-journal",
             "check_file_back_postwrite.py --no-journal",
+            "check_file_back_preflight.py --with-journal",
+            "check_file_back_postwrite.py --with-journal",
+            "--journal wiki.grasp/events.jsonl --output wiki",
             "wiki/journal dirty",
+            "transition 中の互換/audit artifact",
         ),
     ),
     RunbookRule(
@@ -74,13 +80,15 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
         required=(
             "python3 scripts/check_file_back_preflight.py` (no-journal default)",
             "python3 scripts/check_file_back_postwrite.py` (no-journal default)",
-            "python3 scripts/check_file_back_preflight.py --with-journal",
-            "python3 scripts/check_file_back_postwrite.py --with-journal",
-            "--journal wiki.grasp/events.jsonl --output wiki",
+            "tracked `wiki.grasp/events.jsonl` was retired and removed in `1.8.18`",
+            "Do not use repo-runbook `--with-journal`",
         ),
         forbidden=(
             "check_file_back_preflight.py --no-journal",
             "check_file_back_postwrite.py --no-journal",
+            "check_file_back_preflight.py --with-journal",
+            "check_file_back_postwrite.py --with-journal",
+            "--journal wiki.grasp/events.jsonl --output wiki",
             "first run `git fetch origin main` and `python3 scripts/check_file_back_preflight.py`.",
         ),
     ),
@@ -90,16 +98,20 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "通常編集は `--no-journal` path",
             "python3 scripts/check_file_back_preflight.py`（no-journal default）",
             "python3 scripts/check_file_back_postwrite.py`（no-journal default）",
+            "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役・削除済み",
         ),
         forbidden=(
             "wiki・journal dirty",
             "`--no-journal` cutover 検証時",
+            "transition 中の compatibility/audit artifact",
+            "--journal wiki.grasp/events.jsonl",
         ),
     ),
     RunbookRule(
         "README.md",
         required=(
             "repo-local file-back guard scripts は no-journal が default",
+            "tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役済み",
         ),
         forbidden=(
             "journal あり mode と `--no-journal` mode の両方を検査できる",
@@ -140,7 +152,7 @@ def main() -> int:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
-    print("file-back runbook ok: no-journal default documented")
+    print("file-back runbook ok: no-journal default and retired journal documented")
     return 0
 
 

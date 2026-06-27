@@ -10,11 +10,11 @@ class FileBackPreflightScriptTests(unittest.TestCase):
     def test_dirty_path_errors_accepts_clean_status(self):
         self.assertEqual(preflight.dirty_path_errors(""), [])
 
-    def test_dirty_path_errors_rejects_wiki_or_journal_changes(self):
+    def test_dirty_path_errors_rejects_file_back_path_changes(self):
         errors = preflight.dirty_path_errors(" M wiki/log.md\n?? wiki/new.md\n")
 
         self.assertEqual(len(errors), 1)
-        self.assertIn("dirty wiki/journal paths", errors[0])
+        self.assertIn("dirty file-back paths", errors[0])
         self.assertIn("wiki/log.md", errors[0])
         self.assertIn("wiki/new.md", errors[0])
 

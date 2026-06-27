@@ -1226,3 +1226,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - file back: [[sqlite-ssot-write-plan]] の Phase 6 を repo-local dogfood done にし、Immediate Next Slice を `wiki.grasp/events.jsonl` artifact policy へ進めた。
 - file back: [[grasp-backlog]] から no-journal default dogfood streak を未実装項目として外し、残課題を native events semantic projection / JSONL artifact policy / concrete gap が出た場合の generated Markdown backup-review policy に更新。
 - proof: streak 1-3 は preflight/postwrite をフラグなし no-journal default で通し、write は `--no-journal --output wiki`、`wiki.grasp/events.jsonl` 無変更、direct Markdown patch fallback なし。
+
+## [2026-06-27 19:41] implementation | retire tracked events jsonl artifact
+- implemented: tracked wiki.grasp/events.jsonl を削除し、repo-local file-back runbook / checker / skill / README を no-journal default + retired journal policy に更新。
+- guard: scripts/check_file_back_preflight.py は no-journal default でも wiki/ と退役済み JSONL path の dirty を止める。runbook checker は repo runbook の --with-journal 復帰を stale として検出する。
+- file back: history / grasp-v1-implemented / sqlite-ssot-write-plan / grasp-backlog / log を --no-journal --output wiki で更新し、wiki.grasp/events.jsonl は再作成していない。
