@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -1165,18 +1166,21 @@ def build_parser() -> argparse.ArgumentParser:
             "closing log_append. Use --scope same-page-dependents when no log-batch boundary exists and the "
             "anchor is blocked by later active events on the same page. Use --scope event-window with --before/--after "
             "when the intended multi-page unit is a small contiguous SQLite event_sequence window and no semantic "
-            "boundary is available. The result is intended to feed "
+            "boundary is available. Use --scope time-burst with --max-gap-seconds when the intended unit is a "
+            "small burst of adjacent writes close in time and no log boundary exists. The result is intended to feed "
             "revert-events; it does not mutate store, journal, or projection files."
         ),
         returns=(
             "project, scope, anchor_event_id, complete, previous_log_event|null, closing_log_event|null, "
-            "candidate_event_ids[], dependent_event_ids[]?, window_before?, window_after?, revert_order_event_ids[], "
-            "candidate_events[], excluded_events[], revertible, reverted_events[], reason?, suggested_revert_events_args[]?"
+            "candidate_event_ids[], dependent_event_ids[]?, window_before?, window_after?, max_gap_seconds?, "
+            "boundary_events[]?, revert_order_event_ids[], candidate_events[], excluded_events[], revertible, "
+            "reverted_events[], reason?, suggested_revert_events_args[]?"
         ),
         examples=[
             "grasp --project grasp-wiki revert-plan <event-id> --scope log-batch",
             "grasp --project grasp-wiki revert-plan <event-id> --scope same-page-dependents",
             "grasp --project grasp-wiki revert-plan <event-id> --scope event-window --after 2",
+            "grasp --project grasp-wiki revert-plan <event-id> --scope time-burst --max-gap-seconds 120",
             "grasp --project grasp-wiki --json revert-plan <event-id> --scope log-batch --output wiki",
         ],
         notes=[
@@ -1184,13 +1188,15 @@ def build_parser() -> argparse.ArgumentParser:
             "log-batch is for file-back style workflows that append one log entry after a group of page writes.",
             "same-page-dependents mirrors revert-event --include-dependents planning without mutating.",
             "event-window is explicit sequence planning: pass --before and/or --after to bound the event_sequence window.",
+            "time-burst is explicit temporal planning: pass --max-gap-seconds to bound adjacent event gaps; it does not cross log_append boundaries.",
             "Use the returned candidate_event_ids with revert-events, then run revert-events --dry-run before mutating.",
         ],
     )
     revert_plan_parser.add_argument("event_id", help="Anchor SQLite event id inside the work unit to plan.")
-    revert_plan_parser.add_argument("--scope", choices=["log-batch", "same-page-dependents", "event-window"], default="log-batch", help="Planning scope to infer around the anchor event.")
+    revert_plan_parser.add_argument("--scope", choices=["log-batch", "same-page-dependents", "event-window", "time-burst"], default="log-batch", help="Planning scope to infer around the anchor event.")
     revert_plan_parser.add_argument("--before", type=int, default=0, help="For --scope event-window, include this many SQLite events before the anchor.")
     revert_plan_parser.add_argument("--after", type=int, default=0, help="For --scope event-window, include this many SQLite events after the anchor.")
+    revert_plan_parser.add_argument("--max-gap-seconds", type=float, default=None, help="For --scope time-burst, include adjacent SQLite events while created_at gaps are at most this many seconds.")
     revert_plan_parser.add_argument("--output", type=Path, help="Optional projection output folder to include in suggested revert-events args.")
 
     replay_journal_parser = add_command_parser(
@@ -3172,12 +3178,17 @@ def run_revert_plan(store: SQLiteStore, args: argparse.Namespace) -> dict[str, A
     window_after = int(getattr(args, "after", 0) or 0)
     if args.scope != "event-window" and (window_before or window_after):
         raise ValueError("--before/--after are only valid with --scope event-window")
+    max_gap_seconds = getattr(args, "max_gap_seconds", None)
+    if args.scope != "time-burst" and max_gap_seconds is not None:
+        raise ValueError("--max-gap-seconds is only valid with --scope time-burst")
     if args.scope == "log-batch":
         return log_batch_revert_plan(store, args, selected_project, sqlite_events, anchor)
     if args.scope == "same-page-dependents":
         return same_page_dependents_revert_plan(store, args, selected_project, sqlite_events, anchor)
     if args.scope == "event-window":
         return event_window_revert_plan(store, args, selected_project, sqlite_events, anchor)
+    if args.scope == "time-burst":
+        return time_burst_revert_plan(store, args, selected_project, sqlite_events, anchor)
     raise ValueError(f"unsupported revert-plan scope: {args.scope}")
 
 
@@ -3427,8 +3438,154 @@ def event_window_revert_plan(
     return result
 
 
+def time_burst_revert_plan(
+    store: SQLiteStore,
+    args: argparse.Namespace,
+    project: str,
+    sqlite_events: list[dict[str, Any]],
+    anchor: dict[str, Any],
+) -> dict[str, Any]:
+    max_gap_seconds = float(args.max_gap_seconds or 0)
+    if not math.isfinite(max_gap_seconds) or max_gap_seconds <= 0:
+        raise ValueError("--scope time-burst requires --max-gap-seconds to be a finite positive number")
+
+    events = sorted(sqlite_events, key=event_sequence)
+    anchor_index = next(
+        index
+        for index, event in enumerate(events)
+        if event.get("event_id") == anchor.get("event_id")
+    )
+    reverted_ids = reverted_target_event_ids(sqlite_events)
+    excluded_events: list[dict[str, Any]] = []
+    anchor_exclusion = revert_plan_exclusion_reason(anchor, reverted_ids)
+    if anchor_exclusion:
+        excluded_events.append(revert_plan_event_summary(anchor, reason=anchor_exclusion))
+        return {
+            "project": project,
+            "scope": args.scope,
+            "anchor_event_id": anchor["event_id"],
+            "anchor_event": revert_plan_event_summary(anchor),
+            "complete": True,
+            "previous_log_event": None,
+            "closing_log_event": None,
+            "max_gap_seconds": max_gap_seconds,
+            "candidate_event_ids": [],
+            "revert_order_event_ids": [],
+            "candidate_events": [],
+            "excluded_events": excluded_events,
+            "boundary_events": [],
+            "revertible": False,
+            "reverted_events": [],
+            "reason": f"anchor event is not an active reversible target: {anchor_exclusion}",
+        }
+
+    start_index = anchor_index
+    end_index = anchor_index + 1
+    boundary_events: list[dict[str, Any]] = []
+
+    while start_index > 0:
+        outside = events[start_index - 1]
+        current = events[start_index]
+        boundary_reason = time_burst_boundary_reason(outside, current, max_gap_seconds, anchor)
+        if boundary_reason:
+            boundary_events.append(revert_plan_event_summary(outside, reason=boundary_reason))
+            break
+        start_index -= 1
+
+    while end_index < len(events):
+        previous = events[end_index - 1]
+        outside = events[end_index]
+        boundary_reason = time_burst_boundary_reason(previous, outside, max_gap_seconds, anchor)
+        if boundary_reason:
+            boundary_events.append(revert_plan_event_summary(outside, reason=boundary_reason))
+            break
+        end_index += 1
+
+    burst_events = events[start_index:end_index]
+    candidates: list[dict[str, Any]] = []
+    for event in burst_events:
+        exclusion_reason = revert_plan_exclusion_reason(event, reverted_ids)
+        if exclusion_reason:
+            excluded_events.append(revert_plan_event_summary(event, reason=exclusion_reason))
+            continue
+        candidates.append(event)
+
+    targets = sorted(candidates, key=event_sequence, reverse=True)
+    check = check_revert_plan_revertible(store, targets)
+    candidate_event_ids = [event["event_id"] for event in candidates]
+    result: dict[str, Any] = {
+        "project": project,
+        "scope": args.scope,
+        "anchor_event_id": anchor["event_id"],
+        "anchor_event": revert_plan_event_summary(anchor),
+        "complete": True,
+        "previous_log_event": None,
+        "closing_log_event": None,
+        "max_gap_seconds": max_gap_seconds,
+        "burst_start_event_sequence": event_sequence(burst_events[0]) if burst_events else None,
+        "burst_end_event_sequence": event_sequence(burst_events[-1]) if burst_events else None,
+        "burst_start_created_at": burst_events[0].get("created_at") if burst_events else None,
+        "burst_end_created_at": burst_events[-1].get("created_at") if burst_events else None,
+        "candidate_event_ids": candidate_event_ids,
+        "revert_order_event_ids": [event["event_id"] for event in targets],
+        "candidate_events": [revert_plan_event_summary(event) for event in candidates],
+        "excluded_events": excluded_events,
+        "boundary_events": boundary_events,
+        "revertible": check["revertible"],
+        "reverted_events": check["reverted_events"],
+    }
+    if not candidate_event_ids:
+        result["revertible"] = False
+        result["reason"] = "time-burst contains no active reversible events"
+    if not check["revertible"]:
+        result["reason"] = check["reason"]
+    if args.output is not None and candidate_event_ids:
+        result["suggested_revert_events_args"] = [
+            "revert-events",
+            *candidate_event_ids,
+            "--output",
+            str(args.output),
+        ]
+    return result
+
+
 def event_sequence(event: dict[str, Any]) -> int:
     return int(event.get("event_sequence") or 0)
+
+
+def event_created_at_epoch(event: dict[str, Any]) -> float:
+    value = str(event.get("created_at") or "")
+    if not value:
+        raise ValueError(f"event has no created_at timestamp: {event.get('event_id')}")
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    try:
+        timestamp = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError(f"event has invalid created_at timestamp: {event.get('event_id')}: {event.get('created_at')}") from error
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.timestamp()
+
+
+def event_time_gap_seconds(first: dict[str, Any], second: dict[str, Any]) -> float:
+    return abs(event_created_at_epoch(second) - event_created_at_epoch(first))
+
+
+def time_burst_boundary_reason(
+    first: dict[str, Any],
+    second: dict[str, Any],
+    max_gap_seconds: float,
+    anchor: dict[str, Any],
+) -> str | None:
+    if first.get("event_type") == "log_append" and first.get("event_id") != anchor.get("event_id"):
+        return "log_append boundary"
+    if second.get("event_type") == "log_append" and second.get("event_id") != anchor.get("event_id"):
+        return "log_append boundary"
+    gap_seconds = event_time_gap_seconds(first, second)
+    if gap_seconds > max_gap_seconds:
+        return f"time gap {gap_seconds:g}s exceeds max_gap_seconds {max_gap_seconds:g}"
+    return None
 
 
 def first_log_append_at_or_after(events: list[dict[str, Any]], sequence: int) -> dict[str, Any] | None:
@@ -5549,6 +5706,8 @@ def format_revert_plan(result: dict[str, Any]) -> str:
         text += f"closing_log_event: {result['closing_log_event'].get('event_id')}\n"
     if "window_before" in result or "window_after" in result:
         text += f"window: before={result.get('window_before', 0)} after={result.get('window_after', 0)}\n"
+    if "max_gap_seconds" in result:
+        text += f"time_burst_max_gap_seconds: {result.get('max_gap_seconds')}\n"
     order = result.get("revert_order_event_ids") or []
     if order:
         text += "revert_order:\n"
@@ -5557,6 +5716,10 @@ def format_revert_plan(result: dict[str, Any]) -> str:
     if excluded:
         text += "excluded:\n"
         text += "".join(f"- {event.get('event_id')} ({event.get('reason')})\n" for event in excluded)
+    boundaries = result.get("boundary_events") or []
+    if boundaries:
+        text += "boundaries:\n"
+        text += "".join(f"- {event.get('event_id')} ({event.get('reason')})\n" for event in boundaries)
     if result.get("suggested_revert_events_args"):
         text += "suggested_revert_events_args:\n"
         text += " ".join(result["suggested_revert_events_args"]) + "\n"

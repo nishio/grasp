@@ -1290,3 +1290,8 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 - implemented: revert-plan <event-id> --scope event-window --before/--after returns a bounded multi-page event_sequence rollback candidate set without log-batch boundaries.
 - tests: covered two page_update events across different pages with no log entry and verified plan output without store/projection mutation.
 - docs: bumped compatibility version to 1.8.28 and narrowed remaining revert planning to semantic multi-page work-unit inference beyond log-batch, same-page, or explicit event-window boundaries.
+
+## [2026-06-27 23:17] implementation | add time-burst revert planning
+- implemented: revert-plan <event-id> --scope time-burst --max-gap-seconds returns a bounded multi-page rollback candidate set from adjacent event created_at gaps without crossing log_append boundaries.
+- tests: covered three page_update events across different pages with a large gap after the second update, verifying the burst excludes the later event and does not mutate store/projection.
+- docs: bumped compatibility version to 1.8.29 and narrowed remaining revert planning to semantic multi-page work-unit inference beyond log-batch, same-page, explicit event-window, or time-burst boundaries.

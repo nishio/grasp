@@ -3974,6 +3974,180 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(b_text_after_plan, "# B\nnew B\n")
         self.assertEqual([row[1] for row in sqlite_event_rows_after_plan], ["page_update", "page_update"])
 
+    def test_revert_plan_time_burst_infers_multi_page_sequence_without_counting_events(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nold A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nold B\n", encoding="utf-8")
+            (root / "C.md").write_text("# C\nold C\n", encoding="utf-8")
+            a_source = Path(tmpdir) / "A-new.md"
+            b_source = Path(tmpdir) / "B-new.md"
+            c_source = Path(tmpdir) / "C-new.md"
+            a_source.write_text("# A\nnew A\n", encoding="utf-8")
+            b_source.write_text("# B\nnew B\n", encoding="utf-8")
+            c_source.write_text("# C\nnew C\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            def run_json(*args):
+                completed = subprocess.run(
+                    [sys.executable, "-m", "grasp", "--json", "--store", str(store_path), "--project", "wiki", *args],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            a_update = run_json(
+                "write-page",
+                "A",
+                "--from-file",
+                str(a_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            b_update = run_json(
+                "write-page",
+                "B",
+                "--from-file",
+                str(b_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            c_update = run_json(
+                "write-page",
+                "C",
+                "--from-file",
+                str(c_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                connection.executemany(
+                    """
+                    UPDATE events
+                    SET created_at = ?
+                    WHERE event_id = ?
+                    """,
+                    [
+                        ("2026-06-27T00:00:00+00:00", a_update["event_id"]),
+                        ("2026-06-27T00:01:00+00:00", b_update["event_id"]),
+                        ("2026-06-27T00:10:00+00:00", c_update["event_id"]),
+                    ],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            plan = run_json(
+                "revert-plan",
+                a_update["event_id"],
+                "--scope",
+                "time-burst",
+                "--max-gap-seconds",
+                "120",
+                "--output",
+                str(root),
+            )
+            invalid_gap = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "revert-plan",
+                    a_update["event_id"],
+                    "--scope",
+                    "time-burst",
+                    "--max-gap-seconds",
+                    "nan",
+                ],
+                check=False,
+                text=True,
+                capture_output=True,
+            )
+            a_text_after_plan = (root / "A.md").read_text(encoding="utf-8")
+            b_text_after_plan = (root / "B.md").read_text(encoding="utf-8")
+            c_text_after_plan = (root / "C.md").read_text(encoding="utf-8")
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows_after_plan = connection.execute(
+                    """
+                    SELECT event_id, event_type
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+
+        self.assertEqual(plan["scope"], "time-burst")
+        self.assertTrue(plan["complete"])
+        self.assertTrue(plan["revertible"])
+        self.assertEqual(plan["max_gap_seconds"], 120.0)
+        self.assertEqual(
+            plan["candidate_event_ids"],
+            [a_update["event_id"], b_update["event_id"]],
+        )
+        self.assertEqual(
+            plan["revert_order_event_ids"],
+            [b_update["event_id"], a_update["event_id"]],
+        )
+        self.assertEqual(
+            [event["event_type"] for event in plan["candidate_events"]],
+            ["page_update", "page_update"],
+        )
+        self.assertEqual(plan["excluded_events"], [])
+        self.assertEqual([event["event_id"] for event in plan["boundary_events"]], [c_update["event_id"]])
+        self.assertIn("exceeds max_gap_seconds", plan["boundary_events"][0]["reason"])
+        self.assertNotEqual(invalid_gap.returncode, 0)
+        self.assertIn("finite positive number", invalid_gap.stderr)
+        self.assertEqual(
+            [event["target_event_id"] for event in plan["reverted_events"]],
+            [b_update["event_id"], a_update["event_id"]],
+        )
+        self.assertEqual(
+            plan["suggested_revert_events_args"],
+            [
+                "revert-events",
+                a_update["event_id"],
+                b_update["event_id"],
+                "--output",
+                str(root),
+            ],
+        )
+        self.assertEqual(a_text_after_plan, "# A\nnew A\n")
+        self.assertEqual(b_text_after_plan, "# B\nnew B\n")
+        self.assertEqual(c_text_after_plan, "# C\nnew C\n")
+        self.assertEqual(
+            [row[1] for row in sqlite_event_rows_after_plan],
+            ["page_update", "page_update", "page_update"],
+        )
+
     def test_replay_journal_page_update_tolerates_line_id_drift_when_text_matches(self):
         def event(event_type, event_id, payload):
             return {
