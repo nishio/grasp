@@ -49,7 +49,7 @@ grasp/
 ### Ingest / File back
 設計対話や Codex の作業ログを raw/ に置いて ingest、または会話の洞察を file back。実装済み事実なら `entities/`、未実装なら [[grasp-backlog]]、判断なら `decisions/` に。log に `## [YYYY-MM-DD HH:MM] <op> | <desc>`。
 
-`wiki.grasp/events.jsonl` がある場合、file back は **grasp write first**。まず `git fetch origin main` 後に `python3 scripts/check_file_back_preflight.py` を走らせ、remote 分岐なし / wiki・journal dirty なし / `write-status --strict` / SQLite authority projection を確認してから、`append-section` / `write-page` / `append-log` を `--journal wiki.grasp/events.jsonl --output wiki` 付きで使う。write 後に `write-status --strict` と `export-markdown --json --check | python3 scripts/check_projection_policy.py` と lint が通らない時、または任意 frontmatter merge / canonical docs など grasp alpha が表現できない時だけ direct Markdown patch に fallback し、理由を log に残す。
+`wiki.grasp/events.jsonl` がある場合、file back は **grasp write first**。まず `git fetch origin main` 後に `python3 scripts/check_file_back_preflight.py` を走らせ、remote 分岐なし / wiki・journal dirty なし / `write-status --strict` / SQLite authority projection を確認してから、`append-section` / `write-page` / `append-log` を `--journal wiki.grasp/events.jsonl --output wiki` 付きで使う。write 後に `python3 scripts/check_file_back_postwrite.py` が通らない時、または任意 frontmatter merge / canonical docs など grasp alpha が表現できない時だけ direct Markdown patch に fallback し、理由を log に残す。
 
 同じ SQLite store / `wiki.grasp/events.jsonl` に対する write 系 command は **直列実行**する。並列に `write-page` などを投げると journal append と store update の順序が interleave し、projection が一時的に stale になる。起きた場合は対象 page を直列で再 `write-page --from-file` し、`write-status --strict` / `export-markdown --json --check | python3 scripts/check_projection_policy.py` / `replay-journal --check` で clean に戻す。
 

@@ -68,6 +68,8 @@ It supersedes [[llm-wiki-infra-fast-path-plan]] as an implementation plan. The o
 
 `scripts/check_file_back_preflight.py` wraps the guarded file-back preflight. It checks that `origin/main...HEAD` is empty after fetch, `wiki/` and `wiki.grasp/events.jsonl` are clean before writes, `write-status --strict` is clean, and the projection policy check passes. This moves the Phase 6 dogfood path from remembered command sequence to an executable gate.
 
+`scripts/check_file_back_postwrite.py` wraps the write-after verification. It checks `write-status --strict`, `export-markdown --json --check` projection policy, `scripts/lint_wiki.py`, and `git diff --check` after grasp writes have updated `wiki/` and `wiki.grasp/events.jsonl`. This makes the post-write side of the Phase 6 dogfood loop executable too.
+
 This does **not** yet make every authority boundary final. `sync`, `acquire`, generated Markdown backup/review policy, and file-back cutover still need migration work.
 
 ## Why This Replaces The Fast Path
@@ -94,14 +96,14 @@ Therefore, adding more guards to `events.jsonl` is only a temporary mitigation. 
 | 3. Write command migration | Core write verbs update SQLite SSoT | Move `write-page`, `write-page --create`, `rename-page`, log record import, and append-style helpers to the transaction helper | Mostly complete for Markdown authoring alpha: `adopt-markdown`, `write-page` / `write-page --create`, `append-section` / `append-log`, `rename-page`, `import-log-records`, and projection export failure rollback write SQLite events |
 | 4. Export-only Markdown | Projection becomes a read side effect, not authority | Make `export-markdown` read from canonical SQLite. Keep `--check`; make direct `import --markdown` an adoption/emergency path, not reconcile default | In progress: `export-markdown` returns `projection_policy` proving SQLite authority and git-tracked projection role; remaining proof is normal file-back without direct Markdown patch |
 | 5. Native review/recovery | Losing git-diffable JSONL is compensated | Rebuild `history`, `revert-event`, status, and replay/check surfaces from SQLite events/state; add a purpose-named projection diff only if needed | In progress: `write-status` shows SQLite event count / last event and strict-fails SQLite/JSONL event stream mismatch; SQLite-sourced `revert-event` and projection failure rollback write state + `event_revert` atomically; `log-records` / `history` read SQLite log events when available; old `write-diff` removed in `1.8.8` |
-| 6. File-back cutover | Daily wiki edits use the new authority path | Update file-back skill / repo commands to call canonical SQLite write first, then export Markdown, lint, and commit projection | In progress: repo-local and local user-level file-back instructions now run an executable preflight for remote divergence, dirty wiki/journal paths, strict status, and projection policy; done when three consecutive file-backs land through SQLite SSoT without direct Markdown patch fallback |
+| 6. File-back cutover | Daily wiki edits use the new authority path | Update file-back skill / repo commands to call canonical SQLite write first, then export Markdown, lint, and commit projection | In progress: repo-local and local user-level file-back instructions now run executable preflight and postwrite checks around the grasp write path; done when three consecutive file-backs land through SQLite SSoT without direct Markdown patch fallback |
 | 7. Retire JSONL authority | Old alpha artifacts cannot mislead implementers | Mark `wiki.grasp/events.jsonl` as legacy import/audit artifact or remove it from the active path; update docs/AGENTS when the command surface changes | No current instruction tells Codex to treat JSONL as the write authority |
 
 ## Immediate Next Slice
 
-With projection policy and preflight now enforced by repo-local tooling, the next slice is guarded file-back dogfood.
+With projection policy, preflight, and postwrite checks now enforced by repo-local tooling, the next slice is guarded file-back dogfood.
 
-1. Perform the next three wiki file-backs using `git fetch origin main` + `scripts/check_file_back_preflight.py`, grasp write, then `write-status --strict` and `export-markdown --json --check | scripts/check_projection_policy.py` after write.
+1. Perform the next three wiki file-backs using `git fetch origin main` + `scripts/check_file_back_preflight.py`, grasp write, then `scripts/check_file_back_postwrite.py`.
 2. Clarify generated Markdown backup/review policy only if those guarded file-backs expose a concrete recovery workflow gap.
 3. Retire remaining JSONL-authority wording only after the guarded file-back streak lands without direct Markdown patch fallback.
 

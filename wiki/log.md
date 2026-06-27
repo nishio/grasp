@@ -1165,3 +1165,8 @@ Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki
 - Added `scripts/check_file_back_preflight.py` to fail file-back before writes when `origin/main...HEAD` is non-empty, wiki/journal paths are dirty, `write-status --strict` is not clean, or projection policy is not SQLite-authority clean.
 - Updated `/next`, `/ship-next`, AGENTS/CLAUDE, repo `grasp` skill, and local `file-back` skill to use the preflight when available.
 - Dogfood: the preflight passed on the clean wiki/journal state before this grasp write-first file-back; targeted tests cover dirty path, divergence, and write-status guard failures.
+
+## [2026-06-27 18:01] implementation+file-back | file-back postwrite guard
+- Added `scripts/check_file_back_postwrite.py` to verify `write-status --strict`, SQLite-authority projection policy, wiki lint, and `git diff --check` after grasp write-first file-backs.
+- Updated `/next`, `/ship-next`, AGENTS/CLAUDE, repo `grasp` skill, and local `file-back` skill to use the postwrite checker when available.
+- Dogfood: preflight passed before this file-back, and the new postwrite checker passed on the clean projection before the wiki write.

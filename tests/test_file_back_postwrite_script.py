@@ -1,0 +1,95 @@
+import json
+import subprocess
+import unittest
+from pathlib import Path
+
+from scripts import check_file_back_postwrite as postwrite
+
+
+def clean_write_status():
+    return {
+        "strict_ok": True,
+        "projection": {"ok": True},
+        "journal_exists": True,
+        "event_streams_match": True,
+        "journal_log_stale": False,
+    }
+
+
+def clean_projection():
+    return {
+        "ok": True,
+        "projection_policy": {
+            "authority": "sqlite",
+            "base": "stored_markdown_lines",
+            "output_role": "git_tracked_projection",
+            "write_mode": "check",
+            "generated_overlays": [],
+        },
+    }
+
+
+class FileBackPostwriteScriptTests(unittest.TestCase):
+    def run_with_fake_commands(self, fake_run_command):
+        original_run_command = postwrite.run_command
+        try:
+            postwrite.run_command = fake_run_command
+            return postwrite.run_postwrite_checks(
+                Path("."),
+                store=".grasp/file-back.sqlite",
+                project="grasp-wiki",
+                journal="wiki.grasp/events.jsonl",
+                output="wiki",
+                lint=True,
+                diff_check=True,
+            )
+        finally:
+            postwrite.run_command = original_run_command
+
+    def test_postwrite_accepts_clean_status_projection_lint_and_diff(self):
+        def fake_run_command(args, *, cwd):
+            if "write-status" in args:
+                return subprocess.CompletedProcess(args, 0, json.dumps(clean_write_status()), "")
+            if "export-markdown" in args:
+                return subprocess.CompletedProcess(args, 0, json.dumps(clean_projection()), "")
+            if args[-1] in {"scripts/lint_wiki.py", "--check"}:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            self.fail(f"unexpected command: {args}")
+
+        self.assertEqual(self.run_with_fake_commands(fake_run_command), [])
+
+    def test_postwrite_rejects_dirty_projection_policy(self):
+        def fake_run_command(args, *, cwd):
+            if "write-status" in args:
+                return subprocess.CompletedProcess(args, 0, json.dumps(clean_write_status()), "")
+            if "export-markdown" in args:
+                payload = clean_projection()
+                payload["ok"] = False
+                payload["changed_files"] = ["wiki/log.md"]
+                return subprocess.CompletedProcess(args, 1, json.dumps(payload), "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        errors = self.run_with_fake_commands(fake_run_command)
+
+        self.assertTrue(errors)
+        self.assertIn("projection is not clean", "\n".join(errors))
+
+    def test_postwrite_rejects_lint_failure(self):
+        def fake_run_command(args, *, cwd):
+            if "write-status" in args:
+                return subprocess.CompletedProcess(args, 0, json.dumps(clean_write_status()), "")
+            if "export-markdown" in args:
+                return subprocess.CompletedProcess(args, 0, json.dumps(clean_projection()), "")
+            if args[-1] == "scripts/lint_wiki.py":
+                return subprocess.CompletedProcess(args, 1, "", "lint failed")
+            if args[-1] == "--check":
+                return subprocess.CompletedProcess(args, 0, "", "")
+            self.fail(f"unexpected command: {args}")
+
+        errors = self.run_with_fake_commands(fake_run_command)
+
+        self.assertEqual(errors, ["wiki lint failed with exit 1: lint failed"])
+
+
+if __name__ == "__main__":
+    unittest.main()
