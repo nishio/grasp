@@ -3365,6 +3365,17 @@ class CliHelpTests(unittest.TestCase):
                 json.loads(line)
                 for line in journal_path.read_text(encoding="utf-8").splitlines()
             ]
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_id, event_type, project, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
             old_exists_after_revert = (root / "Old.md").exists()
             new_exists_after_revert = (root / "New.md").exists()
 
@@ -3378,6 +3389,15 @@ class CliHelpTests(unittest.TestCase):
             [event["event_type"] for event in journal_events],
             ["page_create", "page_create", "page_rename", "event_revert"],
         )
+        self.assertEqual(len(sqlite_event_rows), 1)
+        self.assertEqual(sqlite_event_rows[0][0], rename_result["event_id"])
+        self.assertEqual(sqlite_event_rows[0][1], "page_rename")
+        self.assertEqual(sqlite_event_rows[0][2], "wiki")
+        sqlite_rename_payload = json.loads(sqlite_event_rows[0][3])
+        self.assertEqual(sqlite_rename_payload["previous_title"], "Old")
+        self.assertEqual(sqlite_rename_payload["title"], "New")
+        self.assertEqual(sqlite_rename_payload["previous_source_path"], "Old.md")
+        self.assertEqual(sqlite_rename_payload["source_path"], "New.md")
         self.assertEqual(rename_result["previous_title"], "Old")
         self.assertEqual(rename_result["title"], "New")
         self.assertEqual(rename_result["event_type"], "page_rename")

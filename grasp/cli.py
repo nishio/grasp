@@ -2246,29 +2246,13 @@ def write_page_replacement_lines(args: argparse.Namespace) -> list[str]:
 
 def run_rename_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = journal_path_for_output(args.output, args.journal)
-    rename_result = store.rename_markdown_page(
+    rename_result, event = store.rename_markdown_page_with_event(
         args.target,
         args.new_title,
         target_kind=args.target_kind,
         new_source_path=args.new_path,
         update_heading=not args.no_heading_update,
-    )
-    event = make_journal_event(
-        "page_rename",
-        project=rename_result["project"],
-        payload={
-            "page_id": rename_result["page"]["id"],
-            "previous_title": rename_result["previous_title"],
-            "title": rename_result["title"],
-            "previous_source_path": rename_result["previous_source_path"],
-            "source_path": rename_result["source_path"],
-            "previous_aliases": rename_result["previous_aliases"],
-            "aliases": rename_result["aliases"],
-            "previous_lines": rename_result["previous_lines"],
-            "lines": rename_result["lines"],
-            "heading_updated": rename_result["heading_updated"],
-            "message": args.message,
-        },
+        message=args.message,
     )
     def project_rename() -> dict[str, Any]:
         removed_files = remove_previous_projection_file(
