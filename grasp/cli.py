@@ -1177,6 +1177,8 @@ def build_parser() -> argparse.ArgumentParser:
             "closing log_append. Use --scope subject-log when the log-batch boundary is too broad but its closing "
             "log entry names the intended pages with wikilinks or Markdown paths. Use --scope log-page-subjects "
             "when legacy/direct Markdown history updated a log page with write-page instead of log_append. "
+            "Use --scope content-subjects when page content changes share wikilinks or Markdown path subjects "
+            "but no explicit log/session/window boundary describes the work unit. "
             "Use --scope same-page-dependents when no log-batch boundary exists and the "
             "anchor is blocked by later active events on the same page. Use --scope event-window with --before/--after "
             "when the intended multi-page unit is a small contiguous SQLite event_sequence window and no semantic "
@@ -1187,8 +1189,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "project, scope, anchor_event_id, complete, previous_log_event|null, closing_log_event|null, "
-            "candidate_event_ids[], dependent_event_ids[]?, subject_log_subjects[]?, log_page_subjects[]?, window_before?, "
-            "window_after?, max_gap_seconds?, session_id?, session_actor?, boundary_events[]?, "
+            "candidate_event_ids[], dependent_event_ids[]?, subject_log_subjects[]?, log_page_subjects[]?, "
+            "content_subjects[]?, window_before?, window_after?, max_gap_seconds?, session_id?, session_actor?, boundary_events[]?, "
             "revert_order_event_ids[], candidate_events[], excluded_events[], revertible, reverted_events[], "
             "reason?, suggested_revert_events_args[]?"
         ),
@@ -1196,6 +1198,7 @@ def build_parser() -> argparse.ArgumentParser:
             "grasp --project grasp-wiki revert-plan <event-id> --scope log-batch",
             "grasp --project grasp-wiki revert-plan <event-id> --scope subject-log",
             "grasp --project grasp-wiki revert-plan <event-id> --scope log-page-subjects",
+            "grasp --project grasp-wiki revert-plan <event-id> --scope content-subjects",
             "grasp --project grasp-wiki revert-plan <event-id> --scope same-page-dependents",
             "grasp --project grasp-wiki revert-plan <event-id> --scope event-window --after 2",
             "grasp --project grasp-wiki revert-plan <event-id> --scope time-burst --max-gap-seconds 120",
@@ -1207,6 +1210,7 @@ def build_parser() -> argparse.ArgumentParser:
             "log-batch is for file-back style workflows that append one log entry after a group of page writes.",
             "subject-log filters a log-batch to page events named by the closing log entry subjects, and includes the closing log_append.",
             "log-page-subjects handles legacy/direct Markdown history where the closing log entry is inside a log page_update.",
+            "content-subjects matches page events by subjects extracted from changed page lines; it is semantic but intentionally heuristic.",
             "same-page-dependents mirrors revert-event --include-dependents planning without mutating.",
             "event-window is explicit sequence planning: pass --before and/or --after to bound the event_sequence window.",
             "time-burst is explicit temporal planning: pass --max-gap-seconds to bound adjacent event gaps; it does not cross log_append boundaries.",
@@ -1215,7 +1219,7 @@ def build_parser() -> argparse.ArgumentParser:
         ],
     )
     revert_plan_parser.add_argument("event_id", help="Anchor SQLite event id inside the work unit to plan.")
-    revert_plan_parser.add_argument("--scope", choices=["log-batch", "subject-log", "log-page-subjects", "same-page-dependents", "event-window", "time-burst", "session"], default="log-batch", help="Planning scope to infer around the anchor event.")
+    revert_plan_parser.add_argument("--scope", choices=["log-batch", "subject-log", "log-page-subjects", "content-subjects", "same-page-dependents", "event-window", "time-burst", "session"], default="log-batch", help="Planning scope to infer around the anchor event.")
     revert_plan_parser.add_argument("--before", type=int, default=0, help="For --scope event-window, include this many SQLite events before the anchor.")
     revert_plan_parser.add_argument("--after", type=int, default=0, help="For --scope event-window, include this many SQLite events after the anchor.")
     revert_plan_parser.add_argument("--max-gap-seconds", type=float, default=None, help="For --scope time-burst, include adjacent SQLite events while created_at gaps are at most this many seconds.")
@@ -3243,6 +3247,8 @@ def run_revert_plan(store: SQLiteStore, args: argparse.Namespace) -> dict[str, A
         return subject_log_revert_plan(store, args, selected_project, sqlite_events, anchor)
     if args.scope == "log-page-subjects":
         return log_page_subjects_revert_plan(store, args, selected_project, sqlite_events, anchor)
+    if args.scope == "content-subjects":
+        return content_subjects_revert_plan(store, args, selected_project, sqlite_events, anchor)
     if args.scope == "same-page-dependents":
         return same_page_dependents_revert_plan(store, args, selected_project, sqlite_events, anchor)
     if args.scope == "event-window":
@@ -3640,6 +3646,140 @@ def log_page_subjects_revert_plan(
     if not candidate_event_ids:
         result["revertible"] = False
         result["reason"] = "log-page-subjects contains no active reversible events"
+    if not check["revertible"]:
+        result["reason"] = check["reason"]
+    if args.output is not None and candidate_event_ids:
+        result["suggested_revert_events_args"] = [
+            "revert-events",
+            *candidate_event_ids,
+            "--output",
+            str(args.output),
+        ]
+    return result
+
+
+def content_subjects_revert_plan(
+    store: SQLiteStore,
+    args: argparse.Namespace,
+    project: str,
+    sqlite_events: list[dict[str, Any]],
+    anchor: dict[str, Any],
+) -> dict[str, Any]:
+    events = sorted(sqlite_events, key=event_sequence)
+    anchor_sequence = event_sequence(anchor)
+    baseline_sequence = initial_baseline_end_sequence_before(events, anchor_sequence)
+    closing_log = first_log_boundary_at_or_after(events, anchor_sequence)
+    previous_log = (
+        last_log_boundary_before(events, event_sequence(closing_log))
+        if closing_log is not None
+        else None
+    )
+    start_sequence = (
+        max(event_sequence(previous_log), baseline_sequence)
+        if previous_log is not None
+        else baseline_sequence
+    )
+    end_sequence = event_sequence(closing_log) if closing_log is not None else event_sequence(events[-1])
+    page_target_norms = event_page_target_norms_by_id(store, project)
+    reverted_ids = reverted_target_event_ids(sqlite_events)
+    excluded_events: list[dict[str, Any]] = []
+    anchor_exclusion = revert_plan_exclusion_reason(anchor, reverted_ids)
+    anchor_subjects = event_changed_content_subjects(anchor)
+    anchor_subject_norms = {normalize_title(subject) for subject in anchor_subjects}
+    anchor_target_norms = event_target_subject_norms(anchor, page_target_norms)
+    if anchor_exclusion:
+        excluded_events.append(revert_plan_event_summary(anchor, reason=anchor_exclusion))
+        return {
+            "project": project,
+            "scope": args.scope,
+            "anchor_event_id": anchor["event_id"],
+            "anchor_event": revert_plan_event_summary(anchor),
+            "complete": bool(anchor_subject_norms),
+            "previous_log_event": revert_plan_event_summary(previous_log) if previous_log is not None else None,
+            "closing_log_event": revert_plan_event_summary(closing_log) if closing_log is not None else None,
+            "content_subjects": anchor_subjects,
+            "content_subject_norms": sorted(anchor_subject_norms),
+            "anchor_target_norms": sorted(anchor_target_norms),
+            "candidate_event_ids": [],
+            "revert_order_event_ids": [],
+            "candidate_events": [],
+            "excluded_events": excluded_events,
+            "revertible": False,
+            "reverted_events": [],
+            "reason": f"anchor event is not an active reversible target: {anchor_exclusion}",
+        }
+    if not anchor_subject_norms:
+        return {
+            "project": project,
+            "scope": args.scope,
+            "anchor_event_id": anchor["event_id"],
+            "anchor_event": revert_plan_event_summary(anchor),
+            "complete": False,
+            "previous_log_event": revert_plan_event_summary(previous_log) if previous_log is not None else None,
+            "closing_log_event": revert_plan_event_summary(closing_log) if closing_log is not None else None,
+            "content_subjects": anchor_subjects,
+            "content_subject_norms": [],
+            "anchor_target_norms": sorted(anchor_target_norms),
+            "candidate_event_ids": [],
+            "revert_order_event_ids": [],
+            "candidate_events": [],
+            "excluded_events": [],
+            "revertible": False,
+            "reverted_events": [],
+            "reason": "anchor event changed lines have no wikilink or Markdown path subjects",
+        }
+
+    candidates: list[dict[str, Any]] = []
+    for event in events:
+        if not (start_sequence < event_sequence(event) <= end_sequence):
+            continue
+        event_changed_subjects = event_changed_content_subjects(event)
+        event_changed_norms = {normalize_title(subject) for subject in event_changed_subjects}
+        event_target_norms = event_target_subject_norms(event, page_target_norms)
+        is_anchor = event.get("event_id") == anchor.get("event_id")
+        matches_subject = bool(event_changed_norms & anchor_subject_norms)
+        matches_target = bool(event_target_norms & anchor_subject_norms)
+        mentions_anchor_target = bool(event_changed_norms & anchor_target_norms)
+        if not (is_anchor or matches_subject or matches_target or mentions_anchor_target):
+            excluded_events.append(
+                revert_plan_event_summary(
+                    event,
+                    reason="event changed subjects and target do not overlap anchor content subjects",
+                )
+            )
+            continue
+        exclusion_reason = revert_plan_exclusion_reason(event, reverted_ids)
+        if exclusion_reason:
+            excluded_events.append(revert_plan_event_summary(event, reason=exclusion_reason))
+            continue
+        candidates.append(event)
+
+    targets = sorted(candidates, key=event_sequence, reverse=True)
+    check = check_revert_plan_revertible(store, targets)
+    candidate_event_ids = [event["event_id"] for event in candidates]
+    result: dict[str, Any] = {
+        "project": project,
+        "scope": args.scope,
+        "anchor_event_id": anchor["event_id"],
+        "anchor_event": revert_plan_event_summary(anchor),
+        "complete": True,
+        "previous_log_event": revert_plan_event_summary(previous_log) if previous_log is not None else None,
+        "closing_log_event": revert_plan_event_summary(closing_log) if closing_log is not None else None,
+        "content_start_after_event_sequence": start_sequence,
+        "content_end_event_sequence": end_sequence,
+        "content_subjects": anchor_subjects,
+        "content_subject_norms": sorted(anchor_subject_norms),
+        "anchor_target_norms": sorted(anchor_target_norms),
+        "candidate_event_ids": candidate_event_ids,
+        "revert_order_event_ids": [event["event_id"] for event in targets],
+        "candidate_events": [revert_plan_event_summary(event) for event in candidates],
+        "excluded_events": excluded_events,
+        "revertible": check["revertible"],
+        "reverted_events": check["reverted_events"],
+    }
+    if not candidate_event_ids:
+        result["revertible"] = False
+        result["reason"] = "content-subjects contains no active reversible events"
     if not check["revertible"]:
         result["reason"] = check["reason"]
     if args.output is not None and candidate_event_ids:
@@ -4079,17 +4219,38 @@ def log_append_event_subjects(event: dict[str, Any]) -> list[str]:
 
 
 def log_page_update_event_subjects(event: dict[str, Any]) -> list[str]:
+    return log_entry_subjects_from_lines(
+        [{"text": text} for text in event_changed_content_line_texts(event)]
+    )
+
+
+def event_changed_content_subjects(event: dict[str, Any]) -> list[str]:
+    return log_entry_subjects_from_lines(
+        [{"text": text} for text in event_changed_content_line_texts(event)]
+    )
+
+
+def event_changed_content_line_texts(event: dict[str, Any]) -> list[str]:
     payload = event.get("payload") or {}
+    event_type = event.get("event_type")
+    if event_type == "page_create":
+        return event_payload_line_texts(payload.get("lines") or [])
+    if event_type in {"section_append", "log_append"}:
+        if payload.get("inserted_lines"):
+            return event_payload_line_texts(payload.get("inserted_lines") or [])
+        return [str(line) for line in payload.get("lines") or []]
+    if event_type != "page_update":
+        return []
     previous_texts = event_payload_line_texts(payload.get("previous_lines") or [])
     current_texts = event_payload_line_texts(payload.get("lines") or [])
-    changed_lines: list[dict[str, str]] = []
+    changed_lines: list[str] = []
     matcher = SequenceMatcher(a=previous_texts, b=current_texts, autojunk=False)
     for tag, _old_start, _old_end, new_start, new_end in matcher.get_opcodes():
         if tag not in {"insert", "replace"}:
             continue
         for text in current_texts[new_start:new_end]:
-            changed_lines.append({"text": text})
-    return log_entry_subjects_from_lines(changed_lines)
+            changed_lines.append(text)
+    return changed_lines
 
 
 def event_payload_line_texts(lines: list[Any]) -> list[str]:
@@ -4231,6 +4392,17 @@ def first_log_page_update_at_or_after(events: list[dict[str, Any]], sequence: in
         if event_sequence(event) < sequence:
             continue
         if event.get("event_type") == "page_update" and event_targets_log_page(event):
+            return event
+    return None
+
+
+def first_log_boundary_at_or_after(events: list[dict[str, Any]], sequence: int) -> dict[str, Any] | None:
+    for event in events:
+        if event_sequence(event) < sequence:
+            continue
+        if event.get("event_type") == "log_append" or (
+            event.get("event_type") in {"page_create", "page_update"} and event_targets_log_page(event)
+        ):
             return event
     return None
 
@@ -6382,6 +6554,8 @@ def format_revert_plan(result: dict[str, Any]) -> str:
         text += "subject_log_subjects: " + ", ".join(result.get("subject_log_subjects") or []) + "\n"
     if result.get("log_page_subjects"):
         text += "log_page_subjects: " + ", ".join(result.get("log_page_subjects") or []) + "\n"
+    if result.get("content_subjects"):
+        text += "content_subjects: " + ", ".join(result.get("content_subjects") or []) + "\n"
     order = result.get("revert_order_event_ids") or []
     if order:
         text += "revert_order:\n"
