@@ -161,7 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--project",
         default=default_project(),
-        help="Project namespace to read/update. Defaults to $GRASP_PROJECT, or the only project in the store.",
+        help="Project namespace to read/update. Retrieval defaults to the whole store when omitted.",
     )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     parser.add_argument("--full-ids", action="store_true", help="In text output, show full stable line ids instead of local aliases.")
@@ -9080,8 +9080,22 @@ def format_edge_list(edges: list[dict[str, Any]], aliases: LineIdAliases | None 
     aliases = aliases or LineIdAliases(enabled=False)
     parts = []
     for edge in edges:
-        parts.append(f"- {edge['source_title']} {aliases.format_line_id(edge['line_id'])}: {edge['line_text']}\n")
+        meta = edge_meta_text(edge)
+        parts.append(f"- {edge['source_title']} {aliases.format_line_id(edge['line_id'])}{meta}: {edge['line_text']}\n")
     return "".join(parts)
+
+
+def edge_meta_text(edge: dict[str, Any]) -> str:
+    pieces = []
+    if edge.get("source_project"):
+        pieces.append(f"project={edge['source_project']}")
+    if edge.get("target_project"):
+        pieces.append(f"target_project={edge['target_project']}")
+    if edge.get("connection_strength"):
+        pieces.append(f"strength={edge['connection_strength']}")
+    if edge.get("link_kind"):
+        pieces.append(f"kind={edge['link_kind']}")
+    return "" if not pieces else " (" + ", ".join(pieces) + ")"
 
 
 def format_related_result(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
@@ -9146,10 +9160,11 @@ def format_related_items(related: list[dict[str, Any]], aliases: LineIdAliases |
     parts: list[str] = []
     for item in related:
         via = ", ".join(item["via"])
+        project_text = f"project={item['project']}, " if item.get("project") else ""
         if item.get("relation") in {"backlink-source", "ambiguous-handle-source"}:
-            parts.append(f"- {item['title']} (links {item['score']}, views {item['views']}; target {via})\n")
+            parts.append(f"- {item['title']} ({project_text}links {item['score']}, views {item['views']}; target {via})\n")
         else:
-            parts.append(f"- {item['title']} (score {item['score']}, views {item['views']}; via {via})\n")
+            parts.append(f"- {item['title']} ({project_text}score {item['score']}, views {item['views']}; via {via})\n")
         if "snippet_lines" in item:
             window = item.get("snippet_window")
             if window and window.get("mode") == "edge":
@@ -9205,8 +9220,9 @@ def format_path(result: dict[str, Any], aliases: LineIdAliases | None = None) ->
         parts.append(f"{titles}\n")
         for edge in path["edges"]:
             direction = "<-" if edge["direction"] == "reverse" else "->"
+            meta = edge_meta_text(edge)
             parts.append(
-                f"- {edge['source_title']} {aliases.format_line_id(edge['line_id'])} {direction} "
+                f"- {edge['source_title']} {aliases.format_line_id(edge['line_id'])}{meta} {direction} "
                 f"[{edge['target_title']}]: {edge['line_text']}\n"
             )
     if result.get("truncated"):
@@ -9410,7 +9426,8 @@ def format_search(
     else:
         for hit in hits:
             match_note = " [normalized]" if hit.get("match_mode") == "normalized" else ""
-            parts.append(f"- {hit['source_title']} {aliases.format_line_id(hit['line_id'])}{match_note}: {hit['line_text']}\n")
+            project_text = f" project={hit['project']}" if hit.get("project") else ""
+            parts.append(f"- {hit['source_title']} {aliases.format_line_id(hit['line_id'])}{project_text}{match_note}: {hit['line_text']}\n")
             window = hit.get("context_window")
             if window:
                 parts.append(
@@ -9869,9 +9886,15 @@ def format_unresolved_targets(
         return "(none)\n"
 
     for item in unresolved_targets:
+        project_text = ""
+        if item.get("projects"):
+            project_text = f", projects={','.join(item['projects'])}"
+        elif item.get("project"):
+            project_text = f", project={item['project']}"
         parts.append(
-            f"- {item['title']} (links {item['link_count']}, pages {item['source_page_count']}, views {item['total_source_views']})\n"
+            f"- {item['title']} (links {item['link_count']}, pages {item['source_page_count']}, views {item['total_source_views']}{project_text})\n"
         )
         for example in item["examples"][:2]:
-            parts.append(f"  - {example['source_title']} {aliases.format_line_id(example['line_id'])}: {example['line_text']}\n")
+            meta = edge_meta_text(example)
+            parts.append(f"  - {example['source_title']} {aliases.format_line_id(example['line_id'])}{meta}: {example['line_text']}\n")
     return "".join(parts)
