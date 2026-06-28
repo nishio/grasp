@@ -1648,3 +1648,8 @@ ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog �
 - implemented: active-lock recovery ladder now says to rerun postwrite with the lock owner GRASP_SESSION_ID when the owner is unreachable but its writes are already in the store.
 - test: preflight recovery-ladder unit test now asserts the postwrite rescue hint and lock-owner session wording.
 - judgment: this turns the external-agent half-closed runbook gap into an actionable same-session rescue path, without adding queueing or automated reconcile.
+
+## [2026-06-28 18:25] file-back | parallel substrate goal completion audit
+- audit: Done 条件1-5（並行 write safety / read-history-log surface / in-flight duplicate avoidance / deferred projection / session rollback）は current regressions と live dogfood で green。
+- result: current main は write-status strict / wiki lint / targeted parallel-agent regression suite が clean。
+- judgment: today goal complete。長い real dogfood は concrete future gap を拾う monitoring であり、queue / automated reconcile を今足す理由ではない。
