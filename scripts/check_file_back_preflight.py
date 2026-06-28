@@ -76,6 +76,7 @@ def recovery_ladder_hints(
     hints = [
         "recovery ladder:",
         f"- inspect recent ownership: python3 -m grasp --store {store} --project {project} activity --limit 20",
+        f"- inspect page claims: python3 -m grasp --store {store} --project {project} claims --include-expired",
     ]
     if "dirty file-back paths" in joined:
         hints.append(
