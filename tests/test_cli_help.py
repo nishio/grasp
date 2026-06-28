@@ -9708,6 +9708,205 @@ class CliHelpTests(unittest.TestCase):
         self.assertTrue(status["strict_ok"])
         self.assertEqual(status["strict_failures"], [])
 
+    def test_parallel_agent_dirty_guard_ladder_uses_claims_to_avoid_duplicate_work(self):
+        from scripts import check_file_back_preflight as preflight
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            root = repo_root / "wiki"
+            root.mkdir(parents=True)
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n- old B\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            init_git_repo(repo_root)
+            store_path = repo_root / ".grasp" / "authority.sqlite"
+            store_path.parent.mkdir()
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            def run_export(*args, check=True):
+                return subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "export-markdown",
+                        "--output",
+                        str(root),
+                        "--regenerate-log",
+                        *args,
+                    ],
+                    check=check,
+                    text=True,
+                    capture_output=True,
+                )
+
+            run_json("import", "--markdown", str(root))
+            claim_a = run_json(
+                "claim-page",
+                "A",
+                "--ttl-seconds",
+                "600",
+                "--message",
+                "agent A owns a dirty projection recovery",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            write_a = run_json(
+                "write-page",
+                "A",
+                "--line",
+                "# A",
+                "--line",
+                "- agent A store state",
+                "--no-journal",
+                "--defer-projection",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            (root / "A.md").write_text("# A\n- uncommitted owner draft\n", encoding="utf-8")
+
+            dirty_errors = preflight.check_dirty_paths(repo_root, ("wiki",))
+            hints = preflight.recovery_ladder_hints(
+                dirty_errors,
+                store=str(store_path),
+                project="wiki",
+                output=str(root),
+            )
+            activity_a = run_json("activity", "A", "--active-seconds", "86400")
+            claims_a = run_json("claims", "A", "--include-expired")
+            conflict_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-b",
+                    "--session-id",
+                    "session-b",
+                    "claim-page",
+                    "A",
+                ],
+                text=True,
+                capture_output=True,
+            )
+
+            if claims_a["active_claims"]:
+                claim_b = run_json(
+                    "claim-page",
+                    "B",
+                    "--ttl-seconds",
+                    "600",
+                    "--message",
+                    "agent B chooses non-owner work after recovery ladder",
+                    actor="agent-b",
+                    session_id="session-b",
+                )
+                write_b = run_json(
+                    "write-page",
+                    "B",
+                    "--line",
+                    "# B",
+                    "--line",
+                    "- agent B avoided dirty A owner work",
+                    "--no-journal",
+                    "--defer-projection",
+                    actor="agent-b",
+                    session_id="session-b",
+                )
+                log_b = run_json(
+                    "append-log",
+                    "--timestamp",
+                    "2026-06-28 16:10",
+                    "--op",
+                    "dogfood",
+                    "--summary",
+                    "dirty guard ladder avoided duplicate work",
+                    "--line",
+                    "- dirty projection guard plus claims showed session-a owns [[A]]; session-b wrote [[B]] instead",
+                    "--no-journal",
+                    "--defer-projection",
+                    actor="agent-b",
+                    session_id="session-b",
+                )
+            else:
+                self.fail("claims did not expose session A before agent B chose work")
+
+            read_a = run_json("read", "A")
+            read_b = run_json("read", "B")
+            activity_all = run_json("activity", "--active-seconds", "86400")
+            revert_plan_a = run_json("revert-plan", write_a["event_id"], "--scope", "session")
+            revert_plan_b = run_json("revert-plan", write_b["event_id"], "--scope", "session")
+            check_completed = run_export("--check", check=False)
+            refused_completed = run_export(check=False)
+
+        check_result = json.loads(check_completed.stdout)
+        joined_hints = "\n".join(hints)
+
+        self.assertEqual(len(dirty_errors), 1)
+        self.assertIn("dirty file-back paths", dirty_errors[0])
+        self.assertIn("wiki/A.md", dirty_errors[0])
+        self.assertIn("activity --limit 20", joined_hints)
+        self.assertIn("claims --include-expired", joined_hints)
+        self.assertIn("dirty projection/worktree", joined_hints)
+        self.assertEqual(activity_a["matched_events"], 2)
+        self.assertEqual(activity_a["active_claims"][0]["claim_event_id"], claim_a["claim"]["claim_event_id"])
+        self.assertEqual(activity_a["active_claims"][0]["session_id"], "session-a")
+        self.assertEqual(claims_a["active_count"], 1)
+        self.assertEqual(claims_a["active_claims"][0]["session_id"], "session-a")
+        self.assertEqual(conflict_completed.returncode, 2)
+        self.assertIn("page already has an active claim", conflict_completed.stderr)
+        self.assertEqual(claim_b["claim"]["title"], "B")
+        self.assertTrue(write_a["projection_deferred"])
+        self.assertTrue(write_b["projection_deferred"])
+        self.assertTrue(log_b["projection_deferred"])
+        self.assertEqual([line["text"] for line in read_a["lines"]], ["# A", "- agent A store state"])
+        self.assertEqual(
+            [line["text"] for line in read_b["lines"]],
+            ["# B", "- agent B avoided dirty A owner work"],
+        )
+        self.assertEqual(
+            sorted(session["session_id"] for session in activity_all["active_sessions"]),
+            ["session-a", "session-b"],
+        )
+        self.assertEqual(revert_plan_a["candidate_event_ids"], [write_a["event_id"]])
+        self.assertEqual(revert_plan_b["candidate_event_ids"], [write_b["event_id"], log_b["event_id"]])
+        self.assertEqual(check_completed.returncode, 1)
+        self.assertEqual(sorted(check_result["changed_files"]), ["A.md", "B.md", "Log.md"])
+        self.assertEqual(refused_completed.returncode, 2)
+        self.assertIn("--allow-projection-overwrite", refused_completed.stderr)
+
     def test_write_status_no_journal_strict_fails_on_sqlite_semantic_log_drift(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
