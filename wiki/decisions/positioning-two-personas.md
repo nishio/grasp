@@ -96,3 +96,36 @@ persona2 向けに振りすぎると「Obsidian-but-for-LLMs / CLI 付き graph 
 - (2) **潜在 edge を提案する半-authoring**: 低密度 corpus で価値を出すには「既存リンクを読む」を超え「リンクされていない mention を surface → come-from 昇格提案」（[[come-from-declared-gather]] §6 (c) AI default 裸）まで踏み込む要。これは retrieval でなく authoring 寄りで、Markdown adapter（release gate）の次の persona2 gate になりうる。
 
 Open Q3（「.md 束より良い」最小デモ）への含意: 低密度 corpus では graph 差が出にくいので、高密度デモ corpus を選ぶ（自己選択 bias のリスク）か、低密度でも効く bounded-retrieval 差（grep 比）を見せるか、を分けて設計する。
+
+### 2026-06-28: 初期 persona 設計の再検討 — 1スペクトラムは独立3軸を畳んでいた
+
+2026-06-25〜26 に判明した事実（Markdown import 実装済み / 密度の逆風 / takker test）と本 decision を突き合わせた再検討。初期（2026-06-23）の persona1 ↔ persona2 は単一スペクトラムだが、実際には独立な3軸を一本に押し込んでいた。
+
+3軸:
+
+- **A. on-ramp（substrate）**: Cosense JSON export ↔ Markdown folder。**両端とも解決済み**（`import --markdown` / `import-forest`、schema v7 で duplicate title / alias collision も import を止めない。[[wiki-forest-markdown-import-dogfood-2026-06-25]]）。初期 doc が persona2 の release gate とした「Markdown folder import が無い」障壁は消えた。
+- **B. リンク密度**: 高 ↔ 低。grasp の graph materialization 価値（read=近傍同梱・backlinks・related・unresolved）を直接駆動する（§2026-06-26 の密度逆風）。
+- **C. corpus 所有者 / GTM チャネル**: nishio dogfooding（日本語・Scrapbox lineage）↔ 冷たい HN/Reddit の他人。persona2 でまだ未検証なのは実は C だけ（[[takker-opencode-villagepump-test-2026-06-24]] の takker は日本語・Cosense インサイダー＝persona1 型で、A も B も persona1 寄り）。
+
+初期 doc は A（on-ramp 障壁）を最大の不確実性として扱ったが、A は解決済み。残る本当の分岐は B（密度）と C（GTM チャネル）。
+
+**二項対立が名前を付け忘れたセル = (Markdown substrate × 高密度 × nishio 所有) = llm-wiki 森（40+ wiki）。** 初期 persona2 の「Markdown だが低密度」と違い、これは Markdown かつ高密度（`[[wikilink]]`・frontmatter id/aliases・concepts 階層）。性質:
+
+- 実在し既に dogfood 済み（persona2 のような仮説でない。import-forest で 42 projects / 3338 pages / 23k edges、[[wiki-forest-markdown-import-dogfood-2026-06-25]]）。
+- Markdown substrate を end-to-end で実証する → persona2 の on-ramp 主張を de-risk する。
+- 高密度なので §2026-06-26 の密度逆風を回避する（graph 差が実際に出る corpus）。
+- nishio 所有なので anchor-persona の「設計が正直・出荷可能に保たれる」性質（§Decision）を保つ。
+
+∴ これは persona1 と persona2 の **bridge persona**。Open Q3（「.md 束より良い」最小デモ）の高密度デモ corpus はこれで、自己選択 bias の懸念（高密度 corpus を恣意的に選ぶこと）も「nishio の実 corpus」という形で正当化される。
+
+**persona2 の分割**（初期は2つの別物を1つの persona に畳んでいたのが歪みの源）:
+
+- **persona2a = 高密度 Markdown wiki ユーザ**（nishio 森＋dense `[[link]]` を持つ Obsidian パワーユーザ）。近接・served 済み・密度価値が効く。事実上の次の driver 候補。
+- **persona2b = まばらな .md フォルダ / 冷たい HN/Reddit ユーザ**。遠い・密度逆風が最大・§罠 design dilution の本体。pitch は密度依存の「逆リンクがある」でなく密度非依存の bounded retrieval（[[read-vs-grep-benchmark-2026-06-24]]）に寄せる。
+
+**consumer 軸の明示**: persona1 / persona2 / persona2a / persona2b はすべて *corpus を所有する人間* のセグメントで、設計上の主ユーザ = Skill 越しに読む AI（[[delivery-cli-plus-skill]]）を指していない。cross-model portability（[[takker-opencode-villagepump-test-2026-06-24]] の Deepseek 完走、[[ai-consumer-feedback-2026-06-23]]）は consumer 側の直交属性で、どの人間が corpus を所有するかに依らない。persona は「corpus 所有者」と「AI consumer」のタグを分けて付けるとよい。
+
+含意:
+
+- 次に actively 狙う persona2 は persona2b（冷たい他人）でなく **persona2a（高密度 Markdown）**。森 dogfood がそのまま検証経路になる（別チャネル獲得を待たずに検証が進む）。
+- persona2b は依然 design dilution リスクの本体。lede は density 非依存側（bounded retrieval）に固定（§罠 design dilution・§2026-06-26 と整合）。
