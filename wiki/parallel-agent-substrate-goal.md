@@ -1,11 +1,12 @@
 ---
 type: plan
-summary: 2026-06-28 の開発ゴール。grasp を「並行 agent が同一 canonical store を共有して知識共有しながら並行開発する基盤」として使える状態にする。判定は机上 spec でなく 2-agent 共有 store dogfood が green になること。1.8.72 で deferred projection / activity / SQLite-only log_append history の最小 substrate は入った。次は real dogfood で activity だけで足りるかを測り、不足した時だけ claim/lease 等を足す。
+summary: 2026-06-28 の開発ゴール。grasp を「並行 agent が同一 canonical store を共有して知識共有しながら並行開発する基盤」として使える状態にする。判定は机上 spec でなく 2-agent 共有 store dogfood が green になること。1.8.72 で deferred projection / activity / SQLite-only log_append history の最小 substrate は入り、1.8.73 で guard failure から recovery ladder へ誘導する最初の実行面を入れた。次は real dogfood で activity/hints だけで足りるかを測り、不足した時だけ claim/lease 等を足す。
 sources:
   - [[sqlite-ssot-write-plan]]
   - [[sqlite-write-concurrency]]
   - [[native-authority-markdown-projection]]
   - [[parallel-agent-write-incident-2026-06-26]]
+  - [[parallel-session-file-back-contention-2026-06-28]]
   - [[grasp-backlog]]
 ---
 
@@ -35,7 +36,7 @@ grasp を **複数の AI agent が同一 canonical store（`.grasp/authority.sql
 | write の attribution（どの agent/session が何を触ったか） | 実装済（`--actor` / `--session-id`、events に記録、preflight session uniqueness、postwrite session marker） |
 | session 単位の独立 rollback | 実装済（`revert-plan --scope session`） |
 | 他 session の write を read（現在状態 / 直近変化） | 現在状態=`read`、変化=`history` / `log-records`（event-stream, current_state=false, session_id）まで実装済 |
-| **in-flight 認識（今どの session が何を作業中か / soft claim）** | 最小実装済（`activity [title]` が touched page/path の recent event と active sessions を返す）。未検証: real dogfood で claim/lease が不要か |
+| **in-flight 認識（今どの session が何を作業中か / soft claim）** | 最小実装済（`activity [title]` が touched page/path の recent event と active sessions を返す）。`1.8.73` で preflight/write-start failure output から `activity --limit 20` と recovery ladder へ誘導する最初の実行面を追加。未検証: real dogfood で claim/lease が不要か |
 | **遅延 / バッチ projection（write と md export の分離）** | 最小実装済（`write-page` / `append-log --defer-projection`、後段 `export-markdown`）。未検証: 長い real dogfood での運用 ergonomics |
 
 ## 2026-06-28 file-back: Markdown を外す時の判断
@@ -45,6 +46,28 @@ grasp を **複数の AI agent が同一 canonical store（`.grasp/authority.sql
 ただし **Markdown projection 自体を即ゼロにする判断ではない**。現時点の projection は review / backup / publish / fresh-checkout recovery の低頻度 artifact として残す。race するのは projection を per-write の authority 的入力にする時であり、generated snapshot として batch 出力する限り、並行 authoring の critical section には入れない。
 
 `1.8.72` の evidence は「最小 2-agent subprocess regression が green」まで。したがって今の位置は **Grasp-only authority substrate は最小成立、広い実運用は未検証**。次は real multi-agent dogfood を走らせ、`activity` だけで二重作業回避が足りるなら claim/lease は作らない。不足が観測された場合だけ、目的が名前に出る command として追加する。目的の薄い既存 command を温存しない方針は `append-section` public CLI を削除した `1.8.70` と同じ。
+
+## 2026-06-28 file-back: 三者三様の修正を開発に使う
+
+Claude Code / Codex の並行 file-back では、同じ摩擦に対して3種類の修正が出た。これはバラバラに見えるが、実際は **別レイヤの修正** として全部 substrate goal に使える。
+
+1. **content delivery 優先**: isolated worktree + direct Markdown patch + PR で、知見を止めずに main へ届ける。短期には有効だが、store events に未反映の divergence を残す。
+2. **incident entity 化**: [[parallel-session-file-back-contention-2026-06-28]] のように、guard がどこで止めたかを観測データとして残す。次の設計入力になるが、単独では再発を止めない。
+3. **concept / code surface 化**: [[sqlite-write-concurrency]] の git working tree / HEAD 層の整理や、`activity` / `--defer-projection` / session_id guard のように、再発防止・観測・rollback surface へ落とす。
+
+この学びから、次の開発は単に claim/lease を足す前に **post-guard recovery ladder** を作るべき。preflight が dirty / HEAD moved / semantic log stale で止めた時、agent が毎回その場判断で別解を作るのではなく、標準手順を返す:
+
+- `activity` / session_id で owner と近い work unit を見る。
+- 同じ work unit なら owner branch に畳む。
+- content-only で急ぐなら isolated worktree + direct patch PR に逃がし、pending reconcile を log / entity に明示する。
+- authority/store 変更なら待つか、shared store に `--defer-projection` で書き、projection は後で batch export する。
+- merge 後に canonical store reconcile を1回だけ走らせ、semantic log / projection drift を消す。
+
+したがって Done 条件 3 の「in-flight 認識」は、ページ単位の `activity` だけでなく **止まった後に何を選ぶかの recovery path** まで含めて評価する。Done 条件 4 の「projection が race しない」も、write command の `--defer-projection` だけでなく direct-patch fallback 後の store reconcile まで含めて dogfood する。
+
+次の dogfood の SUT は write path 単体ではなく **detection / guardrail / recovery ladder**。現段階では並行 fault がゼロになることより、2026-06-26 の silent clobber / stale resurrection が 2026-06-28 の loud refusal / actionable recovery に変わることを進歩指標にする。
+
+`1.8.73` でこの recovery ladder の最初の実行面を入れた。`scripts/check_file_back_preflight.py` / `scripts/check_file_back_write_start.py` は guard failure 時に `recovery ladder:` を stderr に出し、dirty worktree / HEAD movement / semantic log drift / store advance / pair mismatch / session reuse / active lock を `activity --limit 20` 起点の次アクションへ振り分ける。これは自動 reconcile / queue / claim ではなく、止まった agent が別解を作る前に標準選択肢を見るための dogfood surface。
 
 ## 進め方: dogfood-first
 
