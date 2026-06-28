@@ -1,6 +1,6 @@
 ---
 type: decision
-summary: データ最新化は export の繰り返しでなく、初回 export を seed にし以降は cosense-cli で「最近更新されたページだけ」取得して差分 upsert する。cosense-cli は比較対象から grasp の freshness 経路へ昇格（post-MVP）
+summary: データ最新化は export の繰り返しでなく、初回 export を seed にし以降は cosense-cli で差分 upsert する。通常は最近更新ページの hot path、必要時は full manifest reconcile で古い missing / rename / delete を拾う。partial acquisition は sync せず acquire 再実行で更新する。
 sources:
   - llm-wiki 設計対話 2026-06-23（nishio）
   - cosense listPages --help / 実測 2026-06-23
@@ -51,6 +51,16 @@ sync 改善の候補:
 - **stable hosted line id を保存するか決める**: REST `lines[].id` は JSON export に無い。sync で取得した page だけでも `external_line_id` として保持すれば、line fragment URL や hosted edit (`previewEdit` / `submitEdit`) と対応できる。ただし export seed 由来 page には line id が無いので、grasp の local stable line-id とは別列にする方が安全。
 - **direct public API fallback**: `cosense` binary が無い環境でも public project は `/api/pages/:project` と `/api/pages/:project/:title` で読める。private / auth-required project は従来通り cosense-cli or cookie/token path に戻す。
 
+## Update (2026-06-29): full manifest reconcile と境界を実装
+
+`1.8.82` で `grasp sync --full-reconcile` を追加した。通常 sync の recent updated hot path は維持し、明示 flag の時だけ hosted manifest 全体を `listPages` pagination で読む。manifest は remote `id/title/updated/linesCount/linked/views` を持ち、local `pages` の id set と比較する。
+
+- **full manifest reconcile**: remote に存在するが local に無い page、same id で title が変わった page、remote `updated` が新しい page、`linesCount` がずれた page を fetch candidate にする。`--dry-run` は candidate と counts だけを返し、`readPage` / store mutation はしない。
+- **rename detection**: same id / changed title を rename とする。実 upsert 時は旧 title を `page_handles.handle_source=hosted-rename-alias` として残すので、旧 title surface は同じ page id に解決する。`followRename=true` は旧 title fetch の workaround であって rename history ではない、という判断は維持。
+- **delete tombstone**: remote manifest から消えた local id は active graph から削除し、`project.<project>.sync_tombstones` metadata に tombstone（id/title/last_updated/deleted_at/reason）を保存する。これで backlinks / related / unresolved からは外れつつ、physical delete と区別できる最小 audit が残る。認証済み REST の `/api/deleted-pages` や stream `page.delete` は補強候補として未実装。
+- **hosted line id / local line id policy**: hosted `readPage` が `lines[].id` を返しても、現行 schema では `lines.line_id` に保存しない。local `line_id` は引き続き grasp-managed `page.id:line-index` locator。hosted id は external source metadata として扱い、採用するなら将来 `external_line_id` 列を追加して local stable `line_id` と別管理する。
+- **partial acquisition と sync の境界**: `sync` は full hosted mirror maintenance 用。`stats.acquisition.coverage != full-list` の project namespace では mutation せず `diagnostic.type=partial_acquisition_not_syncable` を返す。partial corpus は `acquire` の同一 criteria 再実行で freshness を保つ。seed predicate 外の recently updated page を混ぜないため、slice coverage の意味が保たれる。
+
 ## 帰結
 
 - import adapter は **2モード**: bulk seed（export）と incremental delta（cosense-cli）。native store（[[persistence-custom-format]]）はどちらの入力も同じ正規化先。
@@ -60,6 +70,6 @@ sync 改善の候補:
 ## Open Questions
 
 - ~~cosense-cli は `updated` を humanize した文字列で返す~~ → suffix 前の ISO8601 を epoch seconds に parse して比較。
-- 削除・rename されたページの検出（listPages は存在ページのみ返す）。tombstone をどう同期するか。
+- ~~削除・rename されたページの検出（listPages は存在ページのみ返す）。tombstone をどう同期するか~~ → `sync --full-reconcile` が full manifest 比較で rename / missing / delete tombstone を扱う。認証済み REST の deleted-pages / stream 補強は未実装。
 - ~~`pinned page は常に先頭に来る`~~ → sync の停止判定から pinned を除外。
 - ~~hosted lines は Cosense 由来の安定 line-id を持つ~~ → grasp は自前 line-id（`page.id:line-index`）を維持。

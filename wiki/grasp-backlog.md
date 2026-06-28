@@ -209,13 +209,11 @@ line-id のローカル別名（text で `P1:0`、`--json` / `--full-ids` で完
 
 ## Sync freshness
 
-`grasp sync` の basic upsert は実装済み（[[incremental-sync]]）。未実装:
+`grasp sync` の basic recent upsert と `--full-reconcile` は実装済み（[[incremental-sync]]）。`1.8.82` で full manifest reconcile / hosted delete tombstone / rename detection / partial acquisition boundary / hosted line-id policy は current facts に昇格済み。未実装:
 
-- **full manifest reconcile**: `listPages` pagination で remote `id/title/updated/linesCount/linked/views` manifest を取り、local page id set と比較する。recent updated window だけでは拾えない古い missing page / delete / rename を拾う。
-- **hosted 側で削除された page の tombstone / local delete detection**: remote manifest から消えた local `id` を tombstone 化し、physical delete とは分ける。認証済み path では `/api/deleted-pages/:project/:pageId` と `/api/stream/:project` の `page.delete` event を補助に使えるか検証する。
-- **rename detection**: same page `id` / changed title を rename と見なし、旧 title を alias history に残す。`followRename=true` は fetch 時 workaround であり、rename history 取得ではない。認証済み path では `/api/commits/:project/:pageId` の `TitleChange` で履歴を補えるか検証する。
 - **hosted REST metadata enrichment**: `readPage` / `/api/pages/:project/:title` で得られる `commitId`、stable `lines[].id`、`links` / `projectLinks` / `icons`、`linked`、`pageRank`、`accessed`、`relatedPages` をどこまで store に保存するか決める。JSON export seed には無いので optional source-specific columns として扱う。
-- **stable hosted line-id policy**: 現行 sync は hosted `lines[].id` を捨て `page.id:line-index` を維持する。hosted edit / line fragment 連携を考えるなら `external_line_id` と local stable `line_id` を別列にする。
+- **authenticated delete / rename history enrichment**: 現行 `--full-reconcile` は manifest 差分から delete tombstone と same-id rename を扱う。認証済み path で `/api/deleted-pages/:project/:pageId`、`/api/stream/:project` の `page.delete` event、`/api/commits/:project/:pageId` の `TitleChange` を取り、tombstone / alias history を補強できるか検証する。
+- **external hosted line-id persistence**: 方針は「hosted `lines[].id` は local `lines.line_id` に混ぜず、将来 `external_line_id` として別列にする」で決定済み。実装は schema bump が必要なので未着手。
 - **last-sync cursor の運用精度**: pinned pages / updated ties / clock skew / partial failure の扱い。
 
 ## Cross-project graph を first-class edge に + whole-store retrieval
@@ -257,8 +255,8 @@ Open Questions:
 - `listPages` は非 admin readable project で全ページを pagination できるか。
 - `searchFullText` は `[nishio.icon]` / `[/nishio/` を literal に扱うか。検索上限超過時の pagination / continuation はあるか。
 - all-candidate 失敗でも exit 0 で partial result を返す方針を維持するか。
-- `readPage` の hosted line id を採用するか（現行は export/sync と同じく grasp 側で `page.id:line-index` を維持）。
-- partial corpus で `sync` する時、seed predicate 外の recently updated page を取り込むか、acquisition mode ごとに sync 動詞を分けるか。
+- ~~`readPage` の hosted line id を採用するか~~ → hosted id は observed-only。local `lines.line_id` は grasp-managed locator のままにし、将来 `external_line_id` 列で別管理する。
+- ~~partial corpus で `sync` する時、seed predicate 外の recently updated page を取り込むか、acquisition mode ごとに sync 動詞を分けるか~~ → partial corpus は `acquire` criteria 再実行、full mirror は `sync`。`sync` は partial acquisition namespace で mutation しない。
 - direct public API fallback を入れる場合、Scrapbox API と cosense-cli の metadata / auth / rate limit / search semantics の差をどこまで surface に出すか。
 
 ## Packaging and distribution

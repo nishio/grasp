@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.82`（更新: 2026-06-29 00:43、store: schema `8`、compat: schema `8` compatible）: `sync --full-reconcile` を追加し、hosted `listPages` manifest 全体を local page id set と比較できるようにした。remote にあるが local に無い page / same id の rename / updated or `linesCount` mismatch は fetch candidate になり、remote manifest から消えた local page は active graph から削除して `project.<project>.sync_tombstones` metadata に tombstone を残す。rename は旧 title を `hosted-rename-alias` handle として残す。partial acquisition namespace の `sync` は mutation せず `partial_acquisition_not_syncable` diagnostic を返し、hosted `lines[].id` は observed-only で local `lines.line_id` へは保存しない。schema は不変
 - `1.8.81`（更新: 2026-06-29 00:00、store: schema `8`、compat: schema `8` compatible）: `reconcile-markdown --output <wiki>` を追加した。direct-patch fallback や remote merge 後に Markdown projection だけが SQLite store より進んだ時、既存 non-log page の差分を source path 指定の `page_update` として採用し、primary log page にあるが SQLite events 由来 semantic log には無い section を `log_append` event として採用する。`log.md` が `import --markdown` 等で stored lines だけ先に進んだ semantic drift では、採用後に stored log page を SQLite semantic log と一致するよう normalize し、重複 log entry を残さない。入力は `--output` 配下の files を読むため shell quoting に依存しない。missing/delete/extra file や record-file overlay を含む log reconcile は今回の dogfood 外として blocker にする。schema は不変
 - `1.8.80`（更新: 2026-06-28 15:42、store: schema `8`、compat: schema `8` compatible）: `activity <query>` が `log_append` の `[[subject]]` にも一致するようにし、log-only の並行作業を page query から見えるようにした。`active_sessions[]` は `subjects[]` も返し、text formatter も active session の subjects を表示する。これにより、`history <query>` / `log-records` でしか見えなかった log-only session が、recovery ladder の起点である `activity` からも確認できる。schema は不変
 - `1.8.79`（更新: 2026-06-28 15:07、store: schema `8`、compat: schema `8` compatible）: `claim-page` に `--target handle|page-id|path` を追加し、pre-write intent claim も観測済み page identity / Markdown source path で指定できるようにした。`claims <query>` と `activity <query>` も page_id query に一致するため、`read --page-id` / `activity` / `claims` で見た同じ identity を claim・監査・activity 絞り込みへそのまま戻せる。これは `write-page --target page-id|path` と同じ identity symmetry を claim 側へ広げる変更で、soft claim の任意 coordination 方針は不変。schema は不変
@@ -221,6 +222,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.81`
+- Current public compatibility version: `1.8.82`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.81`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.82`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

@@ -89,3 +89,11 @@ direct-patch + remote-merge fallback の「remote-merge」側自体に friction 
 - **本質は「git は projection を merge し、events を union していない」**: 正しい merge は両 branch の SQLite events を union して projection を再生成することだが、events store（`.grasp/file-back.sqlite`）が gitignored = local scaffolding なので、git には Markdown projection しか無く、projection 層で手 resolve するしかない（[[sqlite-write-concurrency]] の「events ledger は live store 内 authority だが本 repo では gitignored、commit を跨ぐ durable は git-tracked Markdown」の merge 面の帰結）。
 
 ∴ Open Q #2（direct-patch + remote-merge を並行下の正規 fallback として明文化するか）への data point: 正規化するなら append-only projection（特に log）の merge conflict をどう自動解消するかが付随課題 ― events-aware merge / merge 時 regenerate / log を git-merge 対象から外す、等。なお本 Update 自体、`semantic log drift` で grasp write-first preflight がまた落ちた（[[sqlite-write-concurrency]] の「direct-patch fallback は伝播する」の再発）ため direct-patch fallback で書かれたが、merge 前に clean owner がこの PR 上で re-adopt して store=SSoT に流し込んだ。
+
+### 2026-06-29: dirty primary main への fast-forward は autostash conflict を生む
+
+Sync Freshness 実装は隔離 worktree `codex/sync-freshness` で完了したが、primary `/Users/nishio/grasp` では `main` が既に checkout され、別作業の `README.md` / `README.ja.md` / `scripts/check_file_back_runbook.py` / wiki projection dirty を持っていた。そのため別 worktree 側で `main` へ switch して merge する経路は取れず、primary で `git merge --ff-only --autostash codex/sync-freshness` を実行した。結果、`main` は commit `ac01c0c` へ fast-forward したが、autostash replay が append-only hotspot の `wiki/log.md` で conflict した。
+
+正しい復旧は「どちらかの log entry を捨てない」こと。今回の conflict では Sync Freshness の `00:43` entry と README 分離の `00:52` entry を両方残し、`git add wiki/log.md && git reset HEAD wiki/log.md` で unmerged state だけを解消した。その後、autostash 由来のユーザ dirty files が staged に混じっていないことを確認し、reapplied 済みの autostash だけを drop した。これにより primary main は `origin/main` より `ac01c0c` だけ ahead、かつユーザ dirty 差分を保持する状態で止まった。
+
+教訓: dirty primary main へ isolated worktree の完了 branch を fast-forward する必要がある時、`--autostash` は merge 自体を可能にするが、projection append 領域の conflict は普通に起きる。復旧は append union を手で作る作業であり、protected dirty main をそのまま push してよい理由にはならない。file-back preflight もこの状態を `branch differs from origin/main` と dirty wiki で止めるので、後続 file-back は clean owner reconcile か direct Markdown fallback を明示して進める。
