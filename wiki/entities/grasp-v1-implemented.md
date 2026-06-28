@@ -53,7 +53,7 @@ v1 stable scope 外:
 
 ## store
 
-- current public compatibility version は `1.8.76`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.8.77`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - authoring SSoT substrate 用の canonical store path helper は `$GRASP_CANONICAL_STORE` → `<repo>/.grasp/authority.sqlite` → `$GRASP_HOME/authority.sqlite` → `~/.grasp/authority.sqlite`。これは Phase 0/1 helper であり、既存 default read/import store path とは分ける。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
@@ -210,7 +210,7 @@ parser が link から除外するもの:
 - `1.8.70` 以降、public CLI から `append-section` を削除した。新規 authoring は full-page replacement の `write-page` と log 追記の `append-log` に寄せる。既存 `section_append` event は replay/revert 互換のため読み続けるが、新規 public command では mint しない。
 - `1.8.71` 以降、CLI help の mechanics SSoT regression として、`append-log --help` が current write surface と矛盾する stale rename note を出さないことを test で固定している。`append-log` は page identity changes を `rename-page` に委ねると明示する。
 - `1.8.72` 以降、2-agent 共有 canonical store dogfood の最小 substrate として `write-page` / `append-log --defer-projection`、SQLite-only `history` / `log-records` の `log_append` record surface、`activity` command、import-only partial stream の `export-markdown --regenerate-log` seed fallback を持つ。regression は同一 store の agent A/B が並行 write しても Markdown projection を batch export まで触らず、他 session の現在状態・直近 log・page activity・session rollback plan を読めることを確認する。
-- `1.8.73` 以降、repo-local `check_file_back_preflight.py` / `check_file_back_write_start.py` は guard failure 時に `recovery ladder:` hints を stderr に出す。これは [[parallel-agent-substrate-goal]] の post-guard recovery ladder を実行面に落としたもので、dirty worktree / HEAD movement / semantic log drift / store advance / pair mismatch / session reuse / active lock を、owner work への合流・isolated direct-patch PR・clean reconcile・preflight rerun・wait に振り分ける。
+- `1.8.73` 以降、repo-local `check_file_back_preflight.py` / `check_file_back_write_start.py` は guard failure 時に `recovery ladder:` hints を stderr に出す。これは [[parallel-agent-substrate-goal]] の post-guard recovery ladder を実行面に落としたもので、dirty worktree / HEAD movement / semantic log drift / store advance / pair mismatch / session reuse / active lock を、owner work への合流・isolated direct-patch PR・clean reconcile・preflight rerun・wait に振り分ける。`1.8.77` 以降は `activity --limit 20` に加えて `claims --include-expired` も案内し、停止時に recent ownership と soft claim state の両方を確認できる。
 - `1.8.74` 以降、`export-markdown` の non-check write mode は Git worktree 内の Markdown projection が SQLite store と異なる場合、既定で上書きを拒否する。direct-patch fallback / merge 後の未 re-adopt 差分を消さないための guard で、意図的な deferred projection batch だけ `--allow-projection-overwrite` を使う。
 - `1.8.55` 以降、repo-local `scripts/check_file_back_write_start.py` は preflight stamp の latest SQLite `event_sequence` と write-start 時点の current latest `event_sequence` を比較し、preflight 後・最初の write command 前に store が進んだ場合は failure にする。これは preflight と write-start の間に別 writer が `.grasp/file-back.sqlite` を更新した時、postwrite で自分の write 後に検出するのではなく、mutation 前に preflight 再実行を要求する guard。
 - `1.8.56` 以降、repo-local file-back guard は gitignored lock `.grasp/file-back.lock.json` を使う。preflight は clean run 後に lock を取得し、write-start / postwrite は同じ session/store/project/output の lock を要求する。postwrite は全 checks が clean な時だけ lock を解放する。通常 runbook 同士では、複数 write command の file-back 中に別 writer が割り込むことを preflight 時点で止める。

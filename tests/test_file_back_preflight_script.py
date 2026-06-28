@@ -36,6 +36,7 @@ class FileBackPreflightScriptTests(unittest.TestCase):
 
         self.assertIn("recovery ladder:", hints[0])
         self.assertIn("activity --limit 20", joined)
+        self.assertIn("claims --include-expired", joined)
         self.assertIn("dirty projection/worktree", joined)
         self.assertIn("branch/HEAD moved", joined)
         self.assertIn("semantic log drift", joined)
