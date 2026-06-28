@@ -1643,3 +1643,8 @@ ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog �
 - follow-up: the external sub-agent completed the contentful goal/log write, but its postwrite was interrupted inside write-status and did not release the runtime files.
 - recovery: parent reran check_file_back_postwrite.py with the same GRASP_SESSION_ID; semantic log, lint, and diff check passed, and the lock was released.
 - judgment: this validates same-session owner handoff/rescue for a half-closed runbook; it is an ergonomics gap, not evidence for queue or automated reconcile.
+
+## [2026-06-28 18:10] implementation+file-back | active lock hint includes postwrite rescue
+- implemented: active-lock recovery ladder now says to rerun postwrite with the lock owner GRASP_SESSION_ID when the owner is unreachable but its writes are already in the store.
+- test: preflight recovery-ladder unit test now asserts the postwrite rescue hint and lock-owner session wording.
+- judgment: this turns the external-agent half-closed runbook gap into an actionable same-session rescue path, without adding queueing or automated reconcile.

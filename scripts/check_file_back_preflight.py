@@ -107,7 +107,11 @@ def recovery_ladder_hints(
     if "session_id already exists" in joined:
         hints.append("- reused session_id: choose a fresh GRASP_SESSION_ID unless intentionally continuing the same owner branch.")
     if "another file-back lock is active" in joined or "active file-back lock" in joined:
-        hints.append("- active lock: wait for the owner to finish, or inspect/remove only a confirmed stale .grasp/file-back.lock.json.")
+        hints.append(
+            "- active lock: wait for the owner to finish. If the owner is unreachable but its writes are already in the store, "
+            "rerun postwrite with the lock owner's GRASP_SESSION_ID so the normal session-window checks release the lock; "
+            "remove .grasp/file-back.lock.json only after confirming it is stale."
+        )
     if len(hints) == 2:
         hints.append("- rerun the relevant guard after choosing a recovery path; do not bypass silently.")
     return hints
