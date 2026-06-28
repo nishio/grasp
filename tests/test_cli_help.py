@@ -102,6 +102,11 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertIn("invalid choice", completed.stderr)
 
+    def test_help_notes_match_current_write_surface(self):
+        append_log_help = run_grasp_help("append-log")
+        self.assertNotIn("rename is still out of scope", append_log_help)
+        self.assertIn("page identity changes are handled by rename-page", append_log_help)
+
     def test_every_command_help_documents_returns_and_examples(self):
         for command in COMMANDS:
             with self.subTest(command=command):
