@@ -58,6 +58,8 @@ class FileBackPreflightScriptTests(unittest.TestCase):
         self.assertIn("store/output pair mismatch", joined)
         self.assertIn("reused session_id", joined)
         self.assertIn("active lock", joined)
+        self.assertIn("rerun postwrite", joined)
+        self.assertIn("lock owner's GRASP_SESSION_ID", joined)
 
     def test_base_divergence_errors_accepts_empty_left_right_log(self):
         self.assertEqual(preflight.base_divergence_errors("", "origin/main"), [])
