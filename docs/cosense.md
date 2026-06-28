@@ -57,9 +57,12 @@ grasp --project project:crawl acquire https://scrapbox.io/project/ --from-page "
 ```bash
 grasp --project my-cosense sync https://scrapbox.io/project/ --dry-run
 grasp --project my-cosense sync https://scrapbox.io/project/
+grasp --project my-cosense sync https://scrapbox.io/project/ --full-reconcile --dry-run
 ```
 
-`sync` は最近更新された hosted pages を差分 upsert する保守用 path です。通常の一回限りの調査なら JSON export を import するだけで足ります。
+`sync` は full mirror の保守用 path です。既定では最近更新された hosted pages だけを差分 upsert します。`--full-reconcile` は hosted manifest 全体を比較し、古い missing page、rename、hosted 側 delete tombstone を検出します。
+
+partial corpus は `sync` ではなく、同じ `acquire` criteria の再実行で更新します。`sync` は partial acquisition namespace では mutation せず diagnostic を返します。hosted `lines[].id` は今は local `line_id` に保存せず、grasp 側の `page.id:line-index` locator を維持します。
 
 ## cross-project refs を seed にする
 
