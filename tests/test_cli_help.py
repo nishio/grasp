@@ -5841,6 +5841,104 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
         self.assertEqual(page_text, "# A\n")
 
+    def test_write_command_refuses_unwritable_journal_file_before_mutation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "blocked-events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            journal_path.write_text("", encoding="utf-8")
+            journal_path.chmod(0o444)
+            failed_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-section",
+                    "A",
+                    "--heading",
+                    "Should not write",
+                    "--line",
+                    "- blocked",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                text=True,
+                capture_output=True,
+            )
+            journal_path.chmod(0o644)
+            peek_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_type
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            page_text = (root / "A.md").read_text(encoding="utf-8")
+            journal_text = journal_path.read_text(encoding="utf-8")
+
+        failed_error = json.loads(failed_completed.stderr)
+        diagnostic = failed_error["diagnostic"]
+        peek_result = json.loads(peek_completed.stdout)
+        self.assertEqual(failed_completed.returncode, 2)
+        self.assertEqual(diagnostic["type"], "journal_append_preflight_failed")
+        self.assertEqual(diagnostic["journal"], str(journal_path))
+        self.assertFalse(diagnostic["store_mutated"])
+        self.assertFalse(diagnostic["journal_written"])
+        self.assertFalse(diagnostic["projection_written"])
+        self.assertEqual(diagnostic["reason"], "journal path is not writable")
+        self.assertEqual([row[0] for row in sqlite_event_rows], [])
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
+        self.assertEqual(page_text, "# A\n")
+        self.assertEqual(journal_text, "")
+
     def test_revert_command_refuses_unappendable_journal_before_mutation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
