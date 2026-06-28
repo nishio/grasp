@@ -35,6 +35,9 @@ COMMANDS = [
     "log-records",
     "history",
     "activity",
+    "claim-page",
+    "claims",
+    "release-claim",
     "append-log",
     "write-page",
     "rename-page",
@@ -8526,6 +8529,160 @@ class CliHelpTests(unittest.TestCase):
         )
         self.assertTrue(status["strict_ok"])
         self.assertEqual(status["strict_failures"], [])
+
+    def test_parallel_agent_claim_page_surfaces_pre_write_intent(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n- old B\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "authority.sqlite"
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            activity_before_claim = run_json("activity", "A", "--active-seconds", "86400")
+            claim_a = run_json(
+                "claim-page",
+                "A",
+                "--ttl-seconds",
+                "600",
+                "--message",
+                "planning A rewrite",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            activity_after_claim = run_json("activity", "A", "--active-seconds", "86400")
+            claims_a = run_json("claims", "A")
+            conflict_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-b",
+                    "--session-id",
+                    "session-b",
+                    "claim-page",
+                    "A",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            claim_b = run_json(
+                "claim-page",
+                "B",
+                "--ttl-seconds",
+                "600",
+                actor="agent-b",
+                session_id="session-b",
+            )
+            wrong_release_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-b",
+                    "--session-id",
+                    "session-b",
+                    "release-claim",
+                    claim_a["claim"]["claim_event_id"],
+                ],
+                text=True,
+                capture_output=True,
+            )
+            release_a = run_json(
+                "release-claim",
+                claim_a["claim"]["claim_event_id"],
+                actor="agent-a",
+                session_id="session-a",
+            )
+            claim_a_after_release = run_json(
+                "claim-page",
+                "A",
+                "--ttl-seconds",
+                "600",
+                actor="agent-b",
+                session_id="session-b",
+            )
+            claims_all = run_json("claims", "--include-expired")
+
+        self.assertEqual(activity_before_claim["matched_events"], 0)
+        self.assertEqual(claim_a["claim"]["event_type"], "page_claim")
+        self.assertEqual(claim_a["claim"]["title"], "A")
+        self.assertEqual(claim_a["claim"]["session_id"], "session-a")
+        self.assertEqual(claim_a["claim"]["status"], "active")
+        self.assertEqual(activity_after_claim["matched_events"], 1)
+        self.assertEqual(activity_after_claim["events"][0]["event_type"], "page_claim")
+        self.assertEqual(activity_after_claim["events"][0]["session_id"], "session-a")
+        self.assertEqual(activity_after_claim["active_sessions"][0]["session_id"], "session-a")
+        self.assertEqual(claims_a["active_count"], 1)
+        self.assertEqual(claims_a["active_claims"][0]["claim_event_id"], claim_a["claim"]["claim_event_id"])
+        self.assertEqual(conflict_completed.returncode, 2)
+        self.assertIn("page already has an active claim", conflict_completed.stderr)
+        self.assertIn("session-a", conflict_completed.stderr)
+        self.assertEqual(claim_b["claim"]["title"], "B")
+        self.assertEqual(claim_b["claim"]["session_id"], "session-b")
+        self.assertEqual(wrong_release_completed.returncode, 2)
+        self.assertIn("owning session_id", wrong_release_completed.stderr)
+        self.assertEqual(release_a["released_claim"]["claim_event_id"], claim_a["claim"]["claim_event_id"])
+        self.assertEqual(release_a["active_claims"], [])
+        self.assertEqual(claim_a_after_release["claim"]["title"], "A")
+        self.assertEqual(claim_a_after_release["claim"]["session_id"], "session-b")
+        self.assertEqual(
+            sorted(claim["title"] for claim in claims_all["active_claims"]),
+            ["A", "B"],
+        )
+        self.assertEqual(claims_all["released_claims"][0]["claim_event_id"], claim_a["claim"]["claim_event_id"])
 
     def test_write_status_no_journal_strict_fails_on_sqlite_semantic_log_drift(self):
         with tempfile.TemporaryDirectory() as tmpdir:

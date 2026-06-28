@@ -16,6 +16,8 @@ EVENT_TYPES = {
     "page_rename",
     "log_append",
     "log_entry_import",
+    "page_claim",
+    "page_claim_release",
     "projection_export",
     "event_revert",
 }

@@ -46,7 +46,9 @@ VERSION_BUMP_TOKEN_RE = re.compile(r"(?<![\w.])\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?
 STORE_WRITE_COMMANDS = {
     "acquire",
     "append-log",
+    "claim-page",
     "import-log-records",
+    "release-claim",
     "rename",
     "rename-page",
     "revert-event",
@@ -55,7 +57,8 @@ STORE_WRITE_COMMANDS = {
     "write-page",
 }
 REVERSIBLE_EVENT_TYPES = {"page_create", "section_append", "log_append", "page_update", "page_rename"}
-ACTIVITY_EVENT_TYPES = {"page_create", "section_append", "log_append", "page_update", "page_rename"}
+CLAIM_EVENT_TYPES = {"page_claim", "page_claim_release"}
+ACTIVITY_EVENT_TYPES = {"page_create", "section_append", "log_append", "page_update", "page_rename", *CLAIM_EVENT_TYPES}
 
 
 class GraspCliError(ValueError):
@@ -345,10 +348,10 @@ def build_parser() -> argparse.ArgumentParser:
     activity_parser = add_command_parser(
         subparsers,
         "activity",
-        help="List recent SQLite write activity by page or session.",
+        help="List recent SQLite write/claim activity by page or session.",
         description=(
-            "Read SQLite write events directly and summarize which actor/session touched which Markdown-backed page. "
-            "This is a lightweight coordination surface for shared canonical stores; it does not claim or lock pages."
+            "Read SQLite write and page-claim events directly and summarize which actor/session touched "
+            "or claimed which Markdown-backed page. This is a lightweight coordination surface for shared canonical stores."
         ),
         returns=(
             "project, store, result_mode, current_state, query|null, active_seconds, matched_events, "
@@ -362,13 +365,76 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "activity is derived from SQLite events, not Markdown projection.",
             "active=true means the event is within --active-seconds of the current clock.",
-            "Use this before rewriting a page in multi-agent dogfood to see recent same-page work.",
+            "Use this before rewriting a page in multi-agent dogfood to see recent same-page work or claims.",
         ],
     )
     activity_parser.add_argument("title", nargs="?", default=None, help="Optional page title/handle/path to filter touched page events.")
     activity_parser.add_argument("--limit", type=int, default=20, help="Maximum activity events to return after filtering.")
     activity_parser.add_argument("--active-seconds", type=int, default=3600, help="Mark events within this many seconds as active.")
     activity_parser.add_argument("--session", action="append", default=[], help="Only return events from this session_id. Repeat for multiple sessions.")
+
+    claim_page_parser = add_command_parser(
+        subparsers,
+        "claim-page",
+        help="Declare a short-lived page work intent in the SQLite event stream.",
+        description=(
+            "Create a soft lease before editing a Markdown-backed page in a shared canonical store. "
+            "This is pre-write intent metadata for agents; it does not lock SQLite or mutate page content."
+        ),
+        returns="project, store, claim, conflicting_claims[], active_claims[]",
+        examples=[
+            "grasp --project grasp-wiki --actor codex --session-id work-1 claim-page grasp-backlog",
+            "grasp --project grasp-wiki --json claim-page concepts/sqlite-write-concurrency.md --ttl-seconds 900",
+        ],
+        notes=[
+            "claim-page requires --session-id or GRASP_SESSION_ID so the claim can be attributed and released.",
+            "A different active session claim for the same page is refused; use claims <page> to inspect the owner.",
+            "Claims are soft leases with TTL. They coordinate agents; they are not mandatory write locks.",
+        ],
+    )
+    claim_page_parser.add_argument("title", help="Target page title/handle/path to claim.")
+    claim_page_parser.add_argument("--ttl-seconds", type=int, default=1800, help="How long the soft claim remains active.")
+    claim_page_parser.add_argument("--message", default="", help="Optional claim message stored in the event payload.")
+
+    claims_parser = add_command_parser(
+        subparsers,
+        "claims",
+        help="List active page claims from the SQLite event stream.",
+        description=(
+            "Fold page_claim and page_claim_release events into current soft-lease state. "
+            "Use before starting work when activity has no write event yet."
+        ),
+        returns="project, store, query|null, active_claims[], expired_claims[], released_claims[]",
+        examples=[
+            "grasp --project grasp-wiki claims",
+            "grasp --project grasp-wiki claims grasp-backlog --include-expired",
+            "grasp --project grasp-wiki --json claims concepts/sqlite-write-concurrency.md",
+        ],
+        notes=[
+            "claims reads SQLite events only and does not touch Markdown projection.",
+            "By default only active claims are returned; --include-expired includes expired/released records for audit.",
+        ],
+    )
+    claims_parser.add_argument("title", nargs="?", default=None, help="Optional page title/handle/path to filter claims.")
+    claims_parser.add_argument("--include-expired", action="store_true", help="Include expired and released claims in the result.")
+
+    release_claim_parser = add_command_parser(
+        subparsers,
+        "release-claim",
+        help="Release a page claim by claim event id.",
+        description="Append a page_claim_release event for a previously active page_claim.",
+        returns="project, store, released_claim, release_event_id, active_claims[]",
+        examples=[
+            "grasp --project grasp-wiki --actor codex --session-id work-1 release-claim <claim-event-id>",
+        ],
+        notes=[
+            "release-claim requires the same --session-id as the claim unless --force is explicit.",
+            "Expired claims do not need release, but releasing them is refused to keep the event stream unambiguous.",
+        ],
+    )
+    release_claim_parser.add_argument("claim_event_id", help="Event id returned by claim-page.")
+    release_claim_parser.add_argument("--message", default="", help="Optional release message stored in the event payload.")
+    release_claim_parser.add_argument("--force", action="store_true", help="Release a claim owned by another session.")
 
     import_forest_parser = add_command_parser(
         subparsers,
@@ -2620,6 +2686,211 @@ def run_activity(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]
         "events": returned,
         "active_sessions": active_session_summaries(filtered),
     }
+
+
+def run_claim_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    if args.ttl_seconds < 1:
+        raise ValueError("--ttl-seconds must be >= 1")
+    metadata = event_metadata(args)
+    session_id = metadata["session_id"]
+    if not session_id:
+        raise ValueError("claim-page requires --session-id or GRASP_SESSION_ID")
+    target = page_claim_target(store, args.title)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    active_claims = current_page_claims(store, now=now, query=args.title, include_inactive=False)
+    conflicting_claims = [
+        claim
+        for claim in active_claims
+        if claim["page_id"] == target["page_id"] and claim["session_id"] != session_id
+    ]
+    if conflicting_claims:
+        owner = conflicting_claims[0]
+        raise ValueError(
+            "page already has an active claim: "
+            f"{target['title']} session_id={owner['session_id']!r} actor={owner['actor']!r} "
+            f"claim_event_id={owner['claim_event_id']}"
+        )
+    expires_at = (now.timestamp() + int(args.ttl_seconds))
+    expires_datetime = datetime.fromtimestamp(expires_at, timezone.utc).replace(microsecond=0)
+    payload = {
+        **target,
+        "ttl_seconds": int(args.ttl_seconds),
+        "expires_at": expires_datetime.isoformat(),
+        "message": str(args.message or ""),
+    }
+    event = make_journal_event("page_claim", project=target["project"], payload=payload)
+    with store.write_transaction():
+        insert_store_event(store.connection, event, **metadata)
+    stored_event = next(
+        (
+            candidate
+            for candidate in store.events(project=target["project"], limit=None)
+            if candidate.get("event_id") == event["event_id"]
+        ),
+        None,
+    )
+    if stored_event is None:
+        raise RuntimeError(f"inserted claim event not found: {event['event_id']}")
+    claim = page_claim_from_event(stored_event, now=now)
+    active_after = current_page_claims(store, now=now, query=args.title, include_inactive=False)
+    return {
+        "project": target["project"],
+        "store": str(store.path),
+        "claim": claim,
+        "conflicting_claims": [],
+        "active_claims": active_after,
+    }
+
+
+def run_claims(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    claims = current_page_claims(store, now=now, query=args.title, include_inactive=args.include_expired)
+    active = [claim for claim in claims if claim["status"] == "active"]
+    expired = [claim for claim in claims if claim["status"] == "expired"]
+    released = [claim for claim in claims if claim["status"] == "released"]
+    return {
+        "project": store._selected_project_or_none(),
+        "store": str(store.path),
+        "query": args.title,
+        "active_claims": active,
+        "expired_claims": expired if args.include_expired else [],
+        "released_claims": released if args.include_expired else [],
+        "claim_count": len(claims),
+        "active_count": len(active),
+    }
+
+
+def run_release_claim(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    metadata = event_metadata(args)
+    session_id = metadata["session_id"]
+    if not session_id:
+        raise ValueError("release-claim requires --session-id or GRASP_SESSION_ID")
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    claims = current_page_claims(store, now=now, include_inactive=True)
+    claim = next((item for item in claims if item["claim_event_id"] == args.claim_event_id), None)
+    if claim is None:
+        raise ValueError(f"claim not found: {args.claim_event_id}")
+    if claim["status"] != "active":
+        raise ValueError(f"claim is not active: {args.claim_event_id} status={claim['status']}")
+    if claim["session_id"] != session_id and not args.force:
+        raise ValueError(
+            "release-claim requires the owning session_id; "
+            f"claim session_id={claim['session_id']!r}, current session_id={session_id!r}"
+        )
+    payload = {
+        "claim_event_id": claim["claim_event_id"],
+        "page_id": claim["page_id"],
+        "title": claim["title"],
+        "source_path": claim["source_path"],
+        "graph_role": claim["graph_role"],
+        "message": str(args.message or ""),
+    }
+    event = make_journal_event("page_claim_release", project=claim["project"], payload=payload)
+    with store.write_transaction():
+        insert_store_event(store.connection, event, **metadata)
+    active_after = current_page_claims(store, now=now, query=claim["title"], include_inactive=False)
+    return {
+        "project": claim["project"],
+        "store": str(store.path),
+        "released_claim": claim,
+        "release_event_id": event["event_id"],
+        "active_claims": active_after,
+    }
+
+
+def page_claim_target(store: SQLiteStore, title: str) -> dict[str, str]:
+    project = store._require_project()
+    candidates = store.page_handle_candidates(title)
+    if not candidates:
+        raise ValueError(f"page not found: {title}")
+    if len(candidates) > 1:
+        raise ValueError(f"page handle is ambiguous: {title}; use a unique title/path for claim-page")
+    candidate = candidates[0]
+    source_path = str(candidate.get("path") or "")
+    return {
+        "project": project,
+        "page_id": str(candidate.get("page_id") or ""),
+        "title": str(candidate.get("title") or title),
+        "source_path": source_path,
+        "graph_role": str(candidate.get("graph_role") or ""),
+    }
+
+
+def current_page_claims(
+    store: SQLiteStore,
+    *,
+    now: datetime,
+    query: str | None = None,
+    include_inactive: bool = False,
+) -> list[dict[str, Any]]:
+    claims_by_id: dict[str, dict[str, Any]] = {}
+    releases_by_claim_id: dict[str, dict[str, Any]] = {}
+    for event in store.events(project=store._selected_project_or_none(), limit=None):
+        event_type = str(event.get("event_type") or "")
+        if event_type == "page_claim":
+            claim = page_claim_from_event(event, now=now)
+            claims_by_id[claim["claim_event_id"]] = claim
+        elif event_type == "page_claim_release":
+            payload = event.get("payload") or {}
+            claim_event_id = str(payload.get("claim_event_id") or "")
+            if claim_event_id:
+                releases_by_claim_id[claim_event_id] = event
+    for claim_id, release_event in releases_by_claim_id.items():
+        claim = claims_by_id.get(claim_id)
+        if claim is None:
+            continue
+        claim["status"] = "released"
+        claim["active"] = False
+        claim["release_event_id"] = str(release_event.get("event_id") or "")
+        claim["released_at"] = str(release_event.get("created_at") or "")
+        claim["release_session_id"] = str(release_event.get("session_id") or "")
+    claims = list(claims_by_id.values())
+    if query:
+        claims = [claim for claim in claims if claim_matches_query(claim, query)]
+    if not include_inactive:
+        claims = [claim for claim in claims if claim["status"] == "active"]
+    return sorted(claims, key=lambda claim: int(claim["event_sequence"]), reverse=True)
+
+
+def page_claim_from_event(event: dict[str, Any], *, now: datetime) -> dict[str, Any]:
+    payload = event.get("payload") or {}
+    expires_at = str(payload.get("expires_at") or "")
+    expires_timestamp = event_created_timestamp(expires_at)
+    now_timestamp = now.astimezone(timezone.utc).timestamp()
+    expired = expires_timestamp is not None and expires_timestamp < now_timestamp
+    status = "expired" if expired else "active"
+    return {
+        "event_sequence": int(event.get("event_sequence") or 0),
+        "claim_event_id": str(event.get("event_id") or ""),
+        "event_type": str(event.get("event_type") or ""),
+        "project": str(event.get("project") or ""),
+        "created_at": str(event.get("created_at") or ""),
+        "actor": str(event.get("actor") or ""),
+        "session_id": str(event.get("session_id") or ""),
+        "page_id": str(payload.get("page_id") or ""),
+        "title": str(payload.get("title") or ""),
+        "source_path": str(payload.get("source_path") or ""),
+        "graph_role": str(payload.get("graph_role") or ""),
+        "ttl_seconds": int(payload.get("ttl_seconds") or 0),
+        "expires_at": expires_at,
+        "message": str(payload.get("message") or ""),
+        "status": status,
+        "active": status == "active",
+        "release_event_id": "",
+        "released_at": "",
+        "release_session_id": "",
+    }
+
+
+def claim_matches_query(claim: dict[str, Any], query: str) -> bool:
+    query_norm = normalize_title(query)
+    query_path = normalize_projection_relative_path(query).casefold()
+    source_path = str(claim.get("source_path") or "")
+    return (
+        normalize_title(str(claim.get("title") or "")) == query_norm
+        or source_path.casefold() == query_path
+        or Path(source_path).stem.casefold() == query.casefold()
+    )
 
 
 def activity_event_summary(event: dict[str, Any], *, active_cutoff: float) -> dict[str, Any]:
@@ -6934,6 +7205,12 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return run_import_log_records(store, args)
     if args.command == "activity":
         return run_activity(store, args)
+    if args.command == "claim-page":
+        return run_claim_page(store, args)
+    if args.command == "claims":
+        return run_claims(store, args)
+    if args.command == "release-claim":
+        return run_release_claim(store, args)
     if args.command == "append-log":
         return run_append_log(store, args)
     if args.command == "write-page":
@@ -7404,6 +7681,12 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_log_records(result)
     if command == "activity":
         return format_activity(result)
+    if command == "claim-page":
+        return format_claim_page(result)
+    if command == "claims":
+        return format_claims(result)
+    if command == "release-claim":
+        return format_release_claim(result)
     if command == "append-log":
         return format_append_result(result)
     if command == "write-page":
@@ -7634,6 +7917,57 @@ def format_activity(result: dict[str, Any]) -> str:
             f" path={event.get('source_path', '')} event={event.get('event_id', '')}\n"
         )
     return "".join(parts)
+
+
+def format_claim_page(result: dict[str, Any]) -> str:
+    claim = result.get("claim") or {}
+    return (
+        "# Page Claim\n"
+        f"project: {result.get('project', '')}\n"
+        f"store: {result.get('store', '')}\n"
+        f"claim_event_id: {claim.get('claim_event_id', '')}\n"
+        f"title: {claim.get('title', '')}\n"
+        f"source_path: {claim.get('source_path', '')}\n"
+        f"actor: {claim.get('actor', '')}\n"
+        f"session_id: {claim.get('session_id', '')}\n"
+        f"expires_at: {claim.get('expires_at', '')}\n"
+        f"status: {claim.get('status', '')}\n"
+    )
+
+
+def format_claims(result: dict[str, Any]) -> str:
+    parts = [
+        "# Page Claims\n",
+        f"project: {result.get('project') or ''}\n",
+        f"store: {result.get('store') or ''}\n",
+        f"query: {result.get('query') or ''}\n",
+        f"active_count: {result.get('active_count', 0)}\n",
+    ]
+    for label in ("active_claims", "expired_claims", "released_claims"):
+        claims = result.get(label) or []
+        if not claims:
+            continue
+        parts.append(f"{label}:\n")
+        for claim in claims:
+            parts.append(
+                f"- {claim.get('title', '')} status={claim.get('status', '')} "
+                f"session={claim.get('session_id', '')} actor={claim.get('actor', '')} "
+                f"expires={claim.get('expires_at', '')} claim={claim.get('claim_event_id', '')}\n"
+            )
+    return "".join(parts)
+
+
+def format_release_claim(result: dict[str, Any]) -> str:
+    claim = result.get("released_claim") or {}
+    return (
+        "# Release Claim\n"
+        f"project: {result.get('project', '')}\n"
+        f"store: {result.get('store', '')}\n"
+        f"claim_event_id: {claim.get('claim_event_id', '')}\n"
+        f"release_event_id: {result.get('release_event_id', '')}\n"
+        f"title: {claim.get('title', '')}\n"
+        f"session_id: {claim.get('session_id', '')}\n"
+    )
 
 
 def format_append_result(result: dict[str, Any]) -> str:
