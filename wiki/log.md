@@ -1473,3 +1473,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: `export-markdown` now reads all projection targets and preflights write target paths before writing any file, preventing partial Markdown projection updates when a later target fails.
 - tests: added a non-git `write-page A` regression where `B.md` is a directory; automatic rollback leaves SQLite reverted and `A.md` unchanged.
 - docs: bumped public/package version to `1.8.64` and updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[sqlite-ssot-write-plan]]. schema remains v8.
+
+## [2026-06-28 09:11] implementation+file-back | export before removing revert projection files
+- code: `revert-event`, `revert-events`, and `revert-event --include-dependents` now export the reverted store state before deleting projection files made obsolete by page_create/page_rename revert.
+- tests: added a page_rename revert regression where `Old.md` is a directory; the SQLite `event_revert` lands and `New.md` remains instead of being deleted before the failing export.
+- docs: bumped public/package version to `1.8.65` and updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[sqlite-ssot-write-plan]]. schema remains v8.

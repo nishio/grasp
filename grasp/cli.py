@@ -3418,19 +3418,13 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
             project=reverted["project"],
             payload=rollback["payload"],
         )
-    reverted = rollback["reverted"]
-    source_path = rollback["source_path"]
-    previous_source_path = rollback["previous_source_path"]
     if journal is not None:
         append_journal_event(journal, event)
-    removed_files = []
-    if target["event_type"] == "page_rename":
-        removed_files = remove_previous_projection_file(args.output, source_path, previous_source_path)
-    elif target["event_type"] == "page_create":
-        removed_files = remove_projection_file(args.output, source_path)
-    projection = store.export_markdown(args.output, check=False)
-    projection["removed_files"] = removed_files
-    projection["removed_count"] = len(removed_files)
+    projection = export_markdown_then_remove_revert_projection_files(
+        store,
+        args.output,
+        [{"target": target, "rollback": rollback, "event": event}],
+    )
     result = dict(reverted)
     result.update(
         {
@@ -3487,10 +3481,7 @@ def run_revert_events(store: SQLiteStore, args: argparse.Namespace) -> dict[str,
     if journal is not None:
         for record in records:
             append_journal_event(journal, record["event"])
-    removed_files = remove_projection_files_for_revert_records(args.output, records)
-    projection = store.export_markdown(args.output, check=False)
-    projection["removed_files"] = removed_files
-    projection["removed_count"] = len(removed_files)
+    projection = export_markdown_then_remove_revert_projection_files(store, args.output, records)
     return multi_revert_result(
         args,
         journal=journal,
@@ -5307,10 +5298,7 @@ def run_revert_event_with_dependents(
     if journal is not None:
         for record in records:
             append_journal_event(journal, record["event"])
-    removed_files = remove_projection_files_for_revert_records(args.output, records)
-    projection = store.export_markdown(args.output, check=False)
-    projection["removed_files"] = removed_files
-    projection["removed_count"] = len(removed_files)
+    projection = export_markdown_then_remove_revert_projection_files(store, args.output, records)
     return revert_sequence_result(
         args,
         journal=journal,
@@ -5494,6 +5482,19 @@ def projection_files_removed_for_revert_records(output: Path, records: list[dict
             if source_path not in removed:
                 removed.append(source_path)
     return removed
+
+
+def export_markdown_then_remove_revert_projection_files(
+    store: SQLiteStore,
+    output: Path,
+    records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    projection_files_removed_for_revert_records(output, records)
+    projection = store.export_markdown(output, check=False)
+    removed_files = remove_projection_files_for_revert_records(output, records)
+    projection["removed_files"] = removed_files
+    projection["removed_count"] = len(removed_files)
+    return projection
 
 
 def remove_projection_files_for_revert_records(output: Path, records: list[dict[str, Any]]) -> list[str]:
