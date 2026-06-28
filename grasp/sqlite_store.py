@@ -1175,6 +1175,25 @@ def _safe_markdown_output_path(output: Path, relative_path: str) -> Path:
     return output / path
 
 
+def _preflight_markdown_projection_write_targets(output: Path, relative_paths: list[str]) -> None:
+    for relative_path in relative_paths:
+        target = _safe_markdown_output_path(output, relative_path)
+        if target.exists() or target.is_symlink():
+            if target.is_dir():
+                raise IsADirectoryError(str(target))
+            if not target.is_file():
+                raise OSError(f"Markdown projection path is not a regular file: {target}")
+        parent = target.parent
+        existing_parent = parent
+        while not existing_parent.exists():
+            next_parent = existing_parent.parent
+            if next_parent == existing_parent:
+                break
+            existing_parent = next_parent
+        if existing_parent.exists() and not existing_parent.is_dir():
+            raise NotADirectoryError(str(existing_parent))
+
+
 def _safe_markdown_relative_path(relative_path: str | Path) -> str:
     path = Path(relative_path)
     if path.is_absolute() or ".." in path.parts or not path.name:
@@ -2444,21 +2463,32 @@ class SQLiteStore:
         changed_files: list[str] = []
         missing_files: list[str] = []
         written_files: list[str] = []
+        files_to_write: list[str] = []
         for relative_path, text in projections.items():
             target = _safe_markdown_output_path(output, relative_path)
             if not target.exists():
                 missing_files.append(relative_path)
                 if not check:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_text(text, encoding="utf-8")
-                    written_files.append(relative_path)
+                    files_to_write.append(relative_path)
                 continue
             current = target.read_text(encoding="utf-8")
             if current != text:
                 changed_files.append(relative_path)
                 if not check:
+                    files_to_write.append(relative_path)
+
+        if not check:
+            _preflight_markdown_projection_write_targets(output, files_to_write)
+            for relative_path in files_to_write:
+                target = _safe_markdown_output_path(output, relative_path)
+                text = projections[relative_path]
+                if not target.exists():
+                    target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text(text, encoding="utf-8")
                     written_files.append(relative_path)
+                    continue
+                target.write_text(text, encoding="utf-8")
+                written_files.append(relative_path)
 
         exclude_dirs = tuple(str(item) for item in manifest.get("exclude_dirs") or [])
         existing_files = {
