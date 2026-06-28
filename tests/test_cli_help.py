@@ -42,6 +42,7 @@ COMMANDS = [
     "append-log",
     "write-page",
     "rename-page",
+    "reconcile-markdown",
     "write-status",
     "revert-event",
     "revert-events",
@@ -10362,6 +10363,172 @@ class CliHelpTests(unittest.TestCase):
             status_result["semantic_log_projection"]["projection_policy"]["generated_overlays"],
             ["sqlite-events-log"],
         )
+
+    def test_reconcile_markdown_adopts_page_diff_and_semantic_log_drift(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- initial\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
+
+            def run_json(*args, check=True):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        *args,
+                    ],
+                    check=check,
+                    text=True,
+                    capture_output=True,
+                )
+                return completed, json.loads(completed.stdout)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "adopt-markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                    "--journal",
+                    str(journal_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            run_json(
+                "append-log",
+                "--timestamp",
+                "2026-06-26 02:00",
+                "--op",
+                "test",
+                "--summary",
+                "sqlite entry",
+                "--line",
+                "- sqlite line",
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+
+            (root / "Log.md").write_text(
+                "# Log\n\n"
+                "## [2026-06-26 02:30] file-back | direct markdown fallback\n"
+                "- direct log line [[A]]\n",
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "A.md").write_text(
+                "# A\n- direct page edit from file\n",
+                encoding="utf-8",
+            )
+
+            before_completed, before_status = run_json(
+                "write-status",
+                "--output",
+                str(root),
+                "--no-journal",
+                "--strict",
+                check=False,
+            )
+            dry_run_completed, dry_run = run_json(
+                "reconcile-markdown",
+                "--output",
+                str(root),
+                "--no-journal",
+                "--dry-run",
+            )
+            reconcile_completed, reconcile = run_json(
+                "reconcile-markdown",
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            after_completed, after_status = run_json(
+                "write-status",
+                "--output",
+                str(root),
+                "--no-journal",
+                "--strict",
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                event_rows = connection.execute(
+                    """
+                    SELECT event_type, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            event_payloads = [
+                (event_type, json.loads(payload_json))
+                for event_type, payload_json in event_rows
+            ]
+            manual_log_appends = [
+                payload
+                for event_type, payload in event_payloads
+                if event_type == "log_append" and payload.get("summary") == "direct markdown fallback"
+            ]
+            log_text = (root / "Log.md").read_text(encoding="utf-8")
+            a_text = (root / "A.md").read_text(encoding="utf-8")
+
+        self.assertEqual(before_completed.returncode, 1)
+        self.assertEqual(
+            [failure["type"] for failure in before_status["strict_failures"]],
+            ["projection_dirty", "semantic_log_stale"],
+        )
+        self.assertEqual(dry_run_completed.returncode, 0)
+        self.assertEqual(dry_run["normal_page_updates"], [{"source_path": "A.md"}])
+        self.assertEqual(len(dry_run["log_appends"]), 1)
+        self.assertEqual(dry_run["log_appends"][0]["summary"], "direct markdown fallback")
+        self.assertEqual(reconcile_completed.returncode, 0)
+        self.assertTrue(reconcile["ok"])
+        self.assertEqual([update["source_path"] for update in reconcile["normal_page_updates"]], ["A.md"])
+        self.assertEqual(len(reconcile["log_appends"]), 1)
+        self.assertTrue(reconcile["log_normalized"])
+        self.assertEqual(after_completed.returncode, 0)
+        self.assertTrue(after_status["strict_ok"])
+        self.assertEqual(after_status["strict_failures"], [])
+        self.assertEqual(log_text.count("direct markdown fallback"), 1)
+        self.assertEqual(log_text.count("sqlite entry"), 1)
+        self.assertIn("- direct page edit from file", a_text)
+        self.assertEqual(len(manual_log_appends), 1)
+        self.assertEqual(manual_log_appends[0]["op"], "file-back")
+        self.assertEqual(manual_log_appends[0]["timestamp"], "2026-06-26 02:30")
+        self.assertEqual(manual_log_appends[0]["lines"], ["- direct log line [[A]]"])
+        self.assertEqual(manual_log_appends[0]["source_path"], "Log.md")
 
     def test_write_status_reports_stale_log_after_direct_markdown_import(self):
         with tempfile.TemporaryDirectory() as tmpdir:
