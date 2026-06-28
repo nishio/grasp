@@ -1578,3 +1578,8 @@ ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog �
 - code: guard failure recovery hints now include `claims --include-expired` alongside `activity --limit 20`, so stopped agents can inspect soft claim state before choosing a recovery path.
 - tests: extended preflight recovery ladder coverage to require the claim-inspection command.
 - judgment: this keeps the current direction as observation-first coordination; no queue, mandatory lock, or automated reconcile is added without a stronger dogfood gap.
+
+## [2026-06-28 14:48] implementation+file-back | let write-page target page identity
+- code: `write-page` now accepts `--target page-id` and `--target path` for existing-page replacement, while `--create` remains title + `--path`.
+- tests: added a regression that reads page identity, writes the same page by page id, then writes another page by source path and verifies store/projection updates.
+- judgment: this removes an observation-to-authoring friction point for parallel agents; page identity returned by read/history/activity/claims can now be reused directly instead of converted back to title or file stem.

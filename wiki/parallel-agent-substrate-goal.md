@@ -1,6 +1,6 @@
 ---
 type: plan
-summary: 2026-06-28 の開発ゴール。grasp を「並行 agent が同一 canonical store を共有して知識共有しながら並行開発する基盤」として使える状態にする。判定は机上 spec でなく 2-agent 共有 store dogfood が green になること。1.8.72 で deferred projection / activity / SQLite-only log_append history の最小 substrate、1.8.73 で recovery ladder hints、1.8.74 で stale store→Markdown export refusal、1.8.75 で pre-write intent 用の soft page claim surface、1.8.76 で activity の claim-state fold、1.8.77 で recovery ladder の claim-aware hint が入った。Git worktree dogfood regression は activity による同ページ rewrite 回避、claim→write→release→明示 batch export、session rollback candidate 分離を確認済み。次はさらに長い real dogfood で queue / automated reconcile 要否を測る。
+summary: 2026-06-28 の開発ゴール。grasp を「並行 agent が同一 canonical store を共有して知識共有しながら並行開発する基盤」として使える状態にする。判定は机上 spec でなく 2-agent 共有 store dogfood が green になること。1.8.72 で deferred projection / activity / SQLite-only log_append history の最小 substrate、1.8.73 で recovery ladder hints、1.8.74 で stale store→Markdown export refusal、1.8.75 で pre-write intent 用の soft page claim surface、1.8.76 で activity の claim-state fold、1.8.77 で recovery ladder の claim-aware hint、1.8.78 で write-page identity target が入った。Git worktree dogfood regression は activity による同ページ rewrite 回避、claim→write→release→明示 batch export、session rollback candidate 分離を確認済み。次はさらに長い real dogfood で queue / automated reconcile 要否を測る。
 sources:
   - [[sqlite-ssot-write-plan]]
   - [[sqlite-write-concurrency]]
@@ -38,6 +38,7 @@ grasp を **複数の AI agent が同一 canonical store（`.grasp/authority.sql
 | 他 session の write を read（現在状態 / 直近変化） | 現在状態=`read`、変化=`history` / `log-records`（event-stream, current_state=false, session_id）まで実装済 |
 | **in-flight 認識（今どの session が何を作業中か / soft claim）** | 最小実装済（`activity [title]` が touched page/path の recent event と active sessions を返す）。`1.8.73` で preflight/write-start failure output から `activity --limit 20` と recovery ladder へ誘導する最初の実行面を追加。2026-06-28 の Git worktree dogfood regression では touched-page 回避に activity だけで足りた。`1.8.75` で pre-write intent 専用に `claim-page` / `claims` / `release-claim` を追加し、`activity` も claim/release event を読むようにした。追加 regression では A が claim 後に write、B が別 page を claim/write、両者が release し、batch export と session rollback candidate 分離まで通した。`1.8.76` で expired/released claim を `activity.active_sessions[]` から外し、`active_claims[]` と claim status を返す。`1.8.77` で recovery ladder も `claims --include-expired` を案内する。未検証: 長い real dogfood で queue / ergonomics が足りるか |
 | **遅延 / バッチ projection（write と md export の分離）** | 最小実装済（`write-page` / `append-log --defer-projection`、後段 `export-markdown`）。2026-06-28 の Git worktree dogfood regression で、deferred batch export は `--allow-projection-overwrite` を明示して通す運用に更新済み。未検証: 長い real dogfood での ergonomics |
+| 観測した page identity を write に戻す | `1.8.78` で `write-page --target page-id|path` を追加。`read --page-id`、`history.current_state_target`、`activity` / `claims` が返す page id / source path を、title/stem に戻さず replacement target として使える |
 
 ## 2026-06-28 file-back: Markdown を外す時の判断
 
@@ -77,12 +78,14 @@ Claude Code / Codex の並行 file-back では、同じ摩擦に対して3種類
 
 `1.8.76` で stale claim の最初の具体 gap も塞いだ。`claims` は TTL/release を fold していたが、`activity` は event age だけで `active` / `active_sessions[]` を作っていたため、期限切れまたは release 済みの `page_claim` が active work signal に見え得た。現在は `activity` も claim state を fold し、expired/released claim は `active=false` / `claim_active=false` / `claim_status=expired|released` になり、`active_sessions[]` から外れる。active soft claim は top-level `active_claims[]` として読む。
 
+`1.8.78` で観測面から write 面へ戻る identity gap も塞いだ。`read --page-id` / `history.current_state_target` / `activity` / `claims` は page id や source path を返すが、`write-page` は title/handle 前提だったため、agent は観測した identity を人間可読 title/stem へ戻してから replacement する必要があった。現在は `write-page --target page-id <id>` と `write-page --target path <source.md>` が使え、並行時に見た同じ page identity をそのまま update target にできる。
+
 ## 進め方: dogfood-first
 
 机上で spec を確定させず、**まず 2-agent 共有 dogfood を組んで走らせ、実際に落ちた所だけを実装する**（実装事実 first、判明した制約は file back）。
 
 1. 同一 store（temp 可）を共有する2 session を回す最小ハーネスを作る。
-2. 上の Done 条件 1–5 を assert する。最小 subprocess regression に加え、Git worktree regression で activity-based duplicate avoidance と explicit batch export は通った。`1.8.75` で pre-write claim surface と claim→write→release→batch export loop、`1.8.76` で activity の stale-claim fold も regression に入った。次は長い real dogfood で落ちる箇所を見る。
+2. 上の Done 条件 1–5 を assert する。最小 subprocess regression に加え、Git worktree regression で activity-based duplicate avoidance と explicit batch export は通った。`1.8.75` で pre-write claim surface と claim→write→release→batch export loop、`1.8.76` で activity の stale-claim fold、`1.8.78` で observation identity → write target の regression も入った。次は長い real dogfood で落ちる箇所を見る。
 3. 落ちた所に最小実装を入れる。claim/lease は `claim-page` の soft event surface までに留め、queue / automated reconcile は実際の運用 gap が出た時だけ足す。
 4. 判明した制約・設計変更を file back（[[sqlite-write-concurrency]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]]）。
 

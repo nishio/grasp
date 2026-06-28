@@ -3168,6 +3168,80 @@ class CliHelpTests(unittest.TestCase):
         self.assertFalse(new_exists_after_revert)
         self.assertTrue(replay_after_revert["ok"])
 
+    def test_write_page_replaces_by_page_id_and_source_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nold A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nold B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            def run_json(*args):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+            a_before = run_json("read", "A")
+            a_page_id = a_before["page"]["id"]
+
+            by_page_id = run_json(
+                "write-page",
+                a_page_id,
+                "--target",
+                "page-id",
+                "--line",
+                "# A",
+                "--line",
+                "updated by page id",
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            by_path = run_json(
+                "write-page",
+                "B.md",
+                "--target",
+                "path",
+                "--line",
+                "# B",
+                "--line",
+                "updated by path",
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            a_after = run_json("read", "--page-id", a_page_id)
+            b_after = run_json("read", "--path", "B.md")
+            a_projection_text = (root / "A.md").read_text(encoding="utf-8")
+            b_projection_text = (root / "B.md").read_text(encoding="utf-8")
+
+        self.assertEqual(by_page_id["event_type"], "page_update")
+        self.assertEqual(by_page_id["page"]["id"], a_page_id)
+        self.assertEqual(by_page_id["source_path"], "A.md")
+        self.assertEqual([line["text"] for line in a_after["lines"]], ["# A", "updated by page id"])
+        self.assertEqual(a_projection_text, "# A\nupdated by page id\n")
+
+        self.assertEqual(by_path["event_type"], "page_update")
+        self.assertEqual(by_path["page"]["title"], "B")
+        self.assertEqual(by_path["source_path"], "B.md")
+        self.assertEqual([line["text"] for line in b_after["lines"]], ["# B", "updated by path"])
+        self.assertEqual(b_projection_text, "# B\nupdated by path\n")
+
     def test_revert_event_dry_run_reports_revertible_without_mutating_store(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
