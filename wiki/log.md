@@ -1478,3 +1478,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: `revert-event`, `revert-events`, and `revert-event --include-dependents` now export the reverted store state before deleting projection files made obsolete by page_create/page_rename revert.
 - tests: added a page_rename revert regression where `Old.md` is a directory; the SQLite `event_revert` lands and `New.md` remains instead of being deleted before the failing export.
 - docs: bumped public/package version to `1.8.65` and updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[sqlite-ssot-write-plan]]. schema remains v8.
+
+## [2026-06-28 09:23] implementation+file-back | diagnose revert projection export failures
+- code: actual revert projection finalization now raises a `revert_projection_export_failed` diagnostic under `--json` after revert events have been written.
+- tests: strengthened the page_rename revert export-failure regression to assert phase, target/revert event ids, pending removed files, journal status, and original error while preserving the old projection file.
+- docs: bumped public/package version to `1.8.66` and updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[sqlite-ssot-write-plan]]. schema remains v8.

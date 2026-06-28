@@ -72,6 +72,10 @@ class ProjectionExportRollbackFailedError(GraspCliError):
     pass
 
 
+class RevertProjectionExportFailedError(GraspCliError):
+    pass
+
+
 class GraspHelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
     pass
 
@@ -3424,6 +3428,8 @@ def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
         store,
         args.output,
         [{"target": target, "rollback": rollback, "event": event}],
+        journal=journal,
+        target_source=target_source,
     )
     result = dict(reverted)
     result.update(
@@ -3481,7 +3487,13 @@ def run_revert_events(store: SQLiteStore, args: argparse.Namespace) -> dict[str,
     if journal is not None:
         for record in records:
             append_journal_event(journal, record["event"])
-    projection = export_markdown_then_remove_revert_projection_files(store, args.output, records)
+    projection = export_markdown_then_remove_revert_projection_files(
+        store,
+        args.output,
+        records,
+        journal=journal,
+        target_source="sqlite",
+    )
     return multi_revert_result(
         args,
         journal=journal,
@@ -5298,7 +5310,13 @@ def run_revert_event_with_dependents(
     if journal is not None:
         for record in records:
             append_journal_event(journal, record["event"])
-    projection = export_markdown_then_remove_revert_projection_files(store, args.output, records)
+    projection = export_markdown_then_remove_revert_projection_files(
+        store,
+        args.output,
+        records,
+        journal=journal,
+        target_source="sqlite",
+    )
     return revert_sequence_result(
         args,
         journal=journal,
@@ -5488,13 +5506,118 @@ def export_markdown_then_remove_revert_projection_files(
     store: SQLiteStore,
     output: Path,
     records: list[dict[str, Any]],
+    *,
+    journal: Path | None,
+    target_source: str,
 ) -> dict[str, Any]:
-    projection_files_removed_for_revert_records(output, records)
-    projection = store.export_markdown(output, check=False)
-    removed_files = remove_projection_files_for_revert_records(output, records)
+    try:
+        pending_removed_files = projection_files_removed_for_revert_records(output, records)
+    except Exception as error:
+        raise_revert_projection_export_failed(
+            output,
+            journal,
+            records,
+            target_source=target_source,
+            phase="preflight_obsolete_projection_removal",
+            pending_removed_files=[],
+            error=error,
+        )
+    try:
+        projection = store.export_markdown(output, check=False)
+    except Exception as error:
+        raise_revert_projection_export_failed(
+            output,
+            journal,
+            records,
+            target_source=target_source,
+            phase="export_reverted_projection",
+            pending_removed_files=pending_removed_files,
+            error=error,
+        )
+    try:
+        removed_files = remove_projection_files_for_revert_records(output, records)
+    except Exception as error:
+        raise_revert_projection_export_failed(
+            output,
+            journal,
+            records,
+            target_source=target_source,
+            phase="remove_obsolete_projection_files",
+            pending_removed_files=pending_removed_files,
+            error=error,
+        )
     projection["removed_files"] = removed_files
     projection["removed_count"] = len(removed_files)
     return projection
+
+
+def raise_revert_projection_export_failed(
+    output: Path,
+    journal: Path | None,
+    records: list[dict[str, Any]],
+    *,
+    target_source: str,
+    phase: str,
+    pending_removed_files: list[str],
+    error: Exception,
+) -> None:
+    diagnostic = revert_projection_export_failure_diagnostic(
+        output,
+        journal,
+        records,
+        target_source=target_source,
+        phase=phase,
+        pending_removed_files=pending_removed_files,
+        error=error,
+    )
+    raise RevertProjectionExportFailedError(
+        "projection export failed after revert events were written; "
+        f"store remains reverted: {error}",
+        diagnostic=diagnostic,
+    ) from error
+
+
+def revert_projection_export_failure_diagnostic(
+    output: Path,
+    journal: Path | None,
+    records: list[dict[str, Any]],
+    *,
+    target_source: str,
+    phase: str,
+    pending_removed_files: list[str],
+    error: Exception,
+) -> dict[str, Any]:
+    targets = [record["target"] for record in records]
+    events = [
+        record["event"]
+        for record in records
+        if record.get("event") is not None
+    ]
+    project = (
+        events[0].get("project")
+        if events
+        else targets[0].get("project") if targets else None
+    )
+    return {
+        "type": "revert_projection_export_failed",
+        "phase": phase,
+        "store_reverted": True,
+        "project": project,
+        "output": str(output),
+        "journal": str(journal) if journal is not None else None,
+        "journal_written": journal is not None,
+        "target_event_source": target_source,
+        "target_event_ids": [target.get("event_id") for target in targets],
+        "target_event_types": [target.get("event_type") for target in targets],
+        "revert_event_ids": [event.get("event_id") for event in events],
+        "revert_event_types": [event.get("event_type") for event in events],
+        "revert_event_count": len(events),
+        "pending_removed_files": pending_removed_files,
+        "original_error": {
+            "type": type(error).__name__,
+            "message": str(error),
+        },
+    }
 
 
 def remove_projection_files_for_revert_records(output: Path, records: list[dict[str, Any]]) -> list[str]:
