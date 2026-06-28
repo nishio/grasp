@@ -9708,6 +9708,279 @@ class CliHelpTests(unittest.TestCase):
         self.assertTrue(status["strict_ok"])
         self.assertEqual(status["strict_failures"], [])
 
+    def test_parallel_agent_multi_turn_lifecycle_uses_activity_without_queue(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            root = repo_root / "wiki"
+            root.mkdir(parents=True)
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n- old B\n", encoding="utf-8")
+            (root / "Shared.md").write_text("# Shared\n- old shared context\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            init_git_repo(repo_root)
+            store_path = repo_root / ".grasp" / "authority.sqlite"
+            store_path.parent.mkdir()
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            def run_export(*args, check=True):
+                return subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "export-markdown",
+                        "--output",
+                        str(root),
+                        "--regenerate-log",
+                        *args,
+                    ],
+                    check=check,
+                    text=True,
+                    capture_output=True,
+                )
+
+            run_json("import", "--markdown", str(root))
+            claim_a = run_json(
+                "claim-page",
+                "A",
+                "--ttl-seconds",
+                "600",
+                "--message",
+                "agent A starts a multi-turn A edit",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            activity_a_claimed = run_json("activity", "A", "--active-seconds", "86400")
+            conflict_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-b",
+                    "--session-id",
+                    "session-b",
+                    "claim-page",
+                    "A",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            claim_b = run_json(
+                "claim-page",
+                "B.md",
+                "--target",
+                "path",
+                "--ttl-seconds",
+                "600",
+                "--message",
+                "agent B avoids A and takes B",
+                actor="agent-b",
+                session_id="session-b",
+            )
+            write_b = run_json(
+                "write-page",
+                "B.md",
+                "--target",
+                "path",
+                "--line",
+                "# B",
+                "--line",
+                "- agent B avoided A after seeing session-a claim",
+                "--line",
+                "- agent B left [[Shared]] context for agent A",
+                "--no-journal",
+                "--defer-projection",
+                actor="agent-b",
+                session_id="session-b",
+            )
+            log_b = run_json(
+                "append-log",
+                "--timestamp",
+                "2026-06-28 16:45",
+                "--op",
+                "dogfood",
+                "--summary",
+                "B avoided claimed A in multi-turn loop",
+                "--line",
+                "- session-b saw session-a claim on [[A]] and wrote [[B]] while leaving [[Shared]] context",
+                "--no-journal",
+                "--defer-projection",
+                actor="agent-b",
+                session_id="session-b",
+            )
+            history_shared_after_b = run_json("history", "Shared")
+            activity_shared_after_b = run_json("activity", "Shared", "--active-seconds", "86400")
+            write_a = run_json(
+                "write-page",
+                "A",
+                "--line",
+                "# A",
+                "--line",
+                "- agent A incorporated session-b Shared signal",
+                "--line",
+                "- B current line: agent B avoided A after seeing session-a claim",
+                "--no-journal",
+                "--defer-projection",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            log_a = run_json(
+                "append-log",
+                "--timestamp",
+                "2026-06-28 16:46",
+                "--op",
+                "dogfood",
+                "--summary",
+                "A consumed B context in multi-turn loop",
+                "--line",
+                "- session-a read [[Shared]] history from session-b before finishing [[A]]",
+                "--no-journal",
+                "--defer-projection",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            read_a_seen_by_b = run_json("read", "A")
+            history_a_seen_by_b = run_json("history", "A")
+            activity_shared_after_a = run_json("activity", "Shared", "--active-seconds", "86400")
+            release_a = run_json(
+                "release-claim",
+                claim_a["claim"]["claim_event_id"],
+                actor="agent-a",
+                session_id="session-a",
+            )
+            release_b = run_json(
+                "release-claim",
+                claim_b["claim"]["claim_event_id"],
+                actor="agent-b",
+                session_id="session-b",
+            )
+            claims_after_release = run_json("claims", "--include-expired")
+            revert_plan_a = run_json("revert-plan", log_a["event_id"], "--scope", "session")
+            revert_plan_b = run_json("revert-plan", log_b["event_id"], "--scope", "session")
+            markdown_before_export = {
+                path.name: path.read_text(encoding="utf-8")
+                for path in [root / "A.md", root / "B.md", root / "Shared.md", root / "Log.md"]
+            }
+            check_completed = run_export("--check", check=False)
+            refused_completed = run_export(check=False)
+            allowed_completed = run_export("--allow-projection-overwrite")
+            status = run_json("write-status", "--output", str(root), "--no-journal", "--strict")
+            markdown_after_export = {
+                path.name: path.read_text(encoding="utf-8")
+                for path in [root / "A.md", root / "B.md", root / "Shared.md", root / "Log.md"]
+            }
+
+        check_result = json.loads(check_completed.stdout)
+        allowed_result = json.loads(allowed_completed.stdout)
+
+        self.assertEqual(activity_a_claimed["active_claims"][0]["claim_event_id"], claim_a["claim"]["claim_event_id"])
+        self.assertEqual(conflict_completed.returncode, 2)
+        self.assertIn("page already has an active claim", conflict_completed.stderr)
+        self.assertIn("session-a", conflict_completed.stderr)
+        self.assertEqual(claim_b["claim"]["title"], "B")
+        self.assertEqual(claim_b["claim"]["source_path"], "B.md")
+        self.assertTrue(write_b["projection_deferred"])
+        self.assertTrue(log_b["projection_deferred"])
+        self.assertEqual(history_shared_after_b["records"][0]["event_id"], log_b["event_id"])
+        self.assertEqual(history_shared_after_b["records"][0]["subjects"], ["A", "B", "Shared"])
+        self.assertEqual(activity_shared_after_b["events"][0]["event_id"], log_b["event_id"])
+        self.assertEqual(activity_shared_after_b["events"][0]["subjects"], ["A", "B", "Shared"])
+        self.assertTrue(write_a["projection_deferred"])
+        self.assertTrue(log_a["projection_deferred"])
+        self.assertEqual(
+            [line["text"] for line in read_a_seen_by_b["lines"]],
+            [
+                "# A",
+                "- agent A incorporated session-b Shared signal",
+                "- B current line: agent B avoided A after seeing session-a claim",
+            ],
+        )
+        self.assertEqual(
+            sorted(record["session_id"] for record in history_a_seen_by_b["records"]),
+            ["session-a", "session-b"],
+        )
+        self.assertEqual(history_a_seen_by_b["current_state_target"]["status"], "resolved_unique")
+        self.assertEqual(
+            [event["session_id"] for event in activity_shared_after_a["events"]],
+            ["session-a", "session-b"],
+        )
+        self.assertEqual(release_a["released_claim"]["claim_event_id"], claim_a["claim"]["claim_event_id"])
+        self.assertEqual(release_b["released_claim"]["claim_event_id"], claim_b["claim"]["claim_event_id"])
+        self.assertEqual(claims_after_release["active_claims"], [])
+        self.assertEqual(
+            sorted(claim["claim_event_id"] for claim in claims_after_release["released_claims"]),
+            sorted([claim_a["claim"]["claim_event_id"], claim_b["claim"]["claim_event_id"]]),
+        )
+        self.assertEqual(revert_plan_a["candidate_event_ids"], [write_a["event_id"], log_a["event_id"]])
+        self.assertEqual(revert_plan_b["candidate_event_ids"], [write_b["event_id"], log_b["event_id"]])
+        self.assertNotIn(claim_a["claim"]["claim_event_id"], revert_plan_a["candidate_event_ids"])
+        self.assertNotIn(claim_b["claim"]["claim_event_id"], revert_plan_b["candidate_event_ids"])
+        self.assertEqual(markdown_before_export["A.md"], "# A\n- old A\n")
+        self.assertEqual(markdown_before_export["B.md"], "# B\n- old B\n")
+        self.assertEqual(markdown_before_export["Shared.md"], "# Shared\n- old shared context\n")
+        self.assertEqual(markdown_before_export["Log.md"], "# Log\n")
+        self.assertEqual(check_completed.returncode, 1)
+        self.assertEqual(sorted(check_result["changed_files"]), ["A.md", "B.md", "Log.md"])
+        self.assertEqual(refused_completed.returncode, 2)
+        self.assertIn("--allow-projection-overwrite", refused_completed.stderr)
+        self.assertEqual(sorted(allowed_result["written_files"]), ["A.md", "B.md", "Log.md"])
+        self.assertEqual(
+            markdown_after_export["A.md"],
+            "# A\n"
+            "- agent A incorporated session-b Shared signal\n"
+            "- B current line: agent B avoided A after seeing session-a claim\n",
+        )
+        self.assertEqual(
+            markdown_after_export["B.md"],
+            "# B\n"
+            "- agent B avoided A after seeing session-a claim\n"
+            "- agent B left [[Shared]] context for agent A\n",
+        )
+        self.assertEqual(markdown_after_export["Shared.md"], "# Shared\n- old shared context\n")
+        self.assertIn(
+            "## [2026-06-28 16:45] dogfood | B avoided claimed A in multi-turn loop",
+            markdown_after_export["Log.md"],
+        )
+        self.assertIn(
+            "## [2026-06-28 16:46] dogfood | A consumed B context in multi-turn loop",
+            markdown_after_export["Log.md"],
+        )
+        self.assertTrue(status["strict_ok"])
+        self.assertEqual(status["strict_failures"], [])
+
     def test_parallel_agent_dirty_guard_ladder_uses_claims_to_avoid_duplicate_work(self):
         from scripts import check_file_back_preflight as preflight
 

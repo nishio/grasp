@@ -1623,3 +1623,8 @@ ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog �
 - tests: extended the dirty owner reconcile regression again so `revert-plan --scope session` on the owner reconcile event selects both A page updates and excludes the A claim event, then A/B release their claims.
 - result: after release, `claims --include-expired` has no active claims and contains both released claim ids; `write-status --strict` remains clean because release events do not touch Markdown projection.
 - judgment: the dirty guard recovery loop now covers duplicate avoidance, targeted owner reconcile, explicit batch export, session rollback grouping, and claim cleanup without adding a queue, mandatory lock, or automated reconcile.
+
+## [2026-06-28 16:41] dogfood+file-back | multi-turn agent lifecycle works without queue
+- tests: added `test_parallel_agent_multi_turn_lifecycle_uses_activity_without_queue`, where session-a claims [[A]], session-b is refused for A, claims [[B]] by path, writes B, and leaves a [[Shared]] log subject.
+- result: session-a reads `history Shared` / `activity Shared`, writes/logs A using B context, both claims are released, session rollback plans split A write+log from B write+log, and explicit batch export returns strict clean.
+- judgment: this longer temp shared-store lifecycle still fits soft claims + activity + deferred projection; queue / automated reconcile should wait for a live multi-agent runbook gap.
