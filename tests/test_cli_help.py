@@ -9870,8 +9870,31 @@ class CliHelpTests(unittest.TestCase):
             revert_plan_b = run_json("revert-plan", write_b["event_id"], "--scope", "session")
             check_completed = run_export("--check", check=False)
             refused_completed = run_export(check=False)
+            owner_reconcile = run_json(
+                "write-page",
+                "A.md",
+                "--target",
+                "path",
+                "--from-file",
+                str(root / "A.md"),
+                "--no-journal",
+                "--defer-projection",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            read_a_after_reconcile = run_json("read", "A")
+            check_after_reconcile_completed = run_export("--check", check=False)
+            still_refused_completed = run_export(check=False)
+            allowed_completed = run_export("--allow-projection-overwrite")
+            status = run_json("write-status", "--output", str(root), "--no-journal", "--strict")
+            markdown_after_export = {
+                path.name: path.read_text(encoding="utf-8")
+                for path in [root / "A.md", root / "B.md", root / "Log.md"]
+            }
 
         check_result = json.loads(check_completed.stdout)
+        check_after_reconcile_result = json.loads(check_after_reconcile_completed.stdout)
+        allowed_result = json.loads(allowed_completed.stdout)
         joined_hints = "\n".join(hints)
 
         self.assertEqual(len(dirty_errors), 1)
@@ -9906,6 +9929,25 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(sorted(check_result["changed_files"]), ["A.md", "B.md", "Log.md"])
         self.assertEqual(refused_completed.returncode, 2)
         self.assertIn("--allow-projection-overwrite", refused_completed.stderr)
+        self.assertTrue(owner_reconcile["projection_deferred"])
+        self.assertEqual(
+            [line["text"] for line in read_a_after_reconcile["lines"]],
+            ["# A", "- uncommitted owner draft"],
+        )
+        self.assertEqual(check_after_reconcile_completed.returncode, 1)
+        self.assertEqual(sorted(check_after_reconcile_result["changed_files"]), ["B.md", "Log.md"])
+        self.assertNotIn("A.md", check_after_reconcile_result["changed_files"])
+        self.assertEqual(still_refused_completed.returncode, 2)
+        self.assertIn("--allow-projection-overwrite", still_refused_completed.stderr)
+        self.assertEqual(sorted(allowed_result["written_files"]), ["B.md", "Log.md"])
+        self.assertEqual(markdown_after_export["A.md"], "# A\n- uncommitted owner draft\n")
+        self.assertEqual(markdown_after_export["B.md"], "# B\n- agent B avoided dirty A owner work\n")
+        self.assertIn(
+            "## [2026-06-28 16:10] dogfood | dirty guard ladder avoided duplicate work",
+            markdown_after_export["Log.md"],
+        )
+        self.assertTrue(status["strict_ok"])
+        self.assertEqual(status["strict_failures"], [])
 
     def test_write_status_no_journal_strict_fails_on_sqlite_semantic_log_drift(self):
         with tempfile.TemporaryDirectory() as tmpdir:
