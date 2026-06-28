@@ -1,6 +1,6 @@
 ---
 type: plan
-summary: 2026-06-28 の開発ゴール。grasp を「並行 agent が同一 canonical store を共有して知識共有しながら並行開発する基盤」として使える状態にする。判定は机上 spec でなく 2-agent 共有 store dogfood が green になること。write 側基盤（canonical store / WAL / BEGIN IMMEDIATE / session 帰属 / revert-plan --scope session）はほぼ実装済みで、未充足は read 側の in-flight 協調 surface と遅延 projection。dogfood-first で落ちた所だけ実装する。
+summary: 2026-06-28 の開発ゴール。grasp を「並行 agent が同一 canonical store を共有して知識共有しながら並行開発する基盤」として使える状態にする。判定は机上 spec でなく 2-agent 共有 store dogfood が green になること。1.8.72 で deferred projection / activity / SQLite-only log_append history の最小 substrate は入った。次は real dogfood で activity だけで足りるかを測り、不足した時だけ claim/lease 等を足す。
 sources:
   - [[sqlite-ssot-write-plan]]
   - [[sqlite-write-concurrency]]
@@ -23,8 +23,8 @@ grasp を **複数の AI agent が同一 canonical store（`.grasp/authority.sql
 
 1. **並行 write が安全**: A と B が並行に `write-page` / `append-log` しても crash も lost-update も起きない。
 2. **互いの現在状態が読める**: A の write 後、B が `read` で現在状態を、`history` / `log-records`（event-stream + session_id）で A の直近変化を認識できる。
-3. **in-flight 認識で二重作業を避けられる**: B が「A が今このページを触っている / 触った」と分かり、同じページの二重 rewrite を避けられる。← **現状 surface が無い。今日の主対象。**
-4. **projection が race しない**: 並行中は Markdown projection を遅延し、md ファイル層で衝突しない（毎-write 同期 export で [[sqlite-write-concurrency]] reason (c) の clobber 面を再導入しない）。← **現状 write 毎に同期 export。今日の対象。**
+3. **in-flight 認識で二重作業を避けられる**: B が「A が今このページを触っている / 触った」と分かり、同じページの二重 rewrite を避けられる。`1.8.72` は `activity [title]` で recent page/session work を読む最小 surface を入れた。claim/lease は real dogfood で activity が足りない時だけ足す。
+4. **projection が race しない**: 並行中は Markdown projection を遅延し、md ファイル層で衝突しない（毎-write 同期 export で [[sqlite-write-concurrency]] reason (c) の clobber 面を再導入しない）。`1.8.72` は `write-page` / `append-log --defer-projection` と batch `export-markdown` の regression を持つ。
 5. **session 単位で独立 revert**: 事故っても `revert-plan --scope session` で A / B の work unit を独立に巻き戻せる。
 
 ## 実装済み vs 未充足（2026-06-28 時点）
@@ -35,8 +35,16 @@ grasp を **複数の AI agent が同一 canonical store（`.grasp/authority.sql
 | write の attribution（どの agent/session が何を触ったか） | 実装済（`--actor` / `--session-id`、events に記録、preflight session uniqueness、postwrite session marker） |
 | session 単位の独立 rollback | 実装済（`revert-plan --scope session`） |
 | 他 session の write を read（現在状態 / 直近変化） | 現在状態=`read`、変化=`history` / `log-records`（event-stream, current_state=false, session_id）まで実装済 |
-| **in-flight 認識（今どの session が何を作業中か / soft claim）** | **未着手。Done 条件 3 の本丸** |
-| **遅延 / バッチ projection（write と md export の分離）** | **未着手。現状 write 毎に同期 export。Done 条件 4** |
+| **in-flight 認識（今どの session が何を作業中か / soft claim）** | 最小実装済（`activity [title]` が touched page/path の recent event と active sessions を返す）。未検証: real dogfood で claim/lease が不要か |
+| **遅延 / バッチ projection（write と md export の分離）** | 最小実装済（`write-page` / `append-log --defer-projection`、後段 `export-markdown`）。未検証: 長い real dogfood での運用 ergonomics |
+
+## 2026-06-28 file-back: Markdown を外す時の判断
+
+「知識管理から Markdown を外して Grasp だけにする」は、**Markdown を authority / concurrent edit target から外す**という意味なら、このゴールの方向と一致する。並行 agent が同じ知識基盤を使うには、全 agent が同一 canonical SQLite store を共有し、write は `grasp write` 系に寄せ、並行中の Markdown projection は `--defer-projection` で batch export に回すのが正しい境界。
+
+ただし **Markdown projection 自体を即ゼロにする判断ではない**。現時点の projection は review / backup / publish / fresh-checkout recovery の低頻度 artifact として残す。race するのは projection を per-write の authority 的入力にする時であり、generated snapshot として batch 出力する限り、並行 authoring の critical section には入れない。
+
+`1.8.72` の evidence は「最小 2-agent subprocess regression が green」まで。したがって今の位置は **Grasp-only authority substrate は最小成立、広い実運用は未検証**。次は real multi-agent dogfood を走らせ、`activity` だけで二重作業回避が足りるなら claim/lease は作らない。不足が観測された場合だけ、目的が名前に出る command として追加する。目的の薄い既存 command を温存しない方針は `append-section` public CLI を削除した `1.8.70` と同じ。
 
 ## 進め方: dogfood-first
 
