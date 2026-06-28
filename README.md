@@ -1,38 +1,42 @@
 # grasp
 
-**LLM エージェントのための、ローカルなグラフ知識ストア。**
+[Japanese README](README.ja.md)
 
-`grasp` は、既存のノート群をローカルな SQLite グラフストアに取り込み、AI が CLI から **ページ本文 + 行レベル逆リンク + related + 未解決リンクターゲット** を一度に読めるようにするツールです。
+**A local graph reader for AI agents.**
 
-人間が毎回 `grasp` コマンドを覚えて叩くためのツールというより、Claude Code などの AI エージェントに Skill として持たせておき、あなたは自然言語で「この概念について何を書いたっけ」「関連ページも辿って」と聞く、という使い方を想定しています。
+`grasp` turns an existing note collection into a local SQLite graph that an AI
+agent can query from the command line. Your source of truth stays where it is:
+a Markdown folder, an Obsidian vault, or a Scrapbox / Cosense export. `grasp`
+is the read layer beside it.
 
-## どちらから始めるか
+It is built for questions like:
 
-Markdown / Obsidian の人と Scrapbox / Cosense の人では、最初の疑問が違います。自分に近い入口から読んでください。
+> What have I written about this idea? Also show the lines that link to it and
+> nearby pages that may matter.
 
-| 使っているもの | 入口 |
-| --- | --- |
-| Obsidian、Markdown notes、LLM Wiki、ただの `.md` フォルダ | [Obsidian / Markdown ユーザ向け](docs/markdown.md) |
-| Scrapbox / Cosense project、Cosense JSON export、hosted Cosense | [Scrapbox / Cosense ユーザ向け](docs/cosense.md) |
+## The Basic Idea
 
-Scrapbox / Cosense を知らなくても使えます。Markdown フォルダに `[[wikilink]]` や `#tag` があるなら、まずは [Obsidian / Markdown ユーザ向け](docs/markdown.md) から試してください。
+Scrapbox / Cosense are wiki-style note systems where pages are connected by
+inline links, backlinks, and related pages. You do not need to know those tools
+to use `grasp`. The useful idea is simple: notes are more than separate files.
+Their links form a graph.
 
-## 何がうれしいのか
+Plain file search can find matching text, but an agent still has to rebuild the
+surrounding context by opening files, following links, and searching again.
+`grasp` stores the links as graph edges first, so one command can return a
+bounded bundle of context:
 
-Markdown の束だけを AI に渡すと、リンクはただの文字列です。「誰がこのページにリンクしているか」「この概念の周辺には何があるか」を知るには、AI が grep して、候補を開いて、また grep する必要があります。
+- the page body
+- line-level backlinks
+- related pages found through nearby links
+- linked concepts that do not have their own page yet
 
-`grasp` はリンクをグラフのエッジとして保存します。だから `grasp read <title>` だけで、次の文脈をまとめて返せます。
+That makes `grasp` less like a note editor and more like a local retrieval
+surface for agents.
 
-- **本文**: 対象ページの行
-- **逆リンク**: そのページや未解決ターゲットを参照している行
-- **related**: 2-hop で近いページ、または本文が無いターゲットを参照する source pages
-- **未解決ターゲット**: 本文ページは無いがリンクされている概念ノード
+## Install
 
-本文がまだ無い概念でも、多くのページから参照されていれば、参照元の行から意味を読めます。これが「単なる検索 CLI」ではなく、AI がローカルなグラフを読むための基盤である理由です。
-
-## インストール
-
-Python **3.10 以上**。実行時依存はありません。
+Python 3.10 or newer is required. Runtime dependencies are stdlib-only.
 
 ```bash
 git clone https://github.com/nishio/grasp.git
@@ -40,106 +44,90 @@ cd grasp
 pip install -e .
 ```
 
-`pip` がシステム Python に弾かれる環境では、仮想環境か `pipx install --editable .` を使ってください。未インストールのまま試す場合は、リポジトリ直下で `python3 -m grasp ...` と実行できます。
+If you do not want to install it yet, run commands from the repository with
+`python3 -m grasp ...`.
 
-手元にまだデータが無い場合は、このリポジトリ自身の `wiki/` を read-only Markdown mirror として試せます。
+## Try It
+
+This repository contains its own Markdown wiki, so you can try `grasp` without
+preparing data.
 
 ```bash
 grasp --store /tmp/grasp-demo.sqlite import --markdown wiki --project grasp-wiki
 grasp --store /tmp/grasp-demo.sqlite --project grasp-wiki read grasp-v1-implemented --line-limit 20
 ```
 
-## AI エージェントに持たせる
+The second command prints the page plus backlinks, related pages, and unresolved
+targets when they exist.
 
-主経路は CLI 直叩きではなく、AI エージェントに Skill として登録する使い方です。Claude Code なら、リポジトリ内の Skill をユーザ skill ディレクトリへ symlink します。
+## Use Your Notes
+
+For Markdown or Obsidian-style notes:
+
+```bash
+grasp import --markdown ~/Notes --project notes
+grasp --project notes read "Some Page"
+grasp --project notes search "some phrase" --context 2
+```
+
+For a Scrapbox / Cosense JSON export:
+
+```bash
+grasp import --cosense your-project.json --project my-wiki
+grasp --project my-wiki read "Some Page"
+grasp --project my-wiki backlinks "Some Concept"
+```
+
+The default store is `~/.grasp/grasp.sqlite`. A single store can hold multiple
+project namespaces; choose one with `--project`.
+
+## Use It Through an Agent
+
+Humans can run the CLI directly, but the intended use is to give the CLI to an
+AI agent. The agent can search, read, follow backlinks, and gather a bounded
+neighborhood before answering.
+
+For Claude Code, you can symlink the bundled skill:
 
 ```bash
 mkdir -p ~/.claude/skills
 ln -s "$PWD/skills/grasp" ~/.claude/skills/grasp
 ```
 
-これで、AI に次のように聞けます。
+Then ask in natural language, for example:
 
-> 「グラフ理論について自分は何を書いた？ 関連ページも辿って」
+> In my notes, what did I write about graph retrieval? Follow related pages too.
 
-AI は必要に応じて `grasp read` / `search` / `backlinks` / `related` などを呼び分けます。Skill 側の使い方は [skills/grasp/SKILL.md](skills/grasp/SKILL.md)、各コマンドの正確な引数と JSON 形状は `grasp <command> --help` が正典です。
-
-この repo の開発 wiki dogfood では、repo-local file-back guard scripts は no-journal が default です。tracked `wiki.grasp/events.jsonl` は `1.8.18` で退役済みで、通常 file-back は repo に JSONL を作りません。repo default store/output pair は `.grasp/file-back.sqlite` + `wiki` で、temp dogfood は temp store + temp output を使い、default store と temp output を混在させません。各 file-back は一意な `GRASP_SESSION_ID` を設定し、preflight は current upstream（なければ `origin/main`）を基準に未使用 session id を要求し、fresh store は gitignored `.grasp/file-back-adopt.jsonl` へ bootstrap し、gitignored preflight stamp に session/head/base と latest SQLite event_sequence を記録し、gitignored file-back lock `.grasp/file-back.lock.json` を取得します。最初の write command 直前には write-start checker が import なしで projection / stamp / lock / store status がまだ clean であることと latest SQLite event_sequence が preflight 時点から増えていないことを確認し、postwrite は同じ session id を要求して preflight stamp の session/head/base 一致、file-back lock の session 一致、preflight 後に増えた全 SQLite events の session_id、SQLite events 由来の semantic log projection も確認し、clean な時だけ lock を解放します。ship loop は commit 後・push 前に `python3 scripts/check_push_ownership.py` を通し、dirty worktree / behind branch / 通常の protected branch push を止めます。
-
-## 最初に覚えるコマンド
-
-| command | 何をするか |
-| --- | --- |
-| `grasp stats` | store と project の状態を見る |
-| `grasp import --markdown <folder>` | Markdown フォルダを read-only mirror として取り込む |
-| `grasp import --cosense <json>` | Scrapbox / Cosense JSON export を取り込む |
-| `grasp read <title>` | 本文、逆リンク、related、未解決ターゲットをまとめて読む |
-| `grasp search <query>` | 本文行を検索する。`--context N` で前後行も返す |
-| `grasp backlinks <title>` | 行レベル逆リンクだけを見る |
-| `grasp related <title>` | 2-hop related や missing target の source pages を見る |
-| `grasp suggest <partial>` | うろ覚えのタイトルを補完する |
-| `grasp unresolved` | 本文ページが無いリンクターゲットを ranked view で見る |
-| `grasp path <A> <B>` | 2 つのページ / ターゲットの短いリンク経路を見る |
-
-`unresolved` は「埋めるべき TODO リスト」ではありません。本文が無くても、参照元の行の文脈で既に意味を持っている概念ノードとして扱います。
-
-詳しいオプション、返る JSON key、例は使う直前に確認します。
+Exact command arguments and JSON shapes are documented by the CLI itself:
 
 ```bash
+grasp <command> --help
 grasp read --help
-grasp search --help
-grasp --json read "ページタイトル" --backlinks-limit 5
 ```
 
-## Store と project
-
-- 既定 store は `~/.grasp/grasp.sqlite` です。
-- 1 つの store に複数 project namespace を入れられます。
-- project 名を変える場合は import 時に `--project <name>` を付けます。
-- 読む対象を選ぶ場合は command の前に `--project <name>` を置きます。
-
-```bash
-grasp import --project my-notes --markdown ~/Notes
-grasp --project my-notes read "ページタイトル"
-```
-
-環境変数でも指定できます。
-
-| option | 環境変数 | 用途 |
-| --- | --- | --- |
-| `--store PATH` | `GRASP_STORE` | SQLite store の場所 |
-| `--project NAME` | `GRASP_PROJECT` | 読み書き対象の project |
-| なし | `GRASP_HOME` | 既定 home。未指定なら `~/.grasp` |
-
-text 出力の `line-id` は `P1:0` のような実行内ローカル別名に短縮されます。安定した完全 ID が必要な時は `--json`、text のまま完全 ID を見たい時は `--full-ids` を使います。
-
-## 現在のスコープ
+## Current Scope
 
 Stable:
 
-- Markdown folder の read-only mirror import
-- Scrapbox / Cosense JSON export の import
-- 複数 project を 1 store に保持
-- `read` / `search` / `backlinks` / `related` / `path` などの read surface
-- page が存在しない linked target の backlinks / related / link-stats
-- CLI + Agent Skill による AI 向け delivery
+- read-only Markdown folder import
+- Scrapbox / Cosense JSON export import
+- local SQLite store with multiple projects
+- `read`, `search`, `backlinks`, `related`, `path`, `suggest`, and `unresolved`
+- missing linked concepts as graph nodes with backlink context
 
-Alpha:
-
-- Markdown-backed project 向けの `append-log` / `write-page` / `rename-page`
-- SQLite store を authority とする `export-markdown --check` の projection freshness gate
-- `write-status` / `revert-plan` / `revert-event` / `revert-events` / `replay-journal` による recovery surface
-- write/status は移行用の compatibility JSONL journal を使えるほか、`--no-journal` で SQLite events + Markdown projection + semantic log projection の path も検証できる
-- write 系 command の projection export が event write 後に失敗した場合は SQLite state を `event_revert` で自動 rollback し、`--json` では stderr に rollback diagnostic を返す
-- repo-local file-back guard scripts は no-journal が default で、preflight は未使用 session id を要求し、fresh store は gitignored `.grasp/file-back-adopt.jsonl` へ bootstrap し、gitignored preflight stamp に session/head/base と latest SQLite event_sequence を記録し、gitignored file-back lock `.grasp/file-back.lock.json` を取得し、default store/output pair と temp store + temp output の混在を止め、write-start checker は import なしで projection / stamp / lock / store status と latest SQLite event_sequence が preflight 時点から増えていないことを確認し、postwrite は同じ session id を要求して preflight stamp の session/head/base 一致、file-back lock の session 一致、preflight 後に増えた全 SQLite events の session_id、SQLite events 由来の semantic log projection も確認し、clean な時だけ lock を解放し、compatibility journal あり mode は明示 audit 用に残す
-- `scripts/check_file_back_runbook.py` で repo-local file-back runbook の `--no-journal` default drift を検出する
-
-スコープ外:
+Not the goal:
 
 - Web UI
-- リアルタイム多人数編集
-- 共有・権限管理
-- 汎用の hosted Cosense 編集
+- hosted note editing
+- realtime multi-user collaboration
+- replacing your existing note source of truth
+
+Markdown-backed write commands exist, but they are alpha surfaces for repository
+dogfooding. Treat `grasp` as a read and retrieval layer unless you are working
+on the project itself.
+
+More detailed Japanese walkthroughs are in [docs/markdown.md](docs/markdown.md)
+and [docs/cosense.md](docs/cosense.md).
 
 ## License
 
