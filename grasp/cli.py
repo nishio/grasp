@@ -1464,6 +1464,8 @@ def preflight_journal_appendable(journal: Path | None) -> None:
         raise_journal_append_preflight_failed(journal, "journal path is a directory")
     if journal.exists() and not journal.is_file():
         raise_journal_append_preflight_failed(journal, "journal path is not a regular file")
+    if journal.exists() and not os.access(journal, os.W_OK):
+        raise_journal_append_preflight_failed(journal, "journal path is not writable")
 
     parent = journal.parent
     existing = parent
@@ -1476,6 +1478,11 @@ def preflight_journal_appendable(journal: Path | None) -> None:
         raise_journal_append_preflight_failed(
             journal,
             f"journal parent path is not a directory: {existing}",
+        )
+    if not journal.exists() and existing.exists() and not os.access(existing, os.W_OK | os.X_OK):
+        raise_journal_append_preflight_failed(
+            journal,
+            f"journal parent directory is not writable: {existing}",
         )
 
 
