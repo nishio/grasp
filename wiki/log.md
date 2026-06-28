@@ -1504,3 +1504,7 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 
 ## [2026-06-28 10:46] implementation+file-back | fix stale append-log help note
 - append-log --help が rename-page 済みの current surface と矛盾する stale note を出していたため、page identity changes は rename-page が扱うという説明へ更新し、regression test を追加した。
+
+## [2026-06-28 11:41] file-back | 今日の開発ゴール [[parallel-agent-substrate-goal]] を新設（Codex 向け）
+並行 agent が同一 canonical store を共有して知識共有しながら並行開発する基盤、を今日のゴールに固定。判定は 2-agent 共有 store dogfood が green（並行 write 安全 / 互いの現在状態・直近変化が read 可 / in-flight 認識で二重作業回避 / projection 遅延で md race なし / session 単位 revert）。
+write 側基盤（canonical store / WAL / BEGIN IMMEDIATE / session 帰属 / revert-plan --scope session）は実装済、未充足は in-flight 協調 surface と遅延 projection。dogfood-first で落ちた所だけ実装する。新規ユーザは Markdown=SSoT の mode 1 から入る信頼勾配の高信頼端向けで、協調レイヤは単一 agent では不要な形に degrade。
