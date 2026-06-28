@@ -93,7 +93,8 @@ sources:
 
 - **[NEW・並行基盤に直結] cross-machine では `.grasp/` 共有 store は git を渡らない。** 開発 Codex はクラウド、私はローカル machine。`.grasp/file-back.sqlite` は gitignored で **git に乗らない**ため、私のローカル store は merge 済み 66 commits より前で固定され、preflight が `semantic_log_stale / strict_ok=False` で正しく停止した。回復＝stale store を退避し現 `wiki/` から fresh bootstrap。**含意（[[parallel-agent-substrate-goal]] の Done-2/3 に直結）**: 「共有 canonical store」は **同一 machine の同一 store file** を指す時だけ成立する。異 machine/異 harness の agent は store を共有しておらず、各自 git-tracked な `wiki/` projection から store を再構成する。∴ 現状 cross-agent の実際の共有経路は **store でなく Markdown projection** であり、これは mode2（grasp=SSoT、Markdown は export-only）の理想と逆向き。並行基盤を cross-machine へ広げるなら canonical store の同期/共有 layer が要る（さもなくば projection が事実上の交換形式に戻る）。[[sqlite-write-concurrency]] の「並行は想定用途」を machine 境界まで延長した形。
 
-- **[NEW・bug 候補] `write-page` の handle 解決が `read` と非対称。** `read <short page_id>` は解決するのに、同じ short page_id を `write-page <id>` に渡すと `page not found` で失敗し、stem handle（`index`）なら成功した。read で得た id を write にそのまま回せない。Codex 確認/修正候補（read と write で handle resolver を揃えるか、write-page が short id を受けるか）。
+- **[解決済み・元 bug 候補] `write-page` の handle 解決が `read` と非対称。** `read <short page_id>` は解決するのに、同じ short page_id を `write-page <id>` に渡すと `page not found` で失敗し、stem handle（`index`）なら成功した。read で得た id を write にそのまま回せない。Codex 確認/修正候補（read と write で handle resolver を揃えるか、write-page が short id を受けるか）。
+  - 解決（2026-06-28 / `1.8.78`）: `write-page --target page-id|path` を追加し、`read --page-id` / `history.current_state_target` / `activity` / `claims` が返す page identity または source path を replacement target に直接渡せるようにした。裸の short id を handle として推測するのではなく、write 側の target kind を明示する surface として解決。
 
 - **[NEW] content ページの軽量追記手段が無い（append-section 退役の余波）。** `append-section` は public CLI から削除（1.8.70）。既存 content ページの編集は `write-page` の**全文 full-replace** のみ（`append-log` は log ページ専用）。本 §Updates の追記も大ページ full-replace になり、whitespace risk は postwrite の diff-check で担保したが、「既存節に1行足す/前方リンクを1本張る」だけでも全文 replace が要る。前回 friction 1 gotcha（append-section の二重 heading）は退役で解消した代わりに、**節レベル追記の安価手段が消えた**。
 
@@ -101,7 +102,7 @@ sources:
 
 - **(minor) orphan: log/index はリンク源に数えない。** 新規 content ページは別 content ページが `[[..]]` で参照するまで lint 孤立扱い。上の「軽量追記手段が無い」と相互作用し、incoming link を1本足すのも full-replace。
 
-**meta（更新）。** 摩擦の主因は前回の correctness/並行安全性から **setup/ergonomics** へ移った: 残るのは (a) cross-machine の store 非共有（最重要・並行基盤 blocker）(b) read/write の handle 非対称（bug 候補）(c) 軽量追記の欠如（d) env portability。いずれも grasp-write の capability ではなく、**別 agent/harness が同じ substrate に合流する時のコスト**。今日のゴール [[parallel-agent-substrate-goal]] にとって本節最大の datum は (a)＝「`.grasp/` は git を渡らない → 真に共有された store は cross-machine では未成立」。actionable は [[grasp-backlog]] へ。
+**meta（更新）。** 摩擦の主因は前回の correctness/並行安全性から **setup/ergonomics** へ移った: 残るのは (a) cross-machine の store 非共有（最重要・並行基盤 blocker）(c) 軽量追記の欠如（d) env portability。いずれも grasp-write の capability ではなく、**別 agent/harness が同じ substrate に合流する時のコスト**。今日のゴール [[parallel-agent-substrate-goal]] にとって本節最大の datum は (a)＝「`.grasp/` は git を渡らない → 真に共有された store は cross-machine では未成立」。read/write の handle 非対称は `1.8.78` で `write-page --target page-id|path` として解決済み。actionable は [[grasp-backlog]] へ。
 
 ## 関連
 
