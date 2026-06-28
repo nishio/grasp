@@ -96,6 +96,8 @@ Claude Code / Codex の並行 file-back では、同じ摩擦に対して3種類
 
 2026-06-28 16:52 の live runbook contention trial は、temp store ではなく実 repo の `.grasp/file-back.sqlite` + `wiki` pair で通常 preflight を2 session 分走らせた。clean `main` で session A (`live-runbook-session-a-20260628T1655JST`) が `check_file_back_preflight.py` を通して `.grasp/file-back.lock.json` を取得した状態で、session B (`live-runbook-session-b-20260628T1655JST`) が同じ preflight を走らせると、`another file-back lock is active` / `active file-back lock session_id='live-runbook-session-a-...'` で停止し、recovery ladder として `activity --limit 20`、`claims --include-expired`、active lock の wait / confirmed stale lock removal guidance を返した。`activity --limit 5` は直近の file-back sessions を返し、`claims --include-expired` は active_count 0 を返した。これは normal file-back runbook 同士が同じ working tree / store pair で silent interleave せず、所有者待ちへ倒れる live evidence。contentful な同時 file-back はまだ外部 agent で試す余地があるが、少なくとも active lock に対して queue / automated reconcile を足す根拠は出ていない。
 
+2026-06-28 17:03 の contentful external-agent drill は、`multi_agent_v1` external sub-agent が同じ checkout と `.grasp/file-back.sqlite` を使い、session `subagent-contentful-live-fileback-20260628T1703JST` で normal preflight lock を取得した。lock 保持中に parent の competing preflight `parent-competing-live-fileback-20260628T1703JST` は active lock owner と recovery ladder 付きで拒否され、その後 sub-agent は write-start を通して goal page / log の contentful file-back へ進んだ。判断: external-agent contentful file-back も同じ runbook path で serialize され、この観測では queue / automated reconcile の必要は出ていない。
+
 ## 進め方: dogfood-first
 
 机上で spec を確定させず、**まず 2-agent 共有 dogfood を組んで走らせ、実際に落ちた所だけを実装する**（実装事実 first、判明した制約は file back）。
