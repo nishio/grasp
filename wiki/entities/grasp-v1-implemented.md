@@ -53,7 +53,7 @@ v1 stable scope 外:
 
 ## store
 
-- current public compatibility version は `1.8.68`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.8.69`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - authoring SSoT substrate 用の canonical store path helper は `$GRASP_CANONICAL_STORE` → `<repo>/.grasp/authority.sqlite` → `$GRASP_HOME/authority.sqlite` → `~/.grasp/authority.sqlite`。これは Phase 0/1 helper であり、既存 default read/import store path とは分ける。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
@@ -203,6 +203,7 @@ parser が link から除外するもの:
 - `1.8.66` 以降、actual revert 系 command は revert events を書いた後の projection export / obsolete projection file removal が失敗した時、`--json` stderr に `diagnostic.type=revert_projection_export_failed` を返す。diagnostic は `phase`、target event ids/types/source、revert event ids/types/count、`pending_removed_files`、journal status、original error を含む。これは追加 rollback ではなく「store は reverted state に進んだが projection finalization が失敗した」ことを AI が機械的に読める failure contract。
 - `1.8.67` 以降、legacy/ad hoc `--journal` を使う write / recovery / adopt / import-log write path は SQLite mutation 前に journal append path を preflight する。journal path が directory / non-regular file / directory でない既存親 path を指す場合、`--json` stderr に `diagnostic.type=journal_append_preflight_failed`、`store_mutated=false`、`journal_written=false`、`projection_written=false` を返し、SQLite event / `event_revert` / Markdown projection を残さない。通常 repo file-back の `--no-journal` path は不変。
 - `1.8.68` 以降、同 preflight は既存 regular journal file の write permission と、missing journal path 作成に必要な既存 parent directory の write/execute permission も検査する。read-only journal file で `append-section --journal` が失敗しても SQLite event と Markdown projection を残さない。
+- `1.8.69` 以降、同 preflight は既存 journal file の JSONL parse / schema validation も mutation 前に検査する。invalid JSONL の場合は `journal_append_preflight_failed` と既存 parser error を返し、SQLite event / Markdown projection / journal content を残さない。`adopt-markdown --replace-journal` は既存 content を上書きするため validation を skip する。
 - `1.8.55` 以降、repo-local `scripts/check_file_back_write_start.py` は preflight stamp の latest SQLite `event_sequence` と write-start 時点の current latest `event_sequence` を比較し、preflight 後・最初の write command 前に store が進んだ場合は failure にする。これは preflight と write-start の間に別 writer が `.grasp/file-back.sqlite` を更新した時、postwrite で自分の write 後に検出するのではなく、mutation 前に preflight 再実行を要求する guard。
 - `1.8.56` 以降、repo-local file-back guard は gitignored lock `.grasp/file-back.lock.json` を使う。preflight は clean run 後に lock を取得し、write-start / postwrite は同じ session/store/project/output の lock を要求する。postwrite は全 checks が clean な時だけ lock を解放する。通常 runbook 同士では、複数 write command の file-back 中に別 writer が割り込むことを preflight 時点で止める。
 - SQLite write substrate: `connect_sqlite_store(..., for_write=True)` は WAL / `busy_timeout` / `synchronous=NORMAL` を設定し、`sqlite_write_transaction()` は `BEGIN IMMEDIATE` で write lock を取り commit/rollback する。CLI は store 更新系 command を write-configured connection で開く。
