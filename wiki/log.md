@@ -1515,3 +1515,6 @@ Claude Code（開発 Codex とは別 harness）が SQLite-SSoT runbook で本番
 
 ## [2026-06-28 12:20] file-back | [[sqlite-write-concurrency]] §Updates 2026-06-28 に git レイヤ層を追記（lock の上に未カバーの working tree/HEAD）
 post-incident の file-back lock は store/projection を直列化するが、git の working tree/HEAD は別レイヤで lock 管轄外。2 agent が共有 checkout だと第二 agent の未コミット変更が第一 agent のブランチ HEAD に乗り、一方の git switch が他方の HEAD を動かす（2026-06-28 live 観測）。worktree は tree/HEAD を隔離するが各自 .grasp/ store を持つので store を割る＝共有 substrate が git/Markdown に縮退（tree 分離と store 共有は独立軸）。worktree-per-agent は codex で既に部分運用、衝突は persona agent が共有 main checkout にいた運用不徹底。actionable: write 並行 agent は worktree 必須化。
+
+## [2026-06-28 12:24] file-back | [[parallel-agent-substrate-goal]] に 運用観察 2026-06-28 を追記（worktree 隔離 recipe / HEAD 絡み realized / 収束）
+本ゴール設定日に並行 agent と重なり一部が live 実演。共有 checkout の HEAD 絡みは realized（第二 agent の作業が第一 agent のブランチ名上に commit）。worktree 隔離 recipe（branch off→fresh store→Markdown だけ commit）は機能したが store は共有でなく substrate が git/Markdown に縮退＝tree 分離と store 共有は独立軸。worktree-per-agent へ運用収束中。actionable: (1)write 並行 agent は worktree 必須 (2)知識共有は worktree+共有 GRASP_CANONICAL_STORE+遅延 projection (3)HEAD/attribution 分離。

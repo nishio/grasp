@@ -56,3 +56,12 @@ grasp を **複数の AI agent が同一 canonical store（`.grasp/authority.sql
 - 複数 **人間** の協調編集（Co- 層）。削いだ軸であり対象外。
 - 分散 / リモート共有 store。今日は単一マシン上の同一 local store 共有まで。
 - Markdown projection の publish/review 体裁の最適化。
+
+## 運用観察 (2026-06-28, 本ゴール設定セッション)
+
+このゴールを設定した同じ日に、別 harness (Claude Code) の file-back と別 agent (persona-reconsider) の並行稼働が重なり、本ゴールの一部が live で実演された。一次記録は [[ai-author-feedback-2026-06-26]] / [[sqlite-write-concurrency]] §Updates 2026-06-28。
+
+- **共有 working tree + 共有 HEAD の絡みは realized（risk でなく実害）。** 並行 agent が同一 main checkout にいたため、第二 agent の作業が **第一 agent のブランチ名 (`friction/cross-agent-write`) 上に commit として land** した。file-back lock は store/projection を直列化するが **git の working tree/HEAD は守らない**（lock の上の層）。
+- **worktree 隔離は機能した（運用 recipe として有効）。** 本セッションの file-back は ephemeral worktree（branch off → fresh-bootstrap store → Markdown projection だけ commit）で完走した。ただし store は共有でなく fresh なので、**この recipe では共有 substrate が grasp store でなく git/Markdown に縮退する** ＝ Done-2/3 の「store 共有」は worktree だけでは満たされない（tree 分離と store 共有は独立軸）。
+- **worktree-per-agent へ運用が収束しつつある。** repo に codex 用 worktree が併存し、`file-back/parallel-contention-exp` worktree も出現した。
+- **actionable（[[grasp-backlog]] 候補）。** (1) code/wiki を書く並行 agent は worktree 必須化（tree/HEAD 衝突を消す、最優先）。(2) 知識共有まで欲しいなら **worktree + 明示 `$GRASP_CANONICAL_STORE` 1個共有 + 遅延/single-owner projection** の三点（store 1 : projection 複数の stale を避ける）。(3) 共有 checkout に残る HEAD/attribution 層の分離（誰の commit か）。dogfood で git/Markdown 経路と shared-store 経路を突き合わせて、本ゴールがどちらの substrate を採るか決める。
