@@ -64,3 +64,8 @@ LLM Wiki の file-back dogfood に必要な面から始める:
 ## Updates 2026-06-27
 - 2026-06-26 の並行 agent write incident（[[parallel-agent-write-incident-2026-06-26]]）が、この decision に **concurrency という新しい決定理由**を与えた。authority を SQLite に寄せる際、**journal も git-diffable jsonl のままにせず SQLite 内（events テーブル）へ**入れる方向（[[sqlite-write-concurrency]] option D）。理由: detailed event log は人間 review 対象でなく、git-diff 価値 < 並行 conflict コスト（incident で最も揉めた2ファイルが events.jsonl と log.md ＝ ともに append-only ログ）。
 - write が単一 SQLite tx になり DB の write serialization が並行を source で防ぐ。Markdown は publish/review projection として残す（必要時 export）。tradeoff: incident を救った「素の git ファイルを人間が手 reconcile」の脱出口を失うので、grasp-native recovery（history / write-diff / revert-event）で置換するのが cutover 条件。
+
+## Updates 2026-06-28
+- 「知識管理から Markdown を外す」は、Markdown を **authority / concurrent edit target から外す**という意味に限定する。generated Markdown projection は review / backup / publish / fresh-checkout recovery の artifact として残してよい。並行性の問題は Markdown を per-write の入力・同期 export 先として扱う時に出るので、shared canonical store への write 中は projection を遅延し、必要な節目で batch export する。
+- `1.8.72` でこの decision の最小並行 substrate が入った: `write-page` / `append-log --defer-projection`、SQLite-only `history` / `log-records` の `log_append` records、`activity [title]`、import-only partial stream の log projection seed fallback。これは「Grasp-only authority に寄せても複数 agent が同じ store を読めるか」の regression-level evidence であり、full cutover の完了宣言ではない。
+- claim / lease は未採用。まず `activity` を soft coordination surface として real dogfood し、二重作業や stale intent が実際に残る場合だけ、目的が明確な新 command として追加する。既存 command に明確な目的が無い場合は温存せず削除し、必要になった時に目的名で作り直す。
