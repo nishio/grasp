@@ -355,7 +355,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "project, store, result_mode, current_state, query|null, active_seconds, matched_events, "
-            "events[], active_sessions[]"
+            "events[], active_sessions[], active_claims[]"
         ),
         examples=[
             "grasp --project grasp-wiki activity",
@@ -2651,10 +2651,17 @@ def run_activity(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]
         raise ValueError("--limit must be >= 1")
     if args.active_seconds < 0:
         raise ValueError("--active-seconds must be >= 0")
-    active_cutoff = datetime.now(timezone.utc).timestamp() - int(args.active_seconds)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    active_cutoff = now.timestamp() - int(args.active_seconds)
     session_filters = {str(session) for session in args.session or []}
+    claim_states = current_page_claims(store, now=now, include_inactive=True)
+    claim_states_by_id = {
+        claim["claim_event_id"]: claim
+        for claim in claim_states
+    }
+    active_claims = current_page_claims(store, now=now, query=args.title, include_inactive=False)
     events = [
-        activity_event_summary(event, active_cutoff=active_cutoff)
+        activity_event_summary(event, active_cutoff=active_cutoff, claim_states_by_id=claim_states_by_id)
         for event in store.events(project=args.project, limit=None)
         if event.get("event_type") in ACTIVITY_EVENT_TYPES
     ]
@@ -2685,6 +2692,8 @@ def run_activity(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]
         "limit": args.limit,
         "events": returned,
         "active_sessions": active_session_summaries(filtered),
+        "active_claims": active_claims,
+        "active_claim_count": len(active_claims),
     }
 
 
@@ -2893,7 +2902,12 @@ def claim_matches_query(claim: dict[str, Any], query: str) -> bool:
     )
 
 
-def activity_event_summary(event: dict[str, Any], *, active_cutoff: float) -> dict[str, Any]:
+def activity_event_summary(
+    event: dict[str, Any],
+    *,
+    active_cutoff: float,
+    claim_states_by_id: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     payload = event.get("payload") or {}
     event_type = str(event.get("event_type") or "")
     titles = activity_event_titles(event_type, payload)
@@ -2904,6 +2918,30 @@ def activity_event_summary(event: dict[str, Any], *, active_cutoff: float) -> di
             [{"text": str(line)} for line in payload.get("lines") or []]
         )
     created_timestamp = event_created_timestamp(event.get("created_at"))
+    event_recent = created_timestamp is not None and created_timestamp >= active_cutoff
+    claim_status = ""
+    claim_active = False
+    claim_event_id = ""
+    claim_expires_at = ""
+    claim_release_event_id = ""
+    claim_released_at = ""
+    if event_type == "page_claim":
+        claim_event_id = str(event.get("event_id") or "")
+        claim_state = (claim_states_by_id or {}).get(claim_event_id)
+        claim_status = str((claim_state or {}).get("status") or "")
+        claim_active = claim_status == "active"
+        claim_expires_at = str((claim_state or {}).get("expires_at") or payload.get("expires_at") or "")
+        claim_release_event_id = str((claim_state or {}).get("release_event_id") or "")
+        claim_released_at = str((claim_state or {}).get("released_at") or "")
+    elif event_type == "page_claim_release":
+        claim_event_id = str(payload.get("claim_event_id") or "")
+        claim_status = "released"
+        claim_active = False
+        claim_release_event_id = str(event.get("event_id") or "")
+        claim_released_at = str(event.get("created_at") or "")
+    active = event_recent
+    if event_type in CLAIM_EVENT_TYPES:
+        active = event_recent and claim_active
     return {
         "event_sequence": int(event.get("event_sequence", 0)),
         "event_id": str(event.get("event_id") or ""),
@@ -2919,7 +2957,14 @@ def activity_event_summary(event: dict[str, Any], *, active_cutoff: float) -> di
         "source_paths": source_paths,
         "summary": str(payload.get("summary") or payload.get("message") or ""),
         "subjects": subjects,
-        "active": created_timestamp is not None and created_timestamp >= active_cutoff,
+        "active": active,
+        "event_recent": event_recent,
+        "claim_event_id": claim_event_id,
+        "claim_status": claim_status,
+        "claim_active": claim_active,
+        "claim_expires_at": claim_expires_at,
+        "claim_release_event_id": claim_release_event_id,
+        "claim_released_at": claim_released_at,
     }
 
 
@@ -7906,14 +7951,26 @@ def format_activity(result: dict[str, Any]) -> str:
             if pages:
                 parts.append(f" pages={pages}")
             parts.append("\n")
+    active_claims = result.get("active_claims") or []
+    if active_claims:
+        parts.append("active_claims:\n")
+        for claim in active_claims:
+            parts.append(
+                f"- {claim.get('title', '')} session={claim.get('session_id', '')} "
+                f"actor={claim.get('actor', '')} expires={claim.get('expires_at', '')} "
+                f"claim={claim.get('claim_event_id', '')}\n"
+            )
     events = result.get("events") or []
     if events:
         parts.append("events:\n")
     for event in events:
         active = " active" if event.get("active") else ""
+        claim_status = ""
+        if event.get("claim_status"):
+            claim_status = f" claim_status={event.get('claim_status')}"
         parts.append(
             f"- #{event.get('event_sequence')} {event.get('event_type')} {event.get('title')}"
-            f"{active} actor={event.get('actor', '')} session={event.get('session_id', '')}"
+            f"{active}{claim_status} actor={event.get('actor', '')} session={event.get('session_id', '')}"
             f" path={event.get('source_path', '')} event={event.get('event_id', '')}\n"
         )
     return "".join(parts)

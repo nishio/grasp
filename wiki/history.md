@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.76`（更新: 2026-06-28 14:27、store: schema `8`、compat: schema `8` compatible）: `activity` が page claim state を fold するようにした。`page_claim` event は `claim_status` / `claim_active` / `claim_expires_at` / release metadata を返し、expired または released claim は `active=false` になり `active_sessions[]` へ入らない。top-level `active_claims[]` / `active_claim_count` も返すため、agent は recent event と active soft claim を同じ command で区別できる。`page_claim_release` も `claim_status=released` / `claim_active=false` として表示する。これは stale claim が TTL 後や release 後も `activity` 上の active work signal に見える gap を塞ぐ schema-compatible JSON/text output refinement。schema は不変
 - `1.8.75`（更新: 2026-06-28 14:05、store: schema `8`、compat: schema `8` compatible）: 共有 canonical store 上の pre-write intent surface として `claim-page` / `claims` / `release-claim` を追加した。`claim-page <title>` は `--session-id` 必須の soft lease event `page_claim` を SQLite events に書き、同一 page に別 session の active claim があれば拒否する。`claims [title]` は `page_claim` / `page_claim_release` を fold して active / expired / released claim を返し、`release-claim <claim-event-id>` は owning session（または明示 `--force`）で `page_claim_release` を書く。`activity` は write events に加えて claim/release events も読むようになった。これは SQLite lock や mandatory write lock ではなく、`activity` に event が出る前の intent を agent 間で見えるようにする任意 coordination surface。Markdown projection と store schema は不変
 - `1.8.74`（更新: 2026-06-28 13:38、store: schema `8`、compat: schema `8` compatible）: `export-markdown` の non-check write mode が、Git worktree 内の Markdown projection と SQLite store の projection に差分がある時、既定で上書きを拒否するようにした。direct-patch fallback や merge で Markdown だけ進んだまま store→Markdown full projection を走らせると未 re-adopt の内容を巻き戻すため、`changed_files` / `missing_files` を `--check` 相当で先読みし、re-adopt / reconcile runbook を促す。意図的な deferred projection batch や re-adopt 済みの上書きだけ `--allow-projection-overwrite` を明示する。`--check` は従来通り no-write freshness gate。schema は不変
 - `1.8.73`（更新: 2026-06-28 12:38、store: schema `8`、compat: schema `8` compatible）: repo-local `scripts/check_file_back_preflight.py` / `scripts/check_file_back_write_start.py` が guard failure 時に `recovery ladder:` hints を stderr へ出すようにした。hints は `activity --limit 20` による recent ownership 確認を起点に、dirty projection/worktree、branch/HEAD movement、semantic log drift、preflight 後の SQLite event advance、store/output pair mismatch、reused session_id、active lock を、owner branch への fold-in、isolated direct-patch PR + pending reconcile、clean owner worktree での reconcile、preflight 再実行、または待機へ振り分ける。これにより、並行 file-back で agent ごとに別解を作るのではなく、[[parallel-agent-substrate-goal]] の post-guard recovery ladder を guard output として dogfood できる。schema は不変
@@ -215,6 +216,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.75`
+- Current public compatibility version: `1.8.76`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.75`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.76`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
