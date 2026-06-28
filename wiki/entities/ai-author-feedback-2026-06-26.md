@@ -104,6 +104,8 @@ sources:
 
 **meta（更新）。** 摩擦の主因は前回の correctness/並行安全性から **setup/ergonomics** へ移った: 残るのは (a) cross-machine の store 非共有（最重要・並行基盤 blocker）(c) 軽量追記の欠如（d) env portability。いずれも grasp-write の capability ではなく、**別 agent/harness が同じ substrate に合流する時のコスト**。今日のゴール [[parallel-agent-substrate-goal]] にとって本節最大の datum は (a)＝「`.grasp/` は git を渡らない → 真に共有された store は cross-machine では未成立」。read/write の handle 非対称は `1.8.78` で `write-page --target page-id|path` として解決済み。actionable は [[grasp-backlog]] へ。
 
+- **[NEW] postwrite-green（隔離 worktree）≠ SSoT 着地。** 本セッションで判明: 隔離 worktree の file-back は store が throwaway な per-worktree bootstrap で branch も未マージ/競合しうるため、**`postwrite` が green でも content が共有 SSoT（`origin/main`）に無い**状態が起こる（実際に複数回そうなった＝使い捨て store / 未マージ競合 branch / chat 上だけ）。∴ file-back の done は (1) `origin/main` に merge (2) merged main から bootstrap した store で `grasp read` / `backlinks` で読み返し（text present + edge 解決）まで含める。worktree-per-agent が既定化するほどこの read-back verification step は必須。これは [[sqlite-write-concurrency]] §Updates 2026-06-28「worktree は tree を隔離するが store を割る」の done 判定への帰結。
+
 ## 関連
 
 - [[ai-consumer-cost-and-trust]] — read 面の cost-and-trust。本ページは write 面の対（confidence コスト + 並行安全性）
