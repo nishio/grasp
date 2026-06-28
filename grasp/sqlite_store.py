@@ -3202,6 +3202,29 @@ class SQLiteStore:
         source_path, _ = self._markdown_manifest_entry_for_page(manifest, page.id)
         return source_path
 
+    def markdown_page_target_summary(
+        self,
+        target: str,
+        *,
+        target_kind: str = "handle",
+        command: str = "page target",
+    ) -> dict[str, str]:
+        project = self._require_project()
+        manifest = self._markdown_manifest_for_project(project)
+        if not manifest:
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+        page = self._resolve_markdown_write_target(target, target_kind, command=command)
+        if page is None:
+            raise ValueError(f"page not found: {target}")
+        source_path, item = self._markdown_manifest_entry_for_page(manifest, page.id)
+        return {
+            "project": project,
+            "page_id": page.id,
+            "title": page.title,
+            "source_path": source_path,
+            "graph_role": str(item.get("graph_role") or self._markdown_graph_role_for_page(project, page.id)),
+        }
+
     @staticmethod
     def _markdown_page_rename_event_payload(rename_result: dict[str, Any], message: str) -> dict[str, Any]:
         return {
