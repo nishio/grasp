@@ -73,6 +73,24 @@ schema v7 では duplicate title / alias collision は import error ではなく
 - `artifact` role 由来の ambiguity を forest report / ranking でどう弱めるか。
 - `source/` digest を content graph にどこまで混ぜるか。保持はするが、canonical synthesis と同列に ranking すると重複根拠が増える可能性がある。
 
+## Updates
+
+### 2026-06-29: whole-store cross-project retrieval dogfood timing
+
+`1.9.0` の whole-store cross-project retrieval 実装後に、同じ llm-wiki forest registry を `/tmp/grasp-whole-store-forest.sqlite` へ import した。実行 command は `python3 -m grasp --store /tmp/grasp-whole-store-forest.sqlite --json import-forest /Users/nishio/llm-wiki/wikis.yaml --markdown-exclude-dir raw`。
+
+観測値:
+
+- final store: 42 projects / 3,404 pages / 270,371 lines / 24,279 edges / 1,639 unresolved targets
+- store size: 約 98 MiB
+- edge kind: `strong/internal` 23,726、`weak/inferred-normalized-title` 553
+- first project imported_at: 2026-06-29 01:09:37
+- last project imported_at: 2026-06-29 01:13:20
+- import cache manifest mtime: 2026-06-29 01:13:30
+- inferred wall time: project import span 約 223 秒、final derivative/cache 完了まで約 233 秒（3分53秒）
+
+注意: `import-forest` command output の `wall_seconds` は保存していなかったため、上記 timing は SQLite `projects.imported_at` と import cache manifest mtime からの推定。最初の v9 実装は project ごとに weak cross-project edge を再構築しており、5分以上走っても終わらず中断した。修正後は各 project import 中の weak rebuild を defer し、最後に whole-store derivative を一括再構築する。これにより 42 project forest は約4分で完走した。`1.7.3` 時点の `import-forest` 約6秒よりは重いが、v9 は weak inferred edge / whole-store unresolved aggregation を生成するため、同じ性能指標として比較しない。
+
 ## Related
 
 - [[markdown-obsidian-indexed-mirror]]
