@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.70`（更新: 2026-06-28 10:27、store: schema `8`、compat: schema `8` compatible）: public CLI から `append-section` を削除した。dogfood で既存同名 heading に merge せず末尾に重複 section を作ることが分かっており、目的が明確で安全な authoring surface としては `write-page --from-file` で全ページ replacement を行う方がよい。既存 journal / SQLite events の `section_append` event type は `replay-journal` / `revert-event` 互換のため残すが、新規 authoring command としては mint しない。repo-local file-back runbook と README は通常候補を `write-page` / `append-log` に更新した。schema は不変
 - `1.8.69`（更新: 2026-06-28 10:02、store: schema `8`、compat: schema `8` compatible）: legacy/ad hoc `--journal` write path の既存 JSONL validity を mutation 前に preflight するようにした。既存 journal file が parse / validate できない場合、write command は SQLite state / events / Markdown projection / journal content を変える前に `diagnostic.type=journal_append_preflight_failed` を返し、reason に `invalid journal JSON at line ...` などの既存 parser error を入れる。`adopt-markdown --replace-journal` は既存内容を上書きするため content validation を skip する。regression は invalid JSONL を指定した `append-section` が write event を増やさず projection と journal を不変に保つことを確認する。schema は不変
 - `1.8.68`（更新: 2026-06-28 09:52、store: schema `8`、compat: schema `8` compatible）: `1.8.67` の journal append preflight を regular file の permission gap まで広げた。legacy/ad hoc `--journal` が既存 regular file でも write bit のない path を指す場合、write command は SQLite state / events / Markdown projection を変える前に `diagnostic.type=journal_append_preflight_failed`、reason `journal path is not writable` を返す。non-existing journal では作成に必要な既存 parent directory の write/execute permission も preflight する。regression は `append-section` で read-only journal file を指定し、write event が増えず projection と journal が不変であることを確認する。schema は不変
 - `1.8.67`（更新: 2026-06-28 09:39、store: schema `8`、compat: schema `8` compatible）: legacy/ad hoc `--journal` を使う write / recovery 系 command の journal append path を mutation 前に preflight するようにした。journal path が directory、regular file でない path、または親 path が directory でない場合は SQLite state / events / Markdown projection を変えず、`--json` stderr に `diagnostic.type=journal_append_preflight_failed`、`store_mutated=false`、`journal_written=false`、`projection_written=false` を返す。regression は `append-section` と `revert-event` で `--journal` が directory を指す場合に、write event / `event_revert` が増えず projection も変わらないことを確認する。通常 repo file-back の `--no-journal` path は不変。schema は不変
@@ -209,6 +210,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.69`
+- Current public compatibility version: `1.8.70`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.69`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.70`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
