@@ -35,6 +35,7 @@ from check_file_back_preflight import (
     file_back_store_output_pair_errors,
     latest_event_sequence,
     project_events,
+    print_errors_and_recovery,
     run_file_back_lock_check,
     resolve_repo_path,
     resolve_require_journal,
@@ -217,8 +218,7 @@ def main() -> int:
         expected_session_id=args.session_id,
     )
     if errors:
-        for error in errors:
-            print(error, file=sys.stderr)
+        print_errors_and_recovery(errors, store=args.store, project=args.project, output=args.output)
         return 1
 
     session_status = (

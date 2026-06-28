@@ -1534,3 +1534,8 @@ Claude Code / Codex の並行 file-back で出た3種類の修正（content deli
 ## [2026-06-28 12:30] file-back | 並行 write 考察 — SUT は detection 層 / fallback 伝播
 - [[sqlite-write-concurrency]] の Updates 2026-06-28 に5点を追記: ①並行 write 実験の正しい SUT は write path でなく detection/guardrail 層 ②進歩指標 = silent clobber(06-26) → loud refusal(06-28 preflight が competing file-back を exit 1 拒否) ③耐久層は git commit 履歴(本 repo は file-back store gitignored ゆえ commit を跨ぐ durable は git-tracked Markdown) ④direct-patch fallback は伝播する(Codex の direct patch 後 semantic_log_stale で後続 preflight が停止) ⑤SSoT page 自身も陳腐化する。
 - fallback note: 本 file-back は grasp write-first を試みたが `check_file_back_preflight.py` が `semantic_log_stale`(committed log projection が SQLite-events 由来 semantic log と不一致)で exit 1。runbook の escape 条件に従い direct Markdown patch fallback で実施。これは追記④の実例そのもの。
+
+## [2026-06-28 12:38] implementation+file-back | guard failure recovery ladder hints
+- code: `scripts/check_file_back_preflight.py` / `scripts/check_file_back_write_start.py` now print `recovery ladder:` hints when guard failure stops a file-back.
+- behavior: hints start from `activity --limit 20` ownership inspection and route dirty worktree, HEAD movement, semantic log drift, store event advance, store/output pair mismatch, session reuse, and active lock toward owner-branch fold-in, isolated direct-patch PR with pending reconcile, clean reconcile, preflight rerun, or waiting.
+- docs: bumped public/package version to `1.8.73` and updated [[history]], [[grasp-v1-implemented]], [[parallel-agent-substrate-goal]], and [[sqlite-ssot-write-plan]]. schema remains v8.

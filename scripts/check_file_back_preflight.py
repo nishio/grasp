@@ -63,6 +63,68 @@ def dirty_path_errors(status_output: str) -> list[str]:
     return ["dirty file-back paths before file-back:\n" + "\n".join(lines)]
 
 
+def recovery_ladder_hints(
+    errors: list[str],
+    *,
+    store: str,
+    project: str,
+    output: str,
+) -> list[str]:
+    if not errors:
+        return []
+    joined = "\n".join(errors)
+    hints = [
+        "recovery ladder:",
+        f"- inspect recent ownership: python3 -m grasp --store {store} --project {project} activity --limit 20",
+    ]
+    if "dirty file-back paths" in joined:
+        hints.append(
+            "- dirty projection/worktree: do not continue this file-back in place; "
+            "fold into the active owner branch, or use an isolated worktree/direct-patch PR and record pending reconcile."
+        )
+    if (
+        "branch differs from" in joined
+        or "current HEAD=" in joined
+        or "differs from preflight stamp head" in joined
+    ):
+        hints.append(
+            "- branch/HEAD moved: fetch or merge the active owner work, discard the stale preflight stamp, and rerun preflight."
+        )
+    if "semantic_log_stale" in joined or "semantic log" in joined:
+        hints.append(
+            "- semantic log drift: normal write-first is not authoritative until the store/projection are reconciled; "
+            "either reconcile once on a clean owner worktree or use direct-patch fallback with an explicit pending-reconcile note."
+        )
+    if "SQLite events changed after preflight" in joined:
+        hints.append(
+            "- store advanced after preflight: rerun preflight and use activity/session_id to decide whether to fold into that work unit or wait."
+        )
+    if "mixed file-back store/output pair" in joined:
+        hints.append(
+            "- store/output pair mismatch: use .grasp/file-back.sqlite with wiki, or use a temporary store together with a temporary output."
+        )
+    if "session_id already exists" in joined:
+        hints.append("- reused session_id: choose a fresh GRASP_SESSION_ID unless intentionally continuing the same owner branch.")
+    if "another file-back lock is active" in joined or "active file-back lock" in joined:
+        hints.append("- active lock: wait for the owner to finish, or inspect/remove only a confirmed stale .grasp/file-back.lock.json.")
+    if len(hints) == 2:
+        hints.append("- rerun the relevant guard after choosing a recovery path; do not bypass silently.")
+    return hints
+
+
+def print_errors_and_recovery(
+    errors: list[str],
+    *,
+    store: str,
+    project: str,
+    output: str,
+) -> None:
+    for error in errors:
+        print(error, file=sys.stderr)
+    for hint in recovery_ladder_hints(errors, store=store, project=project, output=output):
+        print(hint, file=sys.stderr)
+
+
 def base_divergence_errors(log_output: str, base: str) -> list[str]:
     lines = [line for line in log_output.splitlines() if line.strip()]
     if not lines:
@@ -711,8 +773,7 @@ def main() -> int:
         errors.extend(check_git_base(repo, resolved_base))
     errors.extend(check_dirty_paths(repo, paths))
     if errors:
-        for error in errors:
-            print(error, file=sys.stderr)
+        print_errors_and_recovery(errors, store=args.store, project=args.project, output=args.output)
         return 1
 
     errors.extend(
@@ -728,8 +789,7 @@ def main() -> int:
         )
     )
     if errors:
-        for error in errors:
-            print(error, file=sys.stderr)
+        print_errors_and_recovery(errors, store=args.store, project=args.project, output=args.output)
         return 1
 
     lock_status = "skipped"
@@ -745,8 +805,7 @@ def main() -> int:
             )
         )
         if errors:
-            for error in errors:
-                print(error, file=sys.stderr)
+            print_errors_and_recovery(errors, store=args.store, project=args.project, output=args.output)
             return 1
         lock_status = str(lock_path.relative_to(repo) if lock_path.is_relative_to(repo) else lock_path)
 
@@ -783,8 +842,7 @@ def main() -> int:
                 else:
                     stamp_written = str(stamp_path.relative_to(repo) if stamp_path.is_relative_to(repo) else stamp_path)
         if errors:
-            for error in errors:
-                print(error, file=sys.stderr)
+            print_errors_and_recovery(errors, store=args.store, project=args.project, output=args.output)
             return 1
 
     print(
