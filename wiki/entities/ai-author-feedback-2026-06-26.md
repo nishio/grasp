@@ -85,6 +85,24 @@ sources:
 
 → backlog 候補（actionable）: (1) title==H1 page でも rename 時に旧名 alias を projection に durable 化。(2) replay harness に create(title==H1)→rename→**import-markdown** path を追加。(3) `import --markdown` が rename 跨ぎで lossy な点を明文化、reconcile 既定を replay-journal に。
 
+### 2026-06-28 (本番実走): 別 harness (Claude Code) × SQLite-SSoT runbook — 前回 candidate は実装され、摩擦は git 手術から setup へ移った
+
+本ページ本文と前 Updates は **lock-free JSONL 時代**（2026-06-26/27）の記録。その後 grasp は SQLite-SSoT へ cutover し、file-back は guard-script runbook（preflight stamp + session uniqueness + write-start staleness + postwrite session marker + file-back lock）+ `revert-plan --scope session` を持つ。本節は **開発担当の Codex とは別の agent/harness（Claude Code）が、その runbook 通りに本番 `wiki/` へ file-back した一次記録**。前回提案した候補の多くが実装済みになっており、摩擦の質が変わった。
+
+- **前回 candidate がほぼ実装され、git 手術に逃げず grasp-write で完走できた。** 前 Updates の「lock / 変更の attribution（誰の hunk か）/ write 前 staleness check / 共有 write を安全に既定化」は、今 runbook の guard 群（preflight stamp・write-start の `event_sequence=unchanged` staleness・postwrite の session marker・file-back lock）と `revert-plan --scope session`（= friction 5 sharpening の attribution）として存在する。今回は前回のような pathspec commit / `git checkout` 退避を**一度も使わず** grasp-write path 内で閉じた。confidence コストは「各 write 後の git 検証」から「runbook guard を順に通す」へ移った＝本ページ meta「不確実下の AI 既定＝共有 write を使わない」は **runbook が confidence を肩代わりしたことで今回は覆った**。
+
+- **[NEW・並行基盤に直結] cross-machine では `.grasp/` 共有 store は git を渡らない。** 開発 Codex はクラウド、私はローカル machine。`.grasp/file-back.sqlite` は gitignored で **git に乗らない**ため、私のローカル store は merge 済み 66 commits より前で固定され、preflight が `semantic_log_stale / strict_ok=False` で正しく停止した。回復＝stale store を退避し現 `wiki/` から fresh bootstrap。**含意（[[parallel-agent-substrate-goal]] の Done-2/3 に直結）**: 「共有 canonical store」は **同一 machine の同一 store file** を指す時だけ成立する。異 machine/異 harness の agent は store を共有しておらず、各自 git-tracked な `wiki/` projection から store を再構成する。∴ 現状 cross-agent の実際の共有経路は **store でなく Markdown projection** であり、これは mode2（grasp=SSoT、Markdown は export-only）の理想と逆向き。並行基盤を cross-machine へ広げるなら canonical store の同期/共有 layer が要る（さもなくば projection が事実上の交換形式に戻る）。[[sqlite-write-concurrency]] の「並行は想定用途」を machine 境界まで延長した形。
+
+- **[NEW・bug 候補] `write-page` の handle 解決が `read` と非対称。** `read <short page_id>` は解決するのに、同じ short page_id を `write-page <id>` に渡すと `page not found` で失敗し、stem handle（`index`）なら成功した。read で得た id を write にそのまま回せない。Codex 確認/修正候補（read と write で handle resolver を揃えるか、write-page が short id を受けるか）。
+
+- **[NEW] content ページの軽量追記手段が無い（append-section 退役の余波）。** `append-section` は public CLI から削除（1.8.70）。既存 content ページの編集は `write-page` の**全文 full-replace** のみ（`append-log` は log ページ専用）。本 §Updates の追記も大ページ full-replace になり、whitespace risk は postwrite の diff-check で担保したが、「既存節に1行足す/前方リンクを1本張る」だけでも全文 replace が要る。前回 friction 1 gotcha（append-section の二重 heading）は退役で解消した代わりに、**節レベル追記の安価手段が消えた**。
+
+- **[NEW・portability] runbook が単一連続 shell / env 永続を仮定。** `GRASP_SESSION_ID` を preflight → write-start → 各 write → postwrite で1本通す必要があるが、Claude Code の Bash 呼び出しは **呼び出し間で env を保持しない**。SID を file（`/tmp`）に退避し各 command で再 export して通した。Codex の harness では顕在化しないかもしれないが、別 harness では runbook が暗黙に前提する「同一 session env」が崩れる。
+
+- **(minor) orphan: log/index はリンク源に数えない。** 新規 content ページは別 content ページが `[[..]]` で参照するまで lint 孤立扱い。上の「軽量追記手段が無い」と相互作用し、incoming link を1本足すのも full-replace。
+
+**meta（更新）。** 摩擦の主因は前回の correctness/並行安全性から **setup/ergonomics** へ移った: 残るのは (a) cross-machine の store 非共有（最重要・並行基盤 blocker）(b) read/write の handle 非対称（bug 候補）(c) 軽量追記の欠如（d) env portability。いずれも grasp-write の capability ではなく、**別 agent/harness が同じ substrate に合流する時のコスト**。今日のゴール [[parallel-agent-substrate-goal]] にとって本節最大の datum は (a)＝「`.grasp/` は git を渡らない → 真に共有された store は cross-machine では未成立」。actionable は [[grasp-backlog]] へ。
+
 ## 関連
 
 - [[ai-consumer-cost-and-trust]] — read 面の cost-and-trust。本ページは write 面の対（confidence コスト + 並行安全性）
