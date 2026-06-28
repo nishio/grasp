@@ -61,6 +61,88 @@ class FakeClient:
         }
 
 
+class FullReconcileClient:
+    def __init__(self):
+        self.read_urls = []
+        self.list_calls = []
+
+    def list_pages(self, project_url, *, sort, limit, skip):
+        self.list_calls.append({"sort": sort, "limit": limit, "skip": skip})
+        pages = [
+            {
+                "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                "title": "A Renamed",
+                "updated": "1970-01-01T09:00:10+09:00 (same)",
+                "linesCount": 2,
+                "pin": 0,
+                "linked": 3,
+                "views": 101,
+            },
+            {
+                "id": "cccccccccccccccccccccccc",
+                "title": "C",
+                "updated": "1970-01-01T09:00:05+09:00 (old)",
+                "linesCount": 1,
+                "pin": 0,
+                "linked": 1,
+                "views": 25,
+            },
+        ]
+        return {
+            "projectName": "fixture",
+            "count": 2,
+            "pages": pages[skip : skip + limit],
+        }
+
+    def read_page(self, page_url):
+        self.read_urls.append(page_url)
+        title = unquote(page_url.rstrip("/").rsplit("/", 1)[-1])
+        pages = {
+            "A Renamed": {
+                "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                "title": "A Renamed",
+                "persistent": True,
+                "created": "1970-01-01T09:00:01+09:00 (just now)",
+                "updated": "1970-01-01T09:00:10+09:00 (same)",
+                "views": 101,
+                "lines": [
+                    {
+                        "id": "hosted-line-a0",
+                        "text": "A Renamed",
+                        "created": "1970-01-01T09:00:01+09:00 (just now)",
+                        "updated": "1970-01-01T09:00:10+09:00 (same)",
+                        "user": {"id": "u"},
+                    },
+                    {
+                        "id": "hosted-line-a1",
+                        "text": "still links to [Missing]",
+                        "created": "1970-01-01T09:00:01+09:00 (just now)",
+                        "updated": "1970-01-01T09:00:10+09:00 (same)",
+                        "user": {"id": "u"},
+                    },
+                ],
+            },
+            "C": {
+                "id": "cccccccccccccccccccccccc",
+                "title": "C",
+                "persistent": True,
+                "created": "1970-01-01T09:00:03+09:00 (just now)",
+                "updated": "1970-01-01T09:00:05+09:00 (old)",
+                "views": 25,
+                "lines": [
+                    {
+                        "id": "hosted-line-c0",
+                        "text": "C",
+                        "created": "1970-01-01T09:00:03+09:00 (just now)",
+                        "updated": "1970-01-01T09:00:05+09:00 (old)",
+                        "user": {"id": "u"},
+                    },
+                ],
+            },
+        }
+        return pages[title]
+
+
 class FakeAcquireClient:
     def __init__(self):
         self.read_urls = []
@@ -295,6 +377,113 @@ class CosenseCliSyncTests(unittest.TestCase):
                 self.assertEqual(store.search("updated")[0]["source_title"], "A")
                 self.assertEqual(store.backlinks("Missing"), [])
                 self.assertEqual(store.unresolved_targets()[0]["title"], "D")
+            finally:
+                store.close()
+
+    def test_full_reconcile_fetches_missing_renames_and_tombstones_deleted_pages(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+
+            store = SQLiteStore(store_path, project="fixture")
+            client = FullReconcileClient()
+            try:
+                result = sync_from_cosense(
+                    store,
+                    "https://scrapbox.io/fixture/",
+                    client=client,
+                    batch_size=1,
+                    full_reconcile=True,
+                )
+
+                self.assertEqual(result["mode"], "full-reconcile")
+                self.assertEqual(result["inspected"], 2)
+                self.assertEqual(result["manifest_count"], 2)
+                self.assertEqual(result["changed"], 2)
+                self.assertEqual(result["updated"], 2)
+                self.assertEqual(result["missing_local"], 1)
+                self.assertEqual(result["renamed"], 1)
+                self.assertEqual(result["deleted"], 1)
+                self.assertEqual(result["hosted_line_ids_seen"], 3)
+                self.assertFalse(result["line_id_policy"]["hosted_line_id_persisted"])
+                self.assertEqual(
+                    client.read_urls,
+                    ["https://scrapbox.io/fixture/A%20Renamed", "https://scrapbox.io/fixture/C"],
+                )
+
+                renamed = store.resolve_page("A Renamed")
+                self.assertIsNotNone(renamed)
+                self.assertEqual(renamed.id, "aaaaaaaaaaaaaaaaaaaaaaaa")
+                self.assertEqual(store.resolve_page("A").id, "aaaaaaaaaaaaaaaaaaaaaaaa")
+                self.assertIsNone(store.resolve_page("B"))
+                self.assertEqual(store.resolve_page("C").id, "cccccccccccccccccccccccc")
+
+                lines, _ = store.page_lines(renamed)
+                self.assertEqual([line.line_id for line in lines], ["aaaaaaaaaaaaaaaaaaaaaaaa:0", "aaaaaaaaaaaaaaaaaaaaaaaa:1"])
+                tombstones = store.project_sync_tombstones()
+                self.assertIn("bbbbbbbbbbbbbbbbbbbbbbbb", tombstones)
+                self.assertEqual(tombstones["bbbbbbbbbbbbbbbbbbbbbbbb"]["title"], "B")
+                self.assertEqual(store.stats()["pages"], 2)
+            finally:
+                store.close()
+
+    def test_full_reconcile_dry_run_does_not_mutate_store(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+
+            store = SQLiteStore(store_path, project="fixture")
+            client = FullReconcileClient()
+            try:
+                result = sync_from_cosense(
+                    store,
+                    "https://scrapbox.io/fixture/",
+                    client=client,
+                    batch_size=2,
+                    dry_run=True,
+                    full_reconcile=True,
+                )
+
+                self.assertEqual(result["changed"], 2)
+                self.assertEqual(result["updated"], 0)
+                self.assertEqual(result["deleted"], 1)
+                self.assertEqual(client.read_urls, [])
+                self.assertEqual(store.resolve_page("A").title, "A")
+                self.assertEqual(store.resolve_page("B").title, "B")
+                self.assertEqual(store.project_sync_tombstones(), {})
+            finally:
+                store.close()
+
+    def test_sync_refuses_partial_acquisition_namespace(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = Path(tmpdir) / "store.sqlite"
+            ensure_store_schema(store_path)
+            store = SQLiteStore(store_path)
+            acquire_client = FakeAcquireClient()
+            try:
+                acquire_from_cosense(
+                    store,
+                    "https://scrapbox.io/remote/",
+                    client=acquire_client,
+                    project="remote:slice",
+                    searches=["needle"],
+                    limit=10,
+                )
+                result = sync_from_cosense(
+                    store,
+                    "https://scrapbox.io/remote/",
+                    client=FullReconcileClient(),
+                    full_reconcile=True,
+                )
+
+                self.assertFalse(result["sync_allowed"])
+                self.assertEqual(result["diagnostic"]["type"], "partial_acquisition_not_syncable")
+                self.assertEqual(result["inspected"], 0)
+                self.assertEqual(result["changed"], 0)
             finally:
                 store.close()
 

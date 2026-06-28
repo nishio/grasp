@@ -127,11 +127,127 @@ def sync_from_cosense(
     limit: int = 100,
     batch_size: int = 100,
     dry_run: bool = False,
+    full_reconcile: bool = False,
 ) -> dict[str, Any]:
     client = client or CosenseCliClient()
+    if batch_size <= 0:
+        raise ValueError("--batch-size must be > 0")
+    if limit <= 0:
+        raise ValueError("--limit must be > 0")
+
+    boundary_diagnostic = sync_boundary_diagnostic(store)
+    if boundary_diagnostic is not None:
+        return sync_result(
+            project_url=project_url,
+            dry_run=dry_run,
+            full_reconcile=full_reconcile,
+            inspected=0,
+            changed_metadata=[],
+            updated=0,
+            skipped_nonpersistent=[],
+            stopped_at=None,
+            diagnostic=boundary_diagnostic,
+            sync_allowed=False,
+        )
+
+    local_manifest = store.cosense_project_page_manifest()
+    if full_reconcile:
+        manifest = list_full_page_manifest(client, project_url, batch_size=batch_size)
+        inspected = len(manifest["pages"])
+        reconcile = reconcile_full_manifest(local_manifest, manifest["pages"])
+        changed_metadata = reconcile["changed_metadata"]
+        stopped_at = None
+    else:
+        inspected, changed_metadata, stopped_at = changed_recent_metadata(
+            client,
+            project_url,
+            local_manifest=local_manifest,
+            limit=limit,
+            batch_size=batch_size,
+        )
+        manifest = {"pages": [], "count": None, "projectName": None}
+        reconcile = empty_manifest_reconcile()
+
+    hosted_line_ids_seen = 0
+    fetched_pages: list[dict[str, Any]] = []
+    skipped_nonpersistent: list[dict[str, Any]] = []
+    if not dry_run:
+        for page in changed_metadata:
+            page_url = page_url_for_title(project_url, str(page.get("title", "")))
+            page_data = client.read_page(page_url)
+            if not page_data.get("persistent", True):
+                skipped_nonpersistent.append({"title": page.get("title"), "url": page_url})
+                continue
+            hosted_line_ids_seen += count_hosted_line_ids(page_data)
+            fetched_pages.append(page_data)
+        store.upsert_cosense_pages(fetched_pages)
+        if full_reconcile:
+            reconcile["tombstoned_pages"] = store.tombstone_cosense_pages(
+                [page["id"] for page in reconcile["deleted_pages"] if page.get("id")],
+                reason="remote_manifest_missing",
+            )
+        store.set_metadata(
+            {
+                "last_sync_project": project_url,
+                "last_sync_checked": str(inspected),
+                "last_sync_updated": str(max((parse_cosense_time(page.get("updated")) or 0 for page in changed_metadata), default=0)),
+                "last_sync_mode": "full-reconcile" if full_reconcile else "recent",
+                "last_sync_manifest_count": str(manifest.get("count") or len(manifest["pages"])),
+                "last_sync_deleted": str(len(reconcile["tombstoned_pages"])),
+                "last_sync_renamed": str(len(reconcile["renamed_pages"])),
+            }
+        )
+
+    return sync_result(
+        project_url=project_url,
+        dry_run=dry_run,
+        full_reconcile=full_reconcile,
+        inspected=inspected,
+        manifest_count=manifest.get("count"),
+        changed_metadata=changed_metadata,
+        updated=0 if dry_run else len(fetched_pages),
+        skipped_nonpersistent=skipped_nonpersistent,
+        stopped_at=stopped_at,
+        missing_local_pages=reconcile["missing_local_pages"],
+        renamed_pages=reconcile["renamed_pages"],
+        deleted_pages=reconcile["deleted_pages"],
+        tombstoned_pages=reconcile["tombstoned_pages"],
+        hosted_line_ids_seen=hosted_line_ids_seen,
+    )
+
+
+def sync_boundary_diagnostic(store: SQLiteStore) -> dict[str, Any] | None:
+    acquisition = store.project_acquisition_metadata()
+    if acquisition is None:
+        return None
+    coverage = str(acquisition.get("coverage") or "")
+    if coverage == "full-list":
+        return None
+    return {
+        "type": "partial_acquisition_not_syncable",
+        "severity": "warning",
+        "message": "sync is for full hosted mirrors; partial acquisition namespaces should be refreshed by rerunning acquire with the same criteria",
+        "coverage": coverage or None,
+        "acquisition_mode": acquisition.get("mode"),
+        "criteria_fingerprint": acquisition.get("criteria_fingerprint"),
+        "next_actions": [
+            "Rerun grasp acquire with the same --project and seed criteria to refresh this partial corpus.",
+            "Use a full export import, or a full-list acquisition, for a namespace that should be maintained by grasp sync.",
+        ],
+    }
+
+
+def changed_recent_metadata(
+    client: CosenseClient,
+    project_url: str,
+    *,
+    local_manifest: dict[str, dict[str, Any]],
+    limit: int,
+    batch_size: int,
+) -> tuple[int, list[dict[str, Any]], dict[str, Any] | None]:
     inspected = 0
     skip = 0
-    changed_metadata: list[dict[str, Any]] = []
+    changed_by_key: dict[str, dict[str, Any]] = {}
     stopped_at: dict[str, Any] | None = None
 
     while inspected < limit:
@@ -143,14 +259,18 @@ def sync_from_cosense(
 
         for page in pages:
             inspected += 1
-            page_id = page.get("id")
-            remote_updated = parse_cosense_time(page.get("updated"))
-            local_updated = store.page_updated(page_id) if page_id else None
+            page_id = str(page.get("id") or "")
+            local_page = local_manifest.get(page_id) if page_id else None
+            reasons = sync_change_reasons(page, local_page)
             pin = int(page.get("pin") or 0)
 
-            if local_updated is not None and remote_updated is not None and local_updated >= remote_updated:
-                if pin > 0:
-                    continue
+            if reasons:
+                add_changed_metadata(changed_by_key, page, reasons=reasons, local_page=local_page)
+                if inspected >= limit:
+                    break
+                continue
+
+            if local_page is not None and pin <= 0:
                 stopped_at = {
                     "id": page_id,
                     "title": page.get("title"),
@@ -158,7 +278,6 @@ def sync_from_cosense(
                 }
                 break
 
-            changed_metadata.append(page)
             if inspected >= limit:
                 break
 
@@ -166,43 +285,224 @@ def sync_from_cosense(
             break
         skip += len(pages)
 
-    fetched_pages: list[dict[str, Any]] = []
-    skipped_nonpersistent: list[dict[str, Any]] = []
-    if not dry_run:
-        for page in changed_metadata:
-            page_url = page_url_for_title(project_url, str(page.get("title", "")))
-            page_data = client.read_page(page_url)
-            if not page_data.get("persistent", True):
-                skipped_nonpersistent.append({"title": page.get("title"), "url": page_url})
-                continue
-            fetched_pages.append(page_data)
-        store.upsert_cosense_pages(fetched_pages)
-        store.set_metadata(
-            {
-                "last_sync_project": project_url,
-                "last_sync_checked": str(inspected),
-                "last_sync_updated": str(max((parse_cosense_time(page.get("updated")) or 0 for page in changed_metadata), default=0)),
-            }
-        )
+    return inspected, list(changed_by_key.values()), stopped_at
+
+
+def list_full_page_manifest(
+    client: CosenseClient,
+    project_url: str,
+    *,
+    batch_size: int,
+) -> dict[str, Any]:
+    pages: list[dict[str, Any]] = []
+    remote_count: int | None = None
+    project_name: str | None = None
+    skip = 0
+    previous_batch_key: tuple[tuple[Any, Any], ...] | None = None
+
+    while True:
+        result = client.list_pages(project_url, sort="updated", limit=batch_size, skip=skip)
+        project_name = project_name or result.get("projectName")
+        if remote_count is None and result.get("count") is not None:
+            remote_count = int(result["count"])
+        batch = result.get("pages") or []
+        if not batch:
+            break
+        batch_key = tuple((page.get("id"), page.get("title")) for page in batch)
+        if skip > 0 and batch_key == previous_batch_key:
+            break
+        previous_batch_key = batch_key
+        pages.extend(batch)
+        skip += len(batch)
+        if remote_count is not None and len(pages) >= remote_count:
+            break
+        if len(batch) < batch_size:
+            break
+
+    return {"pages": pages, "count": remote_count, "projectName": project_name}
+
+
+def empty_manifest_reconcile() -> dict[str, Any]:
+    return {
+        "changed_metadata": [],
+        "missing_local_pages": [],
+        "renamed_pages": [],
+        "deleted_pages": [],
+        "tombstoned_pages": [],
+    }
+
+
+def reconcile_full_manifest(
+    local_manifest: dict[str, dict[str, Any]],
+    remote_pages: list[dict[str, Any]],
+) -> dict[str, Any]:
+    changed_by_key: dict[str, dict[str, Any]] = {}
+    remote_by_id: dict[str, dict[str, Any]] = {}
+    missing_local_pages: list[dict[str, Any]] = []
+    renamed_pages: list[dict[str, Any]] = []
+
+    for page in remote_pages:
+        page_id = str(page.get("id") or "")
+        if not page_id:
+            continue
+        remote_by_id[page_id] = page
+        local_page = local_manifest.get(page_id)
+        reasons = sync_change_reasons(page, local_page)
+        if local_page is None:
+            missing_local_pages.append(sync_page_summary(page, local_page=local_page, reasons=["missing_local"]))
+        if local_page is not None and "renamed" in reasons:
+            renamed_pages.append(
+                {
+                    "id": page_id,
+                    "old_title": local_page.get("title"),
+                    "new_title": page.get("title"),
+                    "updated": page.get("updated"),
+                }
+            )
+        if reasons:
+            add_changed_metadata(changed_by_key, page, reasons=reasons, local_page=local_page)
+
+    deleted_pages = [
+        {
+            "id": page_id,
+            "title": local_page.get("title"),
+            "updated": local_page.get("updated"),
+            "line_count": local_page.get("line_count"),
+        }
+        for page_id, local_page in local_manifest.items()
+        if page_id not in remote_by_id
+    ]
 
     return {
+        "changed_metadata": list(changed_by_key.values()),
+        "missing_local_pages": missing_local_pages,
+        "renamed_pages": renamed_pages,
+        "deleted_pages": deleted_pages,
+        "tombstoned_pages": [],
+    }
+
+
+def sync_change_reasons(page: dict[str, Any], local_page: dict[str, Any] | None) -> list[str]:
+    if local_page is None:
+        return ["missing_local"]
+    reasons: list[str] = []
+    remote_updated = parse_cosense_time(page.get("updated"))
+    local_updated = _int_or_none(local_page.get("updated"))
+    if remote_updated is not None and (local_updated is None or local_updated < remote_updated):
+        reasons.append("updated")
+    remote_title = str(page.get("title") or "")
+    local_title = str(local_page.get("title") or "")
+    if remote_title and local_title and normalize_title(remote_title) != normalize_title(local_title):
+        reasons.append("renamed")
+    remote_line_count = _int_or_none(page.get("linesCount"))
+    local_line_count = _int_or_none(local_page.get("line_count"))
+    if remote_line_count is not None and local_line_count is not None and remote_line_count != local_line_count:
+        reasons.append("line_count_mismatch")
+    return list(dict.fromkeys(reasons))
+
+
+def add_changed_metadata(
+    changed_by_key: dict[str, dict[str, Any]],
+    page: dict[str, Any],
+    *,
+    reasons: list[str],
+    local_page: dict[str, Any] | None,
+) -> None:
+    page_id = str(page.get("id") or "")
+    key = page_id or normalize_title(str(page.get("title") or ""))
+    if not key:
+        return
+    entry = changed_by_key.get(key)
+    if entry is None:
+        entry = sync_page_summary(page, local_page=local_page, reasons=[])
+        changed_by_key[key] = entry
+    existing = list(entry.get("reasons") or [])
+    entry["reasons"] = list(dict.fromkeys([*existing, *reasons]))
+
+
+def sync_page_summary(
+    page: dict[str, Any],
+    *,
+    local_page: dict[str, Any] | None,
+    reasons: list[str],
+) -> dict[str, Any]:
+    summary = {
+        "id": page.get("id"),
+        "title": page.get("title"),
+        "updated": page.get("updated"),
+        "pin": page.get("pin", 0),
+        "linesCount": page.get("linesCount"),
+        "linked": page.get("linked"),
+        "views": page.get("views"),
+        "reasons": reasons,
+    }
+    if local_page is not None:
+        summary["local_title"] = local_page.get("title")
+        summary["local_updated"] = local_page.get("updated")
+        summary["local_line_count"] = local_page.get("line_count")
+    return summary
+
+
+def sync_result(
+    *,
+    project_url: str,
+    dry_run: bool,
+    full_reconcile: bool,
+    inspected: int,
+    changed_metadata: list[dict[str, Any]],
+    updated: int,
+    skipped_nonpersistent: list[dict[str, Any]],
+    stopped_at: dict[str, Any] | None,
+    manifest_count: int | None = None,
+    missing_local_pages: list[dict[str, Any]] | None = None,
+    renamed_pages: list[dict[str, Any]] | None = None,
+    deleted_pages: list[dict[str, Any]] | None = None,
+    tombstoned_pages: list[dict[str, Any]] | None = None,
+    hosted_line_ids_seen: int = 0,
+    diagnostic: dict[str, Any] | None = None,
+    sync_allowed: bool = True,
+) -> dict[str, Any]:
+    missing_local_pages = missing_local_pages or []
+    renamed_pages = renamed_pages or []
+    deleted_pages = deleted_pages or []
+    tombstoned_pages = tombstoned_pages or []
+    return {
         "project_url": project_url,
+        "mode": "full-reconcile" if full_reconcile else "recent",
         "dry_run": dry_run,
+        "sync_allowed": sync_allowed,
         "inspected": inspected,
+        "manifest_count": manifest_count,
         "changed": len(changed_metadata),
-        "updated": 0 if dry_run else len(fetched_pages),
+        "updated": updated,
+        "missing_local": len(missing_local_pages),
+        "renamed": len(renamed_pages),
+        "deleted": len(tombstoned_pages) if not dry_run else len(deleted_pages),
         "skipped_nonpersistent": skipped_nonpersistent,
         "stopped_at": stopped_at,
-        "changed_pages": [
-            {
-                "id": page.get("id"),
-                "title": page.get("title"),
-                "updated": page.get("updated"),
-                "pin": page.get("pin", 0),
-            }
-            for page in changed_metadata
-        ],
+        "changed_pages": changed_metadata,
+        "missing_local_pages": missing_local_pages,
+        "renamed_pages": renamed_pages,
+        "deleted_pages": deleted_pages,
+        "tombstoned_pages": tombstoned_pages,
+        "hosted_line_ids_seen": hosted_line_ids_seen,
+        "line_id_policy": line_id_policy(),
+        "diagnostic": diagnostic,
     }
+
+
+def line_id_policy() -> dict[str, Any]:
+    return {
+        "local_line_id": "grasp-managed",
+        "local_line_id_source": "current page id plus line index",
+        "hosted_line_id": "observed-only",
+        "hosted_line_id_persisted": False,
+        "decision": "hosted lines[].id is external source metadata and is not written into lines.line_id until grasp has a separate external_line_id column",
+    }
+
+
+def count_hosted_line_ids(page: dict[str, Any]) -> int:
+    return sum(1 for line in page.get("lines") or [] if isinstance(line, dict) and line.get("id"))
 
 
 def acquire_from_cosense(

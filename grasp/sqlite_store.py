@@ -1660,6 +1660,23 @@ class SQLiteStore:
             if isinstance(alias_norm, str) and isinstance(title, str)
         }
 
+    def project_sync_tombstones(self, project: str | None = None) -> dict[str, dict[str, Any]]:
+        project = self._require_project(project)
+        raw = self.metadata().get(f"project.{project}.sync_tombstones")
+        if raw is None:
+            return {}
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return {
+            str(page_id): tombstone
+            for page_id, tombstone in data.items()
+            if isinstance(tombstone, dict)
+        }
+
     def _resolve_title_norm(self, title: str, *, project: str) -> str:
         norm_title = normalize_title(title)
         alias_title = self.project_title_aliases(project).get(norm_title)
@@ -2370,6 +2387,30 @@ class SQLiteStore:
             "lines": lines,
         }
 
+    def cosense_project_page_manifest(self, project: str | None = None) -> dict[str, dict[str, Any]]:
+        project = self._require_project(project)
+        rows = self.connection.execute(
+            """
+            SELECT id, title, norm_title, created, updated, views, line_count
+            FROM pages
+            WHERE project = ?
+            ORDER BY title
+            """,
+            (project,),
+        ).fetchall()
+        return {
+            row["id"]: {
+                "id": row["id"],
+                "title": row["title"],
+                "norm_title": row["norm_title"],
+                "created": row["created"],
+                "updated": row["updated"],
+                "views": row["views"],
+                "line_count": row["line_count"],
+            }
+            for row in rows
+        }
+
     def page_updated(self, page_id: str) -> int | None:
         project = self._require_project()
         row = self.connection.execute(
@@ -2389,6 +2430,63 @@ class SQLiteStore:
                 self._upsert_cosense_page(page, project)
             rebuild_unresolved_targets(self.connection, project)
             self._refresh_project_counts(project)
+
+    def tombstone_cosense_pages(self, page_ids: list[str], *, reason: str) -> list[dict[str, Any]]:
+        project = self._require_project()
+        unique_ids = [page_id for page_id in dict.fromkeys(str(page_id) for page_id in page_ids) if page_id]
+        if not unique_ids:
+            return []
+
+        placeholders = ",".join("?" for _ in unique_ids)
+        rows = self.connection.execute(
+            f"""
+            SELECT id, title, norm_title, created, updated, views, line_count
+            FROM pages
+            WHERE project = ? AND id IN ({placeholders})
+            ORDER BY title
+            """,
+            (project, *unique_ids),
+        ).fetchall()
+        if not rows:
+            return []
+
+        now = int(time.time())
+        tombstones = self.project_sync_tombstones(project)
+        tombstoned_pages: list[dict[str, Any]] = []
+        with self.connection:
+            for row in rows:
+                tombstone = {
+                    "id": row["id"],
+                    "title": row["title"],
+                    "norm_title": row["norm_title"],
+                    "deleted_at": now,
+                    "last_created": row["created"],
+                    "last_updated": row["updated"],
+                    "last_views": row["views"],
+                    "last_line_count": row["line_count"],
+                    "reason": reason,
+                }
+                tombstones[row["id"]] = tombstone
+                tombstoned_pages.append(tombstone)
+                self.connection.execute(
+                    "DELETE FROM pages WHERE project = ? AND id = ?",
+                    (project, row["id"]),
+                )
+            refresh_edge_resolutions(self.connection, project)
+            rebuild_unresolved_targets(self.connection, project)
+            self._refresh_project_counts(project)
+            _write_metadata(
+                self.connection,
+                {
+                    f"project.{project}.sync_tombstones": json.dumps(
+                        tombstones,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    f"project.{project}.sync_last_tombstone_at": str(now),
+                },
+            )
+        return tombstoned_pages
 
     def resolve_page(self, title: str) -> Page | None:
         candidates = self.page_handle_candidates(title)
@@ -6648,6 +6746,25 @@ class SQLiteStore:
         page_id = str(page["id"])
         title = str(page["title"])
         lines = page.get("lines") or []
+        previous_page = self.connection.execute(
+            "SELECT title FROM pages WHERE project = ? AND id = ?",
+            (project, page_id),
+        ).fetchone()
+        alias_rows = self.connection.execute(
+            """
+            SELECT handle
+            FROM page_handles
+            WHERE project = ? AND page_id = ? AND handle_source = 'hosted-rename-alias'
+            ORDER BY handle
+            """,
+            (project, page_id),
+        ).fetchall()
+        hosted_aliases = [str(row["handle"]) for row in alias_rows]
+        if previous_page is not None:
+            previous_title = str(previous_page["title"])
+            if normalize_title(previous_title) != normalize_title(title):
+                hosted_aliases.append(previous_title)
+
         self.connection.execute("DELETE FROM pages WHERE project = ? AND id = ?", (project, page_id))
         self.connection.execute(
             """
@@ -6674,7 +6791,26 @@ class SQLiteStore:
             "",
             "content",
         )
-        _insert_page_handles(self.connection, [page_handle_row])
+        handle_rows = [page_handle_row]
+        seen_alias_norms = {normalize_title(title)}
+        for alias in hosted_aliases:
+            alias = alias.strip()
+            alias_norm = normalize_title(alias)
+            if not alias or alias_norm in seen_alias_norms:
+                continue
+            seen_alias_norms.add(alias_norm)
+            handle_rows.append(
+                (
+                    project,
+                    alias_norm,
+                    page_id,
+                    alias,
+                    "hosted-rename-alias",
+                    "",
+                    "content",
+                )
+            )
+        _insert_page_handles(self.connection, handle_rows)
 
         line_rows = []
         edge_rows = []
