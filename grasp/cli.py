@@ -1400,23 +1400,29 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser = add_command_parser(
         subparsers,
         "sync",
-        help="Incrementally sync recently updated hosted Cosense pages into the store.",
+        help="Sync hosted Cosense pages into a full local mirror.",
         description=(
             "Inspect hosted Cosense pages by updated time, fetch changed pages with "
-            "cosense readPage, upsert them into the store, and rebuild unresolved targets."
+            "cosense readPage, upsert them into the store, and rebuild unresolved targets. "
+            "--full-reconcile walks the full hosted manifest to catch old missing pages, "
+            "remote deletes, and title changes."
         ),
         returns=(
-            "project_url, dry_run, inspected, changed, updated, "
-            "skipped_nonpersistent[], stopped_at|null, changed_pages[]"
+            "project_url, mode, dry_run, sync_allowed, inspected, manifest_count, changed, updated, "
+            "missing_local, renamed, deleted, skipped_nonpersistent[], stopped_at|null, changed_pages[], "
+            "missing_local_pages[], renamed_pages[], deleted_pages[], tombstoned_pages[], line_id_policy, diagnostic|null"
         ),
         examples=[
             "grasp sync https://scrapbox.io/nishio/ --limit 20 --dry-run",
+            "grasp sync https://scrapbox.io/nishio/ --full-reconcile --dry-run",
             "grasp sync https://scrapbox.io/nishio/ --limit 100 --batch-size 100",
             "grasp sync https://scrapbox.io/nishio/ --cosense-command cosense",
         ],
         notes=[
             "Requires @helpfeel/cosense-cli's `cosense` binary in PATH and a working login.",
             "Global --store selects the local store to update.",
+            "sync is for full hosted mirrors. Partial acquisition namespaces should be refreshed by rerunning acquire with the same criteria.",
+            "Hosted lines[].id is not written into local lines.line_id; it remains external source metadata until a separate external_line_id column exists.",
         ],
     )
     sync_parser.add_argument("project_url", help="Hosted Cosense/Scrapbox project URL, e.g. https://scrapbox.io/nishio/.")
@@ -1424,6 +1430,7 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser.add_argument("--batch-size", type=int, default=100, help="listPages page size.")
     sync_parser.add_argument("--cosense-command", default="cosense", help="cosense CLI binary.")
     sync_parser.add_argument("--dry-run", action="store_true", help="List changed pages without fetching/upserting them.")
+    sync_parser.add_argument("--full-reconcile", action="store_true", help="Walk the full hosted manifest and reconcile missing, renamed, and deleted pages.")
 
     acquire_parser = add_command_parser(
         subparsers,
@@ -7665,6 +7672,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             limit=args.limit,
             batch_size=args.batch_size,
             dry_run=args.dry_run,
+            full_reconcile=args.full_reconcile,
         )
     if args.command == "acquire":
         seed_titles = read_seed_file(args.seed_file) if args.seed_file is not None else []
@@ -9734,22 +9742,54 @@ def format_gather(result: dict[str, Any], aliases: LineIdAliases | None = None) 
 def format_sync(result: dict[str, Any]) -> str:
     parts = [
         f"project: {result['project_url']}\n",
+        f"mode: {result.get('mode', 'recent')}\n",
         f"dry_run: {result['dry_run']}\n",
+        f"sync_allowed: {result.get('sync_allowed', True)}\n",
         f"inspected: {result['inspected']}\n",
+        f"manifest_count: {result.get('manifest_count')}\n",
         f"changed: {result['changed']}\n",
         f"updated: {result['updated']}\n",
+        f"missing_local: {result.get('missing_local', 0)}\n",
+        f"renamed: {result.get('renamed', 0)}\n",
+        f"deleted: {result.get('deleted', 0)}\n",
     ]
+    diagnostic = result.get("diagnostic")
+    if diagnostic:
+        parts.append("\n## Diagnostic\n")
+        parts.append(f"type: {diagnostic.get('type')}\n")
+        parts.append(f"message: {diagnostic.get('message')}\n")
+        for action in diagnostic.get("next_actions") or []:
+            parts.append(f"- {action}\n")
     if result["stopped_at"]:
         stopped = result["stopped_at"]
         parts.append(f"stopped_at: {stopped['title']} ({stopped['updated']})\n")
     if result["changed_pages"]:
         parts.append("\n## Changed Pages\n")
         for page in result["changed_pages"]:
-            parts.append(f"- {page['title']} ({page['updated']})\n")
+            reasons = ",".join(page.get("reasons") or [])
+            reason_text = f" [{reasons}]" if reasons else ""
+            local_title = page.get("local_title")
+            title_text = str(page["title"])
+            if local_title and local_title != page["title"]:
+                title_text = f"{local_title} -> {page['title']}"
+            parts.append(f"- {title_text} ({page['updated']}){reason_text}\n")
+    if result.get("deleted_pages"):
+        parts.append("\n## Remote Deleted Candidates\n")
+        for page in result["deleted_pages"]:
+            parts.append(f"- {page['title']} ({page['id']})\n")
+    if result.get("tombstoned_pages"):
+        parts.append("\n## Tombstoned Pages\n")
+        for page in result["tombstoned_pages"]:
+            parts.append(f"- {page['title']} ({page['id']})\n")
     if result["skipped_nonpersistent"]:
         parts.append("\n## Skipped Nonpersistent\n")
         for page in result["skipped_nonpersistent"]:
             parts.append(f"- {page['title']} {page['url']}\n")
+    line_policy = result.get("line_id_policy") or {}
+    if line_policy:
+        parts.append("\n## Line ID Policy\n")
+        parts.append(f"local_line_id: {line_policy.get('local_line_id_source')}\n")
+        parts.append(f"hosted_line_id: {line_policy.get('hosted_line_id')}\n")
     return "".join(parts)
 
 

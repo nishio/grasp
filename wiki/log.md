@@ -1678,3 +1678,8 @@ ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog �
 - code: `reconcile-markdown --output <wiki>` reads current projection files, adopts non-log page diffs as path-targeted `page_update`, adopts missing log sections as `log_append`, and normalizes `log.md` when stored lines and SQLite semantic log diverge.
 - regression: added a mixed fixture where `A.md` is Markdown-only dirty while `Log.md` was direct-patched then `import --markdown` made stored lines clean but semantic log stale; reconcile leaves no duplicate log entry and `write-status --no-journal --strict` clean.
 - constraint: missing/delete/extra files and record-file log overlays remain blockers; this is a manual recovery surface, not queueing or automatic reconcile.
+
+## [2026-06-29 00:43] implementation | Sync Freshness: full manifest reconcile / tombstone / rename boundary
+- implemented: `sync --full-reconcile` walks hosted `listPages` manifest pagination, compares remote id/title/updated/linesCount against local pages, fetches missing/renamed/stale candidates, and reports dry-run candidates without mutation.
+- implemented: hosted deletes become active-graph removals plus `project.<project>.sync_tombstones` metadata; same-id title changes keep old hosted title as `hosted-rename-alias` handle.
+- decision: partial acquisition namespaces are refreshed by rerunning `acquire` with the same criteria; `sync` refuses them with `partial_acquisition_not_syncable`. hosted `lines[].id` remains observed-only and is not mixed into local `lines.line_id` until a future `external_line_id` schema exists.

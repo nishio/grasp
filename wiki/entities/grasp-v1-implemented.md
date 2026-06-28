@@ -53,7 +53,7 @@ v1 stable scope 外:
 
 ## store
 
-- current public compatibility version は `1.8.81`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.8.82`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - authoring SSoT substrate 用の canonical store path helper は `$GRASP_CANONICAL_STORE` → `<repo>/.grasp/authority.sqlite` → `$GRASP_HOME/authority.sqlite` → `~/.grasp/authority.sqlite`。これは Phase 0/1 helper であり、既存 default read/import store path とは分ける。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
@@ -111,7 +111,7 @@ v1 stable scope 外:
 | `cross-project-acquire` | `cross-project-refs --semantic-only` の seed titles を使い、複数 target project を `<project>:semantic` namespace に順次 partial acquire する orchestration surface。`--dry-run` は plan のみ返す。実行結果は各 project の fetched / failed / skipped / diagnostic / page_sample / reciprocal_refs / top_internal_links を bounded summary として返し、full acquire payload は返さない |
 | `gather <query>` | link stats、bare mention summary、representative bare mentions、co-link slices、backlinks、次に実行する recipe を bounded bundle として返す。co-link slice は既定 `slice` ranking。`returned_counts` / `total_counts` / `omitted_counts` は row 単位（mentions=bare mention lines、co_links=ranked co-link targets、backlinks=incoming link rows）で返す。`--budget` は row limit を選ぶ近似であり厳密 token packing ではない。huge hub では bulk-linking を避ける banner を返す |
 | `export-ai <title>` / `export-for-ai` | main + 1-hop/2-hop page 本文を Cosense Export for AI 風に単一テキスト化 |
-| `sync <project-url>` | optional freshness path。`cosense` CLI で最近更新ページを取得し、SQLite store に upsert |
+| `sync <project-url>` | optional freshness path。`cosense` CLI で最近更新ページを取得し、SQLite store に upsert。`--full-reconcile` は hosted manifest 全体を walk し、古い missing / rename / delete を検出する |
 | `acquire <project-url>` | admin export なしの hosted Cosense 初回 seed / partial corpus acquisition。`--search` / `--filter` / `--full-list` / `--from-page` / `--seed-file`。fetch failure は `failed_pages[].error_class` と `diagnostic` に分類して返す |
 | `unresolved` | page 実体のない linked target を ranking して返す。TODO list ではない |
 
@@ -120,7 +120,11 @@ v1 stable scope 外:
 - `sync` は `cosense listPages --sort updated` の metadata を store の `pages.updated` と比較し、changed page だけ `cosense readPage` で本文取得して upsert する。upsert 後に unresolved target を再 materialize し、project counts を更新する。
 - `--dry-run` は changed page の検出だけを行い、`readPage` / upsert はしない。
 - 2026-06-23 実測: export seed 由来の local `nishio` store は 25791 pages、hosted count は 25792 pages。`sync --limit 20` が新規ページ `タブUI` を upsert し、local stats は 25792 pages / 724986 lines になった。再 dry-run は changed 0。
-- この検証は「最近更新された missing/new page」の解消を確認したもの。削除・rename・古い更新日時のまま local に無いページの検出は [[incremental-sync]] の Open Questions のまま。
+- `1.8.82` 以降、`sync --full-reconcile` は `listPages` pagination で hosted manifest 全体を取り、local page id set と比較する。remote に存在するが local に無い page、same id で title が変わった page、updated / `linesCount` がずれた page を fetch candidate にし、remote manifest から消えた local page を delete candidate にする。`--dry-run` では candidate だけ返す。
+- `1.8.82` 以降、hosted rename detection は page id を主キーにし、same id / changed title を `renamed_pages[]` として返す。実 upsert 時は旧 hosted title を `page_handles.handle_source=hosted-rename-alias` として残すため、旧 title surface は同じ page id に解決する。
+- `1.8.82` 以降、hosted delete は active graph から page row を削除し、`project.<project>.sync_tombstones` metadata に tombstone（id/title/last_updated/deleted_at/reason）を残す。これにより deleted page は backlinks / related / unresolved rebuild から外れ、physical delete と区別できる最小 audit が残る。認証済み REST の `/api/deleted-pages` / stream event 補強は未実装。
+- `1.8.82` 以降、partial acquisition namespace（`stats.acquisition.coverage != full-list`）に対する `sync` は mutation せず `diagnostic.type=partial_acquisition_not_syncable` を返す。partial corpus の freshness は同じ `acquire` criteria の再実行で扱い、full mirror maintenance は export seed または full-list acquisition namespace に限る。
+- hosted `readPage` が返す `lines[].id` は `sync` result の `line_id_policy` で observed-only と明示するが、SQLite `lines.line_id` には保存しない。現行 local `line_id` は `page.id:line-index` 由来の grasp-managed locator のままで、将来 schema に `external_line_id` を足すまで hosted id と local id を混ぜない。
 
 ## acquire facts
 
