@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 import hashlib
@@ -12,6 +13,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 from textwrap import dedent
 from typing import Any
 
@@ -49,6 +51,7 @@ STORE_WRITE_COMMANDS = {
     "claim-page",
     "import-log-records",
     "release-claim",
+    "reconcile-markdown",
     "rename",
     "rename-page",
     "revert-event",
@@ -1167,6 +1170,35 @@ def build_parser() -> argparse.ArgumentParser:
     rename_page_parser.add_argument("--message", default="", help="Optional rename message stored in the journal payload.")
     rename_page_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
     add_optional_write_journal_arguments(rename_page_parser)
+
+    reconcile_markdown_parser = add_command_parser(
+        subparsers,
+        "reconcile-markdown",
+        help="Adopt current Markdown projection diffs back into the SQLite SSoT.",
+        description=(
+            "Re-adopt direct-patched or merge-applied Markdown projection changes without rebuilding the whole project. "
+            "Existing non-log Markdown files are adopted as page_update events by source path. "
+            "Primary log page sections that are present in Markdown but missing from the SQLite-events semantic log are adopted as log_append events, "
+            "then the log page is normalized so stored projection and semantic log projection agree."
+        ),
+        returns=(
+            "project, output, dry_run, ok, blocked[], projection_before, semantic_log_before|null, "
+            "normal_page_updates[], log_appends[], log_normalized, projection_after|null, semantic_log_after|null"
+        ),
+        examples=[
+            "grasp --project grasp-wiki reconcile-markdown --output wiki --no-journal --dry-run",
+            "grasp --project grasp-wiki --json reconcile-markdown --output wiki --no-journal",
+        ],
+        notes=[
+            "This is a manual recovery surface, not a background queue or automatic merge policy.",
+            "It reads replacement page content directly from files under --output, avoiding shell-quoted --line input.",
+            "Unsupported missing/deleted/extra Markdown files are reported as blockers; create/delete/rename reconcile comes later if dogfood needs it.",
+            "Use this after direct-patch fallback or a remote merge leaves Markdown ahead of the SQLite store.",
+        ],
+    )
+    reconcile_markdown_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to reconcile.")
+    reconcile_markdown_parser.add_argument("--dry-run", action="store_true", help="Plan the reconcile without mutating SQLite, journal, or Markdown files.")
+    add_optional_write_journal_arguments(reconcile_markdown_parser)
 
     write_status_parser = add_command_parser(
         subparsers,
@@ -3295,6 +3327,347 @@ def run_rename_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, A
         }
     )
     return result
+
+
+def run_reconcile_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    journal = optional_journal_path_for_output(args)
+    preflight_journal_appendable(journal)
+    projection_before = store.export_markdown(args.output, check=True)
+    semantic_log_before = render_sqlite_semantic_log_projection(store)
+    blockers = reconcile_markdown_projection_blockers(projection_before)
+    log_source_path = str((semantic_log_before or {}).get("source_path") or "")
+
+    normal_source_paths = [
+        path
+        for path in sorted(projection_before.get("changed_files") or [])
+        if not log_source_path or path != log_source_path
+    ]
+    for source_path in normal_source_paths:
+        target = _safe_replay_output_path(args.output, source_path)
+        if not target.exists():
+            blockers.append({"type": "missing_page_file", "source_path": source_path})
+        elif target.is_dir():
+            blockers.append({"type": "page_file_is_directory", "source_path": source_path})
+
+    log_sections = []
+    log_current_differs = False
+    if semantic_log_before is not None:
+        log_target = _safe_replay_output_path(args.output, log_source_path)
+        if log_target.exists() and not log_target.is_dir():
+            current_log_text = log_target.read_text(encoding="utf-8")
+            log_current_differs = current_log_text != semantic_log_before["text"]
+            if log_current_differs:
+                log_sections = missing_log_sections(
+                    current_log_text,
+                    semantic_log_before["text"],
+                )
+                if not log_sections:
+                    blockers.append(
+                        {
+                            "type": "unsupported_log_edit_without_new_sections",
+                            "source_path": log_source_path,
+                        }
+                    )
+                elif semantic_log_before.get("record_file_event_count"):
+                    blockers.append(
+                        {
+                            "type": "unsupported_log_reconcile_with_record_file_overlays",
+                            "source_path": log_source_path,
+                        }
+                    )
+        elif log_source_path:
+            blockers.append({"type": "missing_log_file", "source_path": log_source_path})
+
+    result: dict[str, Any] = {
+        "project": projection_before["project"],
+        "output": str(args.output),
+        "dry_run": bool(args.dry_run),
+        "ok": not blockers,
+        "blocked": blockers,
+        "projection_before": projection_before,
+        "semantic_log_before": semantic_log_plan_summary(semantic_log_before, log_current_differs),
+        "normal_page_updates": [
+            {"source_path": source_path}
+            for source_path in normal_source_paths
+        ],
+        "log_appends": [
+            log_section_plan_summary(section)
+            for section in log_sections
+        ],
+        "log_normalized": False,
+        "projection_after": None,
+        "semantic_log_after": None,
+        "journal": str(journal) if journal is not None else None,
+        "journal_written": False,
+    }
+    if blockers or args.dry_run:
+        return result
+
+    journal_written = False
+    normal_updates: list[dict[str, Any]] = []
+    for source_path in normal_source_paths:
+        target = _safe_replay_output_path(args.output, source_path)
+        update_result, event = store.write_markdown_page_with_event(
+            source_path,
+            lines=target.read_text(encoding="utf-8").splitlines(),
+            target_kind="path",
+            message="reconcile-markdown: adopt current Markdown projection file",
+            **event_metadata(args),
+        )
+        if journal is not None:
+            append_journal_event(journal, event)
+            journal_written = True
+        normal_updates.append(
+            {
+                "source_path": update_result["source_path"],
+                "event_id": event["event_id"],
+                "event_type": event["event_type"],
+                "line_count": update_result["line_count"],
+                "previous_line_count": update_result["previous_line_count"],
+            }
+        )
+
+    log_appends: list[dict[str, Any]] = []
+    if log_sections:
+        log_target = store.markdown_page_target_summary(
+            log_source_path,
+            target_kind="path",
+            command="reconcile-markdown",
+        )
+        for section in log_sections:
+            inserted_lines = ["", section["heading"], *section["body_lines"]]
+            append_result, event = store.append_markdown_lines_with_event(
+                log_target["title"],
+                inserted_lines,
+                event_type="log_append",
+                payload={
+                    "timestamp": section["timestamp"],
+                    "op": section["op"],
+                    "summary": section["summary"],
+                    "lines": section["body_lines"],
+                },
+                **event_metadata(args),
+            )
+            if journal is not None:
+                append_journal_event(journal, event)
+                journal_written = True
+            log_appends.append(
+                {
+                    **log_section_plan_summary(section),
+                    "source_path": append_result["source_path"],
+                    "event_id": event["event_id"],
+                    "event_type": event["event_type"],
+                }
+            )
+
+    log_normalized = False
+    if log_sections and log_source_path:
+        normalization = normalize_reconciled_log_page_if_needed(
+            store,
+            log_source_path,
+            journal=journal,
+            args=args,
+        )
+        if normalization is not None:
+            journal_written = journal_written or bool(normalization.get("journal_written"))
+            log_normalized = True
+            result["log_normalization"] = normalization
+
+    projection_write = store.export_markdown(args.output, check=False)
+    projection_after = store.export_markdown(args.output, check=True)
+    semantic_log_after = check_sqlite_semantic_log_projection(store, args.output)
+    result.update(
+        {
+            "normal_page_updates": normal_updates,
+            "log_appends": log_appends,
+            "log_normalized": log_normalized,
+            "projection_write": projection_write,
+            "projection_after": projection_after,
+            "semantic_log_after": semantic_log_after,
+            "journal_written": journal_written,
+        }
+    )
+    result["ok"] = bool(projection_after.get("ok")) and not regenerated_projection_dirty_files(semantic_log_after or {})
+    return result
+
+
+def reconcile_markdown_projection_blockers(projection: dict[str, Any]) -> list[dict[str, Any]]:
+    blockers: list[dict[str, Any]] = []
+    for source_path in projection.get("missing_files") or []:
+        blockers.append(
+            {
+                "type": "unsupported_missing_file",
+                "source_path": source_path,
+            }
+        )
+    for source_path in projection.get("extra_files") or []:
+        blockers.append(
+            {
+                "type": "unsupported_extra_file",
+                "source_path": source_path,
+            }
+        )
+    return blockers
+
+
+def check_sqlite_semantic_log_projection(store: SQLiteStore, output: Path) -> dict[str, Any] | None:
+    events = store.events(project=store._require_project(), limit=None)
+    try:
+        return store.export_markdown(
+            output,
+            check=True,
+            log_events=events,
+            log_event_source="sqlite",
+            log_overlay_name="sqlite-events-log",
+        )
+    except ValueError as error:
+        if "has no log page to regenerate" in str(error):
+            return None
+        raise
+
+
+def render_sqlite_semantic_log_projection(store: SQLiteStore) -> dict[str, Any] | None:
+    project = store._require_project()
+    events = store.events(project=project, limit=None)
+    try:
+        with tempfile.TemporaryDirectory(prefix="grasp-semantic-log-") as tmpdir:
+            tmp_output = Path(tmpdir)
+            projection = store.export_markdown(
+                tmp_output,
+                check=False,
+                log_events=events,
+                log_event_source="sqlite",
+                log_overlay_name="sqlite-events-log",
+            )
+            regenerated_files = list(projection.get("regenerated_files") or [])
+            if not regenerated_files:
+                return None
+            source_path = str(regenerated_files[0])
+            text = _safe_replay_output_path(tmp_output, source_path).read_text(encoding="utf-8")
+    except ValueError as error:
+        if "has no log page to regenerate" in str(error):
+            return None
+        raise
+    return {
+        "source_path": source_path,
+        "text": text,
+        "event_count": len(events),
+        "record_file_event_count": record_file_log_event_count(events, project=project),
+        "projection": projection,
+    }
+
+
+def record_file_log_event_count(events: list[dict[str, Any]], *, project: str) -> int:
+    return sum(
+        1
+        for event in events
+        if event.get("project") == project
+        and event.get("event_type") == "log_entry_import"
+        and str((event.get("payload") or {}).get("record_format") or "section") == "file"
+    )
+
+
+def semantic_log_plan_summary(semantic_log: dict[str, Any] | None, current_differs: bool) -> dict[str, Any] | None:
+    if semantic_log is None:
+        return None
+    return {
+        "source_path": semantic_log["source_path"],
+        "current_differs": current_differs,
+        "event_count": semantic_log["event_count"],
+        "record_file_event_count": semantic_log["record_file_event_count"],
+    }
+
+
+def missing_log_sections(current_text: str, semantic_text: str) -> list[dict[str, Any]]:
+    expected_counts = Counter(log_section_key(section) for section in parse_log_sections(semantic_text))
+    missing: list[dict[str, Any]] = []
+    for section in parse_log_sections(current_text):
+        key = log_section_key(section)
+        if expected_counts[key] > 0:
+            expected_counts[key] -= 1
+            continue
+        missing.append(section)
+    return missing
+
+
+def parse_log_sections(text: str) -> list[dict[str, Any]]:
+    lines = text.splitlines()
+    sections: list[dict[str, Any]] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        match = LOG_ENTRY_HEADING_RE.match(line)
+        if match is None:
+            index += 1
+            continue
+        body_lines: list[str] = []
+        index += 1
+        while index < len(lines) and LOG_ENTRY_HEADING_RE.match(lines[index]) is None:
+            body_lines.append(lines[index])
+            index += 1
+        while body_lines and not body_lines[-1].strip():
+            body_lines.pop()
+        sections.append(
+            {
+                "heading": line,
+                "timestamp": match.group("timestamp").strip(),
+                "op": match.group("op").strip(),
+                "summary": match.group("summary").strip(),
+                "body_lines": body_lines,
+            }
+        )
+    return sections
+
+
+def log_section_key(section: dict[str, Any]) -> str:
+    return "\n".join([str(section["heading"]), *[str(line) for line in section.get("body_lines") or []]])
+
+
+def log_section_plan_summary(section: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "timestamp": section["timestamp"],
+        "op": section["op"],
+        "summary": section["summary"],
+        "body_line_count": len(section.get("body_lines") or []),
+    }
+
+
+def normalize_reconciled_log_page_if_needed(
+    store: SQLiteStore,
+    source_path: str,
+    *,
+    journal: Path | None,
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
+    semantic_log = render_sqlite_semantic_log_projection(store)
+    if semantic_log is None:
+        return None
+    current_store_text = store.markdown_projection_text_for_source_path(source_path)
+    if current_store_text == semantic_log["text"]:
+        return None
+    if semantic_log["record_file_event_count"]:
+        raise ValueError(
+            "reconcile-markdown cannot normalize a semantic log projection that includes record-file log_entry_import overlays yet"
+        )
+    update_result, event = store.write_markdown_page_with_event(
+        source_path,
+        lines=semantic_log["text"].splitlines(),
+        target_kind="path",
+        message="reconcile-markdown: normalize stored log page to SQLite semantic log",
+        **event_metadata(args),
+    )
+    journal_written = False
+    if journal is not None:
+        append_journal_event(journal, event)
+        journal_written = True
+    return {
+        "source_path": update_result["source_path"],
+        "event_id": event["event_id"],
+        "event_type": event["event_type"],
+        "line_count": update_result["line_count"],
+        "previous_line_count": update_result["previous_line_count"],
+        "journal_written": journal_written,
+    }
 
 
 def remove_previous_projection_file(output: Path, previous_source_path: str, source_path: str) -> list[str]:
@@ -6981,6 +7354,8 @@ def main(argv: list[str] | None = None) -> int:
     emit_result(args, result)
     if args.command == "export-markdown" and args.check and not result.get("ok"):
         return 1
+    if args.command == "reconcile-markdown" and not result.get("ok"):
+        return 1
     if args.command == "write-status" and args.strict and not result.get("strict_ok"):
         return 1
     return 0
@@ -7268,6 +7643,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return run_write_page(store, args)
     if args.command in {"rename-page", "rename"}:
         return run_rename_page(store, args)
+    if args.command == "reconcile-markdown":
+        return run_reconcile_markdown(store, args)
     if args.command == "write-status":
         return run_write_status(store, args)
     if args.command == "revert-event":
@@ -7744,6 +8121,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_write_page_result(result)
     if command in {"rename-page", "rename"}:
         return format_rename_page_result(result)
+    if command == "reconcile-markdown":
+        return format_reconcile_markdown(result)
     if command == "write-status":
         return format_write_status(result)
     if command == "revert-event":
@@ -8141,6 +8520,39 @@ def format_write_status(result: dict[str, Any]) -> str:
     if failures:
         text += "strict_failures:\n"
         text += "".join(f"- {failure.get('type', '')}\n" for failure in failures)
+    return text
+
+
+def format_reconcile_markdown(result: dict[str, Any]) -> str:
+    projection_after = result.get("projection_after") or {}
+    projection_write = result.get("projection_write") or {}
+    semantic_after = result.get("semantic_log_after") or {}
+    text = (
+        "# Reconcile Markdown\n"
+        f"project: {result['project']}\n"
+        f"output: {result['output']}\n"
+        f"dry_run: {str(result.get('dry_run', False)).lower()}\n"
+        f"ok: {str(result.get('ok', False)).lower()}\n"
+        f"normal_page_updates: {len(result.get('normal_page_updates') or [])}\n"
+        f"log_appends: {len(result.get('log_appends') or [])}\n"
+        f"log_normalized: {str(result.get('log_normalized', False)).lower()}\n"
+        f"journal: {result.get('journal') or '(none)'}\n"
+        f"journal_written: {str(result.get('journal_written', False)).lower()}\n"
+    )
+    if projection_after:
+        text += (
+            f"projection_ok: {str(projection_after.get('ok', False)).lower()}\n"
+            f"projection_written: {projection_write.get('written_count', 0)}\n"
+        )
+    if semantic_after:
+        text += (
+            f"semantic_log_stale: {str(bool(regenerated_projection_dirty_files(semantic_after))).lower()}\n"
+            f"semantic_log_changed: {len(regenerated_projection_dirty_files(semantic_after))}\n"
+        )
+    blockers = result.get("blocked") or []
+    if blockers:
+        text += "blocked:\n"
+        text += "".join(f"- {blocker.get('type', '')}: {blocker.get('source_path', '')}\n" for blocker in blockers)
     return text
 
 
