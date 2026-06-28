@@ -1603,3 +1603,8 @@ ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog �
 - code: `activity <query>` now matches `log_append` subjects as well as touched page title/path/page_id, and `active_sessions[]` now carries `subjects[]`. Text output prints active session subjects too.
 - tests: updated shared-store dogfood and claim/write/release regressions so `activity A` includes a recent `log_append` about `[[A]]`; concurrent append-log dogfood now asserts `activity A` / `activity B` expose each log-only session.
 - judgment: log-only parallel work no longer requires agents to switch from `activity` to `history` just to notice a session discussing the page. This improves the recovery-ladder in-flight surface without adding a queue or mandatory lock. Public compatibility version is `1.8.80`; schema remains v8.
+
+## [2026-06-28 15:51] dogfood+file-back | log-only activity avoids duplicate work
+- tests: added a Git-worktree shared-store regression where session-a appends a deferred log entry about `[[A]]` without touching A, session-b reads `activity A`, sees session-a's log-only active subject, and writes B plus a B log instead of rewriting A.
+- result: Markdown projection stays old until explicit batch export; bare export refuses without `--allow-projection-overwrite`; batch export updates only B/Log; `history A` shows both log records; `revert-plan --scope session` separates A's log-only work unit from B's write+log work unit.
+- judgment: this is a longer in-flight dogfood for Done condition 3. The existing soft activity surface is sufficient for this log-only duplicate-avoidance path, so no queue or mandatory lock is justified by this evidence.

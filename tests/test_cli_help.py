@@ -8934,6 +8934,186 @@ class CliHelpTests(unittest.TestCase):
         self.assertTrue(status["strict_ok"])
         self.assertEqual(status["strict_failures"], [])
 
+    def test_parallel_agent_log_subject_activity_avoids_duplicate_work(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            root = repo_root / "wiki"
+            root.mkdir(parents=True)
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n- old B\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            init_git_repo(repo_root)
+            store_path = repo_root / ".grasp" / "authority.sqlite"
+            store_path.parent.mkdir()
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            def run_export(*args, check=True):
+                return subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "export-markdown",
+                        "--output",
+                        str(root),
+                        "--regenerate-log",
+                        *args,
+                    ],
+                    check=check,
+                    text=True,
+                    capture_output=True,
+                )
+
+            run_json("import", "--markdown", str(root))
+            log_a = run_json(
+                "append-log",
+                "--timestamp",
+                "2026-06-28 15:51",
+                "--op",
+                "dogfood",
+                "--summary",
+                "A log-only in-flight signal",
+                "--line",
+                "- session-a is investigating [[A]] without rewriting the page yet",
+                "--no-journal",
+                "--defer-projection",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            activity_a_before_b = run_json("activity", "A", "--active-seconds", "86400")
+
+            if activity_a_before_b["active_sessions"]:
+                write_b = run_json(
+                    "write-page",
+                    "B",
+                    "--line",
+                    "# B",
+                    "--line",
+                    "- agent B avoided A after log-only activity",
+                    "--no-journal",
+                    "--defer-projection",
+                    actor="agent-b",
+                    session_id="session-b",
+                )
+                log_b = run_json(
+                    "append-log",
+                    "--timestamp",
+                    "2026-06-28 15:52",
+                    "--op",
+                    "dogfood",
+                    "--summary",
+                    "B avoided log-only A work",
+                    "--line",
+                    "- activity showed session-a discussing [[A]]; session-b wrote [[B]] instead",
+                    "--no-journal",
+                    "--defer-projection",
+                    actor="agent-b",
+                    session_id="session-b",
+                )
+            else:
+                self.fail("activity did not expose log-only session A before agent B chose work")
+
+            markdown_before_export = {
+                path.name: path.read_text(encoding="utf-8")
+                for path in [root / "A.md", root / "B.md", root / "Log.md"]
+            }
+            read_a = run_json("read", "A")
+            read_b = run_json("read", "B")
+            history_a = run_json("history", "A")
+            activity_a_after_b = run_json("activity", "A", "--active-seconds", "86400")
+            activity_all = run_json("activity", "--active-seconds", "86400")
+            revert_plan_a = run_json("revert-plan", log_a["event_id"], "--scope", "session")
+            revert_plan_b = run_json("revert-plan", write_b["event_id"], "--scope", "session")
+            check_completed = run_export("--check", check=False)
+            refused_completed = run_export(check=False)
+            allowed_completed = run_export("--allow-projection-overwrite")
+            status = run_json("write-status", "--output", str(root), "--no-journal", "--strict")
+            markdown_after_export = {
+                path.name: path.read_text(encoding="utf-8")
+                for path in [root / "A.md", root / "B.md", root / "Log.md"]
+            }
+
+        check_result = json.loads(check_completed.stdout)
+        allowed_result = json.loads(allowed_completed.stdout)
+
+        self.assertTrue(log_a["projection_deferred"])
+        self.assertTrue(write_b["projection_deferred"])
+        self.assertTrue(log_b["projection_deferred"])
+        self.assertEqual(activity_a_before_b["matched_events"], 1)
+        self.assertEqual(activity_a_before_b["events"][0]["event_type"], "log_append")
+        self.assertEqual(activity_a_before_b["events"][0]["session_id"], "session-a")
+        self.assertEqual(activity_a_before_b["events"][0]["subjects"], ["A"])
+        self.assertEqual(activity_a_before_b["active_sessions"][0]["session_id"], "session-a")
+        self.assertEqual(activity_a_before_b["active_sessions"][0]["pages"], ["Log"])
+        self.assertEqual(activity_a_before_b["active_sessions"][0]["subjects"], ["A"])
+        self.assertEqual(markdown_before_export["A.md"], "# A\n- old A\n")
+        self.assertEqual(markdown_before_export["B.md"], "# B\n- old B\n")
+        self.assertEqual(markdown_before_export["Log.md"], "# Log\n")
+        self.assertEqual([line["text"] for line in read_a["lines"]], ["# A", "- old A"])
+        self.assertEqual(
+            [line["text"] for line in read_b["lines"]],
+            ["# B", "- agent B avoided A after log-only activity"],
+        )
+        self.assertEqual(history_a["matched_records"], 2)
+        self.assertEqual(
+            sorted(record["session_id"] for record in history_a["records"]),
+            ["session-a", "session-b"],
+        )
+        self.assertEqual(
+            [event["event_type"] for event in activity_a_after_b["events"]],
+            ["log_append", "log_append"],
+        )
+        self.assertEqual(
+            sorted(session["session_id"] for session in activity_all["active_sessions"]),
+            ["session-a", "session-b"],
+        )
+        self.assertEqual(revert_plan_a["candidate_event_ids"], [log_a["event_id"]])
+        self.assertEqual(revert_plan_b["candidate_event_ids"], [write_b["event_id"], log_b["event_id"]])
+        self.assertEqual(check_completed.returncode, 1)
+        self.assertEqual(sorted(check_result["changed_files"]), ["B.md", "Log.md"])
+        self.assertEqual(refused_completed.returncode, 2)
+        self.assertIn("--allow-projection-overwrite", refused_completed.stderr)
+        self.assertEqual(sorted(allowed_result["written_files"]), ["B.md", "Log.md"])
+        self.assertEqual(markdown_after_export["A.md"], "# A\n- old A\n")
+        self.assertEqual(markdown_after_export["B.md"], "# B\n- agent B avoided A after log-only activity\n")
+        self.assertIn(
+            "## [2026-06-28 15:51] dogfood | A log-only in-flight signal",
+            markdown_after_export["Log.md"],
+        )
+        self.assertIn(
+            "## [2026-06-28 15:52] dogfood | B avoided log-only A work",
+            markdown_after_export["Log.md"],
+        )
+        self.assertTrue(status["strict_ok"])
+        self.assertEqual(status["strict_failures"], [])
+
     def test_parallel_agent_claim_page_surfaces_pre_write_intent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
