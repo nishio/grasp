@@ -1628,3 +1628,8 @@ ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog �
 - tests: added `test_parallel_agent_multi_turn_lifecycle_uses_activity_without_queue`, where session-a claims [[A]], session-b is refused for A, claims [[B]] by path, writes B, and leaves a [[Shared]] log subject.
 - result: session-a reads `history Shared` / `activity Shared`, writes/logs A using B context, both claims are released, session rollback plans split A write+log from B write+log, and explicit batch export returns strict clean.
 - judgment: this longer temp shared-store lifecycle still fits soft claims + activity + deferred projection; queue / automated reconcile should wait for a live multi-agent runbook gap.
+
+## [2026-06-28 16:52] dogfood+file-back | live runbook lock blocks competing preflight
+- live trial: on clean main, session-a ran `check_file_back_preflight.py` against the real repo pair and acquired `.grasp/file-back.lock.json`; session-b then ran the same preflight with a different session id.
+- result: session-b failed loudly with active lock owner session, and stderr included the recovery ladder: inspect `activity --limit 20`, inspect `claims --include-expired`, then wait or remove only a confirmed stale lock.
+- judgment: normal file-back runbook writers now serialize at the real repo guard layer instead of silently interleaving. This supports wait/owner handoff, not queue or automated reconcile yet; contentful external-agent file-back remains the next live test.
