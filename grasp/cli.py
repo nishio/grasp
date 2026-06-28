@@ -3004,9 +3004,11 @@ def activity_event_matches_query(event: dict[str, Any], query: str | None) -> bo
     titles = {normalize_title(title) for title in event.get("titles") or []}
     paths = {str(path).casefold() for path in event.get("source_paths") or []}
     path_stems = {Path(path).stem.casefold() for path in paths}
+    subjects = {normalize_title(subject) for subject in event.get("subjects") or []}
     return (
         str(event.get("page_id") or "") == query
         or query_norm in titles
+        or query_norm in subjects
         or query_path in paths
         or query.casefold() in path_stems
     )
@@ -3031,6 +3033,7 @@ def active_session_summaries(events: list[dict[str, Any]]) -> list[dict[str, Any
                 "event_types": [],
                 "pages": [],
                 "source_paths": [],
+                "subjects": [],
             },
         )
         summary["event_count"] += 1
@@ -3043,6 +3046,8 @@ def active_session_summaries(events: list[dict[str, Any]]) -> list[dict[str, Any
         append_unique(summary["event_types"], event.get("event_type"))
         append_unique(summary["pages"], event.get("title"))
         append_unique(summary["source_paths"], event.get("source_path"))
+        for subject in event.get("subjects") or []:
+            append_unique(summary["subjects"], subject)
     return sorted(
         sessions.values(),
         key=lambda summary: int(summary["latest_event_sequence"]),
@@ -7945,12 +7950,15 @@ def format_activity(result: dict[str, Any]) -> str:
         parts.append("active_sessions:\n")
         for session in active_sessions:
             pages = ", ".join(session.get("pages") or [])
+            subjects = ", ".join(session.get("subjects") or [])
             parts.append(
                 f"- session_id={session.get('session_id', '')} actor={session.get('actor', '')} "
                 f"events={session.get('event_count', 0)} latest={session.get('latest_event_sequence', 0)}"
             )
             if pages:
                 parts.append(f" pages={pages}")
+            if subjects:
+                parts.append(f" subjects={subjects}")
             parts.append("\n")
     active_claims = result.get("active_claims") or []
     if active_claims:

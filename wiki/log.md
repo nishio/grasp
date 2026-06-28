@@ -1598,3 +1598,8 @@ ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog �
 - tests: added the matching regression for `append-log --defer-projection`: an external SQLite `BEGIN IMMEDIATE` writer lock holds two CLI subprocesses, both wait, and both succeed after release.
 - result: `Log.md` projection stays old until batch export; SQLite events contain separate session-a/session-b `log_append` rows; `log-records` / `history A` / `history B` expose the subject+session split; `revert-plan --scope session` keeps each log append as an independent work unit.
 - judgment: Done condition 1 explicitly names `write-page` and `append-log`; both write verbs now have CLI-level lock-wait / serialization dogfood without adding a queue or mandatory lock.
+
+## [2026-06-28 15:42] implementation+file-back | activity matches log subjects
+- code: `activity <query>` now matches `log_append` subjects as well as touched page title/path/page_id, and `active_sessions[]` now carries `subjects[]`. Text output prints active session subjects too.
+- tests: updated shared-store dogfood and claim/write/release regressions so `activity A` includes a recent `log_append` about `[[A]]`; concurrent append-log dogfood now asserts `activity A` / `activity B` expose each log-only session.
+- judgment: log-only parallel work no longer requires agents to switch from `activity` to `history` just to notice a session discussing the page. This improves the recovery-ladder in-flight surface without adding a queue or mandatory lock. Public compatibility version is `1.8.80`; schema remains v8.
