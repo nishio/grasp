@@ -7,6 +7,7 @@ from pathlib import Path
 
 from grasp.cli import format_import_forest
 from grasp.forest import import_forest_from_registry, parse_wiki_registry
+from grasp.sqlite_store import SQLiteStore
 
 
 class ForestImportTests(unittest.TestCase):
@@ -132,6 +133,43 @@ class ForestImportTests(unittest.TestCase):
             self.assertEqual(result["aggregate"]["projects"], 1)
             self.assertEqual(result["aggregate"]["pages"], 2)
             self.assertTrue(store_path.exists())
+
+    def test_import_forest_refreshes_whole_store_derivatives_after_all_projects(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            one = root / "one" / "wiki"
+            two = root / "two" / "wiki"
+            one.mkdir(parents=True)
+            two.mkdir(parents=True)
+            (one / "Source.md").write_text("# Source\nlinks to [[BetaOnly]]\n", encoding="utf-8")
+            (two / "BetaOnly.md").write_text("# BetaOnly\n", encoding="utf-8")
+            registry = root / "wikis.yaml"
+            registry.write_text(
+                "\n".join(
+                    [
+                        "wikis:",
+                        f"  - name: one\n    path: {root / 'one'}",
+                        f"  - name: two\n    path: {root / 'two'}",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            store_path = root / "forest.sqlite"
+
+            result = import_forest_from_registry(registry, store_path)
+
+            self.assertEqual(result["aggregate"]["projects"], 2)
+            self.assertEqual(result["aggregate"]["pages"], 2)
+            self.assertEqual(result["aggregate"]["edges"], 2)
+            store = SQLiteStore(store_path)
+            try:
+                path = store.paths_between("Source", "BetaOnly", max_depth=1, limit=1)
+                self.assertEqual(path["path_count"], 1)
+                self.assertEqual(path["paths"][0]["edges"][0]["connection_strength"], "weak")
+                self.assertEqual(path["paths"][0]["edges"][0]["link_kind"], "inferred-normalized-title")
+                self.assertEqual(path["paths"][0]["edges"][0]["target_project"], "two")
+            finally:
+                store.close()
 
     def test_import_forest_reports_duplicate_registry_names_without_replacing(self):
         with tempfile.TemporaryDirectory() as tmpdir:

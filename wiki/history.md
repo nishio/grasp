@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.9.0`（更新: 2026-06-29 00:57、store: schema `9`、compat: schema `9`）: whole-store cross-project retrieval を materialized graph semantics として入れた。`edges` は source project に加えて `target_project` / `link_kind` / `connection_strength` を持ち、Cosense `[/project/title]` は import 時に `cross-*` strong edge になる。bare unresolved link が他 project の materialized page と normalized title で一致する場合は `inferred-normalized-title` weak edge を再生成する。`read` / `search` / `backlinks` / `related` / `path` / `unresolved` は `--project` 未指定で store 全体を source scope とし、結果に project / strength / link_kind を返す。`unresolved` は whole-store で同じ normalized missing target を project 横断集計し、`projects[]` / `project_count` を返す。schema は `9`
 - `1.8.82`（更新: 2026-06-29 00:43、store: schema `8`、compat: schema `8` compatible）: `sync --full-reconcile` を追加し、hosted `listPages` manifest 全体を local page id set と比較できるようにした。remote にあるが local に無い page / same id の rename / updated or `linesCount` mismatch は fetch candidate になり、remote manifest から消えた local page は active graph から削除して `project.<project>.sync_tombstones` metadata に tombstone を残す。rename は旧 title を `hosted-rename-alias` handle として残す。partial acquisition namespace の `sync` は mutation せず `partial_acquisition_not_syncable` diagnostic を返し、hosted `lines[].id` は observed-only で local `lines.line_id` へは保存しない。schema は不変
 - `1.8.81`（更新: 2026-06-29 00:00、store: schema `8`、compat: schema `8` compatible）: `reconcile-markdown --output <wiki>` を追加した。direct-patch fallback や remote merge 後に Markdown projection だけが SQLite store より進んだ時、既存 non-log page の差分を source path 指定の `page_update` として採用し、primary log page にあるが SQLite events 由来 semantic log には無い section を `log_append` event として採用する。`log.md` が `import --markdown` 等で stored lines だけ先に進んだ semantic drift では、採用後に stored log page を SQLite semantic log と一致するよう normalize し、重複 log entry を残さない。入力は `--output` 配下の files を読むため shell quoting に依存しない。missing/delete/extra file や record-file overlay を含む log reconcile は今回の dogfood 外として blocker にする。schema は不変
 - `1.8.80`（更新: 2026-06-28 15:42、store: schema `8`、compat: schema `8` compatible）: `activity <query>` が `log_append` の `[[subject]]` にも一致するようにし、log-only の並行作業を page query から見えるようにした。`active_sessions[]` は `subjects[]` も返し、text formatter も active session の subjects を表示する。これにより、`history <query>` / `log-records` でしか見えなかった log-only session が、recovery ladder の起点である `activity` からも確認できる。schema は不変
@@ -222,6 +223,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.82`
-- Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.82`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current public compatibility version: `1.9.0`
+- Current internal `SCHEMA_VERSION`: `9`
+- Current package metadata should match `1.9.0`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

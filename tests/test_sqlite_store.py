@@ -103,8 +103,8 @@ class SQLiteStoreTests(unittest.TestCase):
             finally:
                 connection.close()
 
-        self.assertEqual(SCHEMA_VERSION, "8")
-        self.assertEqual(schema_version, "8")
+        self.assertEqual(SCHEMA_VERSION, "9")
+        self.assertEqual(schema_version, "9")
         self.assertIsNotNone(events_table)
         self.assertEqual(
             columns,
@@ -896,8 +896,12 @@ class SQLiteStoreTests(unittest.TestCase):
                 self.assertEqual(aggregate_stats["project_count"], 2)
                 self.assertEqual(aggregate_stats["pages"], 4)
 
-                with self.assertRaises(ValueError):
-                    aggregate_store.resolve_page("A")
+                ambiguous_read = aggregate_store.read("A")
+                self.assertEqual(ambiguous_read["ambiguity"]["candidate_count"], 2)
+                self.assertEqual(
+                    sorted(candidate["project"] for candidate in ambiguous_read["ambiguity"]["candidates"]),
+                    ["fixture", "other"],
+                )
 
                 fixture_page = fixture_store.resolve_page("A")
                 other_page = other_store.resolve_page("A")
@@ -909,6 +913,97 @@ class SQLiteStoreTests(unittest.TestCase):
                 aggregate_store.close()
                 fixture_store.close()
                 other_store.close()
+
+    def test_whole_store_cross_project_retrieval_materializes_strong_and_weak_edges(self):
+        alpha = {
+            "name": "alpha",
+            "displayName": "alpha",
+            "exported": 1,
+            "users": [],
+            "pages": [
+                {
+                    "title": "Alpha",
+                    "id": "alphaalphaalphaalphaaaaa",
+                    "created": 1,
+                    "updated": 50,
+                    "views": 100,
+                    "lines": [
+                        {"text": "Alpha needle", "created": 1, "updated": 1, "userId": "u"},
+                        {
+                            "text": "explicit [/beta/Beta], weak [Beta], and [SharedMissing]",
+                            "created": 1,
+                            "updated": 2,
+                            "userId": "u",
+                        },
+                    ],
+                }
+            ],
+        }
+        beta = {
+            "name": "beta",
+            "displayName": "beta",
+            "exported": 2,
+            "users": [],
+            "pages": [
+                {
+                    "title": "Beta",
+                    "id": "betabetabetabetabetabbbb",
+                    "created": 2,
+                    "updated": 60,
+                    "views": 80,
+                    "lines": [
+                        {"text": "Beta needle", "created": 2, "updated": 1, "userId": "u"},
+                        {"text": "also [SharedMissing]", "created": 2, "updated": 2, "userId": "u"},
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            alpha_path = Path(tmpdir) / "alpha.json"
+            beta_path = Path(tmpdir) / "beta.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            alpha_path.write_text(json.dumps(alpha), encoding="utf-8")
+            beta_path.write_text(json.dumps(beta), encoding="utf-8")
+            import_export_to_sqlite(alpha_path, store_path)
+            import_export_to_sqlite(beta_path, store_path)
+
+            store = SQLiteStore(store_path)
+            try:
+                hits = store.search("needle", limit=10)
+                self.assertEqual([hit["project"] for hit in hits], ["alpha", "beta"])
+
+                beta_read = store.read("Beta", backlink_limit=10, related_limit=10, unresolved_limit=10)
+                self.assertEqual(beta_read["page"]["project"], "beta")
+                backlink_kinds = sorted(
+                    (edge["connection_strength"], edge["link_kind"], edge["target_project"])
+                    for edge in beta_read["backlinks"]
+                )
+                self.assertIn(("strong", "cross-semantic", "beta"), backlink_kinds)
+                self.assertIn(("weak", "inferred-normalized-title", "beta"), backlink_kinds)
+
+                shared = store.unresolved_targets(limit=10)[0]
+                self.assertEqual(shared["title"], "SharedMissing")
+                self.assertEqual(shared["link_count"], 2)
+                self.assertEqual(shared["project_count"], 2)
+                self.assertEqual(shared["projects"], ["alpha", "beta"])
+                self.assertEqual(shared["examples"][0]["connection_strength"], "strong")
+                self.assertEqual(shared["examples"][0]["link_kind"], "internal")
+
+                shared_read = store.read("SharedMissing", backlink_limit=10, related_limit=10)
+                self.assertEqual(shared_read["backlink_count_total"], 2)
+                self.assertEqual(
+                    sorted(item["project"] for item in shared_read["related"]),
+                    ["alpha", "beta"],
+                )
+
+                path = store.paths_between("Alpha", "Beta", max_depth=1, limit=3)
+                self.assertEqual(path["path_count"], 1)
+                self.assertEqual(path["paths"][0]["distance"], 1)
+                self.assertEqual(path["paths"][0]["edges"][0]["target_project"], "beta")
+                self.assertIn(path["paths"][0]["edges"][0]["connection_strength"], {"strong", "weak"})
+            finally:
+                store.close()
 
     def test_import_materializes_hash_tags_and_numeric_links(self):
         fixture = {

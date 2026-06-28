@@ -6,7 +6,7 @@ from time import perf_counter
 from typing import Any
 
 from .markdown import MarkdownCollisionError
-from .sqlite_store import SQLiteStore, import_markdown_folder_to_sqlite
+from .sqlite_store import SQLiteStore, import_markdown_folder_to_sqlite, refresh_store_cross_project_derivatives
 
 
 YAML_KEY_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$")
@@ -107,6 +107,20 @@ def import_forest_from_registry(
     failure_count = sum(1 for project in projects if project["status"] == "failure")
     missing_count = sum(1 for project in projects if project["status"] == "missing")
     skipped_count = sum(1 for project in projects if project["status"] == "skipped")
+    if success_count:
+        refresh_store_cross_project_derivatives(store)
+        store_reader = SQLiteStore(store)
+        try:
+            stats = store_reader.stats()
+            aggregate = {
+                "projects": int(stats.get("project_count") or 0),
+                "pages": int(stats.get("pages") or 0),
+                "lines": int(stats.get("lines") or 0),
+                "edges": int(stats.get("edges") or 0),
+                "unresolved_targets": int(stats.get("unresolved_targets") or 0),
+            }
+        finally:
+            store_reader.close()
     ambiguities = _forest_ambiguities(store, ambiguity_limit, ambiguity_candidate_limit)
     return {
         "registry": str(registry),
@@ -196,6 +210,7 @@ def _import_forest_entry(
             store_path,
             project_name=name,
             exclude_dirs=exclude_dirs,
+            defer_weak_edges=True,
         )
     except MarkdownCollisionError as error:
         return {
