@@ -1593,3 +1593,8 @@ ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog �
 - tests: added a regression that holds an external SQLite `BEGIN IMMEDIATE` writer lock, starts two `write-page --defer-projection` CLI subprocesses against one store, verifies both are waiting, releases the lock, and confirms both writes succeed.
 - result: Markdown projection stays old until batch export; store current state has A/B updates; SQLite events contain separate session-a/session-b `page_update` rows; `activity` sees both active sessions; `revert-plan --scope session` keeps the work units independent.
 - judgment: this directly backs Done condition 1 of [[parallel-agent-substrate-goal]] at CLI level. WAL / busy_timeout / `BEGIN IMMEDIATE` already provide the needed serialization here; no queue or mandatory lock is justified by this dogfood.
+
+## [2026-06-28 15:31] dogfood+file-back | concurrent CLI append-log subprocesses serialize through SQLite
+- tests: added the matching regression for `append-log --defer-projection`: an external SQLite `BEGIN IMMEDIATE` writer lock holds two CLI subprocesses, both wait, and both succeed after release.
+- result: `Log.md` projection stays old until batch export; SQLite events contain separate session-a/session-b `log_append` rows; `log-records` / `history A` / `history B` expose the subject+session split; `revert-plan --scope session` keeps each log append as an independent work unit.
+- judgment: Done condition 1 explicitly names `write-page` and `append-log`; both write verbs now have CLI-level lock-wait / serialization dogfood without adding a queue or mandatory lock.

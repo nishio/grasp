@@ -1,6 +1,6 @@
 ---
 type: plan
-summary: 2026-06-28 の開発ゴール。grasp を「並行 agent が同一 canonical store を共有して知識共有しながら並行開発する基盤」として使える状態にする。判定は机上 spec でなく 2-agent 共有 store dogfood が green になること。1.8.72 で deferred projection / activity / SQLite-only log_append history の最小 substrate、1.8.73 で recovery ladder hints、1.8.74 で stale store→Markdown export refusal、1.8.75 で pre-write intent 用の soft page claim surface、1.8.76 で activity の claim-state fold、1.8.77 で recovery ladder の claim-aware hint、1.8.78 で write-page identity target、1.8.79 で claim-page identity target が入った。Git worktree dogfood regression は activity による同ページ rewrite 回避、claim→write→release→明示 batch export、session rollback candidate 分離を確認済み。追加で SQLite write lock 下の同時 `write-page --defer-projection` 2 subprocess が待って直列化され、両 session の state/event/revert-plan が残ることも固定済み。次はさらに長い real dogfood で queue / automated reconcile 要否を測る。
+summary: 2026-06-28 の開発ゴール。grasp を「並行 agent が同一 canonical store を共有して知識共有しながら並行開発する基盤」として使える状態にする。判定は机上 spec でなく 2-agent 共有 store dogfood が green になること。1.8.72 で deferred projection / activity / SQLite-only log_append history の最小 substrate、1.8.73 で recovery ladder hints、1.8.74 で stale store→Markdown export refusal、1.8.75 で pre-write intent 用の soft page claim surface、1.8.76 で activity の claim-state fold、1.8.77 で recovery ladder の claim-aware hint、1.8.78 で write-page identity target、1.8.79 で claim-page identity target が入った。Git worktree dogfood regression は activity による同ページ rewrite 回避、claim→write→release→明示 batch export、session rollback candidate 分離を確認済み。追加で SQLite write lock 下の同時 `write-page --defer-projection` 2 subprocess と同時 `append-log --defer-projection` 2 subprocess が待って直列化され、両 session の state/event/log-records/revert-plan が残ることも固定済み。次はさらに長い real dogfood で queue / automated reconcile 要否を測る。
 sources:
   - [[sqlite-ssot-write-plan]]
   - [[sqlite-write-concurrency]]
@@ -32,7 +32,7 @@ grasp を **複数の AI agent が同一 canonical store（`.grasp/authority.sql
 
 | 要素 | 状態 |
 |---|---|
-| 共有 canonical store への並行 write が crash/lost-update しない | 実装済（canonical store / WAL / busy_timeout / `BEGIN IMMEDIATE` / state+event 1 transaction）。追加 regression で外部 `BEGIN IMMEDIATE` lock 下に2本の CLI `write-page --defer-projection` subprocess を同時に待たせ、lock 解放後に両方が成功し、A/B の current state・SQLite `page_update` events・session revert-plan が分離して残ることを確認 |
+| 共有 canonical store への並行 write が crash/lost-update しない | 実装済（canonical store / WAL / busy_timeout / `BEGIN IMMEDIATE` / state+event 1 transaction）。追加 regression で外部 `BEGIN IMMEDIATE` lock 下に2本の CLI `write-page --defer-projection` subprocess と2本の `append-log --defer-projection` subprocess をそれぞれ同時に待たせ、lock 解放後に両方が成功し、A/B の current state / `log-records`・SQLite events・session revert-plan が分離して残ることを確認 |
 | write の attribution（どの agent/session が何を触ったか） | 実装済（`--actor` / `--session-id`、events に記録、preflight session uniqueness、postwrite session marker） |
 | session 単位の独立 rollback | 実装済（`revert-plan --scope session`） |
 | 他 session の write を read（現在状態 / 直近変化） | 現在状態=`read`、変化=`history` / `log-records`（event-stream, current_state=false, session_id）まで実装済 |
@@ -84,12 +84,14 @@ Claude Code / Codex の並行 file-back では、同じ摩擦に対して3種類
 
 2026-06-28 15:17 の追加 regression で、Done 条件 1 の「並行 write が安全」を CLI レベルでも固定した。test は import 済み store に外部 `BEGIN IMMEDIATE` を張り、A/B 2本の `write-page --defer-projection` subprocess を同時起動して lock 待ちにする。lock 解放後、両 command は crash せず成功し、Markdown projection は batch export まで旧内容、store current state は A/B それぞれ更新済み、SQLite events には session-a/session-b の `page_update` が残り、`activity` は両 session を active として返し、`revert-plan --scope session` は各 event を独立候補化する。この evidence は queue を足す理由ではなく、SQLite authority 層の直列化が CLI authoring surface まで届いている確認。
 
+2026-06-28 15:31 の追加 regression で、同じ contention proof を `append-log --defer-projection` 側にも広げた。test は外部 `BEGIN IMMEDIATE` lock 下で A/B 2本の `append-log` subprocess を同時に待たせ、解放後に両方が成功することを確認する。Markdown `Log.md` は batch export まで旧内容のまま、SQLite events には session-a/session-b の `log_append` が分離して残り、`log-records` / `history A` / `history B` がそれぞれの subject と session を返し、`revert-plan --scope session` は各 log event を独立候補化する。これで Done 条件 1 の名指し対象だった `write-page` と `append-log` の両方が CLI-level lock-wait / serialization regression を持つ。
+
 ## 進め方: dogfood-first
 
 机上で spec を確定させず、**まず 2-agent 共有 dogfood を組んで走らせ、実際に落ちた所だけを実装する**（実装事実 first、判明した制約は file back）。
 
 1. 同一 store（temp 可）を共有する2 session を回す最小ハーネスを作る。
-2. 上の Done 条件 1–5 を assert する。最小 subprocess regression に加え、Git worktree regression で activity-based duplicate avoidance と explicit batch export は通った。`1.8.75` で pre-write claim surface と claim→write→release→batch export loop、`1.8.76` で activity の stale-claim fold、`1.8.78` で observation identity → write target、`1.8.79` で observation identity → claim target / audit query、2026-06-28 15:17 で SQLite write lock 下の同時 CLI writer 直列化 regression も入った。次は長い real dogfood で落ちる箇所を見る。
+2. 上の Done 条件 1–5 を assert する。最小 subprocess regression に加え、Git worktree regression で activity-based duplicate avoidance と explicit batch export は通った。`1.8.75` で pre-write claim surface と claim→write→release→batch export loop、`1.8.76` で activity の stale-claim fold、`1.8.78` で observation identity → write target、`1.8.79` で observation identity → claim target / audit query、2026-06-28 15:17 で SQLite write lock 下の同時 CLI `write-page` 直列化、2026-06-28 15:31 で同時 CLI `append-log` 直列化 regression も入った。次は長い real dogfood で落ちる箇所を見る。
 3. 落ちた所に最小実装を入れる。claim/lease は `claim-page` の soft event surface までに留め、queue / automated reconcile は実際の運用 gap が出た時だけ足す。
 4. 判明した制約・設計変更を file back（[[sqlite-write-concurrency]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]]）。
 
