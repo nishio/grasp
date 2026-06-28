@@ -1483,3 +1483,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: actual revert projection finalization now raises a `revert_projection_export_failed` diagnostic under `--json` after revert events have been written.
 - tests: strengthened the page_rename revert export-failure regression to assert phase, target/revert event ids, pending removed files, journal status, and original error while preserving the old projection file.
 - docs: bumped public/package version to `1.8.66` and updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[sqlite-ssot-write-plan]]. schema remains v8.
+
+## [2026-06-28 09:39] implementation+file-back | preflight legacy journal append paths
+- code: write / recovery / adopt / import-log paths that still request legacy `--journal` now preflight appendability before SQLite mutation.
+- tests: added append-section and revert-event regressions where `--journal` points at a directory; both return `journal_append_preflight_failed` and leave SQLite events plus Markdown projection unchanged.
+- docs: bumped public/package version to `1.8.67` and updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[sqlite-ssot-write-plan]]. schema remains v8.
