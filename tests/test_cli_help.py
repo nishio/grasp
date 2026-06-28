@@ -8423,12 +8423,25 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(history_a["records"][0]["subjects"], ["A"])
         self.assertEqual(activity_a["result_mode"], "event-stream")
         self.assertEqual(activity_a["query"], "A")
-        self.assertEqual(activity_a["matched_events"], 1)
-        self.assertEqual(activity_a["events"][0]["event_type"], "page_update")
-        self.assertEqual(activity_a["events"][0]["actor"], "agent-a")
-        self.assertEqual(activity_a["events"][0]["session_id"], "session-a")
-        self.assertTrue(activity_a["events"][0]["active"])
-        self.assertEqual(activity_a["active_sessions"][0]["session_id"], "session-a")
+        self.assertEqual(activity_a["matched_events"], 2)
+        activity_by_type = {
+            event["event_type"]: event
+            for event in activity_a["events"]
+        }
+        self.assertEqual(activity_by_type["page_update"]["actor"], "agent-a")
+        self.assertEqual(activity_by_type["page_update"]["session_id"], "session-a")
+        self.assertTrue(activity_by_type["page_update"]["active"])
+        self.assertEqual(activity_by_type["log_append"]["actor"], "agent-b")
+        self.assertEqual(activity_by_type["log_append"]["session_id"], "session-b")
+        self.assertEqual(activity_by_type["log_append"]["subjects"], ["A"])
+        self.assertTrue(activity_by_type["log_append"]["active"])
+        self.assertEqual(
+            sorted(session["session_id"] for session in activity_a["active_sessions"]),
+            ["session-a", "session-b"],
+        )
+        session_b = next(session for session in activity_a["active_sessions"] if session["session_id"] == "session-b")
+        self.assertEqual(session_b["pages"], ["Log"])
+        self.assertEqual(session_b["subjects"], ["A"])
         self.assertEqual(revert_plan["scope"], "session")
         self.assertEqual(revert_plan["session_id"], "session-a")
         self.assertEqual(revert_plan["candidate_event_ids"], [write_result["event_id"]])
@@ -8693,6 +8706,8 @@ class CliHelpTests(unittest.TestCase):
             log_records = run_json("log-records")
             history_a = run_json("history", "A")
             history_b = run_json("history", "B")
+            activity_a = run_json("activity", "A", "--active-seconds", "86400")
+            activity_b = run_json("activity", "B", "--active-seconds", "86400")
             revert_plan_a = run_json("revert-plan", log_a_result["event_id"], "--scope", "session")
             revert_plan_b = run_json("revert-plan", log_b_result["event_id"], "--scope", "session")
             export_result = run_json("export-markdown", "--output", str(root), "--regenerate-log")
@@ -8729,6 +8744,20 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(history_b["matched_records"], 1)
         self.assertEqual(history_b["records"][0]["session_id"], "session-b")
         self.assertEqual(history_b["records"][0]["subjects"], ["B"])
+        self.assertEqual(activity_a["matched_events"], 1)
+        self.assertEqual(activity_a["events"][0]["event_type"], "log_append")
+        self.assertEqual(activity_a["events"][0]["session_id"], "session-a")
+        self.assertEqual(activity_a["events"][0]["subjects"], ["A"])
+        self.assertEqual(activity_a["active_sessions"][0]["session_id"], "session-a")
+        self.assertEqual(activity_a["active_sessions"][0]["pages"], ["Log"])
+        self.assertEqual(activity_a["active_sessions"][0]["subjects"], ["A"])
+        self.assertEqual(activity_b["matched_events"], 1)
+        self.assertEqual(activity_b["events"][0]["event_type"], "log_append")
+        self.assertEqual(activity_b["events"][0]["session_id"], "session-b")
+        self.assertEqual(activity_b["events"][0]["subjects"], ["B"])
+        self.assertEqual(activity_b["active_sessions"][0]["session_id"], "session-b")
+        self.assertEqual(activity_b["active_sessions"][0]["pages"], ["Log"])
+        self.assertEqual(activity_b["active_sessions"][0]["subjects"], ["B"])
         self.assertEqual(revert_plan_a["candidate_event_ids"], [log_a_result["event_id"]])
         self.assertEqual(revert_plan_b["candidate_event_ids"], [log_b_result["event_id"]])
         self.assertEqual(export_result["written_files"], ["Log.md"])
@@ -9472,8 +9501,11 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(history_a["records"][0]["subjects"], ["A", "B"])
         self.assertEqual(
             [event["event_type"] for event in activity_a_after_loop["events"]],
-            ["page_claim_release", "page_update", "page_claim"],
+            ["page_claim_release", "log_append", "page_update", "page_claim"],
         )
+        activity_a_log = next(event for event in activity_a_after_loop["events"] if event["event_type"] == "log_append")
+        self.assertEqual(activity_a_log["session_id"], "session-b")
+        self.assertEqual(activity_a_log["subjects"], ["A", "B"])
         self.assertEqual(
             sorted(session["session_id"] for session in activity_all["active_sessions"]),
             ["session-a", "session-b"],
