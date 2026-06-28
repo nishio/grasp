@@ -174,6 +174,8 @@ Dogfood in the same `1.8.42` slice confirmed the guard fails while the worktree 
 
 `1.8.63` closes a projection-side rollback gap in `rename-page`. The previous order removed the old projection file before exporting the new path, so a failed new-path export could leave SQLite rolled back but the old Markdown projection missing. Rename projection now exports the new store state first and removes the previous file only after export succeeds. A regression forces the new path to be a directory and verifies the rollback diagnostic, SQLite `event_revert`, restored current state, and preserved old projection file.
 
+`1.8.64` closes the general partial projection write variant of the same class. `export-markdown` now reads all projection targets and preflights write target paths before writing any file. A regression uses non-git Markdown output where `A.md` would be updated before `B.md` fails as a directory, and verifies that after automatic SQLite rollback `A.md` still contains the old projection.
+
 This does **not** yet make every authority boundary final. `sync`, `acquire`, generated Markdown backup/review policy, broader native event-derived semantic page projection, and semantic multi-page work-unit inference beyond log-batch, subject-log, log-page-subjects, content-subjects, version-bump, same-page dependency, explicit event-window, time-burst, or explicit session metadata boundaries still need migration work.
 
 ## Why This Replaces The Fast Path
@@ -242,6 +244,8 @@ Completed in `1.8.61`: `history <query>` now exposes `current_state_target` with
 Completed in `1.8.62`: the real git history replay corpus now covers `page_update` revert inside a multi-page update sequence by applying `3eaab75`, reverting only the `grasp-backlog.md` update, and checking the mixed projection through replay and direct re-import.
 
 Completed in `1.8.63`: `rename-page` projection export now writes the new projection before removing the previous projection file, so export failure rollback can restore SQLite state without deleting the old Markdown projection.
+
+Completed in `1.8.64`: `export-markdown` now separates projection comparison from file writes and preflights write targets before writing, so a later projection path/read failure does not leave earlier Markdown files partially updated after SQLite rollback.
 
 Completed in `1.8.56`: repo-local preflight/write-start/postwrite now use gitignored `.grasp/file-back.lock.json` to block overlapping normal runbook file-backs, and postwrite releases the lock only after all checks pass.
 
