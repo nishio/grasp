@@ -5747,6 +5747,219 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(sqlite_revert_payload["target_event_type"], "section_append")
         self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
 
+    def test_write_command_refuses_unappendable_journal_before_mutation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "blocked-events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            journal_path.mkdir()
+            failed_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-section",
+                    "A",
+                    "--heading",
+                    "Should not write",
+                    "--line",
+                    "- blocked",
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                text=True,
+                capture_output=True,
+            )
+            peek_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_type
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            page_text = (root / "A.md").read_text(encoding="utf-8")
+
+        failed_error = json.loads(failed_completed.stderr)
+        diagnostic = failed_error["diagnostic"]
+        peek_result = json.loads(peek_completed.stdout)
+        self.assertEqual(failed_completed.returncode, 2)
+        self.assertEqual(diagnostic["type"], "journal_append_preflight_failed")
+        self.assertEqual(diagnostic["journal"], str(journal_path))
+        self.assertFalse(diagnostic["store_mutated"])
+        self.assertFalse(diagnostic["journal_written"])
+        self.assertFalse(diagnostic["projection_written"])
+        self.assertEqual(diagnostic["reason"], "journal path is a directory")
+        self.assertEqual([row[0] for row in sqlite_event_rows], [])
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
+        self.assertEqual(page_text, "# A\n")
+
+    def test_revert_command_refuses_unappendable_journal_before_mutation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            journal_path = Path(tmpdir) / "blocked-events.jsonl"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            append_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "append-section",
+                    "A",
+                    "--heading",
+                    "Keep me",
+                    "--line",
+                    "- still here",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            append_result = json.loads(append_completed.stdout)
+            journal_path.mkdir()
+            failed_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "revert-event",
+                    append_result["event_id"],
+                    "--output",
+                    str(root),
+                    "--journal",
+                    str(journal_path),
+                ],
+                text=True,
+                capture_output=True,
+            )
+            peek_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "A",
+                    "--line-limit",
+                    "6",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_type
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            page_text = (root / "A.md").read_text(encoding="utf-8")
+
+        failed_error = json.loads(failed_completed.stderr)
+        diagnostic = failed_error["diagnostic"]
+        peek_result = json.loads(peek_completed.stdout)
+        self.assertEqual(failed_completed.returncode, 2)
+        self.assertEqual(diagnostic["type"], "journal_append_preflight_failed")
+        self.assertEqual(diagnostic["journal"], str(journal_path))
+        self.assertFalse(diagnostic["store_mutated"])
+        self.assertFalse(diagnostic["journal_written"])
+        self.assertFalse(diagnostic["projection_written"])
+        self.assertEqual([row[0] for row in sqlite_event_rows], ["section_append"])
+        self.assertEqual(
+            [line["text"] for line in peek_result["lines"]],
+            ["# A", "", "## Keep me", "- still here"],
+        )
+        self.assertEqual(page_text, "# A\n\n## Keep me\n- still here\n")
+
     def test_rename_projection_export_failure_preserves_previous_projection_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
