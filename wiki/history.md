@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.74`（更新: 2026-06-28 13:38、store: schema `8`、compat: schema `8` compatible）: `export-markdown` の non-check write mode が、Git worktree 内の Markdown projection と SQLite store の projection に差分がある時、既定で上書きを拒否するようにした。direct-patch fallback や merge で Markdown だけ進んだまま store→Markdown full projection を走らせると未 re-adopt の内容を巻き戻すため、`changed_files` / `missing_files` を `--check` 相当で先読みし、re-adopt / reconcile runbook を促す。意図的な deferred projection batch や re-adopt 済みの上書きだけ `--allow-projection-overwrite` を明示する。`--check` は従来通り no-write freshness gate。schema は不変
 - `1.8.73`（更新: 2026-06-28 12:38、store: schema `8`、compat: schema `8` compatible）: repo-local `scripts/check_file_back_preflight.py` / `scripts/check_file_back_write_start.py` が guard failure 時に `recovery ladder:` hints を stderr へ出すようにした。hints は `activity --limit 20` による recent ownership 確認を起点に、dirty projection/worktree、branch/HEAD movement、semantic log drift、preflight 後の SQLite event advance、store/output pair mismatch、reused session_id、active lock を、owner branch への fold-in、isolated direct-patch PR + pending reconcile、clean owner worktree での reconcile、preflight 再実行、または待機へ振り分ける。これにより、並行 file-back で agent ごとに別解を作るのではなく、[[parallel-agent-substrate-goal]] の post-guard recovery ladder を guard output として dogfood できる。schema は不変
 - `1.8.72`（更新: 2026-06-28 12:10、store: schema `8`、compat: schema `8` compatible）: 2-agent 共有 canonical store dogfood の最小 substrate を追加した。`write-page` / `append-log` は `--defer-projection` を受け付け、SQLite state+event と optional journal だけを書いて Markdown projection export を後回しにできる。JSON result は `projection_deferred=true` / `projection=null` を返し、`--output` は projection を即時 export する時だけ必須。`activity [title]` を追加し、SQLite write events から page/page path ごとの actor/session_id/recent active sessions を読む。`history` / `log-records` は `--journal` なしの SQLite-only store でも `log_append` records を event-stream として返し、records に `event_type` / `actor` / `session_id` を含める。`export-markdown --regenerate-log` は import-only store の partial SQLite event stream に log page seed event が無い場合、現在 store の log page lines を seed として使う。regression は同一 store の agent A/B が並行に `write-page` / `append-log --defer-projection` し、Markdown files は batch export まで不変、`read` / `history` / `activity` / `revert-plan --scope session` が期待通り読めることを確認する。schema は不変
 - `1.8.71`（更新: 2026-06-28 10:46、store: schema `8`、compat: schema `8` compatible）: `append-log --help` の stale note を修正した。`rename-page` が既に public alpha なのに「rename is still out of scope」と表示していたため、CLI mechanics SSoT が current command surface と矛盾していた。help は page identity changes を `rename-page` が扱うと明示し、regression test で stale wording が戻らないことを固定した。schema は不変
@@ -213,6 +214,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.73`
+- Current public compatibility version: `1.8.74`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.73`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.74`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

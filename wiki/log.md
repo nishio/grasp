@@ -1548,3 +1548,8 @@ Claude Code / Codex の並行 file-back で出た3種類の修正（content deli
 
 ## [2026-06-28 13:22] file-back | [[grasp-backlog]] に write-page handle bug 候補を tracked 化（read と非対称）
 ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog の Local write and identity layer に上げ、Codex が拾えるようにした。read <short page_id> 可・write-page <同 id> 不可・stem handle 可。
+
+## [2026-06-28 13:38] implementation+file-back | guard store-to-Markdown projection overwrite before re-adopt
+- code: `export-markdown` non-check write mode now previews changed/missing projection files and refuses to overwrite Git-worktree Markdown diffs unless `--allow-projection-overwrite` is explicit.
+- rationale: direct-patch fallback or merge can advance Markdown while SQLite is stale; full store-to-Markdown projection must stop and require re-adopt/reconcile instead of resurrecting stale content.
+- docs: bumped public/package version to `1.8.74` and updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[sqlite-ssot-write-plan]]. schema remains v8.
