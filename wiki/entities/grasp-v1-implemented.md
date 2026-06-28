@@ -53,7 +53,7 @@ v1 stable scope 外:
 
 ## store
 
-- current public compatibility version は `1.8.70`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.8.71`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - authoring SSoT substrate 用の canonical store path helper は `$GRASP_CANONICAL_STORE` → `<repo>/.grasp/authority.sqlite` → `$GRASP_HOME/authority.sqlite` → `~/.grasp/authority.sqlite`。これは Phase 0/1 helper であり、既存 default read/import store path とは分ける。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
@@ -204,6 +204,7 @@ parser が link から除外するもの:
 - `1.8.68` 以降、同 preflight は既存 regular journal file の write permission と、missing journal path 作成に必要な既存 parent directory の write/execute permission も検査する。read-only journal file で write command が失敗しても SQLite event と Markdown projection を残さない。
 - `1.8.69` 以降、同 preflight は既存 journal file の JSONL parse / schema validation も mutation 前に検査する。invalid JSONL の場合は `journal_append_preflight_failed` と既存 parser error を返し、SQLite event / Markdown projection / journal content を残さない。`adopt-markdown --replace-journal` は既存 content を上書きするため validation を skip する。
 - `1.8.70` 以降、public CLI から `append-section` を削除した。新規 authoring は full-page replacement の `write-page` と log 追記の `append-log` に寄せる。既存 `section_append` event は replay/revert 互換のため読み続けるが、新規 public command では mint しない。
+- `1.8.71` 以降、CLI help の mechanics SSoT regression として、`append-log --help` が current write surface と矛盾する stale rename note を出さないことを test で固定している。`append-log` は page identity changes を `rename-page` に委ねると明示する。
 - `1.8.55` 以降、repo-local `scripts/check_file_back_write_start.py` は preflight stamp の latest SQLite `event_sequence` と write-start 時点の current latest `event_sequence` を比較し、preflight 後・最初の write command 前に store が進んだ場合は failure にする。これは preflight と write-start の間に別 writer が `.grasp/file-back.sqlite` を更新した時、postwrite で自分の write 後に検出するのではなく、mutation 前に preflight 再実行を要求する guard。
 - `1.8.56` 以降、repo-local file-back guard は gitignored lock `.grasp/file-back.lock.json` を使う。preflight は clean run 後に lock を取得し、write-start / postwrite は同じ session/store/project/output の lock を要求する。postwrite は全 checks が clean な時だけ lock を解放する。通常 runbook 同士では、複数 write command の file-back 中に別 writer が割り込むことを preflight 時点で止める。
 - SQLite write substrate: `connect_sqlite_store(..., for_write=True)` は WAL / `busy_timeout` / `synchronous=NORMAL` を設定し、`sqlite_write_transaction()` は `BEGIN IMMEDIATE` で write lock を取り commit/rollback する。CLI は store 更新系 command を write-configured connection で開く。
