@@ -8762,6 +8762,100 @@ class CliHelpTests(unittest.TestCase):
         )
         self.assertEqual(claims_all["released_claims"][0]["claim_event_id"], claim_a["claim"]["claim_event_id"])
 
+    def test_claim_page_accepts_page_id_and_source_path_targets(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n- old B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "authority.sqlite"
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+            a_before = run_json("read", "A")
+            a_page_id = a_before["page"]["id"]
+
+            claim_a = run_json(
+                "claim-page",
+                a_page_id,
+                "--target",
+                "page-id",
+                "--ttl-seconds",
+                "600",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            claims_by_page_id = run_json("claims", a_page_id)
+            activity_by_page_id = run_json("activity", a_page_id, "--active-seconds", "86400")
+            conflict_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-b",
+                    "--session-id",
+                    "session-b",
+                    "claim-page",
+                    "A.md",
+                    "--target",
+                    "path",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            claim_b = run_json(
+                "claim-page",
+                "B.md",
+                "--target",
+                "path",
+                "--ttl-seconds",
+                "600",
+                actor="agent-b",
+                session_id="session-b",
+            )
+
+        self.assertEqual(claim_a["claim"]["page_id"], a_page_id)
+        self.assertEqual(claim_a["claim"]["title"], "A")
+        self.assertEqual(claim_a["claim"]["source_path"], "A.md")
+        self.assertEqual(claims_by_page_id["active_count"], 1)
+        self.assertEqual(claims_by_page_id["active_claims"][0]["claim_event_id"], claim_a["claim"]["claim_event_id"])
+        self.assertEqual(activity_by_page_id["matched_events"], 1)
+        self.assertEqual(activity_by_page_id["events"][0]["event_id"], claim_a["claim"]["claim_event_id"])
+        self.assertEqual(conflict_completed.returncode, 2)
+        self.assertIn("page already has an active claim", conflict_completed.stderr)
+        self.assertIn("session-a", conflict_completed.stderr)
+        self.assertEqual(claim_b["claim"]["title"], "B")
+        self.assertEqual(claim_b["claim"]["source_path"], "B.md")
+        self.assertNotEqual(claim_b["claim"]["page_id"], a_page_id)
+
     def test_activity_folds_stale_claim_state_out_of_active_sessions(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"

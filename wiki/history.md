@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.79`（更新: 2026-06-28 15:07、store: schema `8`、compat: schema `8` compatible）: `claim-page` に `--target handle|page-id|path` を追加し、pre-write intent claim も観測済み page identity / Markdown source path で指定できるようにした。`claims <query>` と `activity <query>` も page_id query に一致するため、`read --page-id` / `activity` / `claims` で見た同じ identity を claim・監査・activity 絞り込みへそのまま戻せる。これは `write-page --target page-id|path` と同じ identity symmetry を claim 側へ広げる変更で、soft claim の任意 coordination 方針は不変。schema は不変
 - `1.8.78`（更新: 2026-06-28 14:48、store: schema `8`、compat: schema `8` compatible）: `write-page` に `--target handle|page-id|path` を追加し、既存 page replacement の target を title/handle だけでなく page identity / Markdown source path で指定できるようにした。`read --page-id`、`history.current_state_target`、`activity` / `claims` で得た page id や source path を、title/stem へ戻さず write に渡せる。`--create` では従来通り new title + `--path` を使い、`--target` は replacement 専用。schema は不変
 - `1.8.77`（更新: 2026-06-28 14:37、store: schema `8`、compat: schema `8` compatible）: repo-local `check_file_back_preflight.py` / `check_file_back_write_start.py` の guard failure recovery ladder が `claims --include-expired` も案内するようにした。`activity --limit 20` は recent ownership を見る起点のまま、soft claim の active / expired / released state を同じ停止時 routing で確認できる。これは claim-aware recovery output の refinement で、queue / mandatory lock / automated reconcile は追加しない。schema は不変
 - `1.8.76`（更新: 2026-06-28 14:27、store: schema `8`、compat: schema `8` compatible）: `activity` が page claim state を fold するようにした。`page_claim` event は `claim_status` / `claim_active` / `claim_expires_at` / release metadata を返し、expired または released claim は `active=false` になり `active_sessions[]` へ入らない。top-level `active_claims[]` / `active_claim_count` も返すため、agent は recent event と active soft claim を同じ command で区別できる。`page_claim_release` も `claim_status=released` / `claim_active=false` として表示する。これは stale claim が TTL 後や release 後も `activity` 上の active work signal に見える gap を塞ぐ schema-compatible JSON/text output refinement。schema は不変
@@ -218,6 +219,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.78`
+- Current public compatibility version: `1.8.79`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.78`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.79`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

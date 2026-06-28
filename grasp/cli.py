@@ -384,15 +384,18 @@ def build_parser() -> argparse.ArgumentParser:
         returns="project, store, claim, conflicting_claims[], active_claims[]",
         examples=[
             "grasp --project grasp-wiki --actor codex --session-id work-1 claim-page grasp-backlog",
-            "grasp --project grasp-wiki --json claim-page concepts/sqlite-write-concurrency.md --ttl-seconds 900",
+            "grasp --project grasp-wiki --json claim-page concepts/sqlite-write-concurrency.md --target path --ttl-seconds 900",
+            "grasp --project grasp-wiki --json claim-page <page-id> --target page-id",
         ],
         notes=[
             "claim-page requires --session-id or GRASP_SESSION_ID so the claim can be attributed and released.",
+            "Use --target page-id or --target path when activity/read/claims returned a concrete page identity.",
             "A different active session claim for the same page is refused; use claims <page> to inspect the owner.",
             "Claims are soft leases with TTL. They coordinate agents; they are not mandatory write locks.",
         ],
     )
-    claim_page_parser.add_argument("title", help="Target page title/handle/path to claim.")
+    claim_page_parser.add_argument("title", help="Target page title/handle/page-id/path to claim.")
+    claim_page_parser.add_argument("--target", dest="target_kind", choices=["handle", "page-id", "path"], default="handle", help="How to interpret the claim target. Default: handle.")
     claim_page_parser.add_argument("--ttl-seconds", type=int, default=1800, help="How long the soft claim remains active.")
     claim_page_parser.add_argument("--message", default="", help="Optional claim message stored in the event payload.")
 
@@ -2707,7 +2710,7 @@ def run_claim_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
     session_id = metadata["session_id"]
     if not session_id:
         raise ValueError("claim-page requires --session-id or GRASP_SESSION_ID")
-    target = page_claim_target(store, args.title)
+    target = page_claim_target(store, args.title, target_kind=args.target_kind)
     now = datetime.now(timezone.utc).replace(microsecond=0)
     active_claims = current_page_claims(store, now=now, query=args.title, include_inactive=False)
     conflicting_claims = [
@@ -2810,22 +2813,8 @@ def run_release_claim(store: SQLiteStore, args: argparse.Namespace) -> dict[str,
     }
 
 
-def page_claim_target(store: SQLiteStore, title: str) -> dict[str, str]:
-    project = store._require_project()
-    candidates = store.page_handle_candidates(title)
-    if not candidates:
-        raise ValueError(f"page not found: {title}")
-    if len(candidates) > 1:
-        raise ValueError(f"page handle is ambiguous: {title}; use a unique title/path for claim-page")
-    candidate = candidates[0]
-    source_path = str(candidate.get("path") or "")
-    return {
-        "project": project,
-        "page_id": str(candidate.get("page_id") or ""),
-        "title": str(candidate.get("title") or title),
-        "source_path": source_path,
-        "graph_role": str(candidate.get("graph_role") or ""),
-    }
+def page_claim_target(store: SQLiteStore, title: str, *, target_kind: str = "handle") -> dict[str, str]:
+    return store.markdown_page_target_summary(title, target_kind=target_kind, command="claim-page")
 
 
 def current_page_claims(
@@ -2899,7 +2888,8 @@ def claim_matches_query(claim: dict[str, Any], query: str) -> bool:
     query_path = normalize_projection_relative_path(query).casefold()
     source_path = str(claim.get("source_path") or "")
     return (
-        normalize_title(str(claim.get("title") or "")) == query_norm
+        str(claim.get("page_id") or "") == query
+        or normalize_title(str(claim.get("title") or "")) == query_norm
         or source_path.casefold() == query_path
         or Path(source_path).stem.casefold() == query.casefold()
     )
@@ -3014,7 +3004,12 @@ def activity_event_matches_query(event: dict[str, Any], query: str | None) -> bo
     titles = {normalize_title(title) for title in event.get("titles") or []}
     paths = {str(path).casefold() for path in event.get("source_paths") or []}
     path_stems = {Path(path).stem.casefold() for path in paths}
-    return query_norm in titles or query_path in paths or query.casefold() in path_stems
+    return (
+        str(event.get("page_id") or "") == query
+        or query_norm in titles
+        or query_path in paths
+        or query.casefold() in path_stems
+    )
 
 
 def active_session_summaries(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
