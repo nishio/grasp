@@ -263,6 +263,7 @@ class Page:
     views: int
     lines: tuple[Line, ...]
     stored_line_count: int | None = None
+    project: str = ""
 
     @property
     def line_count(self) -> int:
@@ -271,7 +272,7 @@ class Page:
         return len(self.lines)
 
     def to_summary(self) -> dict[str, Any]:
-        return {
+        summary: dict[str, Any] = {
             "id": self.id,
             "title": self.title,
             "created": self.created,
@@ -279,6 +280,9 @@ class Page:
             "views": self.views,
             "line_count": self.line_count,
         }
+        if self.project:
+            summary["project"] = self.project
+        return summary
 
 
 @dataclass(frozen=True)
@@ -296,9 +300,15 @@ class Edge:
     target_handle_norm: str | None = None
     target_page_id: str | None = None
     resolution_status: str = "unresolved"
+    source_project: str = ""
+    target_project: str = ""
+    link_kind: str = "internal"
+    connection_strength: str = "strong"
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
+            "project": self.source_project,
+            "source_project": self.source_project,
             "source_page_id": self.source_page_id,
             "source_title": self.source_title,
             "source_views": self.source_views,
@@ -306,12 +316,21 @@ class Edge:
             "line_id": self.line_id,
             "line_index": self.line_index,
             "line_text": self.line_text,
+            "target_project": self.target_project,
             "target_title": self.target_title,
+            "target_norm": self.target_norm,
             "target_handle": self.target_handle or self.target_title,
             "target_handle_norm": self.target_handle_norm or self.target_norm,
             "target_page_id": self.target_page_id,
             "resolution_status": self.resolution_status,
+            "link_kind": self.link_kind,
+            "connection_strength": self.connection_strength,
         }
+        if not self.source_project:
+            result.pop("project")
+            result.pop("source_project")
+        if not self.target_project:
+            result.pop("target_project")
         annotation = edge_semantic_annotation(self)
         if annotation is not None:
             result["semantic_annotation"] = annotation
@@ -440,6 +459,26 @@ class CosenseStore:
                             line_text=line.text,
                             target_title=target_title,
                             target_norm=normalize_title(target_title),
+                        )
+                    )
+                for cross_link in parse_cosense_cross_project_links(line.text):
+                    target_title = cross_link.title or cross_link.project
+                    edges.append(
+                        Edge(
+                            source_page_id=page.id,
+                            source_title=page.title,
+                            source_views=page.views,
+                            source_updated=page.updated,
+                            line_id=line.line_id,
+                            line_index=line.index,
+                            line_text=line.text,
+                            target_title=target_title,
+                            target_norm=normalize_title(target_title),
+                            target_handle=cross_link.raw,
+                            target_handle_norm=normalize_title(target_title),
+                            target_project=cross_link.project,
+                            link_kind=f"cross-{cross_link.target_class}",
+                            connection_strength="strong",
                         )
                     )
 

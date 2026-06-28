@@ -113,6 +113,9 @@ Stable:
 - Scrapbox / Cosense JSON export import
 - local SQLite store with multiple projects
 - `read`, `search`, `backlinks`, `related`, `path`, `suggest`, and `unresolved`
+  with whole-store defaults when `--project` is omitted
+- cross-project links and inferred normalized-title matches as labeled graph
+  edges (`project`, `target_project`, `link_kind`, `connection_strength`)
 - missing linked concepts as graph nodes with backlink context
 
 Not the goal:

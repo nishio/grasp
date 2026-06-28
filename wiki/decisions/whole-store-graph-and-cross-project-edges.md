@@ -115,6 +115,14 @@ unresolved_targets(
 
 ## Updates
 
+### 2026-06-29: 1.9.0 で core decision を実装、forest dogfood で弱 edge と未本文 hub を確認
+
+`1.9.0` / schema v9 で、`edges.target_project` / `link_kind` / `connection_strength` を導入し、明示 `[/project/title]` は `cross-*` strong edge、cross-project normalized title 一致は `inferred-normalized-title` weak edge として materialize した。`read` / `search` / `backlinks` / `related` / `path` / `unresolved` は `--project` 未指定で whole-store default になり、結果には `project` / `target_project` / `link_kind` / `connection_strength` を返す。current facts は [[grasp-v1-implemented]] と [[history]] を正とする。
+
+llm-wiki forest dogfood では `/Users/nishio/llm-wiki/wikis.yaml` を task-local SQLite store に import し、42 project / 3,404 page / 270,371 line / 24,279 edge を生成した。明示 cross-project link はこの corpus ではほぼ無く、weak normalized-title edge が 553 件出た。`unresolved` whole-store は「一つの概念だと思っていたものが入れ子の二つの概念」「狭義と広義」「アナロジー」「利用と探索のトレードオフ」「倍速会議」など、複数 wiki に出る未本文概念を `projects` / `project_count` 付きで発見できた。`path` では `blindspot` の「まだ絵のない盲点カード」から `llm-wiki` の「利用と探索のトレードオフ」へ weak inferred edge で 1-hop 接続する例を確認した。
+
+実装制約: forest import では project ごとの import 後に弱 edge を毎回再構築すると遅いため、`import-forest` は各 project import 中の weak rebuild を defer し、最後に whole-store derivative を一括再構築する。残課題は Open Questions の通り、referenced-only namespace rollup、slash-in-title 実データ検証、dense graph bound、weak edge の誤接続頻度/rank、表記ゆれ normalize。
+
 ### 2026-06-25: 「v6」は歴史的ラベルに降格、実装は next schema generation で行う
 
 本決定は作成時に「v6 decision」と呼ばれ、本文にも `SCHEMA_VERSION = "6"` と書かれていた。しかし 2026-06-25 の Markdown identity/name collision work で実際の schema v6 は `page_handles`、schema v7 は edge `resolution_status` に使われた（[[history]] / [[grasp-v1-implemented]]）。このため、今後の実装指示として「v6 bump」と読むと current facts と矛盾する。

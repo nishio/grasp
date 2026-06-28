@@ -216,22 +216,17 @@ line-id のローカル別名（text で `P1:0`、`--json` / `--full-ids` で完
 - **external hosted line-id persistence**: 方針は「hosted `lines[].id` は local `lines.line_id` に混ぜず、将来 `external_line_id` として別列にする」で決定済み。実装は schema bump が必要なので未着手。
 - **last-sync cursor の運用精度**: pinned pages / updated ties / clock skew / partial failure の扱い。
 
-## Cross-project graph を first-class edge に + whole-store retrieval
+## Cross-project graph / whole-store retrieval residuals
 
-決定は [[whole-store-graph-and-cross-project-edges]]。store = 外部 source から再生成可能な projection なので、実装時点の next schema generation に bump して理想形に作り直す（`recover_store_from_import_cache` 機構で再 import は安全）。当初は「v6 decision」と呼んだが、実際の schema v6/v7 は Markdown identity/name collision work で消費済みなので、今後は schema 番号でなく **whole-store cross-project** として扱う。現状の parse-on-read `cross_project_refs`（`LIKE '%[/%'` 全スキャン + 毎回 re-parse、edge にならない）を置換する。実装項目:
+`1.9.0` で [[whole-store-graph-and-cross-project-edges]] の本体は実装済み: `edges.target_project` / `link_kind` / `connection_strength`、Cosense `[/project/title]` の first-class strong edge、bare unresolved link から他 project materialized page への weak normalized-title edge、`read` / `search` / `backlinks` / `related` / `path` / `unresolved` の whole-store default、read ambiguity disambiguation、whole-store unresolved project spread。
 
-- **優先度（persona2a 由来）**: [[positioning-two-personas]] 2026-06-28 Update の persona 再検討で、次に actively served すべきは **persona2a（高密度 Markdown 森）**であって persona2b（まばら .md・冷たい HN/Reddit）ではないと整理した。森の「N wiki を跨ぐが本文がどこにも無い概念」俯瞰グラフ価値を供給するのがこの whole-store cross-project + retrieval なので、ここが persona2a 向けの最優先実装。persona2b 向けの come-from 自動昇格（§come-from declare / render 層・密度逆風の半-authoring）は後置でよい。
-- **cross-project link を materialize**: `cross-project-spread` / `cross-project-spreads` は schema-compatible な観測 pre-step として実装済みだが、edge ではない。次は `edges` に `target_project` / `link_kind`（internal / cross-semantic / cross-icon / cross-root）を追加、`source_project` へ rename。`CrossProjectLink`（`raw/project/title/target_class`）を流し、`raw` 保存で slash-in-title を再解決可能に。
-- **解決と unresolved 再構築**: `[/P/T]` を (P, norm(T)) に解決し、存在チェックを target_project の pages に対して行う。`unresolved_targets` を `(target_project, target_norm)` で集計。materialized page 0 の namespace も unresolved の値に取れる。
-- **whole-store default retrieval**: `_require_project` の「複数 project で error」を削除。`search` / `read` / `backlinks` / `related` / `path` / `unresolved` / `mentions` / `co-links` / `gather` は default 全 project、`--project` で絞り、結果は project ラベル付き。`import` / `sync` / `acquire` は project-targeted のまま。
-- **read 多義の disambiguation**: 同名 page が複数 namespace にある時 error せず、全候補を project ラベル + summary で返し `--project` / page-id で絞らせる。
-- **node 状態 = page 単位の materialized / referenced-only**: project は namespace、「未取得 project」は categorical でなく coverage（materialized page 数）の派生量。acquire = referenced-only node の materialize。`unresolved`(whole-store) が「参照済みだが未取得の知識圏」を link_count 順で出し acquire の seed bibliography になる（[[cross-project-reference-acquire-2026-06-24]] の手作業を primitive 化）。
-- **同名 bare 赤リンクの cross-project 統合**: 別 project の同名 bare 赤リンク `[X]`（どの namespace でも未 materialize）を normalize title の project 非依存 key で1ノードに束ねる。materialized page は (project, id) のまま、統合は赤 node だけ。「全 project を通じて誰も本文を書いていないが皆が指す概念ハブ」= project ごとに別 Scrapbox の Cosense が出せない value。誤接続（同綴り別概念）は受容し provenance で後判別（decision point 7）。
-- **接続の強弱**: `edges` に `connection_strength`（strong = 人間が書いた明示リンク intra `[X]` / explicit `[/P/T]` / weak = grasp が normalize title の cross-project 一致で推論した接続＝著者が書いていない AI 向けヒント）。bare 赤 `[X]` が他 project の materialized X に解決するのも weak。誤接続は weak 層に閉じ authored グラフを汚さない＝strength が point 7 の誤接続リスクの封じ込め機構。retrieval は strength を label し weak を strong より下に rank。`link_kind` や typed/directional 軸とは直交（decision point 8）。
-- **出力契約**: discover-broad-filter-post-hoc。relevance で pre-filter せず target_project / link_kind / connection_strength / scope ラベル付きで surface、絞りは post-hoc flag、出力量は rank + omitted-count で bound、性能は bound で対処し hide しない。現 `cross_project_refs` の `--semantic-only` / `--exclude-icons` / `--include-self` は pre-filter から post-hoc filter に位置づけ直す。
-- **history**: store format / materialized index semantics が変わるため [[history]] の `x` を進める（再 import 要）。
+残課題:
 
-未決（decision の Open Questions）: referenced-only namespace の coverage rollup surface 形 / slash-in-title 確定規則の実データ検証 / dense graph での whole-store related/path bound / weak 接続の rank・閾値調整と同綴り別概念の誤接続頻度の dogfood / link 同一判定の表記ゆれ吸収（`yyyy/MM/dd`⇄`yyyy-MM-dd` 等、[[scrapbubble]]）。
+- referenced-only namespace の coverage rollup を `stats` / project report にどう surface するか。
+- slash-in-title 確定規則（第1 segment=project / 残り=title）の実データ検証と、`raw` を使った将来再解決方針。
+- dense graph での whole-store `related` / `path` bound と ranking の継続 dogfood。
+- weak 接続の rank / 閾値調整と、同綴り別概念の誤接続頻度の dogfood。
+- link 同一判定の表記ゆれ吸収（`yyyy/MM/dd`⇄`yyyy-MM-dd` 等、[[scrapbubble]]）。
 
 ## Hosted Cosense acquisition without admin export
 
