@@ -17,7 +17,7 @@ description: >-
 
 - ユーザが JSON export path を指定している場合は、その JSON を使う。**特定ユーザ名・固定パス・固定 project URL を仮定しない**。
 - 既に store がある前提の依頼なら `grasp stats` で store の状態を確認してから読む。
-- `grasp stats` の `project_count` が 2 以上なら、ユーザの意図または問いの文脈から対象 project を選び、以後は `--project <name>`（または `$GRASP_PROJECT`）を付ける。project を推測できない時は確認する。
+- `read` / `search` / `backlinks` / `related` / `path` / `unresolved` は、`--project` が無ければ whole-store default。複数 project を跨ぐ発見を期待する依頼では project を先に絞らない。単一 project 指定がユーザ意図や安全上必要な時だけ `--project <name>`（または `$GRASP_PROJECT`）を付ける。
 - 一回限りの JSON 調査では、既定 store を上書きしないよう task-local store を使う:
 
   ```bash
@@ -37,7 +37,7 @@ description: >-
 
   ```bash
   grasp --store /tmp/grasp-wiki.sqlite import --markdown wiki --project grasp-wiki
-  grasp --store /tmp/grasp-wiki.sqlite --project grasp-wiki read grasp-v1-implemented
+  grasp --store /tmp/grasp-wiki.sqlite read grasp-v1-implemented
   ```
 
   最小 Markdown mirror は frontmatter `title` / `id` / `aliases` / `tags` を読み、title が無い場合は first H1、さらに無ければ file stem を title にする。`[[...]]` と `#tag` を grasp 内 edge にする。duplicate title / alias は import 全体を止めず、`read <handle>` の ambiguity 候補として返る。`backlinks <ambiguous handle>` は handle 自体への incoming lines を主に返し、候補 page ごとの確定 backlinks も分けて返す。`related <ambiguous handle>` は handle 自体への source pages と候補 page ごとの related を分けて返す。`ambiguities` は store 全体または selected project の曖昧 handle を一覧する。duplicate frontmatter `id` は identity 衝突なので error。バックティックのプレーン名（親 llm-wiki への cross-wiki 参照）は edge にしない。既存 Markdown folder へは書き戻さない。重い raw/generated directory を避けたい時は `--markdown-exclude-dir raw` のように directory basename を指定する。再 import は content-only 変更なら差分更新し、title / id / aliases / graph role / exclude dirs / file set が変わった時は安全に full rebuild する。`index.md` / `log.md` など navigation/log artifact は本文検索対象に残しつつ、既定 content graph では outgoing edges を除外する。Obsidian block refs はまだ未実装。
@@ -47,10 +47,13 @@ description: >-
   grasp --store /tmp/grasp-forest.sqlite import-forest /path/to/wikis.yaml --markdown-exclude-dir raw
   ```
 
+  import 後は `grasp --store /tmp/grasp-forest.sqlite unresolved` で、複数 wiki に出る未本文概念ハブを whole-store に探せる。JSON では `project` / `projects` / `project_count` と、example edge の `source_project` / `target_project` / `link_kind` / `connection_strength` を見る。
+
 ## grasp とはどういう物か
 
 - Scrapbox/Cosense の JSON export、または Markdown folder mirror を取り込み、SQLite graph store にしたもの。
 - ページは**行ベース**。Cosense では `[ページ名]`（単角括弧）と `#tag`、Markdown mirror では `[[ページ名]]` と `#tag` を edge にする。read 出力は元の行テキストのまま。
+- 結果は project label 付きで読む。明示 link は `connection_strength=strong`、cross-project normalized-title 推論は `connection_strength=weak` / `link_kind=inferred-normalized-title` として返るので、weak は発見ヒントとして扱う。
 - 中核は **read=近傍同梱**: `grasp read <title>` 一発で、本文 ＋ **行レベル逆リンク** ＋ **related（2-hop）** ＋ **そのページから出る未解決 target** が一緒に返る。`--related-snippets` を付けると related/source ページの先頭行を同梱でき、`--related-snippet-mode edge` なら related/source item を導いたリンク行を同梱できる。
 - オフライン・即時（store があれば各コマンド sub-second）。
 
