@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.65`（更新: 2026-06-28 09:11、store: schema `8`、compat: schema `8` compatible）: `revert-event` / `revert-events` / `revert-event --include-dependents` が page_create / page_rename revert で不要になった projection file を削除する順序を、reverted store state の `export-markdown` 成功後に移した。旧実装は `page_rename` revert で `New.md` を削除してから `Old.md` を export していたため、`Old.md` が directory などで export に失敗すると store は `Old` に戻ったのに現行 Markdown projection の `New.md` も消える partial projection deletion になり得た。regression は `Old.md` directory で revert export を失敗させ、SQLite `event_revert` / current store title+lines / `New.md` 残存を確認する。schema は不変
 - `1.8.64`（更新: 2026-06-28 08:57、store: schema `8`、compat: schema `8` compatible）: `export-markdown` が projection file を書き始める前に全対象の読み取り判定と書き込み先 path preflight を済ませるようにした。旧実装は `A.md` を更新した後、後続の `B.md` が directory などで読み取りに失敗すると、SQLite state は `event_revert` で戻っても `A.md` だけ failed write の新内容で残り得た。regression は git 管理外の Markdown output で `A.md` 更新後に `B.md` directory で export を失敗させ、rollback diagnostic / SQLite `event_revert` / current store lines / `A.md` 不変を確認する。schema は不変
 - `1.8.63`（更新: 2026-06-28 08:44、store: schema `8`、compat: schema `8` compatible）: `rename-page` の projection export failure rollback で旧 projection file を先に削除しないようにした。旧実装は store に `page_rename` event を書いた後、旧 file を削除してから新 path を export していたため、新 path が directory などで export に失敗すると SQLite state は `event_revert` で戻っても旧 Markdown projection が消えたままになり得た。新実装は新 projection export が成功してから旧 file を削除する。regression は `New.md` directory で export を失敗させ、rollback diagnostic / SQLite `event_revert` / current store state / `Old.md` 残存を確認する。schema は不変
 - `1.8.62`（更新: 2026-06-28 08:29、store: schema `8`、compat: schema `8` compatible）: 実 git history replay corpus に、`3eaab75` の既存6ページ横断 `page_update` を適用した後で `grasp-backlog.md` の `page_update` だけを `revert-event` で戻す regression を追加した。expected projection は戻した1ページだけ親 revision、他5ページは更新後 commit の mixed state とし、`replay-journal --check` と direct re-import が clean であることを確認する。これにより `page_update` revert が単体 test だけでなく実履歴 corpus でも復旧できることを固定する。schema は不変
@@ -204,6 +205,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.64`
+- Current public compatibility version: `1.8.65`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.64`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.65`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

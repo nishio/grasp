@@ -53,7 +53,7 @@ v1 stable scope 外:
 
 ## store
 
-- current public compatibility version は `1.8.64`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.8.65`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - authoring SSoT substrate 用の canonical store path helper は `$GRASP_CANONICAL_STORE` → `<repo>/.grasp/authority.sqlite` → `$GRASP_HOME/authority.sqlite` → `~/.grasp/authority.sqlite`。これは Phase 0/1 helper であり、既存 default read/import store path とは分ける。
 - project default: `$GRASP_PROJECT` → store 内に1 project だけならそれ → 複数 project なら明示必須。
@@ -199,6 +199,7 @@ parser が link から除外するもの:
 - `1.8.62` 以降、実 git history replay corpus は `3eaab75` の既存6ページ横断 `page_update` を適用した後、`grasp-backlog.md` の `page_update` だけを `revert-event` で戻す continuous sequence を含む。expected projection は戻した1ページだけ親 revision、他5ページは更新後 commit の mixed state で比較し、`replay-journal --check` と direct re-import が clean であることを固定する。これは新しい recovery surface ではなく、既存 `page_update` revert の実履歴 corpus coverage。
 - `1.8.63` 以降、`rename-page` の projection export failure rollback は旧 projection file を削除する前に新 projection export を試す。新 path の書き出しが directory などで失敗した場合、SQLite state は `event_revert` で戻り、旧 Markdown projection file も残る。regression test は `New.md` directory で失敗させ、rollback diagnostic、SQLite `event_revert`、current store title/lines、`Old.md` 残存を確認する。
 - `1.8.64` 以降、`export-markdown` は projection file を書き始める前に全対象を読み取り、書き込み対象 path の directory / non-regular file / file-blocked parent を preflight する。これにより、後続 projection file の読み取り・path 形状エラーで export が失敗しても、先行 file だけが新内容で残る partial projection write を避ける。regression test は `write-page A` 後の export で `B.md` directory に失敗させ、SQLite rollback 後も `A.md` が旧内容のまま残ることを確認する。
+- `1.8.65` 以降、`revert-event` / `revert-events` / `revert-event --include-dependents` は page_create / page_rename revert で不要になった projection file を、reverted store state の `export-markdown` が成功した後に削除する。これにより、復元先 path が directory などで export に失敗した時、既存 projection file を先に消す partial projection deletion を避ける。regression test は `page_rename` revert で `Old.md` directory に失敗させ、SQLite `event_revert` と restored current store state を確認しつつ `New.md` が残ることを確認する。
 - `1.8.55` 以降、repo-local `scripts/check_file_back_write_start.py` は preflight stamp の latest SQLite `event_sequence` と write-start 時点の current latest `event_sequence` を比較し、preflight 後・最初の write command 前に store が進んだ場合は failure にする。これは preflight と write-start の間に別 writer が `.grasp/file-back.sqlite` を更新した時、postwrite で自分の write 後に検出するのではなく、mutation 前に preflight 再実行を要求する guard。
 - `1.8.56` 以降、repo-local file-back guard は gitignored lock `.grasp/file-back.lock.json` を使う。preflight は clean run 後に lock を取得し、write-start / postwrite は同じ session/store/project/output の lock を要求する。postwrite は全 checks が clean な時だけ lock を解放する。通常 runbook 同士では、複数 write command の file-back 中に別 writer が割り込むことを preflight 時点で止める。
 - SQLite write substrate: `connect_sqlite_store(..., for_write=True)` は WAL / `busy_timeout` / `synchronous=NORMAL` を設定し、`sqlite_write_transaction()` は `BEGIN IMMEDIATE` で write lock を取り commit/rollback する。CLI は store 更新系 command を write-configured connection で開く。
