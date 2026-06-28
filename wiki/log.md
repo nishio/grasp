@@ -1501,3 +1501,6 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 
 ## [2026-06-28 10:27] implementation+file-back | remove append-section public CLI
 - public CLI から append-section を削除し、通常 authoring/file-back は write-page / append-log に寄せた。既存 section_append event は replay/revert compatibility として残す。
+
+## [2026-06-28 10:46] implementation+file-back | fix stale append-log help note
+- append-log --help が rename-page 済みの current surface と矛盾する stale note を出していたため、page identity changes は rename-page が扱うという説明へ更新し、regression test を追加した。

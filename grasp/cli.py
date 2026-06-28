@@ -965,7 +965,7 @@ def build_parser() -> argparse.ArgumentParser:
         ],
         notes=[
             "Default target title is Log.",
-            "Alpha write surface: Markdown-backed projects only; rename is still out of scope.",
+            "Alpha write surface: Markdown-backed projects only; page identity changes are handled by rename-page.",
             "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
             "Dirty projection paths outside the target page are refused before export.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
