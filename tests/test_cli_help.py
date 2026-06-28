@@ -2475,6 +2475,121 @@ class CliHelpTests(unittest.TestCase):
         self.assertIn("| [Digest](source/Digest.md) | Source summary |", index_text)
         self.assertEqual(log_text, "# Log\n\n## [2026-06-26 15:00] test | generated log\n- ok\n")
 
+    def test_export_markdown_refuses_to_overwrite_git_projection_without_explicit_allow(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            root = repo_root / "wiki"
+            root.mkdir(parents=True)
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            init_git_repo(repo_root)
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "A.md").write_text("# A\n- direct patch on main\n", encoding="utf-8")
+            subprocess.run(["git", "add", "wiki/A.md"], cwd=repo_root, check=True, text=True, capture_output=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=grasp-test",
+                    "-c",
+                    "user.email=grasp-test@example.invalid",
+                    "commit",
+                    "-m",
+                    "direct patch",
+                ],
+                cwd=repo_root,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+            check_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--check",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            refused_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                ],
+                text=True,
+                capture_output=True,
+            )
+            text_after_refusal = (root / "A.md").read_text(encoding="utf-8")
+            allowed_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--allow-projection-overwrite",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            text_after_allow = (root / "A.md").read_text(encoding="utf-8")
+
+        check_result = json.loads(check_completed.stdout)
+        allowed_result = json.loads(allowed_completed.stdout)
+        self.assertEqual(check_completed.returncode, 1)
+        self.assertEqual(check_result["changed_files"], ["A.md"])
+        self.assertEqual(refused_completed.returncode, 2)
+        self.assertIn("refusing store-to-Markdown export", refused_completed.stderr)
+        self.assertIn("grasp import --markdown", refused_completed.stderr)
+        self.assertIn("A.md", refused_completed.stderr)
+        self.assertEqual(text_after_refusal, "# A\n- direct patch on main\n")
+        self.assertEqual(allowed_result["written_files"], ["A.md"])
+        self.assertEqual(text_after_allow, "# A\n")
+
     def test_export_markdown_regenerates_log_from_latest_record_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
