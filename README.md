@@ -5,9 +5,11 @@
 **A local graph reader for AI agents.**
 
 `grasp` turns an existing note collection into a local SQLite graph that an AI
-agent can query from the command line. Your source of truth stays where it is:
-a Markdown folder, an Obsidian vault, or a Scrapbox / Cosense export. `grasp`
-is the read layer beside it.
+agent can query from the command line. You can start without moving your source
+of truth: keep a Markdown folder, an Obsidian vault, or a Scrapbox / Cosense
+project as the authoring home, and use `grasp` as the read layer beside it. If
+you later want `grasp` to become the authoring store, that migration can be
+gradual.
 
 It is built for questions like:
 
@@ -123,7 +125,7 @@ Not the goal:
 - Web UI
 - hosted note editing
 - realtime multi-user collaboration
-- replacing your existing note source of truth
+- forcing an up-front migration of your existing note source of truth
 
 Markdown-backed write commands exist, but they are alpha surfaces for repository
 dogfooding. Treat `grasp` as a read and retrieval layer unless you are working
