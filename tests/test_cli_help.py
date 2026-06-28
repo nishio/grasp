@@ -8585,6 +8585,158 @@ class CliHelpTests(unittest.TestCase):
         self.assertTrue(status["strict_ok"])
         self.assertEqual(status["strict_failures"], [])
 
+    def test_parallel_agent_concurrent_cli_append_logs_wait_and_serialize(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "authority.sqlite"
+
+            def run_json(*args):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+
+            lock_holder = sqlite3.connect(store_path, timeout=0.1)
+            lock_holder.execute("BEGIN IMMEDIATE")
+            try:
+                log_a = [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-a",
+                    "--session-id",
+                    "session-a",
+                    "append-log",
+                    "--timestamp",
+                    "2026-06-28 15:30",
+                    "--op",
+                    "dogfood",
+                    "--summary",
+                    "agent A log",
+                    "--line",
+                    "- agent A observed [[A]]",
+                    "--no-journal",
+                    "--defer-projection",
+                ]
+                log_b = [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-b",
+                    "--session-id",
+                    "session-b",
+                    "append-log",
+                    "--timestamp",
+                    "2026-06-28 15:31",
+                    "--op",
+                    "dogfood",
+                    "--summary",
+                    "agent B log",
+                    "--line",
+                    "- agent B observed [[B]]",
+                    "--no-journal",
+                    "--defer-projection",
+                ]
+                processes = [
+                    subprocess.Popen(log_a, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE),
+                    subprocess.Popen(log_b, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE),
+                ]
+                time.sleep(0.2)
+                both_waiting = all(process.poll() is None for process in processes)
+                lock_holder.rollback()
+                self.assertTrue(both_waiting)
+            finally:
+                lock_holder.close()
+
+            completed = []
+            for process in processes:
+                stdout, stderr = process.communicate(timeout=30)
+                completed.append((process.returncode, stdout, stderr))
+            for returncode, stdout, stderr in completed:
+                self.assertEqual(returncode, 0, stderr)
+                self.assertTrue(stdout.strip())
+
+            log_a_result = json.loads(completed[0][1])
+            log_b_result = json.loads(completed[1][1])
+            log_projection_before_export = (root / "Log.md").read_text(encoding="utf-8")
+            log_records = run_json("log-records")
+            history_a = run_json("history", "A")
+            history_b = run_json("history", "B")
+            revert_plan_a = run_json("revert-plan", log_a_result["event_id"], "--scope", "session")
+            revert_plan_b = run_json("revert-plan", log_b_result["event_id"], "--scope", "session")
+            export_result = run_json("export-markdown", "--output", str(root), "--regenerate-log")
+            status = run_json("write-status", "--output", str(root), "--no-journal", "--strict")
+            with sqlite3.connect(store_path) as connection:
+                event_rows = connection.execute(
+                    """
+                    SELECT event_type, actor, session_id
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            log_projection_after_export = (root / "Log.md").read_text(encoding="utf-8")
+
+        self.assertTrue(log_a_result["projection_deferred"])
+        self.assertTrue(log_b_result["projection_deferred"])
+        self.assertEqual(log_projection_before_export, "# Log\n")
+        self.assertEqual(
+            sorted(tuple(row) for row in event_rows),
+            [
+                ("log_append", "agent-a", "session-a"),
+                ("log_append", "agent-b", "session-b"),
+            ],
+        )
+        self.assertEqual(log_records["event_source"], "sqlite")
+        self.assertEqual(log_records["matched_records"], 2)
+        self.assertEqual(
+            sorted(record["summary"] for record in log_records["records"]),
+            ["agent A log", "agent B log"],
+        )
+        self.assertEqual(history_a["matched_records"], 1)
+        self.assertEqual(history_a["records"][0]["session_id"], "session-a")
+        self.assertEqual(history_a["records"][0]["subjects"], ["A"])
+        self.assertEqual(history_b["matched_records"], 1)
+        self.assertEqual(history_b["records"][0]["session_id"], "session-b")
+        self.assertEqual(history_b["records"][0]["subjects"], ["B"])
+        self.assertEqual(revert_plan_a["candidate_event_ids"], [log_a_result["event_id"]])
+        self.assertEqual(revert_plan_b["candidate_event_ids"], [log_b_result["event_id"]])
+        self.assertEqual(export_result["written_files"], ["Log.md"])
+        self.assertIn("## [2026-06-28 15:30] dogfood | agent A log", log_projection_after_export)
+        self.assertIn("## [2026-06-28 15:31] dogfood | agent B log", log_projection_after_export)
+        self.assertTrue(status["strict_ok"])
+        self.assertEqual(status["strict_failures"], [])
+
     def test_parallel_agent_git_worktree_dogfood_uses_activity_and_explicit_batch_export(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir) / "repo"
