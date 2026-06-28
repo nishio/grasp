@@ -2651,63 +2651,72 @@ class SQLiteStore:
         if not log_page_id:
             raise ValueError(f"Markdown log page entry is missing page_id: {log_path}")
 
-        lines: list[str] | None = None
-        for event in events:
-            if event.get("project") != project:
-                continue
-            payload = event.get("payload") or {}
-            event_type = event.get("event_type")
-            if event_type == "page_create" and str(payload.get("page_id") or "") == log_page_id:
-                lines = _journal_lines_to_text(payload.get("lines"))
-            elif event_type == "page_update" and str(payload.get("page_id") or "") == log_page_id:
-                if lines is None:
+        has_log_seed = any(
+            event.get("project") == project
+            and event.get("event_type") in {"page_create", "page_update", "page_rename"}
+            and str((event.get("payload") or {}).get("page_id") or "") == log_page_id
+            for event in events
+        )
+        if has_log_seed:
+            lines: list[str] | None = None
+            for event in events:
+                if event.get("project") != project:
+                    continue
+                payload = event.get("payload") or {}
+                event_type = event.get("event_type")
+                if event_type == "page_create" and str(payload.get("page_id") or "") == log_page_id:
                     lines = _journal_lines_to_text(payload.get("lines"))
-                    continue
-                lines = _journal_lines_to_text(payload.get("lines"))
-            elif event_type == "page_rename" and str(payload.get("page_id") or "") == log_page_id:
-                source_path = str(payload.get("source_path") or "")
-                if source_path and _safe_markdown_relative_path(source_path) != log_path:
-                    continue
-                if lines is None:
-                    lines = _journal_lines_to_text(payload.get("lines"))
-                    continue
-                lines = _journal_lines_to_text(payload.get("lines"))
-            elif event_type == "log_append" and str(payload.get("page_id") or "") == log_page_id:
-                if lines is None:
-                    raise ValueError(f"log_append references log page before page_create in event {event.get('event_id')}")
-                lines.extend(_journal_lines_to_text(payload.get("inserted_lines")))
-            elif event_type == "event_revert" and str(payload.get("page_id") or "") == log_page_id:
-                if lines is None:
-                    raise ValueError(f"event_revert references log page before page_create in event {event.get('event_id')}")
-                target_event_type = payload.get("target_event_type")
-                if target_event_type == "log_append":
-                    removed = _journal_lines_to_text(payload.get("removed_lines"))
-                    if not removed or lines[-len(removed):] != removed:
-                        raise ValueError(f"event_revert does not match log page tail in event {event.get('event_id')}")
-                    del lines[-len(removed):]
-                elif target_event_type == "page_update":
-                    current = _journal_lines_to_text(payload.get("current_lines"))
+                elif event_type == "page_update" and str(payload.get("page_id") or "") == log_page_id:
                     if lines is None:
-                        lines = _journal_lines_to_text(payload.get("previous_lines"))
+                        lines = _journal_lines_to_text(payload.get("lines"))
                         continue
-                    if lines != current:
-                        raise ValueError(f"event_revert current_lines do not match log page in event {event.get('event_id')}")
-                    lines = _journal_lines_to_text(payload.get("previous_lines"))
-                elif target_event_type == "page_rename":
-                    current = _journal_lines_to_text(payload.get("current_lines"))
-                    previous_source_path = str(payload.get("previous_source_path") or "")
+                    lines = _journal_lines_to_text(payload.get("lines"))
+                elif event_type == "page_rename" and str(payload.get("page_id") or "") == log_page_id:
+                    source_path = str(payload.get("source_path") or "")
+                    if source_path and _safe_markdown_relative_path(source_path) != log_path:
+                        continue
                     if lines is None:
+                        lines = _journal_lines_to_text(payload.get("lines"))
+                        continue
+                    lines = _journal_lines_to_text(payload.get("lines"))
+                elif event_type == "log_append" and str(payload.get("page_id") or "") == log_page_id:
+                    if lines is None:
+                        raise ValueError(f"log_append references log page before page_create in event {event.get('event_id')}")
+                    lines.extend(_journal_lines_to_text(payload.get("inserted_lines")))
+                elif event_type == "event_revert" and str(payload.get("page_id") or "") == log_page_id:
+                    if lines is None:
+                        raise ValueError(f"event_revert references log page before page_create in event {event.get('event_id')}")
+                    target_event_type = payload.get("target_event_type")
+                    if target_event_type == "log_append":
+                        removed = _journal_lines_to_text(payload.get("removed_lines"))
+                        if not removed or lines[-len(removed):] != removed:
+                            raise ValueError(f"event_revert does not match log page tail in event {event.get('event_id')}")
+                        del lines[-len(removed):]
+                    elif target_event_type == "page_update":
+                        current = _journal_lines_to_text(payload.get("current_lines"))
+                        if lines is None:
+                            lines = _journal_lines_to_text(payload.get("previous_lines"))
+                            continue
+                        if lines != current:
+                            raise ValueError(f"event_revert current_lines do not match log page in event {event.get('event_id')}")
+                        lines = _journal_lines_to_text(payload.get("previous_lines"))
+                    elif target_event_type == "page_rename":
+                        current = _journal_lines_to_text(payload.get("current_lines"))
+                        previous_source_path = str(payload.get("previous_source_path") or "")
+                        if lines is None:
+                            if previous_source_path and _safe_markdown_relative_path(previous_source_path) != log_path:
+                                continue
+                            lines = _journal_lines_to_text(payload.get("previous_lines"))
+                            continue
+                        if lines != current:
+                            raise ValueError(f"event_revert current_lines do not match log page in event {event.get('event_id')}")
                         if previous_source_path and _safe_markdown_relative_path(previous_source_path) != log_path:
                             continue
                         lines = _journal_lines_to_text(payload.get("previous_lines"))
-                        continue
-                    if lines != current:
-                        raise ValueError(f"event_revert current_lines do not match log page in event {event.get('event_id')}")
-                    if previous_source_path and _safe_markdown_relative_path(previous_source_path) != log_path:
-                        continue
-                    lines = _journal_lines_to_text(payload.get("previous_lines"))
-        if lines is None:
-            raise ValueError(f"event stream does not contain a page_create or page_update seed for log page: {log_page_id}")
+            if lines is None:
+                raise ValueError(f"event stream does not contain a page_create or page_update seed for log page: {log_page_id}")
+        else:
+            lines = self._stored_markdown_page_lines(project, log_page_id)
         record_file_lines = _journal_record_file_log_projection_lines(project, events)
         if record_file_lines:
             if lines and lines[-1].strip():
@@ -2722,6 +2731,18 @@ class SQLiteStore:
             aliases=[str(alias) for alias in item.get("aliases") or []],
             lines=lines,
         )
+
+    def _stored_markdown_page_lines(self, project: str, page_id: str) -> list[str]:
+        rows = self.connection.execute(
+            """
+            SELECT text
+            FROM lines
+            WHERE project = ? AND page_id = ?
+            ORDER BY line_index
+            """,
+            (project, page_id),
+        ).fetchall()
+        return [str(row["text"]) for row in rows]
 
     def append_markdown_lines(self, title: str, lines: list[str]) -> dict[str, Any]:
         with self.connection:

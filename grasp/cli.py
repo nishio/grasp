@@ -55,6 +55,7 @@ STORE_WRITE_COMMANDS = {
     "write-page",
 }
 REVERSIBLE_EVENT_TYPES = {"page_create", "section_append", "log_append", "page_update", "page_rename"}
+ACTIVITY_EVENT_TYPES = {"page_create", "section_append", "log_append", "page_update", "page_rename"}
 
 
 class GraspCliError(ValueError):
@@ -340,6 +341,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     history_parser.add_argument("query", help="Page/topic string to search for in log records.")
     add_log_record_query_arguments(history_parser, include_positional_query=True)
+
+    activity_parser = add_command_parser(
+        subparsers,
+        "activity",
+        help="List recent SQLite write activity by page or session.",
+        description=(
+            "Read SQLite write events directly and summarize which actor/session touched which Markdown-backed page. "
+            "This is a lightweight coordination surface for shared canonical stores; it does not claim or lock pages."
+        ),
+        returns=(
+            "project, store, result_mode, current_state, query|null, active_seconds, matched_events, "
+            "events[], active_sessions[]"
+        ),
+        examples=[
+            "grasp --project grasp-wiki activity",
+            "grasp --project grasp-wiki activity sqlite-write-concurrency --active-seconds 3600",
+            "grasp --project grasp-wiki --json activity grasp-backlog --limit 20",
+        ],
+        notes=[
+            "activity is derived from SQLite events, not Markdown projection.",
+            "active=true means the event is within --active-seconds of the current clock.",
+            "Use this before rewriting a page in multi-agent dogfood to see recent same-page work.",
+        ],
+    )
+    activity_parser.add_argument("title", nargs="?", default=None, help="Optional page title/handle/path to filter touched page events.")
+    activity_parser.add_argument("--limit", type=int, default=20, help="Maximum activity events to return after filtering.")
+    activity_parser.add_argument("--active-seconds", type=int, default=3600, help="Mark events within this many seconds as active.")
+    activity_parser.add_argument("--session", action="append", default=[], help="Only return events from this session_id. Repeat for multiple sessions.")
 
     import_forest_parser = add_command_parser(
         subparsers,
@@ -954,10 +983,10 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Append a dated log entry to a Markdown-backed log page, update the SQLite materialized index, "
             "record a log_append SQLite event, optionally append the compatibility JSONL journal, "
-            "and export the Markdown projection."
+            "and export the Markdown projection unless --defer-projection is used."
         ),
         returns=(
-            "project, page, source_path, journal|null, journal_written, output, event_id, timestamp, op, summary, appended_lines[], appended_line_count, edge_count, projection"
+            "project, page, source_path, journal|null, journal_written, output|null, event_id, timestamp, op, summary, appended_lines[], appended_line_count, edge_count, projection_deferred, projection|null"
         ),
         examples=[
             "grasp --project grasp-wiki append-log --op implementation --summary 'log entry alpha' --line '- details' --output wiki",
@@ -968,6 +997,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Alpha write surface: Markdown-backed projects only; page identity changes are handled by rename-page.",
             "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
             "Dirty projection paths outside the target page are refused before export.",
+            "--defer-projection writes only SQLite state/events and optional journal; run export-markdown later to update Markdown.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
     )
@@ -976,7 +1006,8 @@ def build_parser() -> argparse.ArgumentParser:
     append_log_parser.add_argument("--op", required=True, help="Operation label for the log heading.")
     append_log_parser.add_argument("--summary", required=True, help="Short summary for the log heading.")
     append_log_parser.add_argument("--line", action="append", default=[], help="Body line to append. Repeat for multiple lines.")
-    append_log_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
+    append_log_parser.add_argument("--output", type=Path, default=None, help="Markdown projection output folder to update. Required unless --defer-projection is used.")
+    append_log_parser.add_argument("--defer-projection", action="store_true", help="Do not export Markdown projection after the SQLite write; update it later with export-markdown.")
     add_optional_write_journal_arguments(append_log_parser)
 
     write_page_parser = add_command_parser(
@@ -986,11 +1017,11 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Create a new Markdown-backed page with --create, or replace all stored lines of an existing page. "
             "The command records a page_create/page_update SQLite event, updates the SQLite materialized index, "
-            "optionally appends the compatibility JSONL journal, and exports the Markdown projection."
+            "optionally appends the compatibility JSONL journal, and exports the Markdown projection unless --defer-projection is used."
         ),
         returns=(
-            "project, page, journal|null, journal_written, output, event_id, event_type, source_path, previous_lines[], lines[], "
-            "previous_line_count, line_count, edge_count, projection"
+            "project, page, journal|null, journal_written, output|null, event_id, event_type, source_path, previous_lines[], lines[], "
+            "previous_line_count, line_count, edge_count, projection_deferred, projection|null"
         ),
         examples=[
             "grasp --project grasp-wiki write-page 'New page' --create --path new-page.md --from-file /tmp/new-page.md --output wiki",
@@ -1004,6 +1035,7 @@ def build_parser() -> argparse.ArgumentParser:
             "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
             "--from-file may intentionally use the target projection file itself as the replacement input.",
             "Dirty projection paths outside the target page are refused before export.",
+            "--defer-projection writes only SQLite state/events and optional journal; run export-markdown later to update Markdown.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
     )
@@ -1014,7 +1046,8 @@ def build_parser() -> argparse.ArgumentParser:
     write_page_parser.add_argument("--create", action="store_true", help="Create a new Markdown-backed page instead of replacing an existing page.")
     write_page_parser.add_argument("--path", dest="source_path", default=None, help="New Markdown projection path for --create, relative to --output and ending in .md.")
     write_page_parser.add_argument("--message", default="", help="Optional update message stored in the journal payload.")
-    write_page_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
+    write_page_parser.add_argument("--output", type=Path, default=None, help="Markdown projection output folder to update. Required unless --defer-projection is used.")
+    write_page_parser.add_argument("--defer-projection", action="store_true", help="Do not export Markdown projection after the SQLite write; update it later with export-markdown.")
     add_optional_write_journal_arguments(write_page_parser)
 
     rename_page_parser = add_command_parser(
@@ -1378,8 +1411,8 @@ def add_log_record_query_arguments(command_parser: argparse.ArgumentParser, *, i
     command_parser.add_argument(
         "--journal",
         type=Path,
-        required=True,
-        help="JSONL journal path containing log_entry_import records, used as a fallback when SQLite events are unavailable.",
+        default=None,
+        help="Optional JSONL journal path containing log_entry_import records, used as a fallback when SQLite events are unavailable.",
     )
     if not include_positional_query:
         command_parser.add_argument("--query", default=None, help="Text query matched against record id, source, timestamp, op, summary, heading, and body lines.")
@@ -1423,6 +1456,10 @@ def journal_path_for_output(output: Path, journal_path: Path | None) -> Path:
 def optional_journal_path_for_output(args: argparse.Namespace) -> Path | None:
     if getattr(args, "no_journal", False):
         return None
+    if getattr(args, "journal", None) is not None:
+        return args.journal
+    if getattr(args, "output", None) is None:
+        raise ValueError("--output is required unless --no-journal or --journal is passed")
     return journal_path_for_output(args.output, args.journal)
 
 
@@ -2110,7 +2147,7 @@ def run_log_records(args: argparse.Namespace, store: SQLiteStore | None = None) 
         log_entry_record_from_event(event, journal_index=log_record_event_order_index(event, index))
         for index, event in enumerate(events)
         if (selected_project is None or event["project"] == selected_project)
-        and event["event_type"] == "log_entry_import"
+        and event["event_type"] in {"log_entry_import", "log_append"}
     ]
     versioned_records = annotate_log_entry_record_versions(records)
     visible_records = versioned_records if args.include_superseded else [
@@ -2185,10 +2222,17 @@ def log_record_source_events(
 ) -> tuple[list[dict[str, Any]], str | None, str, int]:
     sqlite_events: list[dict[str, Any]] = []
     if store is not None:
-        sqlite_events = store.events(project=args.project, event_type="log_entry_import", limit=None)
+        sqlite_events = [
+            event
+            for event in store.events(project=args.project, limit=None)
+            if event.get("event_type") in {"log_entry_import", "log_append"}
+        ]
         if sqlite_events:
             selected_project = select_event_project(sqlite_events, args.project, source_label="SQLite events")
             return sqlite_events, selected_project, "sqlite", len(sqlite_events)
+    if args.journal is None:
+        selected_project = store._selected_project_or_none() if store is not None else args.project
+        return [], selected_project, "sqlite", 0
     journal_events = read_journal_events(args.journal)
     selected_project = select_event_project(journal_events, args.project, source_label="journal")
     return journal_events, selected_project, "journal", len(sqlite_events)
@@ -2214,11 +2258,48 @@ def log_record_event_order_index(event: dict[str, Any], fallback_index: int) -> 
 
 def log_entry_record_from_event(event: dict[str, Any], *, journal_index: int) -> dict[str, Any]:
     payload = event.get("payload") or {}
-    body_lines = [
-        line
-        for line in payload.get("body_lines") or []
-        if isinstance(line, dict)
-    ]
+    event_type = str(event.get("event_type") or "")
+    if event_type == "log_append":
+        raw_lines = payload.get("lines") or []
+        body_lines = [
+            {"text": str(line), "line_index": index}
+            for index, line in enumerate(raw_lines)
+        ]
+        timestamp = str(payload.get("timestamp") or "")
+        op = str(payload.get("op") or "")
+        summary = str(payload.get("summary") or "")
+        heading = f"## [{timestamp}] {op} | {summary}".strip()
+        record_id = str(payload.get("record_id") or event["event_id"])
+        legacy_record_id = ""
+        source_path = str(payload.get("source_path") or "")
+        page_id = str(payload.get("page_id") or "")
+        heading_line_index = next(
+            (
+                int(line.get("line_index", -1))
+                for line in payload.get("inserted_lines") or []
+                if isinstance(line, dict) and str(line.get("text") or "").startswith("## ")
+            ),
+            -1,
+        )
+        record_identity = "sqlite_log_append"
+        record_format = "section"
+    else:
+        body_lines = [
+            line
+            for line in payload.get("body_lines") or []
+            if isinstance(line, dict)
+        ]
+        timestamp = str(payload.get("timestamp") or "")
+        op = str(payload.get("op") or "")
+        summary = str(payload.get("summary") or "")
+        heading = str(payload.get("heading") or "")
+        record_id = str(payload.get("record_id") or "")
+        legacy_record_id = str(payload.get("legacy_record_id") or "")
+        source_path = str(payload.get("source_path") or "")
+        page_id = str(payload.get("page_id") or "")
+        heading_line_index = int(payload.get("heading_line_index", -1))
+        record_identity = str(payload.get("record_identity") or ("file_page" if str(payload.get("record_format") or "section") == "file" else "section_content"))
+        record_format = str(payload.get("record_format") or "section")
     body_text = "\n".join(str(line.get("text", "")) for line in body_lines)
     payload_subjects = payload.get("subjects") or []
     subjects: list[str] = []
@@ -2239,21 +2320,24 @@ def log_entry_record_from_event(event: dict[str, Any], *, journal_index: int) ->
     return {
         "journal_index": journal_index,
         "event_id": event["event_id"],
+        "event_type": event_type,
         "event_created_at": event["created_at"],
         "project": event["project"],
-        "record_id": str(payload.get("record_id") or ""),
-        "legacy_record_id": str(payload.get("legacy_record_id") or ""),
+        "actor": str(event.get("actor") or ""),
+        "session_id": str(event.get("session_id") or ""),
+        "record_id": record_id,
+        "legacy_record_id": legacy_record_id,
         "supersedes_record_ids": [str(record_id) for record_id in payload.get("supersedes_record_ids") or []],
-        "record_identity": str(payload.get("record_identity") or ("file_page" if str(payload.get("record_format") or "section") == "file" else "section_content")),
-        "record_format": str(payload.get("record_format") or "section"),
+        "record_identity": record_identity,
+        "record_format": record_format,
         "content_fingerprint": log_entry_payload_content_fingerprint(payload),
-        "source_path": str(payload.get("source_path") or ""),
-        "page_id": str(payload.get("page_id") or ""),
-        "timestamp": str(payload.get("timestamp") or ""),
-        "op": str(payload.get("op") or ""),
-        "summary": str(payload.get("summary") or ""),
-        "heading": str(payload.get("heading") or ""),
-        "heading_line_index": int(payload.get("heading_line_index", -1)),
+        "source_path": source_path,
+        "page_id": page_id,
+        "timestamp": timestamp,
+        "op": op,
+        "summary": summary,
+        "heading": heading,
+        "heading_line_index": heading_line_index,
         "subjects": subjects,
         "explicit_subjects": explicit_subjects,
         "heuristic_subjects": heuristic_subjects,
@@ -2486,6 +2570,168 @@ def log_entry_later_event_summary(
     }
 
 
+def run_activity(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    if args.limit < 1:
+        raise ValueError("--limit must be >= 1")
+    if args.active_seconds < 0:
+        raise ValueError("--active-seconds must be >= 0")
+    active_cutoff = datetime.now(timezone.utc).timestamp() - int(args.active_seconds)
+    session_filters = {str(session) for session in args.session or []}
+    events = [
+        activity_event_summary(event, active_cutoff=active_cutoff)
+        for event in store.events(project=args.project, limit=None)
+        if event.get("event_type") in ACTIVITY_EVENT_TYPES
+    ]
+    filtered = [
+        event
+        for event in events
+        if (not session_filters or event.get("session_id") in session_filters)
+        and activity_event_matches_query(event, args.title)
+    ]
+    ordered = sorted(filtered, key=lambda event: int(event["event_sequence"]), reverse=True)
+    returned = ordered[: args.limit]
+    selected_project = (
+        returned[0]["project"]
+        if returned
+        else store._selected_project_or_none()
+    )
+    return {
+        "project": selected_project,
+        "store": str(store.path),
+        "result_mode": "event-stream",
+        "current_state": False,
+        "query": args.title,
+        "active_seconds": int(args.active_seconds),
+        "session_filters": sorted(session_filters),
+        "total_events": len(events),
+        "matched_events": len(filtered),
+        "returned_events": len(returned),
+        "limit": args.limit,
+        "events": returned,
+        "active_sessions": active_session_summaries(filtered),
+    }
+
+
+def activity_event_summary(event: dict[str, Any], *, active_cutoff: float) -> dict[str, Any]:
+    payload = event.get("payload") or {}
+    event_type = str(event.get("event_type") or "")
+    titles = activity_event_titles(event_type, payload)
+    source_paths = activity_event_source_paths(event_type, payload)
+    subjects: list[str] = []
+    if event_type == "log_append":
+        subjects = log_entry_subjects_from_lines(
+            [{"text": str(line)} for line in payload.get("lines") or []]
+        )
+    created_timestamp = event_created_timestamp(event.get("created_at"))
+    return {
+        "event_sequence": int(event.get("event_sequence", 0)),
+        "event_id": str(event.get("event_id") or ""),
+        "event_type": event_type,
+        "project": str(event.get("project") or ""),
+        "created_at": str(event.get("created_at") or ""),
+        "actor": str(event.get("actor") or ""),
+        "session_id": str(event.get("session_id") or ""),
+        "page_id": str(payload.get("page_id") or ""),
+        "title": titles[-1] if titles else "",
+        "titles": titles,
+        "source_path": source_paths[-1] if source_paths else "",
+        "source_paths": source_paths,
+        "summary": str(payload.get("summary") or payload.get("message") or ""),
+        "subjects": subjects,
+        "active": created_timestamp is not None and created_timestamp >= active_cutoff,
+    }
+
+
+def activity_event_titles(event_type: str, payload: dict[str, Any]) -> list[str]:
+    titles: list[str] = []
+    for key in ("previous_title", "title"):
+        value = str(payload.get(key) or "").strip()
+        if value and value not in titles:
+            titles.append(value)
+    if event_type == "page_rename":
+        new_title = str(payload.get("new_title") or "").strip()
+        if new_title and new_title not in titles:
+            titles.append(new_title)
+    return titles
+
+
+def activity_event_source_paths(event_type: str, payload: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    for key in ("previous_source_path", "source_path"):
+        value = str(payload.get(key) or "").strip()
+        if value and value not in paths:
+            paths.append(value)
+    return paths
+
+
+def event_created_timestamp(value: Any) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).timestamp()
+
+
+def activity_event_matches_query(event: dict[str, Any], query: str | None) -> bool:
+    if not query:
+        return True
+    query_norm = normalize_title(query)
+    query_path = normalize_projection_relative_path(query).casefold()
+    titles = {normalize_title(title) for title in event.get("titles") or []}
+    paths = {str(path).casefold() for path in event.get("source_paths") or []}
+    path_stems = {Path(path).stem.casefold() for path in paths}
+    return query_norm in titles or query_path in paths or query.casefold() in path_stems
+
+
+def active_session_summaries(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sessions: dict[str, dict[str, Any]] = {}
+    for event in events:
+        if not event.get("active"):
+            continue
+        session_id = str(event.get("session_id") or "")
+        key = session_id or "(none)"
+        summary = sessions.setdefault(
+            key,
+            {
+                "session_id": session_id,
+                "actor": str(event.get("actor") or ""),
+                "event_count": 0,
+                "latest_event_sequence": 0,
+                "latest_event_id": "",
+                "latest_created_at": "",
+                "event_types": [],
+                "pages": [],
+                "source_paths": [],
+            },
+        )
+        summary["event_count"] += 1
+        if int(event["event_sequence"]) > int(summary["latest_event_sequence"]):
+            summary["latest_event_sequence"] = int(event["event_sequence"])
+            summary["latest_event_id"] = event["event_id"]
+            summary["latest_created_at"] = event["created_at"]
+            if event.get("actor"):
+                summary["actor"] = event["actor"]
+        append_unique(summary["event_types"], event.get("event_type"))
+        append_unique(summary["pages"], event.get("title"))
+        append_unique(summary["source_paths"], event.get("source_path"))
+    return sorted(
+        sessions.values(),
+        key=lambda summary: int(summary["latest_event_sequence"]),
+        reverse=True,
+    )
+
+
+def append_unique(values: list[str], value: Any) -> None:
+    text = str(value or "").strip()
+    if text and text not in values:
+        values.append(text)
+
+
 def run_export_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     log_events = None
     log_event_source = None
@@ -2520,11 +2766,13 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
     journal = optional_journal_path_for_output(args)
     preflight_journal_appendable(journal)
     target_source_path = store.markdown_source_path_for_unique_handle(args.title)
-    guard_dirty_write_target_paths_before_mutation(
-        store,
-        args.output,
-        target_source_paths={target_source_path},
-    )
+    if not args.defer_projection:
+        require_projection_output(args)
+        guard_dirty_write_target_paths_before_mutation(
+            store,
+            args.output,
+            target_source_paths={target_source_path},
+        )
     timestamp = args.timestamp or datetime.now().strftime("%Y-%m-%d %H:%M")
     heading = f"[{timestamp}] {args.op} | {args.summary}"
     log_lines = ["", f"## {heading}", *args.line]
@@ -2540,7 +2788,7 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
         },
         **event_metadata(args),
     )
-    projection = append_event_and_export_projection(
+    projection = append_event_and_maybe_export_projection(
         store,
         journal,
         event,
@@ -2549,6 +2797,7 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
             args.output,
             allowed_source_paths={append_result["source_path"]},
         ),
+        defer_projection=args.defer_projection,
         **event_metadata(args),
     )
     result = dict(append_result)
@@ -2556,11 +2805,12 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
         {
             "journal": str(journal) if journal is not None else None,
             "journal_written": journal is not None,
-            "output": str(args.output),
+            "output": str(args.output) if args.output is not None else None,
             "event_id": event["event_id"],
             "timestamp": timestamp,
             "op": args.op,
             "summary": args.summary,
+            "projection_deferred": bool(args.defer_projection),
             "projection": projection,
         }
     )
@@ -2572,12 +2822,14 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
     preflight_journal_appendable(journal)
     replacement_lines = write_page_replacement_lines(args)
     target_source_paths = write_page_target_source_paths_before_mutation(store, args)
-    guard_dirty_write_target_paths_before_mutation(
-        store,
-        args.output,
-        target_source_paths=target_source_paths,
-        allow_dirty_source_paths=write_page_allowed_dirty_source_paths(args, target_source_paths),
-    )
+    if not args.defer_projection:
+        require_projection_output(args)
+        guard_dirty_write_target_paths_before_mutation(
+            store,
+            args.output,
+            target_source_paths=target_source_paths,
+            allow_dirty_source_paths=write_page_allowed_dirty_source_paths(args, target_source_paths),
+        )
     update_result, event = store.write_markdown_page_with_event(
         args.title,
         lines=replacement_lines,
@@ -2586,7 +2838,7 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
         message=args.message,
         **event_metadata(args),
     )
-    projection = append_event_and_export_projection(
+    projection = append_event_and_maybe_export_projection(
         store,
         journal,
         event,
@@ -2595,6 +2847,7 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
             args.output,
             allowed_source_paths={update_result["source_path"]},
         ),
+        defer_projection=args.defer_projection,
         **event_metadata(args),
     )
     result = dict(update_result)
@@ -2602,9 +2855,10 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
         {
             "journal": str(journal) if journal is not None else None,
             "journal_written": journal is not None,
-            "output": str(args.output),
+            "output": str(args.output) if args.output is not None else None,
             "event_id": event["event_id"],
             "event_type": event["event_type"],
+            "projection_deferred": bool(args.defer_projection),
             "projection": projection,
         }
     )
@@ -2812,6 +3066,11 @@ def write_page_allowed_dirty_source_paths(args: argparse.Namespace, target_sourc
     return allowed
 
 
+def require_projection_output(args: argparse.Namespace) -> None:
+    if getattr(args, "output", None) is None:
+        raise ValueError("--output is required unless --defer-projection is used")
+
+
 def normalize_projection_relative_path(path: str | Path) -> str:
     return Path(str(path)).as_posix().strip("/")
 
@@ -2904,8 +3163,33 @@ def append_event_and_export_projection(
     actor: str = "",
     session_id: str = "",
 ) -> dict[str, Any]:
+    projection = append_event_and_maybe_export_projection(
+        store,
+        journal,
+        event,
+        export_projection,
+        defer_projection=False,
+        actor=actor,
+        session_id=session_id,
+    )
+    assert projection is not None
+    return projection
+
+
+def append_event_and_maybe_export_projection(
+    store: SQLiteStore,
+    journal: Path | None,
+    event: dict[str, Any],
+    export_projection: Any,
+    *,
+    defer_projection: bool,
+    actor: str = "",
+    session_id: str = "",
+) -> dict[str, Any] | None:
     if journal is not None:
         append_journal_event(journal, event)
+    if defer_projection:
+        return None
     try:
         return export_projection()
     except Exception as error:
@@ -6586,6 +6870,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return run_export_markdown(store, args)
     if args.command == "import-log-records":
         return run_import_log_records(store, args)
+    if args.command == "activity":
+        return run_activity(store, args)
     if args.command == "append-log":
         return run_append_log(store, args)
     if args.command == "write-page":
@@ -7054,6 +7340,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_import_log_records(result)
     if command in {"log-records", "history"}:
         return format_log_records(result)
+    if command == "activity":
+        return format_activity(result)
     if command == "append-log":
         return format_append_result(result)
     if command == "write-page":
@@ -7209,6 +7497,10 @@ def format_log_records(result: dict[str, Any]) -> str:
         parts.append(f"- [{record['timestamp']}] {record['op']} | {record['summary']}\n")
         parts.append(f"  record_id: {record['record_id']}\n")
         parts.append(f"  event_id: {record['event_id']}\n")
+        parts.append(f"  event_type: {record.get('event_type', '')}\n")
+        if record.get("actor") or record.get("session_id"):
+            parts.append(f"  actor: {record.get('actor', '')}\n")
+            parts.append(f"  session_id: {record.get('session_id', '')}\n")
         parts.append(f"  content_fingerprint: {record.get('content_fingerprint', '')}\n")
         parts.append(f"  record_format: {record.get('record_format', 'section')}\n")
         if int(record.get("record_version_count", 1)) > 1:
@@ -7245,6 +7537,43 @@ def format_log_records(result: dict[str, Any]) -> str:
     return "".join(parts)
 
 
+def format_activity(result: dict[str, Any]) -> str:
+    parts = [
+        "# Activity\n",
+        f"project: {result.get('project') or ''}\n",
+        f"store: {result.get('store') or ''}\n",
+        f"result_mode: {result.get('result_mode', 'event-stream')}\n",
+        f"current_state: {str(result.get('current_state', False)).lower()}\n",
+        f"query: {result.get('query') or ''}\n",
+        f"active_seconds: {result.get('active_seconds', 0)}\n",
+        f"matched_events: {result.get('matched_events', 0)}\n",
+        f"returned_events: {result.get('returned_events', 0)}\n",
+    ]
+    active_sessions = result.get("active_sessions") or []
+    if active_sessions:
+        parts.append("active_sessions:\n")
+        for session in active_sessions:
+            pages = ", ".join(session.get("pages") or [])
+            parts.append(
+                f"- session_id={session.get('session_id', '')} actor={session.get('actor', '')} "
+                f"events={session.get('event_count', 0)} latest={session.get('latest_event_sequence', 0)}"
+            )
+            if pages:
+                parts.append(f" pages={pages}")
+            parts.append("\n")
+    events = result.get("events") or []
+    if events:
+        parts.append("events:\n")
+    for event in events:
+        active = " active" if event.get("active") else ""
+        parts.append(
+            f"- #{event.get('event_sequence')} {event.get('event_type')} {event.get('title')}"
+            f"{active} actor={event.get('actor', '')} session={event.get('session_id', '')}"
+            f" path={event.get('source_path', '')} event={event.get('event_id', '')}\n"
+        )
+    return "".join(parts)
+
+
 def format_append_result(result: dict[str, Any]) -> str:
     projection = result.get("projection") or {}
     journal = result.get("journal") or "(none)"
@@ -7258,6 +7587,7 @@ def format_append_result(result: dict[str, Any]) -> str:
         f"event_id: {result['event_id']}\n"
         f"appended_lines: {result['appended_line_count']}\n"
         f"edges: {result['edge_count']}\n"
+        f"projection_deferred: {str(result.get('projection_deferred', False)).lower()}\n"
         f"projection_written: {projection.get('written_count', 0)}\n"
     )
 
@@ -7277,6 +7607,7 @@ def format_write_page_result(result: dict[str, Any]) -> str:
         f"previous_lines: {result['previous_line_count']}\n"
         f"lines: {result['line_count']}\n"
         f"edges: {result['edge_count']}\n"
+        f"projection_deferred: {str(result.get('projection_deferred', False)).lower()}\n"
         f"projection_written: {projection.get('written_count', 0)}\n"
     )
 
