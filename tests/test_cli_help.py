@@ -8457,6 +8457,118 @@ class CliHelpTests(unittest.TestCase):
         self.assertFalse(new_exists_after_revert)
         self.assertTrue(replay_after_revert["ok"])
 
+    def test_revert_rename_export_failure_preserves_current_projection_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "Old.md").write_text("# Old\nbody\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            rename_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "rename-page",
+                    "Old",
+                    "New",
+                    "--new-path",
+                    "New.md",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            rename_result = json.loads(rename_completed.stdout)
+            new_text_before_revert = (root / "New.md").read_text(encoding="utf-8")
+            (root / "Old.md").mkdir()
+            failed_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "revert-event",
+                    rename_result["event_id"],
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            peek_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "Old",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_type
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            new_text_after_failure = (
+                (root / "New.md").read_text(encoding="utf-8")
+                if (root / "New.md").exists()
+                else None
+            )
+            old_is_dir = (root / "Old.md").is_dir()
+
+        peek_result = json.loads(peek_completed.stdout)
+        self.assertNotEqual(failed_completed.returncode, 0)
+        self.assertEqual([row[0] for row in sqlite_event_rows], ["page_rename", "event_revert"])
+        self.assertEqual(peek_result["page"]["title"], "Old")
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# Old", "body"])
+        self.assertEqual(new_text_after_failure, new_text_before_revert)
+        self.assertTrue(old_is_dir)
+
     def test_write_page_create_then_rename_preserves_old_alias_after_fresh_import(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
