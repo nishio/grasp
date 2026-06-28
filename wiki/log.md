@@ -1633,3 +1633,13 @@ ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog �
 - live trial: on clean main, session-a ran `check_file_back_preflight.py` against the real repo pair and acquired `.grasp/file-back.lock.json`; session-b then ran the same preflight with a different session id.
 - result: session-b failed loudly with active lock owner session, and stderr included the recovery ladder: inspect `activity --limit 20`, inspect `claims --include-expired`, then wait or remove only a confirmed stale lock.
 - judgment: normal file-back runbook writers now serialize at the real repo guard layer instead of silently interleaving. This supports wait/owner handoff, not queue or automated reconcile yet; contentful external-agent file-back remains the next live test.
+
+## [2026-06-28 17:03] dogfood+file-back | external sub-agent contentful file-back drill
+- `multi_agent_v1` external sub-agent used the same checkout and `.grasp/file-back.sqlite`, and held the normal preflight lock as session `subagent-contentful-live-fileback-20260628T1703JST`.
+- While that lock was active, parent competing preflight `parent-competing-live-fileback-20260628T1703JST` was rejected with active lock owner plus recovery ladder; the sub-agent then passed write-start and wrote this goal/log update.
+- Judgment: external-agent contentful file-back serialized through the same runbook path; no queue or automated reconcile need was observed here.
+
+## [2026-06-28 17:38] dogfood+file-back | external agent postwrite handoff gap
+- follow-up: the external sub-agent completed the contentful goal/log write, but its postwrite was interrupted inside write-status and did not release the runtime files.
+- recovery: parent reran check_file_back_postwrite.py with the same GRASP_SESSION_ID; semantic log, lint, and diff check passed, and the lock was released.
+- judgment: this validates same-session owner handoff/rescue for a half-closed runbook; it is an ergonomics gap, not evidence for queue or automated reconcile.
