@@ -46,7 +46,6 @@ VERSION_BUMP_TOKEN_RE = re.compile(r"(?<![\w.])\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?
 STORE_WRITE_COMMANDS = {
     "acquire",
     "append-log",
-    "append-section",
     "import-log-records",
     "rename",
     "rename-page",
@@ -948,36 +947,6 @@ def build_parser() -> argparse.ArgumentParser:
     export_markdown_parser.add_argument("--regenerate-log", action="store_true", help="Regenerate the primary log page by replaying SQLite log page events and latest record-per-file records.")
     export_markdown_parser.add_argument("--journal", type=Path, default=None, help="Legacy JSONL event stream path for --regenerate-log ad hoc audits. Omit to use SQLite events.")
 
-    append_section_parser = add_command_parser(
-        subparsers,
-        "append-section",
-        help="Append a Markdown section through the alpha write path.",
-        description=(
-            "Append a section to a Markdown-backed page, update the SQLite materialized index, "
-            "record a section_append SQLite event, optionally append the compatibility JSONL journal, "
-            "and export the Markdown projection."
-        ),
-        returns=(
-            "project, page, source_path, journal|null, journal_written, output, event_id, appended_lines[], appended_line_count, edge_count, projection"
-        ),
-        examples=[
-            "grasp --project grasp-wiki append-section llm-wiki-infra-fast-path-plan --heading Updates --line '- note' --output wiki --journal wiki.grasp/events.jsonl",
-            "grasp --project grasp-wiki --json append-section scratch --heading Updates --line '- first' --line '- second' --output wiki",
-        ],
-        notes=[
-            "Alpha write surface: Markdown-backed projects only; rename is still out of scope.",
-            "The default journal path is <output-folder-name>.grasp/events.jsonl beside the output folder.",
-            "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
-            "Dirty projection paths outside the target page are refused before export.",
-            "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
-        ],
-    )
-    append_section_parser.add_argument("title", help="Target page title or unique handle.")
-    append_section_parser.add_argument("--heading", required=True, help="Section heading text without leading ##.")
-    append_section_parser.add_argument("--line", action="append", default=[], help="Body line to append. Repeat for multiple lines.")
-    append_section_parser.add_argument("--output", type=Path, required=True, help="Markdown projection output folder to update.")
-    add_optional_write_journal_arguments(append_section_parser)
-
     append_log_parser = add_command_parser(
         subparsers,
         "append-log",
@@ -991,7 +960,7 @@ def build_parser() -> argparse.ArgumentParser:
             "project, page, source_path, journal|null, journal_written, output, event_id, timestamp, op, summary, appended_lines[], appended_line_count, edge_count, projection"
         ),
         examples=[
-            "grasp --project grasp-wiki append-log --op implementation --summary 'append-section alpha' --line '- details' --output wiki",
+            "grasp --project grasp-wiki append-log --op implementation --summary 'log entry alpha' --line '- details' --output wiki",
             "grasp --project grasp-wiki --json append-log --timestamp '2026-06-26 01:00' --op test --summary 'smoke' --line '- ok' --output wiki",
         ],
         notes=[
@@ -2545,50 +2514,6 @@ def event_metadata(args: argparse.Namespace) -> dict[str, str]:
         "actor": str(getattr(args, "actor", "") or "").strip(),
         "session_id": str(getattr(args, "session_id", "") or "").strip(),
     }
-
-
-def run_append_section(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
-    journal = optional_journal_path_for_output(args)
-    preflight_journal_appendable(journal)
-    target_source_path = store.markdown_source_path_for_unique_handle(args.title)
-    guard_dirty_write_target_paths_before_mutation(
-        store,
-        args.output,
-        target_source_paths={target_source_path},
-    )
-    section_lines = ["", f"## {args.heading}", *args.line]
-    append_result, event = store.append_markdown_lines_with_event(
-        args.title,
-        section_lines,
-        event_type="section_append",
-        payload={
-            "heading": args.heading,
-            "lines": args.line,
-        },
-        **event_metadata(args),
-    )
-    projection = append_event_and_export_projection(
-        store,
-        journal,
-        event,
-        lambda: export_markdown_after_dirty_projection_guard(
-            store,
-            args.output,
-            allowed_source_paths={append_result["source_path"]},
-        ),
-        **event_metadata(args),
-    )
-    result = dict(append_result)
-    result.update(
-        {
-            "journal": str(journal) if journal is not None else None,
-            "journal_written": journal is not None,
-            "output": str(args.output),
-            "event_id": event["event_id"],
-            "projection": projection,
-        }
-    )
-    return result
 
 
 def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
@@ -6661,8 +6586,6 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return run_export_markdown(store, args)
     if args.command == "import-log-records":
         return run_import_log_records(store, args)
-    if args.command == "append-section":
-        return run_append_section(store, args)
     if args.command == "append-log":
         return run_append_log(store, args)
     if args.command == "write-page":
@@ -7131,7 +7054,7 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_import_log_records(result)
     if command in {"log-records", "history"}:
         return format_log_records(result)
-    if command in {"append-section", "append-log"}:
+    if command == "append-log":
         return format_append_result(result)
     if command == "write-page":
         return format_write_page_result(result)

@@ -34,7 +34,6 @@ COMMANDS = [
     "import-log-records",
     "log-records",
     "history",
-    "append-section",
     "append-log",
     "write-page",
     "rename-page",
@@ -88,10 +87,20 @@ class CliHelpTests(unittest.TestCase):
         self.assertIn("--full-ids", help_text)
         self.assertIn("--version", help_text)
         self.assertNotIn("--store .grasp/grasp.sqlite", help_text)
+        self.assertNotIn("append-section", help_text)
         self.assertNotIn("--export", help_text)
         self.assertNotIn("--rebuild-store", help_text)
         for command in COMMANDS:
             self.assertIn(command, help_text)
+
+    def test_append_section_command_is_removed(self):
+        completed = subprocess.run(
+            [sys.executable, "-m", "grasp", "append-section", "--help"],
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("invalid choice", completed.stderr)
 
     def test_every_command_help_documents_returns_and_examples(self):
         for command in COMMANDS:
@@ -3195,10 +3204,10 @@ class CliHelpTests(unittest.TestCase):
                     str(store_path),
                     "--project",
                     "wiki",
-                    "append-section",
+                    "write-page",
                     "A",
-                    "--heading",
-                    "First",
+                    "--line",
+                    "# A",
                     "--line",
                     "- first",
                     "--output",
@@ -3219,10 +3228,10 @@ class CliHelpTests(unittest.TestCase):
                     str(store_path),
                     "--project",
                     "wiki",
-                    "append-section",
+                    "write-page",
                     "A",
-                    "--heading",
-                    "Second",
+                    "--line",
+                    "# A",
                     "--line",
                     "- second",
                     "--output",
@@ -3274,15 +3283,14 @@ class CliHelpTests(unittest.TestCase):
         self.assertFalse(dry_run_result["revertible"])
         self.assertIsNone(dry_run_result["event_id"])
         self.assertEqual(dry_run_result["target_event_id"], first_result["event_id"])
-        self.assertEqual(dry_run_result["target_event_type"], "section_append")
+        self.assertEqual(dry_run_result["target_event_type"], "page_update")
         self.assertEqual(dry_run_result["target_event_source"], "sqlite")
-        self.assertIn("event is not at the page tail", dry_run_result["reason"])
+        self.assertIn("page_update current lines no longer match the current page", dry_run_result["reason"])
         self.assertFalse(dry_run_result["would_export_projection"])
         self.assertEqual(dry_run_result["would_remove_files"], [])
         self.assertEqual([row[0] for row in sqlite_event_rows], [first_result["event_id"], second_result["event_id"]])
-        self.assertEqual([row[1] for row in sqlite_event_rows], ["section_append", "section_append"])
-        self.assertIn("- first", page_text)
-        self.assertIn("- second", page_text)
+        self.assertEqual([row[1] for row in sqlite_event_rows], ["page_update", "page_update"])
+        self.assertEqual(page_text, "# A\n- second\n")
 
     def test_revert_event_include_dependents_reverts_later_same_page_events(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -3318,10 +3326,10 @@ class CliHelpTests(unittest.TestCase):
                     str(store_path),
                     "--project",
                     "wiki",
-                    "append-section",
+                    "write-page",
                     "A",
-                    "--heading",
-                    "First",
+                    "--line",
+                    "# A",
                     "--line",
                     "- first",
                     "--output",
@@ -3342,10 +3350,10 @@ class CliHelpTests(unittest.TestCase):
                     str(store_path),
                     "--project",
                     "wiki",
-                    "append-section",
+                    "write-page",
                     "A",
-                    "--heading",
-                    "Second",
+                    "--line",
+                    "# A",
                     "--line",
                     "- second",
                     "--output",
@@ -3433,7 +3441,7 @@ class CliHelpTests(unittest.TestCase):
         self.assertIsNone(dry_run_result["event_id"])
         self.assertEqual(dry_run_result["event_ids"], [])
         self.assertEqual(dry_run_result["target_event_id"], first_result["event_id"])
-        self.assertEqual(dry_run_result["target_event_type"], "section_append")
+        self.assertEqual(dry_run_result["target_event_type"], "page_update")
         self.assertEqual(dry_run_result["included_dependent_event_ids"], [second_result["event_id"]])
         self.assertEqual(dry_run_result["included_dependent_count"], 1)
         self.assertEqual(dry_run_result["would_event_count"], 2)
@@ -3443,13 +3451,12 @@ class CliHelpTests(unittest.TestCase):
         )
         self.assertTrue(dry_run_result["would_export_projection"])
         self.assertEqual(dry_run_result["would_remove_files"], [])
-        self.assertEqual([row[1] for row in sqlite_event_rows_after_dry_run], ["section_append", "section_append"])
-        self.assertIn("- first", page_text_after_dry_run)
-        self.assertIn("- second", page_text_after_dry_run)
+        self.assertEqual([row[1] for row in sqlite_event_rows_after_dry_run], ["page_update", "page_update"])
+        self.assertEqual(page_text_after_dry_run, "# A\n- second\n")
         self.assertFalse(revert_result["dry_run"])
         self.assertTrue(revert_result["revertible"])
         self.assertEqual(revert_result["target_event_id"], first_result["event_id"])
-        self.assertEqual(revert_result["target_event_type"], "section_append")
+        self.assertEqual(revert_result["target_event_type"], "page_update")
         self.assertEqual(revert_result["included_dependent_event_ids"], [second_result["event_id"]])
         self.assertEqual(revert_result["included_dependent_count"], 1)
         self.assertEqual(revert_result["reverted_event_count"], 2)
@@ -3461,7 +3468,7 @@ class CliHelpTests(unittest.TestCase):
         )
         self.assertEqual(
             [row[1] for row in sqlite_event_rows_after_revert],
-            ["section_append", "section_append", "event_revert", "event_revert"],
+            ["page_update", "page_update", "event_revert", "event_revert"],
         )
         self.assertEqual(
             [json.loads(row[3])["target_event_id"] for row in sqlite_event_rows_after_revert[2:]],
@@ -4625,22 +4632,22 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
-            first_append = run_json(
-                "append-section",
+            first_update = run_json(
+                "write-page",
                 "A",
-                "--heading",
-                "First",
+                "--line",
+                "# A",
                 "--line",
                 "- first",
                 "--output",
                 str(root),
                 "--no-journal",
             )
-            second_append = run_json(
-                "append-section",
+            second_update = run_json(
+                "write-page",
                 "A",
-                "--heading",
-                "Second",
+                "--line",
+                "# A",
                 "--line",
                 "- second",
                 "--output",
@@ -4649,7 +4656,7 @@ class CliHelpTests(unittest.TestCase):
             )
             blocked_without_dependents = run_json(
                 "revert-event",
-                first_append["event_id"],
+                first_update["event_id"],
                 "--output",
                 str(root),
                 "--no-journal",
@@ -4657,7 +4664,7 @@ class CliHelpTests(unittest.TestCase):
             )
             plan = run_json(
                 "revert-plan",
-                first_append["event_id"],
+                first_update["event_id"],
                 "--scope",
                 "same-page-dependents",
                 "--output",
@@ -4677,44 +4684,43 @@ class CliHelpTests(unittest.TestCase):
                 connection.close()
 
         self.assertFalse(blocked_without_dependents["revertible"])
-        self.assertIn("event is not at the page tail", blocked_without_dependents["reason"])
+        self.assertIn("page_update current lines no longer match the current page", blocked_without_dependents["reason"])
         self.assertTrue(plan["complete"])
         self.assertTrue(plan["revertible"])
         self.assertIsNone(plan["previous_log_event"])
         self.assertIsNone(plan["closing_log_event"])
         self.assertEqual(
             plan["candidate_event_ids"],
-            [first_append["event_id"], second_append["event_id"]],
+            [first_update["event_id"], second_update["event_id"]],
         )
-        self.assertEqual(plan["dependent_event_ids"], [second_append["event_id"]])
+        self.assertEqual(plan["dependent_event_ids"], [second_update["event_id"]])
         self.assertEqual(
             plan["revert_order_event_ids"],
-            [second_append["event_id"], first_append["event_id"]],
+            [second_update["event_id"], first_update["event_id"]],
         )
         self.assertEqual(
             [event["event_type"] for event in plan["candidate_events"]],
-            ["section_append", "section_append"],
+            ["page_update", "page_update"],
         )
         self.assertEqual(plan["excluded_events"], [])
         self.assertEqual(
             [event["target_event_id"] for event in plan["reverted_events"]],
-            [second_append["event_id"], first_append["event_id"]],
+            [second_update["event_id"], first_update["event_id"]],
         )
         self.assertEqual(
             plan["suggested_revert_events_args"],
             [
                 "revert-events",
-                first_append["event_id"],
-                second_append["event_id"],
+                first_update["event_id"],
+                second_update["event_id"],
                 "--output",
                 str(root),
             ],
         )
-        self.assertIn("- first", page_text_after_plan)
-        self.assertIn("- second", page_text_after_plan)
+        self.assertEqual(page_text_after_plan, "# A\n- second\n")
         self.assertEqual(
             [row[1] for row in sqlite_event_rows_after_plan],
-            ["section_append", "section_append"],
+            ["page_update", "page_update"],
         )
 
     def test_revert_plan_event_window_handles_multi_page_sequence_without_log_batch(self):
@@ -5514,7 +5520,7 @@ class CliHelpTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
             root.mkdir()
-            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
             store_path = Path(tmpdir) / "store.sqlite"
             journal_path = Path(tmpdir) / "wiki.grasp" / "events.jsonl"
 
@@ -5537,8 +5543,8 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
-            (root / "A.md").unlink()
-            (root / "A.md").mkdir()
+            (root / "Log.md").unlink()
+            (root / "Log.md").mkdir()
             failed_completed = subprocess.run(
                 [
                     sys.executable,
@@ -5549,10 +5555,13 @@ class CliHelpTests(unittest.TestCase):
                     str(store_path),
                     "--project",
                     "wiki",
-                    "append-section",
-                    "A",
-                    "--heading",
-                    "Broken export",
+                    "append-log",
+                    "--timestamp",
+                    "2026-06-28 10:20",
+                    "--op",
+                    "test",
+                    "--summary",
+                    "broken export",
                     "--line",
                     "- should rollback",
                     "--output",
@@ -5574,7 +5583,7 @@ class CliHelpTests(unittest.TestCase):
                     "--project",
                     "wiki",
                     "peek",
-                    "A",
+                    "Log",
                 ],
                 check=True,
                 text=True,
@@ -5614,7 +5623,7 @@ class CliHelpTests(unittest.TestCase):
                 ).fetchall()
             finally:
                 connection.close()
-            replay_text = (replay_root / "A.md").read_text(encoding="utf-8")
+            replay_text = (replay_root / "Log.md").read_text(encoding="utf-8")
 
         peek_result = json.loads(peek_completed.stdout)
         replay_result = json.loads(replay_completed.stdout)
@@ -5625,7 +5634,7 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(rollback_diagnostic["type"], "projection_export_rollback")
         self.assertTrue(rollback_diagnostic["rolled_back"])
         self.assertEqual(rollback_diagnostic["target_event_id"], journal_events[1]["event_id"])
-        self.assertEqual(rollback_diagnostic["target_event_type"], "section_append")
+        self.assertEqual(rollback_diagnostic["target_event_type"], "log_append")
         self.assertEqual(rollback_diagnostic["target_event_project"], "wiki")
         self.assertEqual(rollback_diagnostic["rollback_event_id"], journal_events[-1]["event_id"])
         self.assertEqual(rollback_diagnostic["rollback_event_type"], "event_revert")
@@ -5634,26 +5643,26 @@ class CliHelpTests(unittest.TestCase):
         self.assertTrue(rollback_diagnostic["journal_written"])
         self.assertEqual(rollback_diagnostic["original_error"]["type"], "IsADirectoryError")
         self.assertIn("projection export failed", rollback_diagnostic["reason"])
-        self.assertEqual([event["event_type"] for event in journal_events], ["page_create", "section_append", "event_revert"])
-        self.assertEqual([row[1] for row in sqlite_event_rows], ["page_create", "section_append", "event_revert"])
+        self.assertEqual([event["event_type"] for event in journal_events], ["page_create", "log_append", "event_revert"])
+        self.assertEqual([row[1] for row in sqlite_event_rows], ["page_create", "log_append", "event_revert"])
         self.assertEqual([row[0] for row in sqlite_event_rows], [event["event_id"] for event in journal_events])
         self.assertEqual([row[2] for row in sqlite_event_rows], ["wiki", "wiki", "wiki"])
         self.assertEqual(journal_events[-1]["payload"]["target_event_id"], journal_events[1]["event_id"])
-        self.assertEqual(journal_events[-1]["payload"]["target_event_type"], "section_append")
+        self.assertEqual(journal_events[-1]["payload"]["target_event_type"], "log_append")
         self.assertIn("projection export failed", journal_events[-1]["payload"]["reason"])
         sqlite_revert_payload = json.loads(sqlite_event_rows[-1][3])
         self.assertEqual(sqlite_revert_payload["target_event_id"], journal_events[1]["event_id"])
-        self.assertEqual(sqlite_revert_payload["target_event_type"], "section_append")
+        self.assertEqual(sqlite_revert_payload["target_event_type"], "log_append")
         self.assertIn("projection export failed", sqlite_revert_payload["reason"])
-        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
-        self.assertEqual(replay_text, "# A\n")
-        self.assertEqual(replay_result["written_files"], ["A.md"])
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# Log"])
+        self.assertEqual(replay_text, "# Log\n")
+        self.assertEqual(replay_result["written_files"], ["Log.md"])
 
     def test_projection_export_failure_no_journal_reports_rollback_diagnostic(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
             root.mkdir()
-            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
             store_path = Path(tmpdir) / "store.sqlite"
 
             subprocess.run(
@@ -5673,8 +5682,8 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
-            (root / "A.md").unlink()
-            (root / "A.md").mkdir()
+            (root / "Log.md").unlink()
+            (root / "Log.md").mkdir()
             failed_completed = subprocess.run(
                 [
                     sys.executable,
@@ -5685,10 +5694,13 @@ class CliHelpTests(unittest.TestCase):
                     str(store_path),
                     "--project",
                     "wiki",
-                    "append-section",
-                    "A",
-                    "--heading",
-                    "Broken export",
+                    "append-log",
+                    "--timestamp",
+                    "2026-06-28 10:21",
+                    "--op",
+                    "test",
+                    "--summary",
+                    "broken export",
                     "--line",
                     "- should rollback",
                     "--output",
@@ -5709,7 +5721,7 @@ class CliHelpTests(unittest.TestCase):
                     "--project",
                     "wiki",
                     "peek",
-                    "A",
+                    "Log",
                 ],
                 check=True,
                 text=True,
@@ -5733,19 +5745,19 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(failed_completed.returncode, 2)
         self.assertEqual(rollback_diagnostic["type"], "projection_export_rollback")
         self.assertTrue(rollback_diagnostic["rolled_back"])
-        self.assertEqual(rollback_diagnostic["target_event_type"], "section_append")
+        self.assertEqual(rollback_diagnostic["target_event_type"], "log_append")
         self.assertEqual(rollback_diagnostic["target_event_project"], "wiki")
         self.assertEqual(rollback_diagnostic["rollback_event_type"], "event_revert")
         self.assertIsNone(rollback_diagnostic["journal"])
         self.assertFalse(rollback_diagnostic["journal_written"])
         self.assertEqual(rollback_diagnostic["original_error"]["type"], "IsADirectoryError")
-        self.assertEqual([row[1] for row in sqlite_event_rows], ["section_append", "event_revert"])
+        self.assertEqual([row[1] for row in sqlite_event_rows], ["log_append", "event_revert"])
         self.assertEqual(rollback_diagnostic["target_event_id"], sqlite_event_rows[0][0])
         self.assertEqual(rollback_diagnostic["rollback_event_id"], sqlite_event_rows[1][0])
         sqlite_revert_payload = json.loads(sqlite_event_rows[1][3])
         self.assertEqual(sqlite_revert_payload["target_event_id"], sqlite_event_rows[0][0])
-        self.assertEqual(sqlite_revert_payload["target_event_type"], "section_append")
-        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
+        self.assertEqual(sqlite_revert_payload["target_event_type"], "log_append")
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# Log"])
 
     def test_write_command_refuses_unappendable_journal_before_mutation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5783,10 +5795,10 @@ class CliHelpTests(unittest.TestCase):
                     str(store_path),
                     "--project",
                     "wiki",
-                    "append-section",
+                    "write-page",
                     "A",
-                    "--heading",
-                    "Should not write",
+                    "--line",
+                    "# A",
                     "--line",
                     "- blocked",
                     "--output",
@@ -5878,10 +5890,10 @@ class CliHelpTests(unittest.TestCase):
                     str(store_path),
                     "--project",
                     "wiki",
-                    "append-section",
+                    "write-page",
                     "A",
-                    "--heading",
-                    "Should not write",
+                    "--line",
+                    "# A",
                     "--line",
                     "- blocked",
                     "--output",
@@ -5975,10 +5987,10 @@ class CliHelpTests(unittest.TestCase):
                     str(store_path),
                     "--project",
                     "wiki",
-                    "append-section",
+                    "write-page",
                     "A",
-                    "--heading",
-                    "Should not write",
+                    "--line",
+                    "# A",
                     "--line",
                     "- blocked",
                     "--output",
@@ -6070,10 +6082,10 @@ class CliHelpTests(unittest.TestCase):
                     str(store_path),
                     "--project",
                     "wiki",
-                    "append-section",
+                    "write-page",
                     "A",
-                    "--heading",
-                    "Keep me",
+                    "--line",
+                    "# A",
                     "--line",
                     "- still here",
                     "--output",
@@ -6147,12 +6159,12 @@ class CliHelpTests(unittest.TestCase):
         self.assertFalse(diagnostic["store_mutated"])
         self.assertFalse(diagnostic["journal_written"])
         self.assertFalse(diagnostic["projection_written"])
-        self.assertEqual([row[0] for row in sqlite_event_rows], ["section_append"])
+        self.assertEqual([row[0] for row in sqlite_event_rows], ["page_update"])
         self.assertEqual(
             [line["text"] for line in peek_result["lines"]],
-            ["# A", "", "## Keep me", "- still here"],
+            ["# A", "- still here"],
         )
-        self.assertEqual(page_text, "# A\n\n## Keep me\n- still here\n")
+        self.assertEqual(page_text, "# A\n- still here\n")
 
     def test_rename_projection_export_failure_preserves_previous_projection_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -6584,97 +6596,6 @@ class CliHelpTests(unittest.TestCase):
                     "# A",
                     "--line",
                     "- replacement",
-                    "--output",
-                    str(root),
-                    "--no-journal",
-                ],
-                text=True,
-                capture_output=True,
-            )
-            peek_completed = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "grasp",
-                    "--json",
-                    "--store",
-                    str(store_path),
-                    "--project",
-                    "wiki",
-                    "peek",
-                    "A",
-                ],
-                check=True,
-                text=True,
-                capture_output=True,
-            )
-            connection = sqlite3.connect(store_path)
-            try:
-                sqlite_event_types = [
-                    row[0]
-                    for row in connection.execute(
-                        """
-                        SELECT event_type
-                        FROM events
-                        ORDER BY event_sequence
-                        """
-                    ).fetchall()
-                ]
-            finally:
-                connection.close()
-            a_text = (root / "A.md").read_text(encoding="utf-8")
-
-        peek_result = json.loads(peek_completed.stdout)
-        self.assertEqual(failed_completed.returncode, 2)
-        self.assertIn("dirty write target paths", failed_completed.stderr)
-        self.assertIn("A.md", failed_completed.stderr)
-        self.assertEqual(sqlite_event_types, [])
-        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
-        self.assertEqual(a_text, "# A\n- local draft\n")
-
-    def test_append_section_refuses_dirty_target_projection_file_before_mutation(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo_root = Path(tmpdir) / "repo"
-            root = repo_root / "wiki"
-            root.mkdir(parents=True)
-            (root / "A.md").write_text("# A\n", encoding="utf-8")
-            init_git_repo(repo_root)
-            store_path = Path(tmpdir) / "store.sqlite"
-
-            subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "grasp",
-                    "--store",
-                    str(store_path),
-                    "import",
-                    "--markdown",
-                    str(root),
-                    "--project",
-                    "wiki",
-                ],
-                check=True,
-                text=True,
-                capture_output=True,
-            )
-            (root / "A.md").write_text("# A\n- local draft\n", encoding="utf-8")
-            failed_completed = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "grasp",
-                    "--json",
-                    "--store",
-                    str(store_path),
-                    "--project",
-                    "wiki",
-                    "append-section",
-                    "A",
-                    "--heading",
-                    "Notes",
-                    "--line",
-                    "- appended",
                     "--output",
                     str(root),
                     "--no-journal",
@@ -7440,10 +7361,10 @@ class CliHelpTests(unittest.TestCase):
                     str(store_path),
                     "--project",
                     "wiki",
-                    "append-section",
+                    "write-page",
                     "A",
-                    "--heading",
-                    "First",
+                    "--line",
+                    "# A",
                     "--line",
                     "- first",
                     "--output",
@@ -7464,10 +7385,10 @@ class CliHelpTests(unittest.TestCase):
                     str(store_path),
                     "--project",
                     "wiki",
-                    "append-section",
+                    "write-page",
                     "A",
-                    "--heading",
-                    "Second",
+                    "--line",
+                    "# A",
                     "--line",
                     "- second",
                     "--output",
@@ -7519,12 +7440,11 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(failed_completed.returncode, 2)
         self.assertIn("dirty paths outside the current write target", failed_completed.stderr)
         self.assertIn("B.md", failed_completed.stderr)
-        self.assertEqual(sqlite_event_types, ["section_append", "section_append"])
-        self.assertIn("- first", a_text)
-        self.assertIn("- second", a_text)
+        self.assertEqual(sqlite_event_types, ["page_update", "page_update"])
+        self.assertEqual(a_text, "# A\n- second\n")
         self.assertEqual(b_text, "# B\n- local draft\n")
 
-    def test_append_section_and_log_update_store_journal_and_projection(self):
+    def test_write_page_and_append_log_update_store_journal_and_projection(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
             root.mkdir()
@@ -7551,7 +7471,7 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
-            section_completed = subprocess.run(
+            page_update_completed = subprocess.run(
                 [
                     sys.executable,
                     "-m",
@@ -7561,10 +7481,10 @@ class CliHelpTests(unittest.TestCase):
                     str(store_path),
                     "--project",
                     "wiki",
-                    "append-section",
+                    "write-page",
                     "A",
-                    "--heading",
-                    "Updates",
+                    "--line",
+                    "# A",
                     "--line",
                     "- detail [[B]]",
                     "--output",
@@ -7731,7 +7651,7 @@ class CliHelpTests(unittest.TestCase):
             finally:
                 connection.close()
 
-        section_result = json.loads(section_completed.stdout)
+        page_update_result = json.loads(page_update_completed.stdout)
         status_result = json.loads(status_completed.stdout)
         revert_result = json.loads(revert_completed.stdout)
         revert_write_result = json.loads(revert_write_completed.stdout)
@@ -7741,7 +7661,7 @@ class CliHelpTests(unittest.TestCase):
             [
                 "page_create",
                 "page_create",
-                "section_append",
+                "page_update",
                 "log_append",
                 "event_revert",
                 "page_update",
@@ -7753,7 +7673,7 @@ class CliHelpTests(unittest.TestCase):
             [
                 "page_create",
                 "page_create",
-                "section_append",
+                "page_update",
                 "log_append",
                 "event_revert",
                 "page_update",
@@ -7761,24 +7681,23 @@ class CliHelpTests(unittest.TestCase):
             ],
         )
         self.assertEqual([row[2] for row in sqlite_event_rows], ["wiki"] * 7)
-        self.assertEqual(sqlite_event_rows[2][0], section_result["event_id"])
+        self.assertEqual(sqlite_event_rows[2][0], page_update_result["event_id"])
         self.assertEqual(sqlite_event_rows[3][0], log_result["event_id"])
         self.assertEqual(sqlite_event_rows[4][0], revert_result["event_id"])
         self.assertEqual(sqlite_event_rows[5][0], write_result["event_id"])
         self.assertEqual(sqlite_event_rows[6][0], revert_write_result["event_id"])
-        self.assertEqual(json.loads(sqlite_event_rows[2][3])["heading"], "Updates")
         self.assertEqual(json.loads(sqlite_event_rows[2][3])["source_path"], "A.md")
         self.assertEqual(json.loads(sqlite_event_rows[3][3])["op"], "test")
         self.assertEqual(json.loads(sqlite_event_rows[3][3])["source_path"], "Log.md")
         self.assertEqual(json.loads(sqlite_event_rows[4][3])["target_event_id"], log_result["event_id"])
         self.assertEqual(json.loads(sqlite_event_rows[6][3])["target_event_id"], write_result["event_id"])
-        self.assertIn("\n## Updates\n- detail [[B]]\n", page_text)
+        self.assertIn("- detail [[B]]", page_text)
         self.assertNotIn("- rewritten [[C]]", page_text)
         self.assertEqual(log_text, "# Log\n")
-        self.assertEqual(section_result["source_path"], "A.md")
+        self.assertEqual(page_update_result["source_path"], "A.md")
         self.assertEqual(log_result["source_path"], "Log.md")
-        self.assertEqual(section_result["edge_count"], 1)
-        self.assertEqual(section_result["projection"]["written_files"], ["A.md"])
+        self.assertEqual(page_update_result["edge_count"], 1)
+        self.assertEqual(page_update_result["projection"]["written_files"], ["A.md"])
         self.assertEqual(log_result["projection"]["written_files"], ["Log.md"])
         self.assertEqual(write_result["source_path"], "A.md")
         self.assertEqual(write_result["edge_count"], 1)
@@ -7799,7 +7718,7 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(revert_result["projection"]["written_files"], ["Log.md"])
         self.assertEqual(revert_result["removed_line_count"], 3)
         self.assertEqual(revert_write_result["target_event_type"], "page_update")
-        self.assertEqual(revert_write_result["restored_line_count"], 4)
+        self.assertEqual(revert_write_result["restored_line_count"], 2)
         self.assertTrue(replay_result["ok"])
         self.assertEqual(replay_result["file_count"], 2)
 
@@ -7831,7 +7750,7 @@ class CliHelpTests(unittest.TestCase):
                 capture_output=True,
             )
             original_journal_text = journal_path.read_text(encoding="utf-8")
-            section_completed = subprocess.run(
+            page_update_completed = subprocess.run(
                 [
                     sys.executable,
                     "-m",
@@ -7841,10 +7760,10 @@ class CliHelpTests(unittest.TestCase):
                     str(store_path),
                     "--project",
                     "wiki",
-                    "append-section",
+                    "write-page",
                     "A",
-                    "--heading",
-                    "Updates",
+                    "--line",
+                    "# A",
                     "--line",
                     "- detail [[B]]",
                     "--output",
@@ -8026,14 +7945,14 @@ class CliHelpTests(unittest.TestCase):
             log_text = (root / "Log.md").read_text(encoding="utf-8")
             renamed_exists_after_revert = (root / "Renamed.md").exists()
 
-        section_result = json.loads(section_completed.stdout)
+        page_update_result = json.loads(page_update_completed.stdout)
         write_result = json.loads(write_completed.stdout)
         revert_result = json.loads(revert_completed.stdout)
         revert_rename_result = json.loads(revert_rename_completed.stdout)
         status_result = json.loads(status_completed.stdout)
         export_result = json.loads(export_completed.stdout)
-        self.assertIsNone(section_result["journal"])
-        self.assertFalse(section_result["journal_written"])
+        self.assertIsNone(page_update_result["journal"])
+        self.assertFalse(page_update_result["journal_written"])
         self.assertIsNone(log_result["journal"])
         self.assertFalse(log_result["journal_written"])
         self.assertIsNone(write_result["journal"])
@@ -8050,7 +7969,7 @@ class CliHelpTests(unittest.TestCase):
             [
                 "page_create",
                 "page_create",
-                "section_append",
+                "page_update",
                 "log_append",
                 "page_update",
                 "event_revert",
