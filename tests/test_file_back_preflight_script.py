@@ -20,6 +20,44 @@ class FileBackPreflightScriptTests(unittest.TestCase):
         self.assertIn("wiki/log.md", errors[0])
         self.assertIn("wiki/new.md", errors[0])
 
+    def test_recovery_ladder_hints_route_common_guard_failures(self):
+        hints = preflight.recovery_ladder_hints(
+            [
+                "dirty file-back paths before file-back:\n M wiki/log.md",
+                "write-status semantic_log_stale is true",
+                "current HEAD='new' differs from preflight stamp head='old'",
+                "SQLite events changed after preflight before write-start",
+            ],
+            store=".grasp/file-back.sqlite",
+            project="grasp-wiki",
+            output="wiki",
+        )
+        joined = "\n".join(hints)
+
+        self.assertIn("recovery ladder:", hints[0])
+        self.assertIn("activity --limit 20", joined)
+        self.assertIn("dirty projection/worktree", joined)
+        self.assertIn("branch/HEAD moved", joined)
+        self.assertIn("semantic log drift", joined)
+        self.assertIn("store advanced after preflight", joined)
+
+    def test_recovery_ladder_hints_route_pair_lock_and_session_failures(self):
+        hints = preflight.recovery_ladder_hints(
+            [
+                "mixed file-back store/output pair",
+                "session_id already exists before file-back",
+                "another file-back lock is active",
+            ],
+            store="/tmp/store.sqlite",
+            project="grasp-wiki",
+            output="/tmp/wiki",
+        )
+        joined = "\n".join(hints)
+
+        self.assertIn("store/output pair mismatch", joined)
+        self.assertIn("reused session_id", joined)
+        self.assertIn("active lock", joined)
+
     def test_base_divergence_errors_accepts_empty_left_right_log(self):
         self.assertEqual(preflight.base_divergence_errors("", "origin/main"), [])
 
