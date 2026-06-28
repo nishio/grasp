@@ -76,6 +76,10 @@ class RevertProjectionExportFailedError(GraspCliError):
     pass
 
 
+class JournalAppendPreflightError(GraspCliError):
+    pass
+
+
 class GraspHelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
     pass
 
@@ -1453,6 +1457,47 @@ def optional_journal_path_for_output(args: argparse.Namespace) -> Path | None:
     return journal_path_for_output(args.output, args.journal)
 
 
+def preflight_journal_appendable(journal: Path | None) -> None:
+    if journal is None:
+        return
+    if journal.exists() and journal.is_dir():
+        raise_journal_append_preflight_failed(journal, "journal path is a directory")
+    if journal.exists() and not journal.is_file():
+        raise_journal_append_preflight_failed(journal, "journal path is not a regular file")
+
+    parent = journal.parent
+    existing = parent
+    while not existing.exists():
+        next_parent = existing.parent
+        if next_parent == existing:
+            break
+        existing = next_parent
+    if existing.exists() and not existing.is_dir():
+        raise_journal_append_preflight_failed(
+            journal,
+            f"journal parent path is not a directory: {existing}",
+        )
+
+
+def raise_journal_append_preflight_failed(journal: Path, reason: str) -> None:
+    raise JournalAppendPreflightError(
+        f"journal is not appendable before mutation: {journal}: {reason}",
+        diagnostic={
+            "type": "journal_append_preflight_failed",
+            "phase": "journal_append_preflight",
+            "journal": str(journal),
+            "reason": reason,
+            "store_mutated": False,
+            "journal_written": False,
+            "projection_written": False,
+            "next_actions": [
+                "Choose a JSONL file path for --journal, or use --no-journal for the SQLite-authority path.",
+                "If the path is a directory, move or remove it before retrying the write command.",
+            ],
+        },
+    )
+
+
 def adopt_markdown(
     folder: Path,
     store_path: Path,
@@ -1466,6 +1511,7 @@ def adopt_markdown(
 ) -> dict[str, Any]:
     folder = Path(folder)
     journal = journal_path or default_journal_path(folder)
+    preflight_journal_appendable(journal)
     if journal.exists() and not replace_journal:
         raise ValueError(f"journal already exists: {journal}; use --replace-journal to overwrite")
 
@@ -1878,6 +1924,7 @@ def log_entry_subject_from_markdown_path(raw_path: str) -> str | None:
 
 def run_import_log_records(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = journal_path_for_output(args.folder, args.journal)
+    preflight_journal_appendable(journal)
     if not journal.exists():
         raise ValueError(f"journal does not exist: {journal}; run adopt-markdown first")
     project = store._require_project()
@@ -2486,6 +2533,7 @@ def event_metadata(args: argparse.Namespace) -> dict[str, str]:
 
 def run_append_section(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = optional_journal_path_for_output(args)
+    preflight_journal_appendable(journal)
     target_source_path = store.markdown_source_path_for_unique_handle(args.title)
     guard_dirty_write_target_paths_before_mutation(
         store,
@@ -2529,6 +2577,7 @@ def run_append_section(store: SQLiteStore, args: argparse.Namespace) -> dict[str
 
 def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = optional_journal_path_for_output(args)
+    preflight_journal_appendable(journal)
     target_source_path = store.markdown_source_path_for_unique_handle(args.title)
     guard_dirty_write_target_paths_before_mutation(
         store,
@@ -2579,6 +2628,7 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
 
 def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = optional_journal_path_for_output(args)
+    preflight_journal_appendable(journal)
     replacement_lines = write_page_replacement_lines(args)
     target_source_paths = write_page_target_source_paths_before_mutation(store, args)
     guard_dirty_write_target_paths_before_mutation(
@@ -2632,6 +2682,7 @@ def write_page_replacement_lines(args: argparse.Namespace) -> list[str]:
 
 def run_rename_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = optional_journal_path_for_output(args)
+    preflight_journal_appendable(journal)
     target_source_paths = store.markdown_source_paths_for_rename_target(
         args.target,
         target_kind=args.target_kind,
@@ -3330,6 +3381,8 @@ def revert_target_projection_source_paths(store: SQLiteStore, target: dict[str, 
 
 def run_revert_event(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = optional_journal_path_for_output(args)
+    if not args.dry_run:
+        preflight_journal_appendable(journal)
     journal_events = read_journal_events(journal) if journal is not None else []
     selected_project = store._require_project()
     sqlite_events = store.events(project=selected_project, limit=None)
@@ -3471,6 +3524,7 @@ def run_revert_events(store: SQLiteStore, args: argparse.Namespace) -> dict[str,
             targets=targets,
         )
 
+    preflight_journal_appendable(journal)
     guard_dirty_projection_paths_for_revert_targets(store, args.output, targets)
     records: list[dict[str, Any]] = []
     with store.write_transaction():
@@ -5294,6 +5348,7 @@ def run_revert_event_with_dependents(
             dependent_events=dependent_events,
         )
 
+    preflight_journal_appendable(journal)
     guard_dirty_projection_paths_for_revert_targets(store, args.output, targets)
     records: list[dict[str, Any]] = []
     with store.write_transaction():
