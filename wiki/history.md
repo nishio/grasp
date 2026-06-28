@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.66`（更新: 2026-06-28 09:23、store: schema `8`、compat: schema `8` compatible）: actual revert 系 command の projection finalization failure を `--json` で machine-readable にした。`revert-event` / `revert-events` / `revert-event --include-dependents` は SQLite `event_revert` rows（および必要なら legacy journal event）を書いた後の projection export / obsolete file removal が失敗した場合、`diagnostic.type=revert_projection_export_failed`、phase、target/revert event ids、pending removed files、元 error を stderr JSON に返す。regression は `page_rename` revert で `Old.md` directory による export failure を起こし、store が reverted state になっていること、`New.md` が残ること、diagnostic が phase / pending_removed_files / event ids を返すことを確認する。schema は不変
 - `1.8.65`（更新: 2026-06-28 09:11、store: schema `8`、compat: schema `8` compatible）: `revert-event` / `revert-events` / `revert-event --include-dependents` が page_create / page_rename revert で不要になった projection file を削除する順序を、reverted store state の `export-markdown` 成功後に移した。旧実装は `page_rename` revert で `New.md` を削除してから `Old.md` を export していたため、`Old.md` が directory などで export に失敗すると store は `Old` に戻ったのに現行 Markdown projection の `New.md` も消える partial projection deletion になり得た。regression は `Old.md` directory で revert export を失敗させ、SQLite `event_revert` / current store title+lines / `New.md` 残存を確認する。schema は不変
 - `1.8.64`（更新: 2026-06-28 08:57、store: schema `8`、compat: schema `8` compatible）: `export-markdown` が projection file を書き始める前に全対象の読み取り判定と書き込み先 path preflight を済ませるようにした。旧実装は `A.md` を更新した後、後続の `B.md` が directory などで読み取りに失敗すると、SQLite state は `event_revert` で戻っても `A.md` だけ failed write の新内容で残り得た。regression は git 管理外の Markdown output で `A.md` 更新後に `B.md` directory で export を失敗させ、rollback diagnostic / SQLite `event_revert` / current store lines / `A.md` 不変を確認する。schema は不変
 - `1.8.63`（更新: 2026-06-28 08:44、store: schema `8`、compat: schema `8` compatible）: `rename-page` の projection export failure rollback で旧 projection file を先に削除しないようにした。旧実装は store に `page_rename` event を書いた後、旧 file を削除してから新 path を export していたため、新 path が directory などで export に失敗すると SQLite state は `event_revert` で戻っても旧 Markdown projection が消えたままになり得た。新実装は新 projection export が成功してから旧 file を削除する。regression は `New.md` directory で export を失敗させ、rollback diagnostic / SQLite `event_revert` / current store state / `Old.md` 残存を確認する。schema は不変
@@ -205,6 +206,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.65`
+- Current public compatibility version: `1.8.66`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.65`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.66`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
