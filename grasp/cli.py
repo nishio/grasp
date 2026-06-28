@@ -1457,7 +1457,11 @@ def optional_journal_path_for_output(args: argparse.Namespace) -> Path | None:
     return journal_path_for_output(args.output, args.journal)
 
 
-def preflight_journal_appendable(journal: Path | None) -> None:
+def preflight_journal_appendable(
+    journal: Path | None,
+    *,
+    validate_existing_jsonl: bool = True,
+) -> None:
     if journal is None:
         return
     if journal.exists() and journal.is_dir():
@@ -1484,6 +1488,11 @@ def preflight_journal_appendable(journal: Path | None) -> None:
             journal,
             f"journal parent directory is not writable: {existing}",
         )
+    if journal.exists() and validate_existing_jsonl:
+        try:
+            read_journal_events(journal)
+        except ValueError as error:
+            raise_journal_append_preflight_failed(journal, str(error))
 
 
 def raise_journal_append_preflight_failed(journal: Path, reason: str) -> None:
@@ -1518,9 +1527,9 @@ def adopt_markdown(
 ) -> dict[str, Any]:
     folder = Path(folder)
     journal = journal_path or default_journal_path(folder)
-    preflight_journal_appendable(journal)
     if journal.exists() and not replace_journal:
         raise ValueError(f"journal already exists: {journal}; use --replace-journal to overwrite")
+    preflight_journal_appendable(journal, validate_existing_jsonl=not replace_journal)
 
     mirror = MarkdownMirror.from_folder(folder, exclude_dirs=exclude_dirs)
     stats = import_markdown_folder_to_sqlite(
