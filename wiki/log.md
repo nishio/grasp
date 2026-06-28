@@ -1558,3 +1558,8 @@ ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog �
 - tests: added `test_parallel_agent_git_worktree_dogfood_uses_activity_and_explicit_batch_export`, a Git-worktree shared `.grasp/authority.sqlite` loop where A writes `A` with `--defer-projection`, B checks `activity A`, avoids rewriting A, writes `B` plus a log entry, then batch exports.
 - result: Markdown remains unchanged during deferred writes; bare `export-markdown --regenerate-log` refuses with `--allow-projection-overwrite` guidance; explicit batch export writes A/B/Log and `write-status --strict` is clean.
 - judgment: for touched-page duplicate rewrite avoidance, `activity` is sufficient in this dogfood and no claim/lease was added. Pre-event intent awareness remains a longer real-dogfood question.
+
+## [2026-06-28 14:05] implementation+file-back | soft page claims for pre-write agent intent
+- code: added `claim-page`, `claims`, and `release-claim` as optional soft lease commands backed by SQLite `page_claim` / `page_claim_release` events. `activity` now includes those events as well as write events.
+- tests/docs: added a parallel-agent regression where session A claims page A before writing, session B sees the intent, is refused for A, can claim B, and can claim A only after A releases. Public/package version is `1.8.75`; schema remains v8.
+- judgment: this closes the specific pre-event intent gap without adding a mandatory write lock, queue, or automated reconcile. Longer real dogfood should decide whether stale claim cleanup or queueing is needed.
