@@ -178,6 +178,8 @@ Dogfood in the same `1.8.42` slice confirmed the guard fails while the worktree 
 
 `1.8.65` closes the corresponding partial projection deletion gap in actual revert commands. `revert-event`, `revert-events`, and `revert-event --include-dependents` now export the reverted store state before deleting projection files made obsolete by page_create/page_rename revert. A regression forces `Old.md` to be a directory during page_rename revert export and verifies the SQLite revert lands while the pre-existing `New.md` projection is not deleted first.
 
+`1.8.66` makes that failure state machine-readable. If actual revert commands write their revert events and then fail while exporting the reverted projection or removing obsolete projection files, `--json` now emits `diagnostic.type=revert_projection_export_failed` with the phase, target/revert event ids, pending removed files, journal status, and original error. This keeps the command from looking like an opaque crash when the store has already advanced to the reverted state.
+
 This does **not** yet make every authority boundary final. `sync`, `acquire`, generated Markdown backup/review policy, broader native event-derived semantic page projection, and semantic multi-page work-unit inference beyond log-batch, subject-log, log-page-subjects, content-subjects, version-bump, same-page dependency, explicit event-window, time-burst, or explicit session metadata boundaries still need migration work.
 
 ## Why This Replaces The Fast Path
@@ -250,6 +252,8 @@ Completed in `1.8.63`: `rename-page` projection export now writes the new projec
 Completed in `1.8.64`: `export-markdown` now separates projection comparison from file writes and preflights write targets before writing, so a later projection path/read failure does not leave earlier Markdown files partially updated after SQLite rollback.
 
 Completed in `1.8.65`: actual revert commands now export reverted store state before deleting projection files obsolete after page_create/page_rename revert, so export failure does not delete the previous visible Markdown projection first.
+
+Completed in `1.8.66`: actual revert projection-finalization failures now return machine-readable `revert_projection_export_failed` diagnostics on `--json` stderr after revert events have been written.
 
 Completed in `1.8.56`: repo-local preflight/write-start/postwrite now use gitignored `.grasp/file-back.lock.json` to block overlapping normal runbook file-backs, and postwrite releases the lock only after all checks pass.
 
