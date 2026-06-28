@@ -9887,6 +9887,21 @@ class CliHelpTests(unittest.TestCase):
             still_refused_completed = run_export(check=False)
             allowed_completed = run_export("--allow-projection-overwrite")
             status = run_json("write-status", "--output", str(root), "--no-journal", "--strict")
+            revert_plan_a_after_reconcile = run_json("revert-plan", owner_reconcile["event_id"], "--scope", "session")
+            release_a = run_json(
+                "release-claim",
+                claim_a["claim"]["claim_event_id"],
+                actor="agent-a",
+                session_id="session-a",
+            )
+            release_b = run_json(
+                "release-claim",
+                claim_b["claim"]["claim_event_id"],
+                actor="agent-b",
+                session_id="session-b",
+            )
+            claims_after_release = run_json("claims", "--include-expired")
+            status_after_release = run_json("write-status", "--output", str(root), "--no-journal", "--strict")
             markdown_after_export = {
                 path.name: path.read_text(encoding="utf-8")
                 for path in [root / "A.md", root / "B.md", root / "Log.md"]
@@ -9948,6 +9963,23 @@ class CliHelpTests(unittest.TestCase):
         )
         self.assertTrue(status["strict_ok"])
         self.assertEqual(status["strict_failures"], [])
+        self.assertEqual(
+            revert_plan_a_after_reconcile["candidate_event_ids"],
+            [write_a["event_id"], owner_reconcile["event_id"]],
+        )
+        self.assertNotIn(
+            claim_a["claim"]["claim_event_id"],
+            revert_plan_a_after_reconcile["candidate_event_ids"],
+        )
+        self.assertEqual(release_a["released_claim"]["claim_event_id"], claim_a["claim"]["claim_event_id"])
+        self.assertEqual(release_b["released_claim"]["claim_event_id"], claim_b["claim"]["claim_event_id"])
+        self.assertEqual(claims_after_release["active_claims"], [])
+        self.assertEqual(
+            sorted(claim["claim_event_id"] for claim in claims_after_release["released_claims"]),
+            sorted([claim_a["claim"]["claim_event_id"], claim_b["claim"]["claim_event_id"]]),
+        )
+        self.assertTrue(status_after_release["strict_ok"])
+        self.assertEqual(status_after_release["strict_failures"], [])
 
     def test_write_status_no_journal_strict_fails_on_sqlite_semantic_log_drift(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -1618,3 +1618,8 @@ ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog �
 - tests: extended the dirty guard ladder regression so the A owner reconciles the dirty `wiki/A.md` draft back into SQLite with `write-page A.md --target path --from-file wiki/A.md --defer-projection`.
 - result: after owner reconcile, `export-markdown --check` no longer reports `A.md`; only B/Log remain pending. Bare export still refuses without `--allow-projection-overwrite`, explicit batch export writes B/Log, and `write-status --strict` is clean.
 - judgment: the observed recovery path is targeted owner reconcile plus explicit batch projection, not automated reconcile or queueing. This covers a full dirty guard failure -> avoid duplicate work -> clean return loop with existing surfaces.
+
+## [2026-06-28 16:24] dogfood+file-back | dirty guard cleanup keeps rollback boundaries
+- tests: extended the dirty owner reconcile regression again so `revert-plan --scope session` on the owner reconcile event selects both A page updates and excludes the A claim event, then A/B release their claims.
+- result: after release, `claims --include-expired` has no active claims and contains both released claim ids; `write-status --strict` remains clean because release events do not touch Markdown projection.
+- judgment: the dirty guard recovery loop now covers duplicate avoidance, targeted owner reconcile, explicit batch export, session rollback grouping, and claim cleanup without adding a queue, mandatory lock, or automated reconcile.
