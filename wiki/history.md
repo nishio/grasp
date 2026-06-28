@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.72`（更新: 2026-06-28 12:10、store: schema `8`、compat: schema `8` compatible）: 2-agent 共有 canonical store dogfood の最小 substrate を追加した。`write-page` / `append-log` は `--defer-projection` を受け付け、SQLite state+event と optional journal だけを書いて Markdown projection export を後回しにできる。JSON result は `projection_deferred=true` / `projection=null` を返し、`--output` は projection を即時 export する時だけ必須。`activity [title]` を追加し、SQLite write events から page/page path ごとの actor/session_id/recent active sessions を読む。`history` / `log-records` は `--journal` なしの SQLite-only store でも `log_append` records を event-stream として返し、records に `event_type` / `actor` / `session_id` を含める。`export-markdown --regenerate-log` は import-only store の partial SQLite event stream に log page seed event が無い場合、現在 store の log page lines を seed として使う。regression は同一 store の agent A/B が並行に `write-page` / `append-log --defer-projection` し、Markdown files は batch export まで不変、`read` / `history` / `activity` / `revert-plan --scope session` が期待通り読めることを確認する。schema は不変
 - `1.8.71`（更新: 2026-06-28 10:46、store: schema `8`、compat: schema `8` compatible）: `append-log --help` の stale note を修正した。`rename-page` が既に public alpha なのに「rename is still out of scope」と表示していたため、CLI mechanics SSoT が current command surface と矛盾していた。help は page identity changes を `rename-page` が扱うと明示し、regression test で stale wording が戻らないことを固定した。schema は不変
 - `1.8.70`（更新: 2026-06-28 10:27、store: schema `8`、compat: schema `8` compatible）: public CLI から `append-section` を削除した。dogfood で既存同名 heading に merge せず末尾に重複 section を作ることが分かっており、目的が明確で安全な authoring surface としては `write-page --from-file` で全ページ replacement を行う方がよい。既存 journal / SQLite events の `section_append` event type は `replay-journal` / `revert-event` 互換のため残すが、新規 authoring command としては mint しない。repo-local file-back runbook と README は通常候補を `write-page` / `append-log` に更新した。schema は不変
 - `1.8.69`（更新: 2026-06-28 10:02、store: schema `8`、compat: schema `8` compatible）: legacy/ad hoc `--journal` write path の既存 JSONL validity を mutation 前に preflight するようにした。既存 journal file が parse / validate できない場合、write command は SQLite state / events / Markdown projection / journal content を変える前に `diagnostic.type=journal_append_preflight_failed` を返し、reason に `invalid journal JSON at line ...` などの既存 parser error を入れる。`adopt-markdown --replace-journal` は既存内容を上書きするため content validation を skip する。regression は invalid JSONL を指定した `append-section` が write event を増やさず projection と journal を不変に保つことを確認する。schema は不変
@@ -211,6 +212,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.71`
+- Current public compatibility version: `1.8.72`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.71`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.72`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

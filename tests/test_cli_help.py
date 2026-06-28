@@ -34,6 +34,7 @@ COMMANDS = [
     "import-log-records",
     "log-records",
     "history",
+    "activity",
     "append-log",
     "write-page",
     "rename-page",
@@ -8002,6 +8003,246 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(page_text, "# A\n- rewritten [[C]]\n")
         self.assertEqual(log_text, "# Log\n")
         self.assertFalse(renamed_exists_after_revert)
+
+    def test_parallel_agent_shared_store_dogfood_deferred_projection_and_activity(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n- old\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "authority.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+            write_a = [
+                sys.executable,
+                "-m",
+                "grasp",
+                "--json",
+                "--store",
+                str(store_path),
+                "--project",
+                "wiki",
+                "--actor",
+                "agent-a",
+                "--session-id",
+                "session-a",
+                "write-page",
+                "A",
+                "--line",
+                "# A",
+                "--line",
+                "- from agent A",
+                "--no-journal",
+                "--defer-projection",
+            ]
+            log_b = [
+                sys.executable,
+                "-m",
+                "grasp",
+                "--json",
+                "--store",
+                str(store_path),
+                "--project",
+                "wiki",
+                "--actor",
+                "agent-b",
+                "--session-id",
+                "session-b",
+                "append-log",
+                "--timestamp",
+                "2026-06-28 12:00",
+                "--op",
+                "dogfood",
+                "--summary",
+                "B saw A",
+                "--line",
+                "- saw [[A]]",
+                "--no-journal",
+                "--defer-projection",
+            ]
+            processes = [
+                subprocess.Popen(write_a, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE),
+                subprocess.Popen(log_b, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE),
+            ]
+            completed = []
+            for process in processes:
+                stdout, stderr = process.communicate(timeout=30)
+                completed.append((process.returncode, stdout, stderr))
+            for returncode, stdout, stderr in completed:
+                self.assertEqual(returncode, 0, stderr)
+                self.assertTrue(stdout.strip())
+
+            write_result = json.loads(completed[0][1])
+            log_result = json.loads(completed[1][1])
+            a_projection_before_export = (root / "A.md").read_text(encoding="utf-8")
+            log_projection_before_export = (root / "Log.md").read_text(encoding="utf-8")
+            read_a_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "read",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            history_a_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "history",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            activity_a_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "activity",
+                    "A",
+                    "--active-seconds",
+                    "86400",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            revert_plan_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "revert-plan",
+                    write_result["event_id"],
+                    "--scope",
+                    "session",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            export_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--regenerate-log",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            status_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                    "--strict",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            a_projection_after_export = (root / "A.md").read_text(encoding="utf-8")
+            log_projection_after_export = (root / "Log.md").read_text(encoding="utf-8")
+
+        read_a = json.loads(read_a_completed.stdout)
+        history_a = json.loads(history_a_completed.stdout)
+        activity_a = json.loads(activity_a_completed.stdout)
+        revert_plan = json.loads(revert_plan_completed.stdout)
+        export_result = json.loads(export_completed.stdout)
+        status_result = json.loads(status_completed.stdout)
+
+        self.assertTrue(write_result["projection_deferred"])
+        self.assertIsNone(write_result["projection"])
+        self.assertTrue(log_result["projection_deferred"])
+        self.assertIsNone(log_result["projection"])
+        self.assertEqual(a_projection_before_export, "# A\n- old\n")
+        self.assertEqual(log_projection_before_export, "# Log\n")
+        self.assertEqual(a_projection_after_export, "# A\n- from agent A\n")
+        self.assertIn("## [2026-06-28 12:00] dogfood | B saw A", log_projection_after_export)
+        self.assertEqual([line["text"] for line in read_a["lines"]], ["# A", "- from agent A"])
+        self.assertEqual(history_a["event_source"], "sqlite")
+        self.assertEqual(history_a["records"][0]["event_type"], "log_append")
+        self.assertEqual(history_a["records"][0]["session_id"], "session-b")
+        self.assertEqual(history_a["records"][0]["subjects"], ["A"])
+        self.assertEqual(activity_a["result_mode"], "event-stream")
+        self.assertEqual(activity_a["query"], "A")
+        self.assertEqual(activity_a["matched_events"], 1)
+        self.assertEqual(activity_a["events"][0]["event_type"], "page_update")
+        self.assertEqual(activity_a["events"][0]["actor"], "agent-a")
+        self.assertEqual(activity_a["events"][0]["session_id"], "session-a")
+        self.assertTrue(activity_a["events"][0]["active"])
+        self.assertEqual(activity_a["active_sessions"][0]["session_id"], "session-a")
+        self.assertEqual(revert_plan["scope"], "session")
+        self.assertEqual(revert_plan["session_id"], "session-a")
+        self.assertEqual(revert_plan["candidate_event_ids"], [write_result["event_id"]])
+        self.assertNotIn(log_result["event_id"], revert_plan["candidate_event_ids"])
+        self.assertEqual(sorted(export_result["written_files"]), ["A.md", "Log.md"])
+        self.assertTrue(status_result["strict_ok"])
+        self.assertEqual(status_result["strict_failures"], [])
 
     def test_write_status_no_journal_strict_fails_on_sqlite_semantic_log_drift(self):
         with tempfile.TemporaryDirectory() as tmpdir:
