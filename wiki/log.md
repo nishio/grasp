@@ -1505,6 +1505,10 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 ## [2026-06-28 10:46] implementation+file-back | fix stale append-log help note
 - append-log --help が rename-page 済みの current surface と矛盾する stale note を出していたため、page identity changes は rename-page が扱うという説明へ更新し、regression test を追加した。
 
+## [2026-06-28 11:10] file-back | record Grasp-only concurrency conditions
+- [[sqlite-write-concurrency]] に、Markdown を authority / edit input から外し同一 canonical SQLite transaction path に寄せれば storage-level の並行 safety は得られるが、semantic conflict / stale intent は base event_sequence 等で別途検出する必要がある、と記録。
+- [[native-authority-markdown-projection]] に、Grasp-only mode は現行 Markdown projection 方針の stronger profile であり、fresh checkout / review / recovery を grasp-native surface で置換してから guard 付きで cutover すべき、と記録。
+
 ## [2026-06-28 11:41] file-back | 今日の開発ゴール [[parallel-agent-substrate-goal]] を新設（Codex 向け）
 並行 agent が同一 canonical store を共有して知識共有しながら並行開発する基盤、を今日のゴールに固定。判定は 2-agent 共有 store dogfood が green（並行 write 安全 / 互いの現在状態・直近変化が read 可 / in-flight 認識で二重作業回避 / projection 遅延で md race なし / session 単位 revert）。
 write 側基盤（canonical store / WAL / BEGIN IMMEDIATE / session 帰属 / revert-plan --scope session）は実装済、未充足は in-flight 協調 surface と遅延 projection。dogfood-first で落ちた所だけ実装する。新規ユーザは Markdown=SSoT の mode 1 から入る信頼勾配の高信頼端向けで、協調レイヤは単一 agent では不要な形に degrade。
@@ -1733,3 +1737,9 @@ Reddit は r/ObsidianMD / r/AI_Agents で Karpathy-style LLM Wiki、Obsidian vau
 [[grasp-backlog]] の AI persona emulation / feedback queue に success shape を追記。目的は persona ごとの感想集めではなく、grasp の強い用途・弱い導線・次に直すべき面を実走証跡から決めること。
 良い run は README / docs / demo に昇格できる concrete outcome story、悪い run は onboarding / zero-hit recovery / raw-dump output / write confidence / report handoff などの修正先へ routing する。
 persona run は将来の回帰基準にし、P1/P2a=graph density、P2b=bounded retrieval、P3=write confidence、P4=low-cost portability、P5=acquisition/report handoff と価値を分けて position する。
+
+## [2026-06-29 14:22] file-back | vulnerability triage disagreement graph
+[[security-triage-disagreement-graph]] を追加。脆弱性スキャナー方向での Grasp は scanner engine ではなく、scanner finding / Claude Code transcript / 人間議論 / 批判 / judgment を次回 triage に再利用する reasoning layer と位置づける。
+核心: scanner finding は observation、Claude thinking は evidence discovery trail、人間議論は position / assumption / decision provenance、judgment は evidence・前提・期限・無効化条件つきの current conclusion。scanner と批判は `vulnerable version present` vs `not reachable in production` のように別命題を見ていることが多いので、中心は finding ではなく disagreement axis / dispute。
+非公開プロジェクトへの handoff 方針: 公開 wiki 側は構造仮説だけを渡し、実際の ontology / ingest policy は非公開 scanner report・Claude transcript・ID付き人間議論で壊して決めてもらう。
+fallback: grasp write-first preflight は local `main` が `origin/main` より4 commits ahead で `branch differs from origin/main` 停止。今回は direct Markdown patch fallback で記録した。
