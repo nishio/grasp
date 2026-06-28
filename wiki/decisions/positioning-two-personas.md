@@ -129,3 +129,9 @@ Open Q3（「.md 束より良い」最小デモ）への含意: 低密度 corpus
 
 - 次に actively 狙う persona2 は persona2b（冷たい他人）でなく **persona2a（高密度 Markdown）**。森 dogfood がそのまま検証経路になる（別チャネル獲得を待たずに検証が進む）。
 - persona2b は依然 design dilution リスクの本体。lede は density 非依存側（bounded retrieval）に固定（§罠 design dilution・§2026-06-26 と整合）。
+
+### 2026-06-29: HN/Reddit survey - persona2a は active、persona2b は skeptical channel
+
+[[hn-reddit-grasp-adjacent-survey-2026-06-29]] を追加。HN では OpenKnowledge / Atomic / Karpathy-style LLM wiki など local-first AI knowledge-base が反応を取っているが、反応の芯は「Obsidian/VS Code より何が良いか」「local-first なら local model / privacy はどうか」「generic Obsidian + AI wrapper ではないか」という比較圧。Reddit では r/ObsidianMD / r/AI_Agents で Karpathy-style LLM Wiki、Obsidian vault、agentic project memory が実践・反論込みで語られている。
+
+含意: 2026-06-28 update の persona2a（高密度 Markdown wiki / Obsidian power user）は実在し、active に served する次 target として妥当。persona2b（cold HN/Reddit）は launch channel ではあるが skeptical channel なので、Scrapbox lineage や generic RAG ではなく **CLI agent substrate / bounded graph read / no up-front SSoT migration / stale-write guard** を concrete demo で出す。
