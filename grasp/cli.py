@@ -960,12 +960,14 @@ def build_parser() -> argparse.ArgumentParser:
             "grasp --project grasp-wiki --json export-markdown --output wiki --check",
             "grasp --project grasp-wiki export-markdown --output wiki --regenerate-index --regenerate-log --check",
             "grasp --project grasp-wiki export-markdown --output wiki --regenerate-log --journal /tmp/events.jsonl --check",
-            "grasp --project grasp-wiki export-markdown --output wiki",
+            "grasp --project grasp-wiki export-markdown --output wiki --allow-projection-overwrite",
         ],
         notes=[
             "The projection authority is SQLite; Markdown is a git-tracked output for review, backup, publish, and recovery.",
             "This projection preserves stored lines and paths; formatting synthesis comes later.",
             "--check is the projection freshness gate for ship loops and file-back cutover.",
+            "Non-check writes refuse to overwrite Git-worktree projection files that differ from SQLite unless --allow-projection-overwrite is passed.",
+            "Use --allow-projection-overwrite only after re-adopting current Markdown or when exporting an intentional deferred-projection batch.",
             "--regenerate-log replays SQLite log page events by default and appends latest record-per-file log_entry_import records.",
             "--journal switches --regenerate-log to a legacy JSONL event stream for ad hoc audits.",
         ],
@@ -975,6 +977,14 @@ def build_parser() -> argparse.ArgumentParser:
     export_markdown_parser.add_argument("--regenerate-index", action="store_true", help="Regenerate the primary navigation index page from the Markdown store catalog.")
     export_markdown_parser.add_argument("--regenerate-log", action="store_true", help="Regenerate the primary log page by replaying SQLite log page events and latest record-per-file records.")
     export_markdown_parser.add_argument("--journal", type=Path, default=None, help="Legacy JSONL event stream path for --regenerate-log ad hoc audits. Omit to use SQLite events.")
+    export_markdown_parser.add_argument(
+        "--allow-projection-overwrite",
+        action="store_true",
+        help=(
+            "Allow non-check export to overwrite Git-worktree Markdown projection files that differ from SQLite. "
+            "Use only after re-adopt, or for an intentional deferred-projection batch."
+        ),
+    )
 
     append_log_parser = add_command_parser(
         subparsers,
@@ -2745,6 +2755,16 @@ def run_export_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict[st
             log_events = store.events(project=args.project, limit=None)
             log_event_source = "sqlite"
             log_overlay_name = "sqlite-events-log"
+    if not args.check and not args.allow_projection_overwrite:
+        preview = store.export_markdown(
+            args.output,
+            check=True,
+            regenerate_index=args.regenerate_index,
+            log_events=log_events,
+            log_event_source=log_event_source,
+            log_overlay_name=log_overlay_name,
+        )
+        guard_projection_overwrite_before_export(args.output, preview)
     return store.export_markdown(
         args.output,
         check=args.check,
@@ -2752,6 +2772,30 @@ def run_export_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict[st
         log_events=log_events,
         log_event_source=log_event_source,
         log_overlay_name=log_overlay_name,
+    )
+
+
+def guard_projection_overwrite_before_export(output: Path, preview: dict[str, Any]) -> None:
+    if not projection_output_is_inside_git_worktree(output):
+        return
+    changed = sorted(preview.get("changed_files") or [])
+    missing = sorted(preview.get("missing_files") or [])
+    if not changed and not missing:
+        return
+    changed_text = ", ".join(changed[:10])
+    missing_text = ", ".join(missing[:10])
+    details: list[str] = []
+    if changed:
+        details.append(f"changed: {changed_text}{'' if len(changed) <= 10 else f', ... (+{len(changed) - 10} more)'}")
+    if missing:
+        details.append(f"missing: {missing_text}{'' if len(missing) <= 10 else f', ... (+{len(missing) - 10} more)'}")
+    raise ValueError(
+        "Markdown projection differs from the SQLite store; refusing store-to-Markdown export before "
+        "overwriting current files under the Git worktree. "
+        "If these Markdown changes came from direct-patch fallback or a merge, run `grasp import --markdown <output> "
+        "--project <project>` or the repo re-adopt/reconcile runbook first. "
+        "If this is an intentional deferred-projection batch, rerun with --allow-projection-overwrite. "
+        f"Projection differences: {'; '.join(details)}"
     )
 
 
@@ -3077,17 +3121,9 @@ def normalize_projection_relative_path(path: str | Path) -> str:
 
 def git_dirty_projection_paths(output: Path) -> list[str]:
     output_abs = output.resolve(strict=False)
-    probe = nearest_existing_path(output_abs)
-    if probe is None:
+    root_abs = git_worktree_root_for_path(output_abs)
+    if root_abs is None:
         return []
-    root_completed = subprocess.run(
-        ["git", "-C", str(probe), "rev-parse", "--show-toplevel"],
-        text=True,
-        capture_output=True,
-    )
-    if root_completed.returncode != 0:
-        return []
-    root_abs = Path(root_completed.stdout.strip()).resolve(strict=False)
     try:
         rel_output = output_abs.relative_to(root_abs)
     except ValueError:
@@ -3120,6 +3156,32 @@ def git_dirty_projection_paths(output: Path) -> list[str]:
             continue
         dirty_paths.append(projection_relative.as_posix())
     return sorted(set(dirty_paths))
+
+
+def projection_output_is_inside_git_worktree(output: Path) -> bool:
+    output_abs = output.resolve(strict=False)
+    root_abs = git_worktree_root_for_path(output_abs)
+    if root_abs is None:
+        return False
+    try:
+        output_abs.relative_to(root_abs)
+    except ValueError:
+        return False
+    return True
+
+
+def git_worktree_root_for_path(path: Path) -> Path | None:
+    probe = nearest_existing_path(path)
+    if probe is None:
+        return None
+    root_completed = subprocess.run(
+        ["git", "-C", str(probe), "rev-parse", "--show-toplevel"],
+        text=True,
+        capture_output=True,
+    )
+    if root_completed.returncode != 0:
+        return None
+    return Path(root_completed.stdout.strip()).resolve(strict=False)
 
 
 def nearest_existing_path(path: Path) -> Path | None:
