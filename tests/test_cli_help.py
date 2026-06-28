@@ -8664,7 +8664,11 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(activity_after_claim["matched_events"], 1)
         self.assertEqual(activity_after_claim["events"][0]["event_type"], "page_claim")
         self.assertEqual(activity_after_claim["events"][0]["session_id"], "session-a")
+        self.assertEqual(activity_after_claim["events"][0]["claim_status"], "active")
+        self.assertTrue(activity_after_claim["events"][0]["claim_active"])
         self.assertEqual(activity_after_claim["active_sessions"][0]["session_id"], "session-a")
+        self.assertEqual(activity_after_claim["active_claim_count"], 1)
+        self.assertEqual(activity_after_claim["active_claims"][0]["claim_event_id"], claim_a["claim"]["claim_event_id"])
         self.assertEqual(claims_a["active_count"], 1)
         self.assertEqual(claims_a["active_claims"][0]["claim_event_id"], claim_a["claim"]["claim_event_id"])
         self.assertEqual(conflict_completed.returncode, 2)
@@ -8683,6 +8687,107 @@ class CliHelpTests(unittest.TestCase):
             ["A", "B"],
         )
         self.assertEqual(claims_all["released_claims"][0]["claim_event_id"], claim_a["claim"]["claim_event_id"])
+
+    def test_activity_folds_stale_claim_state_out_of_active_sessions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n- old B\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "authority.sqlite"
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+            claim_a = run_json(
+                "claim-page",
+                "A",
+                "--ttl-seconds",
+                "600",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            with sqlite3.connect(store_path) as connection:
+                payload_text = connection.execute(
+                    "SELECT payload_json FROM events WHERE event_id = ?",
+                    (claim_a["claim"]["claim_event_id"],),
+                ).fetchone()[0]
+                payload = json.loads(payload_text)
+                payload["expires_at"] = "2000-01-01T00:00:00+00:00"
+                connection.execute(
+                    "UPDATE events SET payload_json = ? WHERE event_id = ?",
+                    (
+                        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                        claim_a["claim"]["claim_event_id"],
+                    ),
+                )
+            claims_a = run_json("claims", "A", "--include-expired")
+            activity_a = run_json("activity", "A", "--active-seconds", "86400")
+
+            claim_b = run_json(
+                "claim-page",
+                "B",
+                "--ttl-seconds",
+                "600",
+                actor="agent-b",
+                session_id="session-b",
+            )
+            run_json(
+                "release-claim",
+                claim_b["claim"]["claim_event_id"],
+                actor="agent-b",
+                session_id="session-b",
+            )
+            claims_b = run_json("claims", "B", "--include-expired")
+            activity_b = run_json("activity", "B", "--active-seconds", "86400")
+
+        self.assertEqual(claims_a["active_count"], 0)
+        self.assertEqual(claims_a["expired_claims"][0]["claim_event_id"], claim_a["claim"]["claim_event_id"])
+        self.assertEqual(activity_a["matched_events"], 1)
+        self.assertEqual(activity_a["events"][0]["event_type"], "page_claim")
+        self.assertTrue(activity_a["events"][0]["event_recent"])
+        self.assertFalse(activity_a["events"][0]["active"])
+        self.assertEqual(activity_a["events"][0]["claim_status"], "expired")
+        self.assertFalse(activity_a["events"][0]["claim_active"])
+        self.assertEqual(activity_a["active_sessions"], [])
+        self.assertEqual(activity_a["active_claim_count"], 0)
+        self.assertEqual(activity_a["active_claims"], [])
+
+        self.assertEqual(claims_b["active_count"], 0)
+        self.assertEqual(claims_b["released_claims"][0]["claim_event_id"], claim_b["claim"]["claim_event_id"])
+        self.assertEqual(
+            [event["event_type"] for event in activity_b["events"]],
+            ["page_claim_release", "page_claim"],
+        )
+        self.assertEqual(
+            [event["claim_status"] for event in activity_b["events"]],
+            ["released", "released"],
+        )
+        self.assertEqual([event["active"] for event in activity_b["events"]], [False, False])
+        self.assertEqual(activity_b["active_sessions"], [])
+        self.assertEqual(activity_b["active_claim_count"], 0)
 
     def test_parallel_agent_claim_write_release_projection_loop(self):
         with tempfile.TemporaryDirectory() as tmpdir:
