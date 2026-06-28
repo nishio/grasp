@@ -1,6 +1,6 @@
 ---
 type: plan
-summary: 2026-06-28 の開発ゴール。grasp を「並行 agent が同一 canonical store を共有して知識共有しながら並行開発する基盤」として使える状態にする。判定は机上 spec でなく 2-agent 共有 store dogfood が green になること。1.8.72 で deferred projection / activity / SQLite-only log_append history の最小 substrate、1.8.73 で recovery ladder hints、1.8.74 で stale store→Markdown export refusal、1.8.75 で pre-write intent 用の soft page claim surface、1.8.76 で activity の claim-state fold、1.8.77 で recovery ladder の claim-aware hint、1.8.78 で write-page identity target、1.8.79 で claim-page identity target、1.8.80 で activity の log subject query match が入った。Git worktree dogfood regression は activity による同ページ rewrite 回避、claim→write→release→明示 batch export、session rollback candidate 分離を確認済み。追加で SQLite write lock 下の同時 `write-page --defer-projection` 2 subprocess と同時 `append-log --defer-projection` 2 subprocess が待って直列化され、両 session の state/event/log-records/revert-plan が残ることも固定済み。次はさらに長い real dogfood で queue / automated reconcile 要否を測る。
+summary: 2026-06-28 の開発ゴール。grasp を「並行 agent が同一 canonical store を共有して知識共有しながら並行開発する基盤」として使える状態にする。判定は机上 spec でなく 2-agent 共有 store dogfood が green になること。1.8.72 で deferred projection / activity / SQLite-only log_append history の最小 substrate、1.8.73 で recovery ladder hints、1.8.74 で stale store→Markdown export refusal、1.8.75 で pre-write intent 用の soft page claim surface、1.8.76 で activity の claim-state fold、1.8.77 で recovery ladder の claim-aware hint、1.8.78 で write-page identity target、1.8.79 で claim-page identity target、1.8.80 で activity の log subject query match が入った。Git worktree dogfood regression は activity による同ページ rewrite 回避、claim→write→release→明示 batch export、log-only activity による二重作業回避、session rollback candidate 分離を確認済み。追加で SQLite write lock 下の同時 `write-page --defer-projection` 2 subprocess と同時 `append-log --defer-projection` 2 subprocess が待って直列化され、両 session の state/event/log-records/revert-plan が残ることも固定済み。次はさらに長い real dogfood で queue / automated reconcile 要否を測る。
 sources:
   - [[sqlite-ssot-write-plan]]
   - [[sqlite-write-concurrency]]
@@ -88,12 +88,14 @@ Claude Code / Codex の並行 file-back では、同じ摩擦に対して3種類
 
 `1.8.80` で、recovery ladder の起点である `activity` を log subject-aware にした。これまでは `append-log` が `[[A]]` を記録しても、`history A` / `log-records` では見える一方で `activity A` は Log page の event としてしか扱わず、log-only session を page query から見落とし得た。現在は `activity <query>` が `log_append` の subjects にも一致し、`active_sessions[]` は `subjects[]` を返す。これにより、ページを直接 rewrite していないが、そのページについて判断・観測を残している session も、queue を足さずに標準の in-flight surface から見える。
 
+2026-06-28 15:51 の追加 Git-worktree dogfood regression は、この log subject-aware `activity` を実際の二重作業回避 loop に入れた。A は `[[A]]` について `append-log --defer-projection` だけを行い、A page は触らない。B は `activity A` で session-a の log-only in-flight signal を見て A を rewrite せず、B page と B log に進む。Markdown は batch export まで旧内容のまま、bare export は `--allow-projection-overwrite` を要求して拒否され、明示 batch export 後に B/Log だけが更新される。`revert-plan --scope session` は A の log-only work unit と B の write+log work unit を分離する。これは queue/lock を足す理由ではなく、`activity` surface の表現力が「page を直接触った session」から「page について作業中の session」へ近づいた証拠。
+
 ## 進め方: dogfood-first
 
 机上で spec を確定させず、**まず 2-agent 共有 dogfood を組んで走らせ、実際に落ちた所だけを実装する**（実装事実 first、判明した制約は file back）。
 
 1. 同一 store（temp 可）を共有する2 session を回す最小ハーネスを作る。
-2. 上の Done 条件 1–5 を assert する。最小 subprocess regression に加え、Git worktree regression で activity-based duplicate avoidance と explicit batch export は通った。`1.8.75` で pre-write claim surface と claim→write→release→batch export loop、`1.8.76` で activity の stale-claim fold、`1.8.78` で observation identity → write target、`1.8.79` で observation identity → claim target / audit query、2026-06-28 15:17 で SQLite write lock 下の同時 CLI `write-page` 直列化、2026-06-28 15:31 で同時 CLI `append-log` 直列化、`1.8.80` で activity の log subject-aware query regression も入った。次は長い real dogfood で落ちる箇所を見る。
+2. 上の Done 条件 1–5 を assert する。最小 subprocess regression に加え、Git worktree regression で activity-based duplicate avoidance と explicit batch export は通った。`1.8.75` で pre-write claim surface と claim→write→release→batch export loop、`1.8.76` で activity の stale-claim fold、`1.8.78` で observation identity → write target、`1.8.79` で observation identity → claim target / audit query、2026-06-28 15:17 で SQLite write lock 下の同時 CLI `write-page` 直列化、2026-06-28 15:31 で同時 CLI `append-log` 直列化、`1.8.80` で activity の log subject-aware query、2026-06-28 15:51 で log-only activity からの duplicate avoidance loop regression も入った。次は長い real dogfood で落ちる箇所を見る。
 3. 落ちた所に最小実装を入れる。claim/lease は `claim-page` の soft event surface までに留め、queue / automated reconcile は実際の運用 gap が出た時だけ足す。
 4. 判明した制約・設計変更を file back（[[sqlite-write-concurrency]] / [[sqlite-ssot-write-plan]] / [[grasp-backlog]]）。
 
