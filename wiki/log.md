@@ -1505,6 +1505,9 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 ## [2026-06-28 10:46] implementation+file-back | fix stale append-log help note
 - append-log --help が rename-page 済みの current surface と矛盾する stale note を出していたため、page identity changes は rename-page が扱うという説明へ更新し、regression test を追加した。
 
+## [2026-06-28 11:06] file-back | 就寝中自動実行の観察を記録
+[[ai-agent-implementation-experiment]] に 2026-06-28 の就寝中自動実行観察を追記。goal「LLM Wikiのインフラとして信頼できるものになる」/ 実行時間 17h 47m 45s / PR #7-#36 / 1.8.36→1.8.71 の進捗は大機能追加より reliability hardening に寄り、無人 run は明確な recovery gap と guard task を積む用途に向くと整理した。
+
 ## [2026-06-28 11:10] file-back | record Grasp-only concurrency conditions
 - [[sqlite-write-concurrency]] に、Markdown を authority / edit input から外し同一 canonical SQLite transaction path に寄せれば storage-level の並行 safety は得られるが、semantic conflict / stale intent は base event_sequence 等で別途検出する必要がある、と記録。
 - [[native-authority-markdown-projection]] に、Grasp-only mode は現行 Markdown projection 方針の stronger profile であり、fresh checkout / review / recovery を grasp-native surface で置換してから guard 付きで cutover すべき、と記録。
