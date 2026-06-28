@@ -5947,6 +5947,103 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(a_text, "# A\n")
         self.assertEqual(b_text, "# B\n- local draft\n")
 
+    def test_write_page_projection_export_failure_does_not_partially_update_prior_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            (root / "B.md").unlink()
+            (root / "B.md").mkdir()
+            failed_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-page",
+                    "A",
+                    "--line",
+                    "# A",
+                    "--line",
+                    "- replacement",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            peek_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows = connection.execute(
+                    """
+                    SELECT event_id, event_type, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            a_text = (root / "A.md").read_text(encoding="utf-8")
+            b_is_dir = (root / "B.md").is_dir()
+
+        failed_error = json.loads(failed_completed.stderr)
+        rollback_diagnostic = failed_error["diagnostic"]
+        peek_result = json.loads(peek_completed.stdout)
+        self.assertEqual(failed_completed.returncode, 2)
+        self.assertEqual(rollback_diagnostic["type"], "projection_export_rollback")
+        self.assertTrue(rollback_diagnostic["rolled_back"])
+        self.assertEqual(rollback_diagnostic["target_event_type"], "page_update")
+        self.assertEqual(rollback_diagnostic["rollback_event_type"], "event_revert")
+        self.assertEqual(rollback_diagnostic["original_error"]["type"], "IsADirectoryError")
+        self.assertEqual([row[1] for row in sqlite_event_rows], ["page_update", "event_revert"])
+        self.assertEqual(rollback_diagnostic["target_event_id"], sqlite_event_rows[0][0])
+        self.assertEqual(rollback_diagnostic["rollback_event_id"], sqlite_event_rows[1][0])
+        self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
+        self.assertEqual(a_text, "# A\n")
+        self.assertTrue(b_is_dir)
+
     def test_write_page_allows_dirty_projection_file_when_it_is_the_target(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir) / "repo"
