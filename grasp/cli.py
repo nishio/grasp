@@ -1102,10 +1102,12 @@ def build_parser() -> argparse.ArgumentParser:
         examples=[
             "grasp --project grasp-wiki write-page 'New page' --create --path new-page.md --from-file /tmp/new-page.md --output wiki",
             "grasp --project grasp-wiki write-page scratch --from-file /tmp/scratch.md --output wiki",
+            "grasp --project grasp-wiki write-page 5928725cba093700118fa5b2 --target page-id --line '# scratch' --output wiki",
             "grasp --project grasp-wiki --json write-page scratch --line '# scratch' --line '- updated' --output wiki",
         ],
         notes=[
-            "Alpha write surface: Markdown-backed projects and unique handles only.",
+            "Alpha write surface for Markdown-backed projects.",
+            "Existing-page replacement defaults to unique handle lookup; use --target page-id or --target path when an observation surface returned identity metadata.",
             "--path is required with --create and deliberately ignored for existing-page updates.",
             "Rename and source-path changes for existing pages are handled by rename-page.",
             "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
@@ -1119,6 +1121,7 @@ def build_parser() -> argparse.ArgumentParser:
     input_group = write_page_parser.add_mutually_exclusive_group(required=True)
     input_group.add_argument("--from-file", type=Path, default=None, help="Read replacement Markdown page body from this file.")
     input_group.add_argument("--line", action="append", default=None, help="Replacement body line. Repeat for multiple lines.")
+    write_page_parser.add_argument("--target", dest="target_kind", choices=["handle", "page-id", "path"], default="handle", help="How to interpret the target argument for existing-page replacement.")
     write_page_parser.add_argument("--create", action="store_true", help="Create a new Markdown-backed page instead of replacing an existing page.")
     write_page_parser.add_argument("--path", dest="source_path", default=None, help="New Markdown projection path for --create, relative to --output and ending in .md.")
     write_page_parser.add_argument("--message", default="", help="Optional update message stored in the journal payload.")
@@ -3180,6 +3183,8 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
 def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = optional_journal_path_for_output(args)
     preflight_journal_appendable(journal)
+    if args.create and args.target_kind != "handle":
+        raise ValueError("write-page --target is only valid when replacing an existing page")
     replacement_lines = write_page_replacement_lines(args)
     target_source_paths = write_page_target_source_paths_before_mutation(store, args)
     if not args.defer_projection:
@@ -3194,6 +3199,7 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
         args.title,
         lines=replacement_lines,
         create=args.create,
+        target_kind=args.target_kind,
         source_path=args.source_path,
         message=args.message,
         **event_metadata(args),
@@ -3410,7 +3416,7 @@ def write_page_target_source_paths_before_mutation(store: SQLiteStore, args: arg
         if not args.source_path:
             raise ValueError("write-page --create requires --path")
         return {normalize_projection_relative_path(args.source_path)}
-    return {store.markdown_source_path_for_unique_handle(args.title)}
+    return {store.markdown_source_path_for_write_target(args.title, target_kind=args.target_kind)}
 
 
 def write_page_allowed_dirty_source_paths(args: argparse.Namespace, target_source_paths: set[str]) -> set[str]:

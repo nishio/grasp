@@ -3050,18 +3050,22 @@ class SQLiteStore:
         with self.connection:
             return self._replace_markdown_page_lines_uncommitted(title, lines)
 
-    def _replace_markdown_page_lines_uncommitted(self, title: str, lines: list[str]) -> dict[str, Any]:
+    def _replace_markdown_page_lines_uncommitted(
+        self,
+        title: str,
+        lines: list[str],
+        *,
+        target_kind: str = "handle",
+    ) -> dict[str, Any]:
         project = self._require_project()
         manifest = self._markdown_manifest_for_project(project)
         if not manifest:
             raise ValueError(f"project is not a Markdown-backed project: {project}")
 
-        candidates = self.page_handle_candidates(title)
-        if not candidates:
+        page = self._resolve_markdown_write_target(title, target_kind, command="write-page")
+        if page is None:
             raise ValueError(f"page not found: {title}")
-        if len(candidates) > 1:
-            raise ValueError(f"page handle is ambiguous: {title}; use a unique title for write-page alpha")
-        page_id = str(candidates[0]["page_id"])
+        page_id = page.id
         source_path, _ = self._markdown_manifest_entry_for_page(manifest, page_id)
         graph_role = self._markdown_graph_role_for_page(project, page_id)
         previous_lines = self._markdown_line_payloads(project, page_id)
@@ -3094,7 +3098,7 @@ class SQLiteStore:
         page = self._page_by_id(page_id)
         return {
             "project": project,
-            "page": page.to_summary() if page is not None else {"id": page_id, "title": title},
+            "page": page.to_summary(),
             "source_path": source_path,
             "graph_role": graph_role,
             "previous_lines": previous_lines,
@@ -3110,6 +3114,7 @@ class SQLiteStore:
         *,
         lines: list[str],
         create: bool = False,
+        target_kind: str = "handle",
         source_path: str | Path | None = None,
         message: str = "",
         actor: str = "",
@@ -3138,7 +3143,11 @@ class SQLiteStore:
                     "lines": update_result["lines"],
                 }
             else:
-                update_result = self._replace_markdown_page_lines_uncommitted(title, lines)
+                update_result = self._replace_markdown_page_lines_uncommitted(
+                    title,
+                    lines,
+                    target_kind=target_kind,
+                )
                 event_type = "page_update"
                 payload = {
                     "page_id": update_result["page"]["id"],
@@ -3181,6 +3190,17 @@ class SQLiteStore:
         if source_path in files and str(files[source_path].get("page_id") or "") != page.id:
             raise ValueError(f"Markdown source path already belongs to another page: {source_path}")
         return {previous_source_path, source_path}
+
+    def markdown_source_path_for_write_target(self, target: str, *, target_kind: str = "handle") -> str:
+        project = self._require_project()
+        manifest = self._markdown_manifest_for_project(project)
+        if not manifest:
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+        page = self._resolve_markdown_write_target(target, target_kind, command="write-page")
+        if page is None:
+            raise ValueError(f"page not found: {target}")
+        source_path, _ = self._markdown_manifest_entry_for_page(manifest, page.id)
+        return source_path
 
     @staticmethod
     def _markdown_page_rename_event_payload(rename_result: dict[str, Any], message: str) -> dict[str, Any]:
@@ -3660,12 +3680,15 @@ class SQLiteStore:
         return "content"
 
     def _resolve_markdown_rename_target(self, target: str, target_kind: str) -> Page | None:
+        return self._resolve_markdown_write_target(target, target_kind, command="rename")
+
+    def _resolve_markdown_write_target(self, target: str, target_kind: str, *, command: str) -> Page | None:
         if target_kind == "page-id":
             return self._page_by_id(target)
         if target_kind == "path":
             return self._page_by_source_path(_safe_markdown_relative_path(target))
         if target_kind != "handle":
-            raise ValueError("rename target kind must be one of: handle, page-id, path")
+            raise ValueError(f"{command} target kind must be one of: handle, page-id, path")
         candidates = self.page_handle_candidates(target)
         if len(candidates) > 1:
             raise ValueError(f"page handle is ambiguous: {target}; use --target page-id or --target path")

@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.8.78`（更新: 2026-06-28 14:48、store: schema `8`、compat: schema `8` compatible）: `write-page` に `--target handle|page-id|path` を追加し、既存 page replacement の target を title/handle だけでなく page identity / Markdown source path で指定できるようにした。`read --page-id`、`history.current_state_target`、`activity` / `claims` で得た page id や source path を、title/stem へ戻さず write に渡せる。`--create` では従来通り new title + `--path` を使い、`--target` は replacement 専用。schema は不変
 - `1.8.77`（更新: 2026-06-28 14:37、store: schema `8`、compat: schema `8` compatible）: repo-local `check_file_back_preflight.py` / `check_file_back_write_start.py` の guard failure recovery ladder が `claims --include-expired` も案内するようにした。`activity --limit 20` は recent ownership を見る起点のまま、soft claim の active / expired / released state を同じ停止時 routing で確認できる。これは claim-aware recovery output の refinement で、queue / mandatory lock / automated reconcile は追加しない。schema は不変
 - `1.8.76`（更新: 2026-06-28 14:27、store: schema `8`、compat: schema `8` compatible）: `activity` が page claim state を fold するようにした。`page_claim` event は `claim_status` / `claim_active` / `claim_expires_at` / release metadata を返し、expired または released claim は `active=false` になり `active_sessions[]` へ入らない。top-level `active_claims[]` / `active_claim_count` も返すため、agent は recent event と active soft claim を同じ command で区別できる。`page_claim_release` も `claim_status=released` / `claim_active=false` として表示する。これは stale claim が TTL 後や release 後も `activity` 上の active work signal に見える gap を塞ぐ schema-compatible JSON/text output refinement。schema は不変
 - `1.8.75`（更新: 2026-06-28 14:05、store: schema `8`、compat: schema `8` compatible）: 共有 canonical store 上の pre-write intent surface として `claim-page` / `claims` / `release-claim` を追加した。`claim-page <title>` は `--session-id` 必須の soft lease event `page_claim` を SQLite events に書き、同一 page に別 session の active claim があれば拒否する。`claims [title]` は `page_claim` / `page_claim_release` を fold して active / expired / released claim を返し、`release-claim <claim-event-id>` は owning session（または明示 `--force`）で `page_claim_release` を書く。`activity` は write events に加えて claim/release events も読むようになった。これは SQLite lock や mandatory write lock ではなく、`activity` に event が出る前の intent を agent 間で見えるようにする任意 coordination surface。Markdown projection と store schema は不変
@@ -217,6 +218,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.8.77`
+- Current public compatibility version: `1.8.78`
 - Current internal `SCHEMA_VERSION`: `8`
-- Current package metadata should match `1.8.77`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.8.78`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
