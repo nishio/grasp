@@ -1533,3 +1533,6 @@ write 側基盤（canonical store / WAL / BEGIN IMMEDIATE / session 帰属 / rev
 
 ## [2026-06-28 12:46] file back | 前回 file-back 内容が SSoT store に届いたことを確認 + projection 前 re-adopt ガードを backlog 追加
 検証: persona 再検討（positioning Update / grasp-backlog persona2a シグナル / 新 entity [[parallel-session-file-back-contention-2026-06-28]] / index / log）が direct-patch fallback 経由で main に入った後、Codex の ssot-land 系 re-adopt で **file-back store（.grasp/file-back.sqlite, 44 pages）にも全て materialize** されていることを確認（store 内 page "parallel session file-back contention 2026-06-28" 実在、各内容行 present）。∴ 「並行下で store に直接書けず direct-patch fallback しても、adopt は main Markdown から build するので内容は次の re-adopt で自動的に store=SSoT へ流れ込む」。ただし暗黙依存なので、逆向き（store→md full projection）を未取り込み diff のまま走らせると未 reconcile の direct-patch（他 session 分含む）が巻き戻る。この projection 前 re-adopt 強制 check を [[grasp-backlog]] の write-substrate guard 群に [gap] として追加した。
+
+## [2026-06-28 13:22] file-back | [[grasp-backlog]] に write-page handle bug 候補を tracked 化（read と非対称）
+ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog の Local write and identity layer に上げ、Codex が拾えるようにした。read <short page_id> 可・write-page <同 id> 不可・stem handle 可。
