@@ -1509,6 +1509,10 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 並行 agent が同一 canonical store を共有して知識共有しながら並行開発する基盤、を今日のゴールに固定。判定は 2-agent 共有 store dogfood が green（並行 write 安全 / 互いの現在状態・直近変化が read 可 / in-flight 認識で二重作業回避 / projection 遅延で md race なし / session 単位 revert）。
 write 側基盤（canonical store / WAL / BEGIN IMMEDIATE / session 帰属 / revert-plan --scope session）は実装済、未充足は in-flight 協調 surface と遅延 projection。dogfood-first で落ちた所だけ実装する。新規ユーザは Markdown=SSoT の mode 1 から入る信頼勾配の高信頼端向けで、協調レイヤは単一 agent では不要な形に degrade。
 
+## [2026-06-28 12:03] file back | 初期 persona 設計を再検討（positioning-two-personas に3軸分解 / bridge persona / persona2a-2b / consumer 軸）
+[[positioning-two-personas]] に `## Updates` 追記。初期の persona1↔persona2 単一スペクトラムが独立3軸（A on-ramp=実装済で解決 / B リンク密度=価値駆動・逆風 / C corpus 所有者・GTM）を畳んでいたと整理。二項が名前を付け忘れたセル=(Markdown×高密度×nishio 所有)=llm-wiki 森を bridge persona と位置づけ（[[wiki-forest-markdown-import-dogfood-2026-06-25]]）。persona2 を persona2a（高密度 Markdown、served・次 driver 候補）/ persona2b（まばら .md・冷たい HN/Reddit、density 非依存 pitch・dilution 本体）に分割。persona は corpus 所有者軸と AI consumer 軸（[[delivery-cli-plus-skill]]）を分離。
+- fallback 理由: grasp write-first runbook が通らなかったため direct Markdown patch で file back。並行 session が共有 main working tree を占有（branch 切替・wiki/code dirty）し git-side guard を満たせず、worktree + shared store は store/output pairing guard（repo store↔repo output のみ）で禁止。SQLite store(.grasp/file-back.sqlite, event<=324) への authoritative 反映は main working tree が空いてから write-page で reconcile 予定。branch: file-back/persona-reconsider-wt（off origin/main 96df1d1）。
+
 ## [2026-06-28 12:05] file-back | Grasp-only authority と並行 agent 判断
 - judgment: 知識管理から Markdown を外す、は Markdown を authority / concurrent edit target から外す意味なら妥当。Markdown projection は review / backup / publish / fresh-checkout recovery の低頻度 artifact として残す。
 - implementation position: `1.8.72` で `write-page` / `append-log --defer-projection`、SQLite-only `history` / `log-records` の `log_append` records、`activity [title]` が入り、2-agent subprocess regression は shared store / deferred projection / cross-session read / session rollback plan まで green。
@@ -1517,3 +1521,6 @@ write 側基盤（canonical store / WAL / BEGIN IMMEDIATE / session 帰属 / rev
 
 ## [2026-06-28 12:13] file-back | competing file-back preflight blocked dirty worktree
 別 agent の incident file-back は、この `friction/cross-agent-write` worktree が activity / deferred projection / version bump / file-back で dirty だったため、`scripts/check_file_back_preflight.py` の single-owner clean guard で正しく停止した。衝突をその場で解こうとせず、この pass に畳む判断になったため、[[parallel-agent-write-incident-2026-06-26]] の Open Questions を file-back lock / push ownership / SQLite event session_id / `activity` surface の解決済みとして追記した。これは incident 後 guardrail の live dogfood 成功。
+
+## [2026-06-28 12:15] file back | grasp-backlog に persona2a 優先の実装シグナルを追記
+[[positioning-two-personas]] 2026-06-28 再検討の実装含意を [[grasp-backlog]] の「Cross-project graph を first-class edge に + whole-store retrieval」節へ1行: 次に served すべきは persona2a（高密度 Markdown 森）= whole-store cross-project + retrieval が最優先、persona2b 向け come-from 自動昇格は後置。backlog = Codex の作業候補リストなので、再検討を Codex に伝える経路はここ。direct-patch fallback 継続（authoritative store 反映は main tree が静まってから）。
