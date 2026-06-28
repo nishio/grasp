@@ -1553,3 +1553,8 @@ ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog �
 - code: `export-markdown` non-check write mode now previews changed/missing projection files and refuses to overwrite Git-worktree Markdown diffs unless `--allow-projection-overwrite` is explicit.
 - rationale: direct-patch fallback or merge can advance Markdown while SQLite is stale; full store-to-Markdown projection must stop and require re-adopt/reconcile instead of resurrecting stale content.
 - docs: bumped public/package version to `1.8.74` and updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[sqlite-ssot-write-plan]]. schema remains v8.
+
+## [2026-06-28 13:53] implementation+file-back | Git-worktree shared-store dogfood for activity + explicit batch export
+- tests: added `test_parallel_agent_git_worktree_dogfood_uses_activity_and_explicit_batch_export`, a Git-worktree shared `.grasp/authority.sqlite` loop where A writes `A` with `--defer-projection`, B checks `activity A`, avoids rewriting A, writes `B` plus a log entry, then batch exports.
+- result: Markdown remains unchanged during deferred writes; bare `export-markdown --regenerate-log` refuses with `--allow-projection-overwrite` guidance; explicit batch export writes A/B/Log and `write-status --strict` is clean.
+- judgment: for touched-page duplicate rewrite avoidance, `activity` is sufficient in this dogfood and no claim/lease was added. Pre-event intent awareness remains a longer real-dogfood question.
