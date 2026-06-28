@@ -1568,3 +1568,8 @@ ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog �
 - tests: added `test_parallel_agent_claim_write_release_projection_loop`, combining `claim-page`, `activity`, refused duplicate claim, deferred `write-page`, deferred `append-log`, `release-claim`, explicit batch export, strict status, and session rollback planning in one Git-worktree shared-store loop.
 - result: Markdown projection stays old until batch export; bare export refuses without `--allow-projection-overwrite`; claim/release events stay coordination metadata and are excluded from `revert-plan --scope session` candidates.
 - judgment: happy-path soft claims do not yet require queueing or mandatory locks. Stale claim cleanup remains a longer real-dogfood question.
+
+## [2026-06-28 14:27] implementation+file-back | fold stale claim state into activity
+- code: `activity` now folds `page_claim` / `page_claim_release` state before summarizing events. Claim events expose `claim_status`, `claim_active`, expiry/release metadata, and top-level `active_claims[]`.
+- tests: added coverage that expired and released claims remain visible as event-stream history but no longer set `active=true` or appear in `active_sessions[]`.
+- judgment: this removes the concrete stale-claim ergonomics gap where TTL-expired or released soft leases could still look like active work through `activity`.
