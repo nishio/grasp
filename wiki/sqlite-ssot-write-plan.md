@@ -184,6 +184,8 @@ Dogfood in the same `1.8.42` slice confirmed the guard fails while the worktree 
 
 `1.8.68` hardens that preflight for permission-shaped failures: an existing regular journal file must be writable, and a missing journal path must have a writable/searchable existing parent directory before mutation starts. The regression uses a read-only JSONL file and confirms no SQLite event, projection write, or journal content is left behind.
 
+`1.8.69` extends the same preflight from path appendability to existing journal integrity. Before appending to a legacy/ad hoc journal, write commands now parse and validate the existing JSONL stream; invalid JSONL fails with `journal_append_preflight_failed` before SQLite mutation, projection export, or journal append. `adopt-markdown --replace-journal` keeps the overwrite escape hatch and does not require old content to parse.
+
 This does **not** yet make every authority boundary final. `sync`, `acquire`, generated Markdown backup/review policy, broader native event-derived semantic page projection, and semantic multi-page work-unit inference beyond log-batch, subject-log, log-page-subjects, content-subjects, version-bump, same-page dependency, explicit event-window, time-burst, or explicit session metadata boundaries still need migration work.
 
 ## Why This Replaces The Fast Path
@@ -262,6 +264,8 @@ Completed in `1.8.66`: actual revert projection-finalization failures now return
 Completed in `1.8.67`: legacy/ad hoc `--journal` write paths now preflight journal appendability before mutation and return `journal_append_preflight_failed` diagnostics without changing SQLite state or Markdown projection when the journal path is unappendable.
 
 Completed in `1.8.68`: journal append preflight now rejects read-only existing journal files and unwritable existing parent directories for missing journal paths before write commands mutate SQLite state.
+
+Completed in `1.8.69`: journal append preflight now validates existing journal JSONL before appending, while keeping `adopt-markdown --replace-journal` as the explicit overwrite path.
 
 Completed in `1.8.56`: repo-local preflight/write-start/postwrite now use gitignored `.grasp/file-back.lock.json` to block overlapping normal runbook file-backs, and postwrite releases the lock only after all checks pass.
 

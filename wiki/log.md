@@ -1493,3 +1493,8 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 - code: legacy/ad hoc `--journal` preflight now rejects read-only existing journal files and unwritable existing parent directories for missing journal paths before mutation.
 - tests: added an append-section regression with a read-only JSONL file; the command returns `journal_append_preflight_failed` and leaves SQLite events, Markdown projection, and journal content unchanged.
 - docs: bumped public/package version to `1.8.68` and updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[sqlite-ssot-write-plan]]. schema remains v8.
+
+## [2026-06-28 10:02] implementation+file-back | preflight invalid existing journals
+- code: legacy/ad hoc `--journal` write paths now parse and validate existing JSONL before appending, failing before mutation when the audit stream is corrupt.
+- tests: added an append-section regression with invalid JSONL; the command returns `journal_append_preflight_failed` and leaves SQLite events, Markdown projection, and journal content unchanged.
+- docs: bumped public/package version to `1.8.69` and updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[sqlite-ssot-write-plan]]. schema remains v8.
