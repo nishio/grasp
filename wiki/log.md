@@ -1535,7 +1535,16 @@ Claude Code / Codex の並行 file-back で出た3種類の修正（content deli
 - [[sqlite-write-concurrency]] の Updates 2026-06-28 に5点を追記: ①並行 write 実験の正しい SUT は write path でなく detection/guardrail 層 ②進歩指標 = silent clobber(06-26) → loud refusal(06-28 preflight が competing file-back を exit 1 拒否) ③耐久層は git commit 履歴(本 repo は file-back store gitignored ゆえ commit を跨ぐ durable は git-tracked Markdown) ④direct-patch fallback は伝播する(Codex の direct patch 後 semantic_log_stale で後続 preflight が停止) ⑤SSoT page 自身も陳腐化する。
 - fallback note: 本 file-back は grasp write-first を試みたが `check_file_back_preflight.py` が `semantic_log_stale`(committed log projection が SQLite-events 由来 semantic log と不一致)で exit 1。runbook の escape 条件に従い direct Markdown patch fallback で実施。これは追記④の実例そのもの。
 
+## [2026-06-28 12:33] file-back | 別 harness (Claude Code) の書き込み体験を SSoT(現 main) に着地: [[ai-author-feedback-2026-06-26]] §Updates + [[sqlite-write-concurrency]] §Updates 2026-06-28
+前 file-back は使い捨て worktree の fresh store で実行し store ごと消えたため、content は未マージ枝の Markdown にしか無く SSoT 未着地だった（自己実演: worktree 隔離→store が git/Markdown に縮退）。現 main に対しクリーンに再適用。摩擦=cross-machine store 非共有 / write-page handle が read と非対称(bug候補) / content 軽量追記欠如 / env portability、および lock の上の git working-tree/HEAD 層（worktree は tree/HEAD を隔離するが store を割る＝独立軸）。goal ページの運用観察は並行 agent の 1.8.72 実装で重複化したため落とした。
+
 ## [2026-06-28 12:38] implementation+file-back | guard failure recovery ladder hints
 - code: `scripts/check_file_back_preflight.py` / `scripts/check_file_back_write_start.py` now print `recovery ladder:` hints when guard failure stops a file-back.
 - behavior: hints start from `activity --limit 20` ownership inspection and route dirty worktree, HEAD movement, semantic log drift, store event advance, store/output pair mismatch, session reuse, and active lock toward owner-branch fold-in, isolated direct-patch PR with pending reconcile, clean reconcile, preflight rerun, or waiting.
 - docs: bumped public/package version to `1.8.73` and updated [[history]], [[grasp-v1-implemented]], [[parallel-agent-substrate-goal]], and [[sqlite-ssot-write-plan]]. schema remains v8.
+
+## [2026-06-28 12:46] file back | 前回 file-back 内容が SSoT store に届いたことを確認 + projection 前 re-adopt ガードを backlog 追加
+検証: persona 再検討（positioning Update / grasp-backlog persona2a シグナル / 新 entity [[parallel-session-file-back-contention-2026-06-28]] / index / log）が direct-patch fallback 経由で main に入った後、Codex の ssot-land 系 re-adopt で **file-back store（.grasp/file-back.sqlite, 44 pages）にも全て materialize** されていることを確認（store 内 page "parallel session file-back contention 2026-06-28" 実在、各内容行 present）。∴ 「並行下で store に直接書けず direct-patch fallback しても、adopt は main Markdown から build するので内容は次の re-adopt で自動的に store=SSoT へ流れ込む」。ただし暗黙依存なので、逆向き（store→md full projection）を未取り込み diff のまま走らせると未 reconcile の direct-patch（他 session 分含む）が巻き戻る。この projection 前 re-adopt 強制 check を [[grasp-backlog]] の write-substrate guard 群に [gap] として追加した。
+
+## [2026-06-28 13:22] file-back | [[grasp-backlog]] に write-page handle bug 候補を tracked 化（read と非対称）
+ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog の Local write and identity layer に上げ、Codex が拾えるようにした。read <short page_id> 可・write-page <同 id> 不可・stem handle 可。
