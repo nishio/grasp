@@ -112,6 +112,10 @@ Done 条件1-5は current `main` で green。証拠は `tests.test_cli_help` の
 
 したがって本ページの today goal は完了。長い real dogfood は「この判断を覆す concrete gap が出たら最小 surface を足す」ための monitoring であり、queue / automated reconcile を今追加する blocker ではない。
 
+## 2026-06-28 post-completion sub-agent write smoke
+
+別 sub-agent が clean `main` から通常の Grasp write-first runbook で小さな post-completion smoke を行った。これは parallel-agent substrate goal を green と判定した後の確認であり、新しい scope を足すものではない。長い real dogfood は引き続き monitoring として扱う。
+
 ## 進め方: dogfood-first
 
 机上で spec を確定させず、**まず 2-agent 共有 dogfood を組んで走らせ、実際に落ちた所だけを実装する**（実装事実 first、判明した制約は file back）。
