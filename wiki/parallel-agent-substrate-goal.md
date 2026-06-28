@@ -6,6 +6,7 @@ sources:
   - [[sqlite-write-concurrency]]
   - [[native-authority-markdown-projection]]
   - [[parallel-agent-write-incident-2026-06-26]]
+  - [[parallel-session-file-back-contention-2026-06-28]]
   - [[grasp-backlog]]
 ---
 
@@ -45,6 +46,24 @@ grasp を **複数の AI agent が同一 canonical store（`.grasp/authority.sql
 ただし **Markdown projection 自体を即ゼロにする判断ではない**。現時点の projection は review / backup / publish / fresh-checkout recovery の低頻度 artifact として残す。race するのは projection を per-write の authority 的入力にする時であり、generated snapshot として batch 出力する限り、並行 authoring の critical section には入れない。
 
 `1.8.72` の evidence は「最小 2-agent subprocess regression が green」まで。したがって今の位置は **Grasp-only authority substrate は最小成立、広い実運用は未検証**。次は real multi-agent dogfood を走らせ、`activity` だけで二重作業回避が足りるなら claim/lease は作らない。不足が観測された場合だけ、目的が名前に出る command として追加する。目的の薄い既存 command を温存しない方針は `append-section` public CLI を削除した `1.8.70` と同じ。
+
+## 2026-06-28 file-back: 三者三様の修正を開発に使う
+
+Claude Code / Codex の並行 file-back では、同じ摩擦に対して3種類の修正が出た。これはバラバラに見えるが、実際は **別レイヤの修正** として全部 substrate goal に使える。
+
+1. **content delivery 優先**: isolated worktree + direct Markdown patch + PR で、知見を止めずに main へ届ける。短期には有効だが、store events に未反映の divergence を残す。
+2. **incident entity 化**: [[parallel-session-file-back-contention-2026-06-28]] のように、guard がどこで止めたかを観測データとして残す。次の設計入力になるが、単独では再発を止めない。
+3. **concept / code surface 化**: [[sqlite-write-concurrency]] の git working tree / HEAD 層の整理や、`activity` / `--defer-projection` / session_id guard のように、再発防止・観測・rollback surface へ落とす。
+
+この学びから、次の開発は単に claim/lease を足す前に **post-guard recovery ladder** を作るべき。preflight が dirty / HEAD moved / semantic log stale で止めた時、agent が毎回その場判断で別解を作るのではなく、標準手順を返す:
+
+- `activity` / session_id で owner と近い work unit を見る。
+- 同じ work unit なら owner branch に畳む。
+- content-only で急ぐなら isolated worktree + direct patch PR に逃がし、pending reconcile を log / entity に明示する。
+- authority/store 変更なら待つか、shared store に `--defer-projection` で書き、projection は後で batch export する。
+- merge 後に canonical store reconcile を1回だけ走らせ、semantic log / projection drift を消す。
+
+したがって Done 条件 3 の「in-flight 認識」は、ページ単位の `activity` だけでなく **止まった後に何を選ぶかの recovery path** まで含めて評価する。Done 条件 4 の「projection が race しない」も、write command の `--defer-projection` だけでなく direct-patch fallback 後の store reconcile まで含めて dogfood する。
 
 ## 進め方: dogfood-first
 
