@@ -1508,3 +1508,7 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 ## [2026-06-28 11:41] file-back | 今日の開発ゴール [[parallel-agent-substrate-goal]] を新設（Codex 向け）
 並行 agent が同一 canonical store を共有して知識共有しながら並行開発する基盤、を今日のゴールに固定。判定は 2-agent 共有 store dogfood が green（並行 write 安全 / 互いの現在状態・直近変化が read 可 / in-flight 認識で二重作業回避 / projection 遅延で md race なし / session 単位 revert）。
 write 側基盤（canonical store / WAL / BEGIN IMMEDIATE / session 帰属 / revert-plan --scope session）は実装済、未充足は in-flight 協調 surface と遅延 projection。dogfood-first で落ちた所だけ実装する。新規ユーザは Markdown=SSoT の mode 1 から入る信頼勾配の高信頼端向けで、協調レイヤは単一 agent では不要な形に degrade。
+
+## [2026-06-28 12:07] file-back | [[ai-author-feedback-2026-06-26]] に §Updates 2026-06-28（別 harness × SQLite-SSoT runbook の書き込み摩擦）を追記
+Claude Code（開発 Codex とは別 harness）が SQLite-SSoT runbook で本番 file-back した一次記録。前 candidate（lock / attribution / staleness check）は guard-script + revert-plan --scope session として実装済で、git 手術に逃げず grasp-write で完走。新摩擦＝(a) cross-machine で .grasp/ 共有 store は git を渡らない→真に共有された store は cross-machine 未成立（並行基盤 blocker）(b) write-page の handle 解決が read と非対称(bug候補) (c) content ページの軽量追記手段が無い（append-section 退役の余波）(d) runbook が単一連続 shell/env 永続を仮定。
+実演: 本 file-back 中に別 agent(persona-reconsider)が共有 working tree で並行稼働。grasp lock は第二 writer を正しく阻止したが、lock は store/projection しか直列化せず git の working tree/HEAD は共有のまま→未コミット7件が私のブランチ HEAD に混入。worktree（tree 分離+HEAD 分離）で隔離して完走。tree 分離と store 共有は別軸で、worktree を素に使うと store が割れ知識共有が消える＝ [[parallel-agent-substrate-goal]] は worktree+GRASP_CANONICAL_STORE 共有+遅延 projection の三点が要る。
