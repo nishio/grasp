@@ -4,6 +4,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -8435,6 +8436,154 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(sorted(export_result["written_files"]), ["A.md", "Log.md"])
         self.assertTrue(status_result["strict_ok"])
         self.assertEqual(status_result["strict_failures"], [])
+
+    def test_parallel_agent_concurrent_cli_writes_wait_and_serialize(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n- old B\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "authority.sqlite"
+
+            def run_json(*args):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+
+            lock_holder = sqlite3.connect(store_path, timeout=0.1)
+            lock_holder.execute("BEGIN IMMEDIATE")
+            try:
+                write_a = [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-a",
+                    "--session-id",
+                    "session-a",
+                    "write-page",
+                    "A",
+                    "--line",
+                    "# A",
+                    "--line",
+                    "- concurrent agent A",
+                    "--no-journal",
+                    "--defer-projection",
+                ]
+                write_b = [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-b",
+                    "--session-id",
+                    "session-b",
+                    "write-page",
+                    "B",
+                    "--line",
+                    "# B",
+                    "--line",
+                    "- concurrent agent B",
+                    "--no-journal",
+                    "--defer-projection",
+                ]
+                processes = [
+                    subprocess.Popen(write_a, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE),
+                    subprocess.Popen(write_b, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE),
+                ]
+                time.sleep(0.2)
+                both_waiting = all(process.poll() is None for process in processes)
+                lock_holder.rollback()
+                self.assertTrue(both_waiting)
+            finally:
+                lock_holder.close()
+
+            completed = []
+            for process in processes:
+                stdout, stderr = process.communicate(timeout=30)
+                completed.append((process.returncode, stdout, stderr))
+            for returncode, stdout, stderr in completed:
+                self.assertEqual(returncode, 0, stderr)
+                self.assertTrue(stdout.strip())
+
+            write_a_result = json.loads(completed[0][1])
+            write_b_result = json.loads(completed[1][1])
+            markdown_before_export = {
+                path.name: path.read_text(encoding="utf-8")
+                for path in [root / "A.md", root / "B.md", root / "Log.md"]
+            }
+            read_a = run_json("read", "A")
+            read_b = run_json("read", "B")
+            activity_all = run_json("activity", "--active-seconds", "86400")
+            revert_plan_a = run_json("revert-plan", write_a_result["event_id"], "--scope", "session")
+            revert_plan_b = run_json("revert-plan", write_b_result["event_id"], "--scope", "session")
+            export_result = run_json("export-markdown", "--output", str(root), "--regenerate-log")
+            status = run_json("write-status", "--output", str(root), "--no-journal", "--strict")
+            with sqlite3.connect(store_path) as connection:
+                event_rows = connection.execute(
+                    """
+                    SELECT event_type, actor, session_id
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            markdown_after_export = {
+                path.name: path.read_text(encoding="utf-8")
+                for path in [root / "A.md", root / "B.md", root / "Log.md"]
+            }
+
+        self.assertTrue(write_a_result["projection_deferred"])
+        self.assertTrue(write_b_result["projection_deferred"])
+        self.assertEqual(markdown_before_export["A.md"], "# A\n- old A\n")
+        self.assertEqual(markdown_before_export["B.md"], "# B\n- old B\n")
+        self.assertEqual(markdown_before_export["Log.md"], "# Log\n")
+        self.assertEqual([line["text"] for line in read_a["lines"]], ["# A", "- concurrent agent A"])
+        self.assertEqual([line["text"] for line in read_b["lines"]], ["# B", "- concurrent agent B"])
+        self.assertEqual(
+            sorted(tuple(row) for row in event_rows),
+            [
+                ("page_update", "agent-a", "session-a"),
+                ("page_update", "agent-b", "session-b"),
+            ],
+        )
+        self.assertEqual(
+            sorted(session["session_id"] for session in activity_all["active_sessions"]),
+            ["session-a", "session-b"],
+        )
+        self.assertEqual(revert_plan_a["candidate_event_ids"], [write_a_result["event_id"]])
+        self.assertEqual(revert_plan_b["candidate_event_ids"], [write_b_result["event_id"]])
+        self.assertEqual(sorted(export_result["written_files"]), ["A.md", "B.md"])
+        self.assertEqual(markdown_after_export["A.md"], "# A\n- concurrent agent A\n")
+        self.assertEqual(markdown_after_export["B.md"], "# B\n- concurrent agent B\n")
+        self.assertTrue(status["strict_ok"])
+        self.assertEqual(status["strict_failures"], [])
 
     def test_parallel_agent_git_worktree_dogfood_uses_activity_and_explicit_batch_export(self):
         with tempfile.TemporaryDirectory() as tmpdir:
