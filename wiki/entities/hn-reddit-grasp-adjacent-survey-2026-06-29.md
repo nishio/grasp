@@ -69,3 +69,11 @@ HN/Reddit に出す前に必要な最小 demo:
 - HN 投稿の最小タイトルは何か。候補: `Show HN: Grasp - a local graph reader for agent-maintained Markdown wikis`。ただし `reader` だけでは write/file-back dogfood が弱いかもしれない。
 - r/ObsidianMD に出す場合、plugin ではないことは弱点か、それとも CLI agent substrate として差別化になるか。
 - local embeddings / local LLM をいつまでに語れるようにするか。privacy hook は強いが、今の grasp は graph/SQLite/token-bounded read が主役であり、local model story を先に盛ると軸がぶれる。
+
+## Updates
+
+### 2026-06-29: direct Grasp mention search found Cosense/Scrapbox organic mentions, not HN/Reddit
+
+[[grasp-organic-mentions-2026-06-29]] を追加。HN/Reddit の隣接需要はあるが、`nishio/grasp` / `github.com/nishio/grasp` の直接 mention は見つからなかった。直接 mention は井戸端・motoso・stao など Scrapbox/Cosense 圏に集中し、特に inajob の非 admin public backup + OpenCode + grasp skill 試用が public project outsider story として強い。
+
+含意: HN/Reddit は organic channel ではまだなく launch channel。persona2b へは concrete demo が必要。Scrapbox/Cosense 圏では persona1 周辺の organic adoption が始まっている。
