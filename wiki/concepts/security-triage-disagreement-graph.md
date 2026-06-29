@@ -3,6 +3,7 @@ type: concept
 summary: 脆弱性スキャナー結果を current risk として直輸入せず、scanner observation / Claude Code transcript / 人間議論 / 批判 / judgment を disagreement graph として構造化する設計仮説。Grasp は scanner engine ではなく、意見が分かれる理由と判断の前提を次回 triage で再利用する reasoning layer になりうる。
 sources:
   - nishio conversation 2026-06-29: vulnerability scanner direction / transcript / human discussion IDs / private-project handoff
+  - docs/authority-modes.md
   - [[hn-reddit-grasp-adjacent-survey-2026-06-29]]
   - [[use-case-experiment-as-outcome-story]]
   - [[ai-consumer-cost-and-trust]]
@@ -137,6 +138,21 @@ Grasp 側の差分候補:
 - 人間の発言者 ID / role / owner status を judgment provenance にどう反映するか。
 - current risk view を何から fold するか。
 - 何が変わったら再評価を必須にするか。
+
+## Updates 2026-06-29: authority modes and A/B+C pattern
+
+Claude / private-project handoff exposed a public-doc ambiguity: README described Grasp strongly enough as a local graph reader that a reader could infer "Markdown-only indexer". The correction is now documented in `docs/authority-modes.md`: Mode 1 = read-only indexed evidence, Mode 2 = SQLite-authority wiki with Markdown projection.
+
+For the vulnerability-triage use case, the concrete adoption pattern is A/B+C:
+
+- Wiki A/B: existing evidence corpora imported read-only. Examples include scanner exports, transcript exports, human-discussion exports, and existing security notes. Their original systems remain authority.
+- Wiki C: new SQLite-authority reasoning wiki. It contains derived `scan-observation`, `security-dispute`, `security-judgment`, `assumption`, `invalidation`, and per-file attention-ledger pages, with provenance links back to A/B evidence.
+
+Terminology guard: current Grasp is an event-backed materialized SQLite store, not pure replay-only event sourcing. `claim-page` is a soft coordination signal, not a mandatory lock. Markdown projection is review / backup / export in Mode 2, not the authority.
+
+Smoke-test gotcha: empty `adopt-markdown` currently fails with `Markdown folder has no .md files`, so a fresh SQLite-authority wiki needs a seed Markdown page before adoption, or a future first-class empty-project init command. The docs recipe uses a seed `Home.md`.
+
+Design implication: start Wiki C with page type / frontmatter conventions and ordinary links. Promote only the types that survive real scanner data into native commands or event types. This keeps Grasp as substrate while letting the private corpus decide the ontology.
 
 ## Related
 

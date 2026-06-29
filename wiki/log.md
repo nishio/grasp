@@ -1751,3 +1751,10 @@ persona run は将来の回帰基準にし、P1/P2a=graph density、P2b=bounded 
 核心: scanner finding は observation、Claude thinking は evidence discovery trail、人間議論は position / assumption / decision provenance、judgment は evidence・前提・期限・無効化条件つきの current conclusion。scanner と批判は `vulnerable version present` vs `not reachable in production` のように別命題を見ていることが多いので、中心は finding ではなく disagreement axis / dispute。
 非公開プロジェクトへの handoff 方針: 公開 wiki 側は構造仮説だけを渡し、実際の ontology / ingest policy は非公開 scanner report・Claude transcript・ID付き人間議論で壊して決めてもらう。
 fallback: grasp write-first preflight は local `main` が `origin/main` より4 commits ahead で `branch differs from origin/main` 停止。今回は direct Markdown patch fallback で記録した。
+
+## [2026-06-29 23:15] file-back | authority modes docs clarify A/B evidence + C reasoning wiki
+[[security-triage-disagreement-graph]] に authority modes / A/B+C pattern の Updates を追記。Claude / private-project handoff で Grasp が "Markdown-only indexer" と読まれうる public-doc ambiguity が出たため、`docs/authority-modes.md`・README/README.ja・`docs/markdown.md` 側で read-only indexed evidence と SQLite-authority wiki を分けた。
+設計結論: 既存 Wiki A/B は read-only evidence corpus として import し、新規 Wiki C は SQLite-authority reasoning wiki として作る。C はまず page type / frontmatter conventions で `scan-observation` / `security-dispute` / `security-judgment` / `assumption` / `invalidation` / per-file attention ledger を持ち、実データで残った型だけ native command / event type に昇格する。
+用語補正: Grasp は event-backed materialized SQLite store であり pure replay-only event sourcing ではない。`claim-page` は soft coordination signal で mandatory lock ではない。Mode 2 の Markdown は review / backup / export projection であって authority ではない。
+実装 gotcha: docs recipe の smoke で、空ディレクトリへの `adopt-markdown` は `Markdown folder has no .md files` で失敗すると分かったため、fresh SQLite-authority wiki には seed `Home.md` が必要と記録した。
+fallback: `GRASP_SESSION_ID=file-back-20260629T2315-authority-modes python3 scripts/check_file_back_preflight.py` は local `main` が `origin/main` より9 commits ahead で `branch differs from origin/main` 停止。今回は direct Markdown patch fallback で記録した。
