@@ -1758,3 +1758,8 @@ fallback: grasp write-first preflight は local `main` が `origin/main` より4
 用語補正: Grasp は event-backed materialized SQLite store であり pure replay-only event sourcing ではない。`claim-page` は soft coordination signal で mandatory lock ではない。Mode 2 の Markdown は review / backup / export projection であって authority ではない。
 実装 gotcha: docs recipe の smoke で、空ディレクトリへの `adopt-markdown` は `Markdown folder has no .md files` で失敗すると分かったため、fresh SQLite-authority wiki には seed `Home.md` が必要と記録した。
 fallback: `GRASP_SESSION_ID=file-back-20260629T2315-authority-modes python3 scripts/check_file_back_preflight.py` は local `main` が `origin/main` より9 commits ahead で `branch differs from origin/main` 停止。今回は direct Markdown patch fallback で記録した。
+
+## [2026-06-29 23:25] file-back | Grasp organic mention survey
+[[grasp-organic-mentions-2026-06-29]] を追加。grasp 直接 mention は HN/Reddit では見つからず、井戸端・motoso・stao など Scrapbox/Cosense 圏に集中していた。
+最重要 data point は inajob の非 admin public backup + OpenCode + grasp skill 試用。persona1 周辺の organic adoption と public project outsider persona を示す。
+[[hn-reddit-grasp-adjacent-survey-2026-06-29]] と [[grasp-backlog]] P5 に反映。tool routing（cosense-cli ではなく grasp を選ばせる）が次の friction。
