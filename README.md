@@ -62,6 +62,15 @@ grasp --store /tmp/grasp-demo.sqlite --project grasp-wiki read grasp-v1-implemen
 The second command prints the page plus backlinks, related pages, and unresolved
 targets when they exist.
 
+For a smaller external-facing Markdown demo, use the bundled dense vault:
+
+```bash
+python3 -m grasp --store /tmp/persona2a.sqlite import --markdown examples/persona2a-vault --project persona2a
+python3 -m grasp --store /tmp/persona2a.sqlite --project persona2a read "Ingestion Pipeline"
+```
+
+The full walkthrough is in [docs/persona2a-demo.md](docs/persona2a-demo.md).
+
 ## Use Your Notes
 
 For Markdown or Obsidian-style notes:
