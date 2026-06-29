@@ -55,6 +55,14 @@ sources:
 - **P4: constrained low-cost model consumer**。corpus owner は P1 or P2a から選ぶ。AI consumer = 小 context・低能力・domain knowledge 薄めの agent。実タスク: custom script なし、`skills/grasp` と `grasp <cmd> --help` だけで同じ retrieval question を解く。見るもの: command discoverability、text/JSON contract、zero-hit recovery、[[takker-opencode-villagepump-test-2026-06-24]] で見えた cross-model portability の再現性。
 - **P5: public hosted Cosense partial-acquire researcher**。corpus owner = public project outsider（admin export なし）。AI consumer = 調査 agent。実タスク: `acquire` / `cross-project-refs` / `cross-project-acquire` で特定 topic の bounded candidate bundle を作り、agent-authored report へ渡す。見るもの: permission / env diagnostics、partial corpus caveat、report handoff contract、raw dump で終わらないか。
 
+success shape:
+
+- persona ごとの「感想」ではなく、**grasp の強い用途・弱い導線・次に直すべき面**が実走証跡から決まる状態にする。
+- 良かった run は README / docs / demo へ昇格できる concrete outcome story にする。特に P2a は「Markdown 束より grasp が効く」を見せる外向け demo 候補。
+- 悪かった run は「persona が不満だった」で止めず、onboarding / zero-hit recovery / raw-dump output / write confidence / report handoff など、CLI・Skill・docs・backlog・decision の修正先へ routing する。
+- persona run は将来の回帰基準にする。CLI や docs を変えた時、P2b sparse Markdown の初回体験や P3 file-back agent の write confidence が悪化していないかを確認できる状態がよい。
+- 全 persona に同じ売り文句を当てない。P1/P2a は graph density、P2b は bounded retrieval、P3 は write confidence、P4 は low-cost portability、P5 は acquisition/report handoff という別価値として position する。
+
 done criteria:
 
 - 少なくとも各 persona 1 run ずつ、entity page または既存 feedback page に command trace と outcome judgement が残る。
