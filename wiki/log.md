@@ -1741,6 +1741,11 @@ Reddit は r/ObsidianMD / r/AI_Agents で Karpathy-style LLM Wiki、Obsidian vau
 良い run は README / docs / demo に昇格できる concrete outcome story、悪い run は onboarding / zero-hit recovery / raw-dump output / write confidence / report handoff などの修正先へ routing する。
 persona run は将来の回帰基準にし、P1/P2a=graph density、P2b=bounded retrieval、P3=write confidence、P4=low-cost portability、P5=acquisition/report handoff と価値を分けて position する。
 
+## [2026-06-29 12:37] file-back | SQLite SSoT does not prevent projection merge conflicts
+[[sqlite-write-concurrency]] に 2026-06-29 Updates を追記。SQLite SSoT は live write authority だが、Git merge は gitignored SQLite events を見ず tracked Markdown projection を text merge するため、`wiki/log.md` は conflict しうる。
+今回の `codex/persona-emulation-plan` fast-forward + autostash conflict は P3 AI author/file-back agent の bad experience として routing。correctness は保てるが、merge 済み / dirty 継続 / autostash 残存 / append union が人間に重い。
+改善方向: events-aware merge、git-tracked durable event bundle、または `log.md` projection の merge 対象外化 / 遅延 batch。現状 recovery は append union と conflict marker / lint / whitespace check。
+
 ## [2026-06-29 14:22] file-back | vulnerability triage disagreement graph
 [[security-triage-disagreement-graph]] を追加。脆弱性スキャナー方向での Grasp は scanner engine ではなく、scanner finding / Claude Code transcript / 人間議論 / 批判 / judgment を次回 triage に再利用する reasoning layer と位置づける。
 核心: scanner finding は observation、Claude thinking は evidence discovery trail、人間議論は position / assumption / decision provenance、judgment は evidence・前提・期限・無効化条件つきの current conclusion。scanner と批判は `vulnerable version present` vs `not reachable in production` のように別命題を見ていることが多いので、中心は finding ではなく disagreement axis / dispute。
