@@ -8,6 +8,8 @@ sources:
   - [[use-case-experiment-as-outcome-story]]
   - [[ai-consumer-cost-and-trust]]
   - [[positioning-two-personas]]
+id: c2b25c9f4969e87a5813c489
+title: security triage disagreement graph
 ---
 
 # concept: security triage disagreement graph
