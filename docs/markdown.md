@@ -32,6 +32,8 @@ grasp --project notes backlinks "概念名"
 
 project が 1 つだけなら `--project` は省略できます。
 
+小さな高密度 Markdown vault で試す demo は [persona2a-demo.md](persona2a-demo.md) にあります。`examples/persona2a-vault` を取り込み、`read` が本文・逆リンク・related・未解決ターゲットを一度に返すことと、temp copy 上の `append-log` / `write-status --strict` までを確認できます。
+
 ## タイトルとリンクの扱い
 
 page title は次の順で決まります。

@@ -62,6 +62,8 @@ HN/Reddit に出す前に必要な最小 demo:
 - comparison: raw grep / editor search では token が散る一方、`grasp read` / `search` は source page + backlinks + related + unresolved を bounded に返す。
 - write loop: session close で file-back し、`write-status --strict` が clean であることを見せる。stale Markdown / direct-patch fallback は `reconcile-markdown` で SSoT に戻す。
 
+2026-06-29 follow-up: 上の最小 demo を repo artifact 化した。`examples/persona2a-vault/` は small dense Markdown / Obsidian-like vault で、agent memory / context budget / ingestion pipeline / stale write guard / source provenance / source digest / log artifact を持つ。`docs/persona2a-demo.md` は temp copy へ import し、`search` / `read` / `backlinks` / `related` / `gather` と grep の差を見せ、最後に `append-log --no-journal` と `write-status --no-journal --strict` を通す。`tests/test_persona2a_demo.py` はこの walkthrough の import / graph read / append-log / strict status を regression として固定した。
+
 ## Open Questions
 
 - HN 投稿の最小タイトルは何か。候補: `Show HN: Grasp - a local graph reader for agent-maintained Markdown wikis`。ただし `reader` だけでは write/file-back dogfood が弱いかもしれない。
