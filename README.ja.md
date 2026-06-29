@@ -10,6 +10,18 @@ Markdown フォルダ、Obsidian vault を authoring の場として残し、そ
 AI が速く読める検索・読解レイヤーを置きます。必要になったら、grasp を
 authoring store にする方向へ段階的に移行できます。
 
+authority の置き方は2つあります。
+
+- **read-only indexed evidence**: 既存の Markdown / Obsidian / Cosense を
+  SSoT のまま残し、`grasp` は捨てられるグラフ index として横に置く。
+- **SQLite-authority wiki**: 新しく作る知識は `grasp` の write 経路で作り、
+  SQLite の current state + event ledger を authority にし、Markdown は
+  review / backup / 相互運用の projection として吐く。
+
+A/B の既存 evidence corpus を read-only import し、C の新しい reasoning wiki を
+SQLite authority として作る pattern は [docs/authority-modes.md](docs/authority-modes.md)
+にまとめています。
+
 まずはこういう道具だと考えてください。
 
 > Cosense や Markdown を引っ越さずに始められ、必要なら段階的に移行できるローカル index。
@@ -125,7 +137,8 @@ grasp read --help
 
 Markdown-backed の書き込み系コマンドもありますが、現時点ではプロジェクト自身の
 dogfooding 用 alpha surface です。通常の利用では、まず読み取り・検索レイヤーとして
-使ってください。
+使ってください。新規の SQLite-authority wiki を意図的に prototype する場合は
+[docs/authority-modes.md](docs/authority-modes.md) の手順に従ってください。
 
 詳しい入口は [docs/markdown.md](docs/markdown.md) と [docs/cosense.md](docs/cosense.md) にあります。
 

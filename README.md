@@ -11,6 +11,18 @@ project as the authoring home, and use `grasp` as the read layer beside it. If
 you later want `grasp` to become the authoring store, that migration can be
 gradual.
 
+There are two authority modes:
+
+- **Read-only indexed evidence**: keep existing Markdown, Obsidian, or
+  Scrapbox / Cosense data as the source of truth and let `grasp` build a
+  disposable graph index beside it.
+- **SQLite-authority wiki**: create new knowledge through `grasp` writes, store
+  the current state and event ledger in SQLite, and export Markdown as a
+  projection for review or interoperability.
+
+See [docs/authority-modes.md](docs/authority-modes.md) for the A/B evidence +
+C reasoning-wiki pattern.
+
 It is built for questions like:
 
 > What have I written about this idea? Also show the lines that link to it and
@@ -138,10 +150,11 @@ Not the goal:
 
 Markdown-backed write commands exist, but they are alpha surfaces for repository
 dogfooding. Treat `grasp` as a read and retrieval layer unless you are working
-on the project itself.
+on the project itself or intentionally prototyping a SQLite-authority wiki.
 
 More detailed Japanese walkthroughs are in [docs/markdown.md](docs/markdown.md)
-and [docs/cosense.md](docs/cosense.md).
+and [docs/cosense.md](docs/cosense.md). The authority-mode guide is in
+[docs/authority-modes.md](docs/authority-modes.md).
 
 ## License
 

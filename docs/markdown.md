@@ -34,6 +34,14 @@ project が 1 つだけなら `--project` は省略できます。
 
 小さな高密度 Markdown vault で試す demo は [persona2a-demo.md](persona2a-demo.md) にあります。`examples/persona2a-vault` を取り込み、`read` が本文・逆リンク・related・未解決ターゲットを一度に返すことと、temp copy 上の `append-log` / `write-status --strict` までを確認できます。
 
+## read-only mirror と SQLite-authority wiki
+
+既存 Markdown / Obsidian vault を取り込むだけなら、元ファイルは SSoT のままです。`grasp` は read-only indexed evidence として横に置く graph index です。
+
+一方で、新しく作る知識を `grasp` 側の SQLite store に持たせ、Markdown は projection として吐く使い方もあります。例えば既存 Wiki A/B を evidence として read-only import し、新しい Wiki C を SQLite-authority な reasoning wiki として作る形です。
+
+詳細と最小コマンド例は [authority-modes.md](authority-modes.md) を見てください。
+
 ## タイトルとリンクの扱い
 
 page title は次の順で決まります。
@@ -73,6 +81,6 @@ AI は必要に応じて `search` で当たりを付け、`read` で本文 + 逆
 
 - Obsidian block refs / heading anchors の line-id 対応は未実装です。
 - Markdown import は read-only mirror です。既存ファイルには書き戻しません。
-- Markdown-backed project 向けの `append-section` / `append-log` / `write-page` / `rename-page` は alpha です。
+- Markdown-backed project 向けの `append-log` / `write-page` / `rename-page` は alpha です。旧 `append-section` event は replay/revert 互換としてだけ残っています。
 
 詳細な引数と JSON key は `grasp <command> --help` を見てください。
