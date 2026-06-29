@@ -1721,3 +1721,8 @@ Reddit は r/ObsidianMD / r/AI_Agents で Karpathy-style LLM Wiki、Obsidian vau
 [[grasp-backlog]] に AI persona emulation / feedback queue を追加。複数 persona は corpus owner と AI consumer constraint を分けて扱う。
 タスク queue: P1 JP Cosense heavy dogfood refresh / P2a dense Markdown wiki owner / P2b sparse Markdown cold skeptic / P3 AI author file-back agent / P4 constrained low-cost model consumer / P5 public hosted Cosense partial-acquire researcher。
 各 run は command trace と outcome judgement を entity page に残し、finding を CLI surface / Skill recipe / docs / backlog / decision の該当先へ routing する。
+
+## [2026-06-29 12:23] file-back | persona emulation success shape
+[[grasp-backlog]] の AI persona emulation / feedback queue に success shape を追記。目的は persona ごとの感想集めではなく、grasp の強い用途・弱い導線・次に直すべき面を実走証跡から決めること。
+良い run は README / docs / demo に昇格できる concrete outcome story、悪い run は onboarding / zero-hit recovery / raw-dump output / write confidence / report handoff などの修正先へ routing する。
+persona run は将来の回帰基準にし、P1/P2a=graph density、P2b=bounded retrieval、P3=write confidence、P4=low-cost portability、P5=acquisition/report handoff と価値を分けて position する。
