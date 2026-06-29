@@ -35,6 +35,32 @@ sources:
 
 `read --around-line` / `search --context` / `peek --line-offset` の bounded navigation primitive は実装済み。残るのは Skill/subagent 運用で不足が見えた時に bounded primitive を足すこと。**LLM 要約は CLI でなく agent 層の責務**（CLI に summarizer を持たせない、[[delivery-cli-plus-skill]]）。
 
+### AI persona emulation / feedback queue
+
+目的: 複数 persona を AI agent が実際に `grasp` CLI で使い、体験を [[use-case-experiment-as-outcome-story]] の形式で file back する。[[positioning-two-personas]] の persona は corpus owner / GTM の軸なので、この queue では **corpus owner persona** と **AI consumer constraint** を分けて書く。
+
+共通 protocol:
+
+- 各 run は開始前に `persona id` / corpus owner / AI consumer constraint / corpus / user task / success criteria を短く宣言する。想像した persona plan は finding ではなく仮説として扱う。
+- AI はできるだけ `grasp` CLI の出力だけで次 action を選び、command trace と「どの出力が次の判断を可能にしたか」を残す。raw dump が最終成果なら outcome story としては未完了。
+- file back は entity page（例: `persona-...-user-test-YYYY-MM-DD` または `ai-...-feedback-YYYY-MM-DD`）に、依頼・対象 corpus・実行 surface・結果・coverage/caveat・friction を分けて残す。実装 gap は本 backlog の該当節へ、current fact は [[grasp-v1-implemented]] へ、設計判断は `decisions/` へ routing する。
+- 各 run は「いい感じか」を明示判定する。CLI が返した bounded artifact が、読む・判断する・次に使う単位になっているかを見る。
+
+タスク queue:
+
+- **P1: JP Cosense heavy dogfood refresh**。corpus owner = persona1（日本語 Cosense heavy user）。AI consumer = 通常 Codex/Claude。実タスク: nishio store / hosted Cosense から最近の設計問いを1つ調べ、`search` / `read` / `backlinks` / `related` / `path` / `gather` の自然な loop で答える。見るもの: 高密度 graph の強み、表記ゆれ、巨大 hub、bounded output だけで判断できるか。
+- **P2a: dense Markdown wiki owner**。corpus owner = persona2a（dense `[[wikilink]]` を持つ Markdown / Obsidian power user、bridge として llm-wiki 森）。AI consumer = 通常 agent。実タスク: `import-forest` または persona2a demo vault を使い、複数 wiki / note を跨ぐ概念探索を完走する。見るもの: Markdown on-ramp、whole-store weak cross-project retrieval、navigation/log artifact handling、demo として人に見せられる concrete value。
+- **P2b: sparse Markdown cold skeptic**。corpus owner = persona2b（cold HN/Reddit 的な低リンク密度 .md folder ユーザ）。AI consumer = fresh agent。実タスク: 空 `GRASP_HOME` と小さな sparse notes で始め、`grep` / `cat` / `grasp import --markdown` / `search` / `read` を比較して「何が残る価値か」を判定する。見るもの: density 非依存の bounded retrieval pitch、friendly onboarding、"why not Obsidian/RAG/grep" への実証。
+- **P3: AI author / file-back agent**。corpus owner = grasp wiki maintainer。AI consumer = wiki に知見を残す coding agent。実タスク: `activity` / `claim-page` / preflight / `write-page` / `append-log` / postwrite / `revert-plan --scope session` を使って小さな file-back を完走する。見るもの: confidence 獲得コスト、guard message、dirty/stale recovery、direct patch へ逃げたくなる理由が減るか。
+- **P4: constrained low-cost model consumer**。corpus owner は P1 or P2a から選ぶ。AI consumer = 小 context・低能力・domain knowledge 薄めの agent。実タスク: custom script なし、`skills/grasp` と `grasp <cmd> --help` だけで同じ retrieval question を解く。見るもの: command discoverability、text/JSON contract、zero-hit recovery、[[takker-opencode-villagepump-test-2026-06-24]] で見えた cross-model portability の再現性。
+- **P5: public hosted Cosense partial-acquire researcher**。corpus owner = public project outsider（admin export なし）。AI consumer = 調査 agent。実タスク: `acquire` / `cross-project-refs` / `cross-project-acquire` で特定 topic の bounded candidate bundle を作り、agent-authored report へ渡す。見るもの: permission / env diagnostics、partial corpus caveat、report handoff contract、raw dump で終わらないか。
+
+done criteria:
+
+- 少なくとも各 persona 1 run ずつ、entity page または既存 feedback page に command trace と outcome judgement が残る。
+- finding は「persona の感想」に留めず、CLI surface / Skill recipe / docs / backlog / decision のどれへ効くかを routing する。
+- 良い outcome story になった run は README / docs / demo から参照できる候補にする。
+
 ## Markdown / Obsidian indexed mirror
 
 最小 read-only mirror（`import --markdown <folder>`、frontmatter title/id/aliases/tags、first H1 title resolution、content-only 差分 index、`--markdown-exclude-dir` による heavy raw/generated directory 除外）は実装済み。決定は [[markdown-obsidian-indexed-mirror]]。未実装:
