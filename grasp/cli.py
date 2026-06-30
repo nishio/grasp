@@ -1190,7 +1190,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "project, output, dry_run, ok, blocked[], projection_before, semantic_log_before|null, "
-            "normal_page_updates[], log_appends[], log_normalized, projection_after|null, semantic_log_after|null"
+            "normal_page_updates[], new_page_creates[], log_appends[], log_normalized, projection_after|null, semantic_log_after|null"
         ),
         examples=[
             "grasp --project grasp-wiki reconcile-markdown --output wiki --no-journal --dry-run",
@@ -1199,7 +1199,7 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "This is a manual recovery surface, not a background queue or automatic merge policy.",
             "It reads replacement page content directly from files under --output, avoiding shell-quoted --line input.",
-            "Unsupported missing/deleted/extra Markdown files are reported as blockers; create/delete/rename reconcile comes later if dogfood needs it.",
+            "Extra Markdown files are adopted as page_create events. Unsupported missing/deleted files are reported as blockers; delete/rename reconcile comes later if dogfood needs it.",
             "Use this after direct-patch fallback or a remote merge leaves Markdown ahead of the SQLite store.",
         ],
     )
@@ -3410,12 +3410,19 @@ def run_reconcile_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict
         for path in sorted(projection_before.get("changed_files") or [])
         if not log_source_path or path != log_source_path
     ]
+    new_source_paths = sorted(projection_before.get("extra_files") or [])
     for source_path in normal_source_paths:
         target = _safe_replay_output_path(args.output, source_path)
         if not target.exists():
             blockers.append({"type": "missing_page_file", "source_path": source_path})
         elif target.is_dir():
             blockers.append({"type": "page_file_is_directory", "source_path": source_path})
+    for source_path in new_source_paths:
+        target = _safe_replay_output_path(args.output, source_path)
+        if not target.exists():
+            blockers.append({"type": "missing_new_page_file", "source_path": source_path})
+        elif target.is_dir():
+            blockers.append({"type": "new_page_file_is_directory", "source_path": source_path})
 
     log_sections = []
     log_current_differs = False
@@ -3458,6 +3465,10 @@ def run_reconcile_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict
             {"source_path": source_path}
             for source_path in normal_source_paths
         ],
+        "new_page_creates": [
+            {"source_path": source_path}
+            for source_path in new_source_paths
+        ],
         "log_appends": [
             log_section_plan_summary(section)
             for section in log_sections
@@ -3472,6 +3483,31 @@ def run_reconcile_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict
         return result
 
     journal_written = False
+    new_creates: list[dict[str, Any]] = []
+    for source_path in new_source_paths:
+        target = _safe_replay_output_path(args.output, source_path)
+        create_result, event = store.write_markdown_page_with_event(
+            "",
+            create=True,
+            source_path=source_path,
+            lines=target.read_text(encoding="utf-8").splitlines(),
+            message="reconcile-markdown: adopt new Markdown projection file",
+            **event_metadata(args),
+        )
+        if journal is not None:
+            append_journal_event(journal, event)
+            journal_written = True
+        new_creates.append(
+            {
+                "source_path": create_result["source_path"],
+                "event_id": event["event_id"],
+                "event_type": event["event_type"],
+                "title": create_result["page"]["title"],
+                "line_count": create_result["line_count"],
+                "edge_count": create_result["edge_count"],
+            }
+        )
+
     normal_updates: list[dict[str, Any]] = []
     for source_path in normal_source_paths:
         target = _safe_replay_output_path(args.output, source_path)
@@ -3547,6 +3583,7 @@ def run_reconcile_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict
     result.update(
         {
             "normal_page_updates": normal_updates,
+            "new_page_creates": new_creates,
             "log_appends": log_appends,
             "log_normalized": log_normalized,
             "projection_write": projection_write,
@@ -3565,13 +3602,6 @@ def reconcile_markdown_projection_blockers(projection: dict[str, Any]) -> list[d
         blockers.append(
             {
                 "type": "unsupported_missing_file",
-                "source_path": source_path,
-            }
-        )
-    for source_path in projection.get("extra_files") or []:
-        blockers.append(
-            {
-                "type": "unsupported_extra_file",
                 "source_path": source_path,
             }
         )
@@ -8741,6 +8771,7 @@ def format_reconcile_markdown(result: dict[str, Any]) -> str:
         f"dry_run: {str(result.get('dry_run', False)).lower()}\n"
         f"ok: {str(result.get('ok', False)).lower()}\n"
         f"normal_page_updates: {len(result.get('normal_page_updates') or [])}\n"
+        f"new_page_creates: {len(result.get('new_page_creates') or [])}\n"
         f"log_appends: {len(result.get('log_appends') or [])}\n"
         f"log_normalized: {str(result.get('log_normalized', False)).lower()}\n"
         f"journal: {result.get('journal') or '(none)'}\n"
