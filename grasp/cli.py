@@ -61,6 +61,20 @@ STORE_WRITE_COMMANDS = {
     "sync",
     "write-page",
 }
+IDLE_HYDRATE_COMMANDS = {
+    "backlinks",
+    "co-links",
+    "gather",
+    "link-stats",
+    "mentions",
+    "path",
+    "peek",
+    "read",
+    "related",
+    "search",
+    "suggest",
+    "unresolved",
+}
 REVERSIBLE_EVENT_TYPES = {"page_create", "section_append", "log_append", "page_update", "page_rename"}
 CLAIM_EVENT_TYPES = {"page_claim", "page_claim_release"}
 ACTIVITY_EVENT_TYPES = {"page_create", "section_append", "log_append", "page_update", "page_rename", *CLAIM_EVENT_TYPES}
@@ -134,6 +148,9 @@ def build_parser() -> argparse.ArgumentParser:
             accepted after a command for recovery from common agent mistakes.
             Text output uses compact local line-id aliases by default; use
             --full-ids for stable full line ids.
+            --idle-hydrate-seconds S can append markdown_idle_hydration to
+            supported read/retrieval command results after the displayed result
+            is computed, improving future incomplete Markdown graph queries.
             """
         ).strip(),
         epilog=dedent(
@@ -170,6 +187,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--full-ids", action="store_true", help="In text output, show full stable line ids instead of local aliases.")
     parser.add_argument("--actor", default=default_actor(), help="Actor metadata for SQLite events written by write/revert/import-log/adopt commands. Defaults to $GRASP_ACTOR.")
     parser.add_argument("--session-id", default=default_session_id(), help="Session/work-unit metadata for SQLite events written by write/revert/import-log/adopt commands. Defaults to $GRASP_SESSION_ID.")
+    parser.add_argument(
+        "--idle-hydrate-seconds",
+        type=float,
+        default=0.0,
+        help=(
+            "After supported read/retrieval commands, spend up to this many seconds hydrating incomplete "
+            "Markdown graph files for future commands. Default: 0 (disabled)."
+        ),
+    )
+    parser.add_argument(
+        "--idle-hydrate-limit",
+        type=int,
+        default=1,
+        help="Maximum Markdown source files to parse after one supported command when idle hydration is enabled. Default: 1.",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="command")
 
@@ -7632,6 +7664,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         parser.error(store_missing_error(args.store))
 
+    idle_hydration_requested = command_idle_hydration_requested(args)
     store_for_write = (
         args.command in STORE_WRITE_COMMANDS
         or (args.command == "read" and getattr(args, "hydrate", False))
@@ -7639,6 +7672,7 @@ def main(argv: list[str] | None = None) -> int:
             args.command in {"backlinks", "gather", "related", "search"}
             and getattr(args, "hydrate_limit", 0) > 0
         )
+        or idle_hydration_requested
     )
     store: SQLiteStore | None = SQLiteStore(args.store, project=args.project, for_write=store_for_write)
     try:
@@ -7654,6 +7688,8 @@ def main(argv: list[str] | None = None) -> int:
             store = SQLiteStore(args.store, project=args.project, for_write=store_for_write)
         try:
             result = run_command(store, args)
+            if idle_hydration_requested:
+                attach_idle_hydration(store, args, result)
         except GraspCliError as error:
             if args.json:
                 emit_cli_error_result(error)
@@ -7721,6 +7757,7 @@ def emit_result(args: argparse.Namespace, result: Any) -> None:
     else:
         aliases = LineIdAliases(enabled=not args.full_ids)
         sys.stdout.write(format_result(args.command, result, aliases=aliases))
+        sys.stdout.write(format_idle_hydration_footer(result))
 
 
 def emit_error_result(error: MarkdownCollisionError) -> None:
@@ -7753,6 +7790,34 @@ def hydrate_query_sources_for_args(
     if hydrate_limit <= 0:
         return None
     return store.hydrate_markdown_query_sources(query, limit=hydrate_limit)
+
+
+def command_idle_hydration_requested(args: argparse.Namespace) -> bool:
+    seconds = float(getattr(args, "idle_hydrate_seconds", 0.0) or 0.0)
+    return seconds > 0 and getattr(args, "command", None) in IDLE_HYDRATE_COMMANDS
+
+
+def attach_idle_hydration(store: SQLiteStore, args: argparse.Namespace, result: Any) -> None:
+    if not isinstance(result, dict):
+        return
+    seconds = float(getattr(args, "idle_hydrate_seconds", 0.0) or 0.0)
+    limit = max(0, int(getattr(args, "idle_hydrate_limit", 1) or 0))
+    if seconds <= 0 or limit <= 0:
+        return
+    graph = store.selected_project_markdown_graph_status()
+    if not graph or graph.get("complete"):
+        return
+    hydration = store.hydrate_markdown_chunk(
+        limit=limit,
+        until_complete=False,
+        max_seconds=seconds,
+    )
+    hydration["applied_after_result"] = True
+    hydration["result_scope_note"] = (
+        "The command result was computed before idle hydration; "
+        "markdown_idle_hydration only improves subsequent commands."
+    )
+    result["markdown_idle_hydration"] = hydration
 
 
 def attach_markdown_query_context(
@@ -8456,6 +8521,30 @@ def with_alias_legend(text: str, aliases: LineIdAliases) -> str:
     if newline_index < 0:
         return f"{text}\n{legend}"
     return f"{text[:newline_index + 1]}{legend}{text[newline_index + 1:]}"
+
+
+def format_idle_hydration_footer(result: Any) -> str:
+    if not isinstance(result, dict):
+        return ""
+    hydration = result.get("markdown_idle_hydration")
+    if not isinstance(hydration, dict):
+        return ""
+    graph = hydration.get("markdown_graph") or {}
+    parts = [
+        "\n# Idle Markdown Hydration\n",
+        "applied_after_result: true\n",
+        f"hydrated: {hydration.get('hydrated_count', 0)}\n",
+        f"reason: {hydration.get('reason')}\n",
+        f"elapsed_seconds: {hydration.get('elapsed_seconds', 0)}\n",
+    ]
+    if graph:
+        parts.append(
+            "graph: "
+            f"{graph.get('status')} ({graph.get('mode')}, "
+            f"{graph.get('hydrated_files')}/{graph.get('total_files')} files hydrated)\n"
+        )
+    parts.append("note: this hydration happened after the displayed command result and affects subsequent commands.\n")
+    return "".join(parts)
 
 
 def format_result(command: str, result: Any, aliases: LineIdAliases | None = None) -> str:
