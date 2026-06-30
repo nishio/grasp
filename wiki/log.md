@@ -1914,3 +1914,8 @@ Mode2 cutover remains a policy decision until owner chooses acceptable overhead 
 [[grasp-backlog]] に、read v1 stable ではなく mode2/write-authoring を dogfood stable に寄せるための checklist を明記。
 最優先は claim retry throughput gate の broader 実測と owner 閾値決定。append/merge surface や queue は real dogfood で必要が出るまで作らない。
 stable line identity と Markdown direct edit policy、git-diff-of-md に依存しない recovery/review evidence は stable 前の残件として残す。
+
+## [2026-06-30 23:31] implementation+file-back | expand claim retry throughput gate
+- code: scripts/benchmark_claim_retry_throughput.py を matrix benchmark に拡張。複数 think time、hot-page / file-back workload、Markdown table output、JSON output、active claim overlap fold、p95 claim wait を出す。
+- measurement: --iterations 25 --think-seconds 0,0.02,0.05 --workload file-back --format table で、claim_retry は全3条件 50/50 生存、lost 0、strict green、overlap 0、p95 wait 0.549-0.589s。
+- cutover: completed throughput ratio は 0.383-0.426、surviving throughput ratio は 0.416/0.852/0.805。次は owner が許容 throughput / wait 閾値を決める。
