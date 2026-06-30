@@ -1763,3 +1763,6 @@ fallback: `GRASP_SESSION_ID=file-back-20260629T2315-authority-modes python3 scri
 [[grasp-organic-mentions-2026-06-29]] を追加。grasp 直接 mention は HN/Reddit では見つからず、井戸端・motoso・stao など Scrapbox/Cosense 圏に集中していた。
 最重要 data point は inajob の非 admin public backup + OpenCode + grasp skill 試用。persona1 周辺の organic adoption と public project outsider persona を示す。
 [[hn-reddit-grasp-adjacent-survey-2026-06-29]] と [[grasp-backlog]] P5 に反映。tool routing（cosense-cli ではなく grasp を選ばせる）が次の friction。
+
+## [2026-06-30 04:46] file-back | Open Q #1/#2 は cutover decision の下流（合成を entity に追記）
+[[parallel-session-file-back-contention-2026-06-28]] に Update。未決 Open Q #1(pairing guard / projection defer)と #2(direct-patch+remote-merge 正規化 / append-only merge)は独立でなく [[adoption-trust-gradient]] の mode1↔mode2 cutover の下流。mode2 に倒せば Q#1=defer-projection(半実装済) / Q#2=store から regenerate で解ける。leverage は Q#1(ii) を先に。decision でなく分析(cutover 判断は owner)。
