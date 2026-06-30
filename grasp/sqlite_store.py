@@ -3659,6 +3659,81 @@ class SQLiteStore:
                 "markdown_graph": graph_status,
             }
 
+    def hydrate_markdown_chunk(self, *, limit: int = 10) -> dict[str, Any]:
+        project = self._require_project()
+        limit = max(0, int(limit))
+        manifest = self._markdown_manifest_for_project(project)
+        files = manifest.get("files")
+        graph_status_before = self.project_markdown_graph_status_by_name(project)
+        result: dict[str, Any] = {
+            "project": project,
+            "requested_limit": limit,
+            "scan": "markdown-source-order",
+            "hydrated": [],
+            "hydrated_count": 0,
+            "skipped": [],
+            "skipped_count": 0,
+            "scanned_files": 0,
+            "markdown_graph_before": graph_status_before,
+            "markdown_graph": graph_status_before,
+            "remaining_files": None,
+        }
+        if limit <= 0:
+            result["reason"] = "limit_zero"
+            return result
+        if not isinstance(files, dict) or not files:
+            result["reason"] = "not_markdown_project"
+            return result
+        if graph_status_before and graph_status_before.get("complete"):
+            result["reason"] = "graph_complete"
+            result["remaining_files"] = 0
+            return result
+
+        project_row = self.project_metadata(project)
+        if project_row is None:
+            raise ValueError(f"project does not exist: {project}")
+        folder_path = Path(str(project_row.get("source_export") or ""))
+        if not folder_path.exists() or not folder_path.is_dir():
+            raise ValueError(f"Markdown folder does not exist: {folder_path}")
+
+        for source_path in sorted(str(path) for path in files):
+            if result["hydrated_count"] >= limit:
+                break
+            item = files.get(source_path)
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("hash") or ""):
+                continue
+            result["scanned_files"] += 1
+            markdown_path = folder_path / source_path
+            if not markdown_path.exists() or not markdown_path.is_file():
+                result["skipped"].append({"source_path": source_path, "reason": "source_missing"})
+                continue
+            page_id = str(item.get("page_id") or "")
+            page = self._page_by_id(page_id, project=project) if page_id else None
+            if page is None:
+                result["skipped"].append({"source_path": source_path, "reason": "page_missing"})
+                continue
+            hydration = self.hydrate_markdown_page(page)
+            result["hydrated"].append(hydration)
+            if hydration.get("hydrated"):
+                result["hydrated_count"] += 1
+
+        result["skipped_count"] = len(result["skipped"])
+        result["markdown_graph"] = self.project_markdown_graph_status_by_name(project)
+        graph = result["markdown_graph"] or {}
+        total_files = graph.get("total_files")
+        hydrated_files = graph.get("hydrated_files")
+        if isinstance(total_files, int) and isinstance(hydrated_files, int):
+            result["remaining_files"] = max(0, total_files - hydrated_files)
+        if graph.get("complete"):
+            result["reason"] = "graph_complete"
+        elif result["hydrated_count"] >= limit:
+            result["reason"] = "limit_reached"
+        else:
+            result["reason"] = "scan_exhausted"
+        return result
+
     def hydrate_markdown_query_sources(self, query: str, *, limit: int = 1) -> dict[str, Any]:
         project = self._require_project()
         limit = max(0, limit)
