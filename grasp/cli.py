@@ -1168,9 +1168,9 @@ def build_parser() -> argparse.ArgumentParser:
             "Regeneration flags are explicit alpha overlays for generated navigation/log artifacts."
         ),
         returns=(
-            "project, output, check, ok, file_count, checked_files, written_files, written_count, "
-            "regenerated_files, log_event_source|null, log_event_count, projection_policy, "
-            "changed_files, missing_files, extra_files"
+            "project, output, check, ok, projection_complete, file_count, checked_files, written_files, written_count, "
+            "regenerated_files, log_event_source|null, log_event_count, projection_policy, markdown_graph|null, "
+            "markdown_projection_contract|null, changed_files, missing_files, extra_files"
         ),
         examples=[
             "grasp --project grasp-wiki export-markdown --output wiki --check",
@@ -1185,6 +1185,7 @@ def build_parser() -> argparse.ArgumentParser:
             "--check is the projection freshness gate for ship loops and file-back cutover.",
             "Non-check writes refuse to overwrite Git-worktree projection files that differ from SQLite unless --allow-projection-overwrite is passed.",
             "Use --allow-projection-overwrite only after re-adopting current Markdown or when exporting an intentional deferred-projection batch.",
+            "Non-check writes also refuse incomplete Markdown graphs unless --allow-incomplete-markdown-export is passed.",
             "--regenerate-log replays SQLite log page events by default and appends latest record-per-file log_entry_import records.",
             "--journal switches --regenerate-log to a legacy JSONL event stream for ad hoc audits.",
         ],
@@ -1200,6 +1201,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Allow non-check export to overwrite Git-worktree Markdown projection files that differ from SQLite. "
             "Use only after re-adopt, or for an intentional deferred-projection batch."
+        ),
+    )
+    export_markdown_parser.add_argument(
+        "--allow-incomplete-markdown-export",
+        action="store_true",
+        help=(
+            "Allow non-check export from an incomplete Markdown graph. This can write partial projections for "
+            "unhydrated source files; prefer hydrate-markdown --until-complete or normal import --markdown first."
         ),
     )
 
@@ -3329,6 +3338,7 @@ def run_export_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict[st
     return store.export_markdown(
         args.output,
         check=args.check,
+        allow_incomplete_graph_export=args.allow_incomplete_markdown_export,
         regenerate_index=args.regenerate_index,
         log_events=log_events,
         log_event_source=log_event_source,
@@ -8981,6 +8991,19 @@ def format_export_markdown(result: dict[str, Any]) -> str:
     if result.get("log_event_source"):
         parts.append(f"log_event_source: {result['log_event_source']}\n")
         parts.append(f"log_event_count: {result.get('log_event_count', 0)}\n")
+    markdown_graph = result.get("markdown_graph") or {}
+    if markdown_graph.get("complete") is False:
+        parts.append(
+            "graph: incomplete "
+            f"({markdown_graph.get('hydrated_files')}/{markdown_graph.get('total_files')} files hydrated)\n"
+        )
+        contract = result.get("markdown_projection_contract") or {}
+        hydrate_hint = contract.get("hydrate_hint")
+        if hydrate_hint:
+            parts.append(
+                "note: projection is partial because unhydrated Markdown source files have no stored lines; "
+                f"{hydrate_hint}\n"
+            )
     for key, label in (
         ("regenerated_files", "regenerated"),
         ("changed_files", "changed"),

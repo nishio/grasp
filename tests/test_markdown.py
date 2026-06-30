@@ -826,6 +826,91 @@ class MarkdownImportTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_export_markdown_refuses_incomplete_graph_write_by_default(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# Alpha\nlinks to [[B]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki", catalog_only=True)
+
+            check = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--check",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(check.returncode, 1)
+            check_result = json.loads(check.stdout)
+            self.assertEqual(check_result["markdown_graph"]["complete"], False)
+            self.assertEqual(check_result["projection_complete"], False)
+            self.assertEqual(check_result["markdown_projection_contract"]["result_scope"], "partial_markdown_graph")
+            self.assertEqual(
+                check_result["markdown_projection_contract"]["clobber_risk"],
+                "unhydrated_markdown_sources_have_no_stored_lines",
+            )
+            self.assertIn("A.md", check_result["changed_files"])
+
+            refused = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--allow-projection-overwrite",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("Markdown graph is incomplete", refused.stderr)
+            self.assertEqual((root / "A.md").read_text(encoding="utf-8"), "# Alpha\nlinks to [[B]]\n")
+
+            partial = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--allow-projection-overwrite",
+                    "--allow-incomplete-markdown-export",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            partial_result = json.loads(partial.stdout)
+            self.assertEqual(partial_result["projection_complete"], False)
+            self.assertEqual(partial_result["markdown_projection_contract"]["safe_to_write"], True)
+            self.assertEqual(set(partial_result["written_files"]), {"A.md", "B.md"})
+            self.assertIn("title: A", (root / "A.md").read_text(encoding="utf-8"))
+
     def test_read_hydrate_catalog_page_parses_only_selected_markdown_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

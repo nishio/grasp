@@ -1862,3 +1862,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 17:36] implementation | claim retry throughput benchmark harness
 - Added scripts/benchmark_claim_retry_throughput.py to rerun uncoordinated vs claim_retry hot-page contention with real grasp CLI subprocesses.
 - Small run (2 workers x 4, think 0.02s): uncoordinated lost 4/8 and strict failed; claim_retry kept 8/8, strict green, completed throughput 0.322x and surviving-marker throughput 0.645x of uncoordinated.
+
+## [2026-06-30 17:50] implementation | incomplete Markdown export guard
+- Added an export-markdown contract for incomplete Markdown graphs: JSON now reports markdown_graph, projection_complete=false, and markdown_projection_contract.
+- Non-check export from catalog-only/partial Markdown graphs now refuses by default because unhydrated files have no stored lines and can be clobbered; explicit --allow-incomplete-markdown-export is required.
