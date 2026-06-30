@@ -869,6 +869,47 @@ class MarkdownImportTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_gather_hydrate_limit_parses_query_matching_sources_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "A.md").write_text("# A\nlinks to [[B]] and [[C]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nbody without incoming links\n", encoding="utf-8")
+            (root / "C.md").write_text("# C\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki", catalog_only=True)
+            original_record_from_file = sqlite_store.markdown_page_record_from_file
+            parsed_paths: list[str] = []
+
+            def record_from_file(root_arg, path_arg):
+                parsed_paths.append(Path(path_arg).relative_to(root_arg).as_posix())
+                return original_record_from_file(root_arg, path_arg)
+
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                with patch("grasp.sqlite_store.markdown_page_record_from_file", side_effect=record_from_file):
+                    gather = store.gather(
+                        "B",
+                        hydrate_limit=1,
+                        backlink_limit=10,
+                        co_link_limit=10,
+                        mention_limit=10,
+                    )
+
+                self.assertEqual(parsed_paths, ["A.md"])
+                self.assertEqual(gather["markdown_hydration"]["hydrated_count"], 1)
+                self.assertEqual(gather["markdown_hydration"]["matched_files"], 1)
+                self.assertEqual(gather["markdown_hydration"]["hydrated"][0]["source_path"], "A.md")
+                self.assertEqual(gather["markdown_graph"]["complete"], False)
+                self.assertEqual(gather["markdown_graph"]["hydrated_files"], 1)
+                self.assertEqual(gather["link_stats"]["link_count"], 1)
+                self.assertEqual([edge["source_title"] for edge in gather["backlinks"]], ["A"])
+                self.assertEqual([item["title"] for item in gather["co_links"]], ["C"])
+                self.assertEqual(store.stats()["lines"], 2)
+                self.assertEqual(store.stats()["edges"], 2)
+            finally:
+                store.close()
+
     def test_noop_reimport_uses_manifest_hash_fast_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
