@@ -1,3 +1,6 @@
+import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -909,6 +912,53 @@ class MarkdownImportTests(unittest.TestCase):
                 self.assertEqual(store.stats()["edges"], 2)
             finally:
                 store.close()
+
+    def test_cli_hydrate_limit_retrieval_commands_hydrate_matching_sources(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nneedle links to [[B]] and [[C]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nbody without incoming links\n", encoding="utf-8")
+            (root / "C.md").write_text("# C\n", encoding="utf-8")
+
+            def make_store(name: str) -> Path:
+                store_path = Path(tmpdir) / f"{name}.sqlite"
+                import_markdown_folder_to_sqlite(root, store_path, project_name="wiki", catalog_only=True)
+                return store_path
+
+            def run_json(store_path: Path, *args: str) -> dict:
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            search = run_json(make_store("search"), "search", "needle", "--hydrate-limit", "1", "--limit", "10")
+            self.assertEqual(search["markdown_hydration"]["hydrated_count"], 1)
+            self.assertEqual(search["markdown_graph"]["hydrated_files"], 1)
+            self.assertEqual([hit["source_title"] for hit in search["hits"]], ["A"])
+
+            backlinks = run_json(make_store("backlinks"), "backlinks", "B", "--hydrate-limit", "1", "--limit", "10")
+            self.assertEqual(backlinks["markdown_hydration"]["hydrated_count"], 1)
+            self.assertEqual(backlinks["markdown_graph"]["hydrated_files"], 1)
+            self.assertEqual([edge["source_title"] for edge in backlinks["backlinks"]], ["A"])
+
+            related = run_json(make_store("related"), "related", "B", "--hydrate-limit", "1", "--limit", "10")
+            self.assertEqual(related["markdown_hydration"]["hydrated_count"], 1)
+            self.assertEqual(related["markdown_graph"]["hydrated_files"], 1)
+            self.assertEqual([item["title"] for item in related["related"]], ["C"])
 
     def test_noop_reimport_uses_manifest_hash_fast_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
