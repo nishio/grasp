@@ -1954,6 +1954,53 @@ def _preflight_markdown_projection_write_targets(output: Path, relative_paths: l
             raise NotADirectoryError(str(existing_parent))
 
 
+def _path_is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
+def _preflight_markdown_projection_backup_targets(
+    output: Path,
+    backup_dir: Path,
+    relative_paths: list[str],
+) -> None:
+    output_root = output.resolve()
+    backup_root = backup_dir.resolve()
+    if backup_root == output_root or _path_is_relative_to(backup_root, output_root):
+        raise ValueError("Markdown projection backup dir must be outside the output folder.")
+    if backup_root.exists() and not backup_root.is_dir():
+        raise NotADirectoryError(str(backup_root))
+    for relative_path in relative_paths:
+        backup_target = _safe_markdown_output_path(backup_root, relative_path)
+        if backup_target.exists() or backup_target.is_symlink():
+            raise FileExistsError(f"Markdown projection backup already exists: {backup_target}")
+        parent = backup_target.parent
+        existing_parent = parent
+        while not existing_parent.exists():
+            next_parent = existing_parent.parent
+            if next_parent == existing_parent:
+                break
+            existing_parent = next_parent
+        if existing_parent.exists() and not existing_parent.is_dir():
+            raise NotADirectoryError(str(existing_parent))
+
+
+def _backup_markdown_projection_files(output: Path, backup_dir: Path, relative_paths: list[str]) -> list[str]:
+    backed_up_files: list[str] = []
+    for relative_path in relative_paths:
+        source = _safe_markdown_output_path(output, relative_path)
+        if not source.exists():
+            continue
+        backup_target = _safe_markdown_output_path(backup_dir, relative_path)
+        backup_target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, backup_target)
+        backed_up_files.append(relative_path)
+    return backed_up_files
+
+
 def _safe_markdown_relative_path(relative_path: str | Path) -> str:
     path = Path(relative_path)
     if path.is_absolute() or ".." in path.parts or not path.name:
@@ -3359,6 +3406,7 @@ class SQLiteStore:
         *,
         check: bool = False,
         allow_incomplete_graph_export: bool = False,
+        backup_dir: str | Path | None = None,
         regenerate_index: bool = False,
         log_events: list[dict[str, Any]] | None = None,
         log_event_source: str | None = None,
@@ -3399,6 +3447,7 @@ class SQLiteStore:
         missing_files: list[str] = []
         written_files: list[str] = []
         files_to_write: list[str] = []
+        files_to_backup: list[str] = []
         for relative_path, text in projections.items():
             target = _safe_markdown_output_path(output, relative_path)
             if not target.exists():
@@ -3409,6 +3458,7 @@ class SQLiteStore:
             current = target.read_text(encoding="utf-8")
             if current != text:
                 changed_files.append(relative_path)
+                files_to_backup.append(relative_path)
                 if not check:
                     files_to_write.append(relative_path)
 
@@ -3417,11 +3467,23 @@ class SQLiteStore:
                 "Markdown graph is incomplete; refusing export because unhydrated Markdown source files have "
                 "no stored lines and a partial projection can overwrite source content. Run "
                 "`hydrate-markdown --until-complete --max-seconds S`, run normal `import --markdown <folder>`, "
-                "or rerun with --allow-incomplete-markdown-export if this partial projection write is intentional."
+                "or rerun with --allow-incomplete-markdown-export and --backup-dir if this partial projection "
+                "write is intentional."
+            )
+        backup_path = Path(backup_dir) if backup_dir is not None else None
+        backup_required = bool(graph_incomplete and not check and allow_incomplete_graph_export and files_to_backup)
+        if backup_required and backup_path is None:
+            raise ValueError(
+                "Markdown graph is incomplete; --allow-incomplete-markdown-export also requires --backup-dir "
+                "before overwriting existing Markdown files with a partial projection."
             )
 
+        backed_up_files: list[str] = []
         if not check:
             _preflight_markdown_projection_write_targets(output, files_to_write)
+            if backup_path is not None and files_to_backup:
+                _preflight_markdown_projection_backup_targets(output, backup_path, files_to_backup)
+                backed_up_files = _backup_markdown_projection_files(output, backup_path, files_to_backup)
             for relative_path in files_to_write:
                 target = _safe_markdown_output_path(output, relative_path)
                 text = projections[relative_path]
@@ -3455,8 +3517,17 @@ class SQLiteStore:
                 "result_scope": "partial_markdown_graph",
                 "graph_complete": False,
                 "projection_complete": False,
-                "safe_to_write": bool(allow_incomplete_graph_export),
-                "write_requires": "--allow-incomplete-markdown-export",
+                "safe_to_write": bool(
+                    allow_incomplete_graph_export and (not files_to_backup or backup_path is not None)
+                ),
+                "write_requires": [
+                    "--allow-incomplete-markdown-export",
+                    *(["--backup-dir"] if files_to_backup else []),
+                ],
+                "backup_required": bool(files_to_backup),
+                "backup_dir": str(backup_path) if backup_path is not None else None,
+                "backed_up_files": sorted(backed_up_files),
+                "backed_up_count": len(backed_up_files),
                 "clobber_risk": "unhydrated_markdown_sources_have_no_stored_lines",
                 "hydrated_files": markdown_graph.get("hydrated_files") if markdown_graph else None,
                 "total_files": markdown_graph.get("total_files") if markdown_graph else None,
@@ -3486,6 +3557,9 @@ class SQLiteStore:
             "checked_files": len(projections) if check else 0,
             "written_files": written_files,
             "written_count": len(written_files),
+            "backup_dir": str(backup_path) if backup_path is not None else None,
+            "backed_up_files": sorted(backed_up_files),
+            "backed_up_count": len(backed_up_files),
             "regenerated_files": sorted(regenerated_files),
             "regenerated_count": len(regenerated_files),
             "log_event_source": log_event_source,

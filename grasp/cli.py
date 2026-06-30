@@ -1180,8 +1180,9 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "project, output, check, ok, projection_complete, file_count, checked_files, written_files, written_count, "
-            "regenerated_files, log_event_source|null, log_event_count, projection_policy, markdown_graph|null, "
-            "markdown_projection_contract|null, changed_files, missing_files, extra_files"
+            "backup_dir|null, backed_up_files, backed_up_count, regenerated_files, log_event_source|null, "
+            "log_event_count, projection_policy, markdown_graph|null, markdown_projection_contract|null, "
+            "changed_files, missing_files, extra_files"
         ),
         examples=[
             "grasp --project grasp-wiki export-markdown --output wiki --check",
@@ -1196,7 +1197,8 @@ def build_parser() -> argparse.ArgumentParser:
             "--check is the projection freshness gate for ship loops and file-back cutover.",
             "Non-check writes refuse to overwrite Git-worktree projection files that differ from SQLite unless --allow-projection-overwrite is passed.",
             "Use --allow-projection-overwrite only after re-adopting current Markdown or when exporting an intentional deferred-projection batch.",
-            "Non-check writes also refuse incomplete Markdown graphs unless --allow-incomplete-markdown-export is passed.",
+            "Non-check writes refuse incomplete Markdown graphs unless --allow-incomplete-markdown-export is passed; "
+            "overwriting existing files from an incomplete graph also requires --backup-dir.",
             "--regenerate-log replays SQLite log page events by default and appends latest record-per-file log_entry_import records.",
             "--journal switches --regenerate-log to a legacy JSONL event stream for ad hoc audits.",
         ],
@@ -1220,6 +1222,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Allow non-check export from an incomplete Markdown graph. This can write partial projections for "
             "unhydrated source files; prefer hydrate-markdown --until-complete or normal import --markdown first."
+        ),
+    )
+    export_markdown_parser.add_argument(
+        "--backup-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Directory for backing up existing Markdown files before an allowed incomplete graph export overwrites "
+            "them. Required with --allow-incomplete-markdown-export when existing files would be changed."
         ),
     )
 
@@ -3350,6 +3361,7 @@ def run_export_markdown(store: SQLiteStore, args: argparse.Namespace) -> dict[st
         args.output,
         check=args.check,
         allow_incomplete_graph_export=args.allow_incomplete_markdown_export,
+        backup_dir=args.backup_dir,
         regenerate_index=args.regenerate_index,
         log_events=log_events,
         log_event_source=log_event_source,
@@ -9118,7 +9130,10 @@ def format_export_markdown(result: dict[str, Any]) -> str:
         f"ok: {str(result['ok']).lower()}\n",
         f"files: {result['file_count']}\n",
         f"written: {result['written_count']}\n",
+        f"backed_up: {result.get('backed_up_count', 0)}\n",
     ]
+    if result.get("backup_dir"):
+        parts.append(f"backup_dir: {result['backup_dir']}\n")
     generated_overlays = policy.get("generated_overlays") or []
     if generated_overlays:
         parts.append("generated_overlays:\n")
@@ -9144,6 +9159,7 @@ def format_export_markdown(result: dict[str, Any]) -> str:
         ("changed_files", "changed"),
         ("missing_files", "missing"),
         ("extra_files", "extra"),
+        ("backed_up_files", "backed_up_files"),
         ("written_files", "written_files"),
     ):
         files = result.get(key) or []
