@@ -495,14 +495,14 @@ def line_id_policy() -> dict[str, Any]:
     return {
         "local_line_id": "grasp-managed",
         "local_line_id_source": "current page id plus line index",
-        "hosted_line_id": "observed-only",
-        "hosted_line_id_persisted": False,
-        "decision": "hosted lines[].id is external source metadata and is not written into lines.line_id until grasp has a separate external_line_id column",
+        "hosted_line_id": "external_line_id",
+        "hosted_line_id_persisted": True,
+        "decision": "hosted lines[].id is external source metadata stored separately as lines.external_line_id and is never mixed into local lines.line_id",
     }
 
 
 def count_hosted_line_ids(page: dict[str, Any]) -> int:
-    return sum(1 for line in page.get("lines") or [] if isinstance(line, dict) and line.get("id"))
+    return sum(1 for line in page.get("lines") or [] if isinstance(line, dict) and (line.get("id") or line.get("lineId")))
 
 
 def acquire_from_cosense(

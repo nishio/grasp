@@ -166,9 +166,9 @@ v1 stable surface は read line。Markdown-backed `append-log` / `write-page` / 
 `page.id:line-index` は **安定 line ID でなく positional locator**（行挿入で後続 locator が変わる）。content hash は本文編集で、line index は挿入で identity が変わるため不可＝**stable ID requires memory**。identity 層では `line.id`（opaque stable）と `line_index`（current order）を別列にする。要件:
 
 - 2026-06-26 の前処理として、`line_window.around_line_id` / search context window は `page.id:line-index` を再合成せず stored `lines.line_id` を返すようにした（`1.7.8`）。2026-07-01 に Markdown content-only re-import と `write-page` replacement は unambiguous exact matching line の `line_id` を引き継ぐ第一 slice を実装した。旧新それぞれで text が一意なら位置が変わった unique exact moved line も同じ `line_id` を維持する。旧側または新側に同じ text line が複数ある場合や split / merge / 大幅編集のように exact text match で同一と判定できない場合は自動同一視しない。Markdown re-import は旧 positional id と衝突する新 line に opaque suffix を mint し、`write-page` / `write-lines` は新 `line_id` を mint して消えた旧 `line_id` を tombstone に残す。
-- local write は moved exact-same line の id 維持、既存1行を full `line_id` で置換する `write-line` command surface、同一 page 上の full `line_id` 2つで inclusive range を置換する `write-lines` command surface、live `lines` から消えた `line_id` を `line_tombstones` に残す削除側 memory、重複 text line を自動同一視しない保守 policy、split / merge / 大幅編集を自動同一視しない `line_identity` policy surface まで実装済み。残る未実装は Cosense/hosted sync external line id と、real dogfood で必要が出た場合の explicit split/merge surface。
+- local write は moved exact-same line の id 維持、既存1行を full `line_id` で置換する `write-line` command surface、同一 page 上の full `line_id` 2つで inclusive range を置換する `write-lines` command surface、live `lines` から消えた `line_id` を `line_tombstones` に残す削除側 memory、重複 text line を自動同一視しない保守 policy、split / merge / 大幅編集を自動同一視しない `line_identity` policy surface まで実装済み。Cosense/hosted sync external line id は `lines.external_line_id` として実装済み。残る未実装は real dogfood で必要が出た場合の explicit split/merge surface。
 - 外部 source（Cosense export / Markdown mirror）に line id が無ければ初回 import 時に grasp が mint し、identity journal に保持する。
-- sync / reimport は旧新 lines を diff し、unambiguous に同一と判定できる line だけ id を引き継ぐ。Markdown content-only re-import と `write-page` replacement の unambiguous exact matching line 引き継ぎ、`write-lines` range replacement の範囲内 unambiguous exact matching line 引き継ぎ、unique exact moved line の id 維持、Markdown-backed replacement / range replacement / append revert の line tombstone、duplicate text line の非自動継承、split / merge / 大幅編集の非自動継承と `line_identity` plan は実装済み。残る未実装は Cosense / hosted sync 側の external line id。
+- sync / reimport は旧新 lines を diff し、unambiguous に同一と判定できる line だけ id を引き継ぐ。Markdown content-only re-import と `write-page` replacement の unambiguous exact matching line 引き継ぎ、`write-lines` range replacement の範囲内 unambiguous exact matching line 引き継ぎ、unique exact moved line の id 維持、Markdown-backed replacement / range replacement / append revert の line tombstone、duplicate text line の非自動継承、split / merge / 大幅編集の非自動継承と `line_identity` plan は実装済み。Cosense / hosted sync 側の external line id は `lines.external_line_id` として実装済み。
 
 schema 方向:
 
@@ -258,7 +258,7 @@ line-id のローカル別名（text で `P1:0`、`--json` / `--full-ids` で完
 
 - **hosted REST metadata enrichment**: `readPage` / `/api/pages/:project/:title` で得られる `commitId`、stable `lines[].id`、`links` / `projectLinks` / `icons`、`linked`、`pageRank`、`accessed`、`relatedPages` をどこまで store に保存するか決める。JSON export seed には無いので optional source-specific columns として扱う。
 - **authenticated delete / rename history enrichment**: 現行 `--full-reconcile` は manifest 差分から delete tombstone と same-id rename を扱う。認証済み path で `/api/deleted-pages/:project/:pageId`、`/api/stream/:project` の `page.delete` event、`/api/commits/:project/:pageId` の `TitleChange` を取り、tombstone / alias history を補強できるか検証する。
-- **external hosted line-id persistence**: 方針は「hosted `lines[].id` は local `lines.line_id` に混ぜず、将来 `external_line_id` として別列にする」で決定済み。実装は schema bump が必要なので未着手。
+- **external hosted line-id persistence**: `1.14.0` で schema `14` として実装済み。hosted `lines[].id` / `lineId` は local `lines.line_id` に混ぜず、`lines.external_line_id` として別列に保存する。
 - **last-sync cursor の運用精度**: pinned pages / updated ties / clock skew / partial failure の扱い。
 
 ## Cross-project graph / whole-store retrieval residuals
@@ -295,7 +295,7 @@ Open Questions:
 - `listPages` は非 admin readable project で全ページを pagination できるか。
 - `searchFullText` は `[nishio.icon]` / `[/nishio/` を literal に扱うか。検索上限超過時の pagination / continuation はあるか。
 - all-candidate 失敗でも exit 0 で partial result を返す方針を維持するか。
-- ~~`readPage` の hosted line id を採用するか~~ → hosted id は observed-only。local `lines.line_id` は grasp-managed locator のままにし、将来 `external_line_id` 列で別管理する。
+- ~~`readPage` の hosted line id を採用するか~~ → hosted id は local `lines.line_id` には採用しない。`1.14.0` 以降は `lines.external_line_id` として別管理する。
 - ~~partial corpus で `sync` する時、seed predicate 外の recently updated page を取り込むか、acquisition mode ごとに sync 動詞を分けるか~~ → partial corpus は `acquire` criteria 再実行、full mirror は `sync`。`sync` は partial acquisition namespace で mutation しない。
 - direct public API fallback を入れる場合、Scrapbox API と cosense-cli の metadata / auth / rate limit / search semantics の差をどこまで surface に出すか。
 

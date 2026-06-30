@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.14.0`（更新: 2026-07-01 02:39、store: schema `14`、compat: schema `14`）: `lines.external_line_id` と `line_tombstones.external_line_id` を追加した。Cosense JSON export や hosted `readPage` が返す `lines[].id` / `lineId` は local `lines.line_id` に混ぜず、外部 source metadata として別列に保存し、JSON line output では値がある時だけ `external_line_id` を返す。`sync` result の `line_id_policy.hosted_line_id_persisted` は true になった。schema は `14`
 - `1.13.4`（更新: 2026-07-01 02:14、store: schema `13`、compat: schema `13` compatible）: `write-page` / `write-lines` の JSON result と `page_update` event payload に `line_identity` plan を追加した。plan は `unique_exact_text_v1` policy で inherited / minted / tombstoned line ids と counts を返し、split / merge / 大幅編集を自動で同一 line に推定しない境界を review/recovery から見えるようにした。Markdown content-only re-import も split / merge / 大幅編集を自動継承しない regression を追加。schema は不変
 - `1.13.3`（更新: 2026-07-01 01:52、store: schema `13`、compat: schema `13` compatible）: Markdown line-id inheritance を unique exact text matching に変更し、同じ text が旧新それぞれで一意なら位置が変わっても旧 `line_id` を引き継ぐようにした。これにより Markdown content-only re-import / `write-page` / `write-lines` は unique exact moved line の identity を維持する。duplicate text line は引き続き自動継承しない。schema は不変
 - `1.13.2`（更新: 2026-07-01 01:38、store: schema `13`、compat: schema `13` compatible）: Markdown line-id inheritance を conservative にし、旧側または新側に同じ text line が複数ある場合は exact unchanged でも自動で旧 `line_id` に寄せない。Markdown content-only re-import / `write-page` / `write-lines` は unambiguous exact match だけ `line_id` を引き継ぎ、duplicate text line は新 id を mint する。`write-page` / `write-lines` で消えた旧 duplicate `line_id` は `line_tombstones` に残る。schema は不変
@@ -231,6 +232,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.13.4`
-- Current internal `SCHEMA_VERSION`: `13`
-- Current package metadata should match `1.13.4`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current public compatibility version: `1.14.0`
+- Current internal `SCHEMA_VERSION`: `14`
+- Current package metadata should match `1.14.0`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

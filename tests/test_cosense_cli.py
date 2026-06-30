@@ -46,12 +46,14 @@ class FakeClient:
             "views": 101,
             "lines": [
                 {
+                    "id": "hosted-line-a0",
                     "text": "A",
                     "created": "1970-01-01T09:00:01+09:00 (just now)",
                     "updated": "1970-01-01T09:00:20+09:00 (just now)",
                     "user": {"id": "u"},
                 },
                 {
+                    "id": "hosted-line-a1",
                     "text": "updated [D]",
                     "created": "1970-01-01T09:00:01+09:00 (just now)",
                     "updated": "1970-01-01T09:00:20+09:00 (just now)",
@@ -377,6 +379,11 @@ class CosenseCliSyncTests(unittest.TestCase):
                 self.assertEqual(store.search("updated")[0]["source_title"], "A")
                 self.assertEqual(store.backlinks("Missing"), [])
                 self.assertEqual(store.unresolved_targets()[0]["title"], "D")
+                lines, _truncated = store.page_lines(page)
+                self.assertEqual([line.line_id for line in lines], ["aaaaaaaaaaaaaaaaaaaaaaaa:0", "aaaaaaaaaaaaaaaaaaaaaaaa:1"])
+                self.assertEqual([line.external_line_id for line in lines], ["hosted-line-a0", "hosted-line-a1"])
+                self.assertEqual(lines[1].to_dict()["external_line_id"], "hosted-line-a1")
+                self.assertTrue(result["line_id_policy"]["hosted_line_id_persisted"])
             finally:
                 store.close()
 
@@ -407,7 +414,7 @@ class CosenseCliSyncTests(unittest.TestCase):
                 self.assertEqual(result["renamed"], 1)
                 self.assertEqual(result["deleted"], 1)
                 self.assertEqual(result["hosted_line_ids_seen"], 3)
-                self.assertFalse(result["line_id_policy"]["hosted_line_id_persisted"])
+                self.assertTrue(result["line_id_policy"]["hosted_line_id_persisted"])
                 self.assertEqual(
                     client.read_urls,
                     ["https://scrapbox.io/fixture/A%20Renamed", "https://scrapbox.io/fixture/C"],
@@ -422,10 +429,12 @@ class CosenseCliSyncTests(unittest.TestCase):
 
                 lines, _ = store.page_lines(renamed)
                 self.assertEqual([line.line_id for line in lines], ["aaaaaaaaaaaaaaaaaaaaaaaa:0", "aaaaaaaaaaaaaaaaaaaaaaaa:1"])
+                self.assertEqual([line.external_line_id for line in lines], ["hosted-line-a0", "hosted-line-a1"])
                 tombstones = store.project_sync_tombstones()
                 self.assertIn("bbbbbbbbbbbbbbbbbbbbbbbb", tombstones)
                 self.assertEqual(tombstones["bbbbbbbbbbbbbbbbbbbbbbbb"]["title"], "B")
                 self.assertEqual(store.stats()["pages"], 2)
+                self.assertTrue(result["line_id_policy"]["hosted_line_id_persisted"])
             finally:
                 store.close()
 
