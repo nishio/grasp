@@ -11281,6 +11281,187 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(overwrite["current_session_id"], "session-b")
         self.assertEqual(overwrite["removed_line_samples"], ["- agent A marker"])
 
+    def test_claim_retry_hot_page_stress_preserves_all_markers(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            iterations = 4
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+            bootstrap_claim = run_json(
+                "claim-page",
+                "A",
+                "--ttl-seconds",
+                "30",
+                actor="bootstrap",
+                session_id="bootstrap-session",
+            )
+            worker_script = """
+import json
+import subprocess
+import sys
+import time
+
+store_path, output_root, worker_id, iterations_text = sys.argv[1:5]
+iterations = int(iterations_text)
+session_id = f"{worker_id}-session"
+
+def run_json(*args):
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "grasp",
+            "--json",
+            "--store",
+            store_path,
+            "--project",
+            "wiki",
+            "--actor",
+            worker_id,
+            "--session-id",
+            session_id,
+            *args,
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if completed.returncode != 0:
+        print(
+            json.dumps(
+                {
+                    "worker": worker_id,
+                    "returncode": completed.returncode,
+                    "stdout": completed.stdout,
+                    "stderr": completed.stderr,
+                }
+            )
+        )
+        sys.exit(completed.returncode)
+    return json.loads(completed.stdout)
+
+markers = []
+claim_attempts = 0
+claim_waited_seconds = 0.0
+for index in range(iterations):
+    marker = f"- {worker_id} marker {index}"
+    claim = run_json(
+        "claim-page",
+        "A",
+        "--ttl-seconds",
+        "30",
+        "--wait-seconds",
+        "5",
+        "--retry-interval-seconds",
+        "0.02",
+    )
+    claim_attempts += int(claim.get("claim_attempts") or 1)
+    claim_waited_seconds += float(claim.get("claim_waited_seconds") or 0)
+    claim_event_id = claim["claim"]["claim_event_id"]
+    try:
+        read = run_json("read", "A")
+        lines = [line["text"] for line in read["lines"]]
+        if marker not in lines:
+            lines.append(marker)
+        write_args = ["write-page", "A"]
+        for line in lines:
+            write_args.extend(["--line", line])
+        write_args.extend(["--output", output_root, "--no-journal", "--defer-projection"])
+        run_json(*write_args)
+        markers.append(marker)
+        time.sleep(0.03)
+    finally:
+        run_json("release-claim", claim_event_id)
+
+print(
+    json.dumps(
+        {
+            "worker": worker_id,
+            "markers": markers,
+            "claim_attempts": claim_attempts,
+            "claim_waited_seconds": round(claim_waited_seconds, 3),
+        },
+        sort_keys=True,
+    )
+)
+"""
+            processes = [
+                subprocess.Popen(
+                    [sys.executable, "-c", worker_script, str(store_path), str(root), worker, str(iterations)],
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                for worker in ("agent-a", "agent-b")
+            ]
+            time.sleep(0.2)
+            self.assertTrue(all(process.poll() is None for process in processes))
+            run_json(
+                "release-claim",
+                bootstrap_claim["claim"]["claim_event_id"],
+                actor="bootstrap",
+                session_id="bootstrap-session",
+            )
+            completed = []
+            for process in processes:
+                stdout, stderr = process.communicate(timeout=60)
+                completed.append((process.returncode, stdout, stderr))
+            summaries = []
+            for returncode, stdout, stderr in completed:
+                self.assertEqual(returncode, 0, stderr or stdout)
+                summaries.append(json.loads(stdout))
+            export_result = run_json("export-markdown", "--output", str(root))
+            status = run_json("write-status", "--output", str(root), "--no-journal", "--strict")
+            read_a = run_json("read", "A")
+            with sqlite3.connect(store_path) as connection:
+                page_update_count = connection.execute(
+                    "SELECT COUNT(*) FROM events WHERE event_type = 'page_update'"
+                ).fetchone()[0]
+            markdown_text = (root / "A.md").read_text(encoding="utf-8")
+
+        expected_markers = [
+            f"- {worker} marker {index}"
+            for worker in ("agent-a", "agent-b")
+            for index in range(iterations)
+        ]
+        line_texts = [line["text"] for line in read_a["lines"]]
+        self.assertEqual(page_update_count, iterations * 2)
+        self.assertTrue(any(summary["claim_attempts"] > iterations for summary in summaries), summaries)
+        self.assertEqual(sorted(summary["worker"] for summary in summaries), ["agent-a", "agent-b"])
+        for summary in summaries:
+            self.assertEqual(len(summary["markers"]), iterations)
+        for marker in expected_markers:
+            self.assertIn(marker, line_texts)
+            self.assertIn(marker, markdown_text)
+        self.assertEqual(sorted(export_result["written_files"]), ["A.md"])
+        self.assertTrue(status["strict_ok"])
+        self.assertEqual(status["strict_failures"], [])
+
     def test_write_status_strict_fails_when_journal_is_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
