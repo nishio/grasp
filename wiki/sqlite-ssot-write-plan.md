@@ -24,6 +24,7 @@ It supersedes [[llm-wiki-infra-fast-path-plan]] as an implementation plan. The o
 - **One canonical persistent SQLite store is the source of truth** for pages, lines, handles, edges, events, and log records.
 - **Events live inside SQLite**. The durable event stream is an `events` table written in the same transaction as state changes.
 - **Markdown is export-only projection**. `wiki/` is still emitted for review, backup, publish, and interoperability, but normal edits do not start from Markdown patch + import.
+- **Current knowledge reads start from SQLite**. Use `grasp read` / `search` / `gather` / `activity` against the canonical store first; treat `wiki/` as a readable cache only after strict projection checks are clean. If store and projection disagree, fix the projection from SQLite rather than treating Markdown as authority.
 - **Write operations are one SQLite transaction**. A write command opens the canonical store, takes the write transaction (`BEGIN IMMEDIATE` or equivalent), appends event rows, updates materialized state, and commits once.
 - **Recovery is grasp-native**. `history`, `revert-event`, and export/replay checks replace the old escape hatch of manually editing `events.jsonl` / `wiki/` and using git checkout. `write-diff` was removed in `1.8.8`; if a diff/review surface becomes necessary, create a purpose-named command instead of preserving the old vague one.
 
