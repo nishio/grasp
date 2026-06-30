@@ -1810,3 +1810,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 - UX: normal `read` remains read-only; `--hydrate` is explicit opt-in and refuses `--around-line`.
 - benchmark: 3000p/54000 edges synthetic corpus measured catalog-only 0.19s, first page hydrate 0.038s, next 10 page hydrates 0.412s total (~0.041s/page), leaving graph partial at 11/3000 hydrated files.
 - docs: [[grasp-v1-implemented]] updated with current facts; [[grasp-backlog]] now leaves auto/background hydration policy and finer stale/incomplete query contracts as remaining work.
+
+## [2026-06-30 14:55] implementation+file-back | gather hydrate-limit query-source slice
+- code: `gather --hydrate-limit N` scans incomplete Markdown source files for the query and hydrates up to N matching source pages before calculating link stats, mentions, co-links, and backlinks.
+- test: catalog-only 3-page corpus proves only the query-matching source file is parsed and the returned bundle gains backlink/co-link evidence while `markdown_graph` stays partial.
