@@ -955,6 +955,29 @@ def markdown_graph_status_metadata(
     }
 
 
+def markdown_graph_status_for_manifest_files(
+    files: dict[str, Any],
+    *,
+    incomplete_mode: str,
+    incomplete_reason: str,
+    complete_mode: str = "on-demand",
+) -> dict[str, Any]:
+    total_files = sum(1 for item in files.values() if isinstance(item, dict))
+    hydrated_files = sum(
+        1
+        for item in files.values()
+        if isinstance(item, dict) and bool(str(item.get("hash") or ""))
+    )
+    complete = total_files > 0 and hydrated_files == total_files
+    return markdown_graph_status_metadata(
+        complete=complete,
+        mode=complete_mode if complete else incomplete_mode,
+        total_files=total_files,
+        hydrated_files=hydrated_files,
+        reason=None if complete else incomplete_reason,
+    )
+
+
 def ensure_store_schema(store_path: str | Path) -> None:
     store_path = Path(store_path)
     store_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3503,6 +3526,136 @@ class SQLiteStore:
                 return str(source_path)
         return None
 
+    def hydrate_markdown_page(self, page: Page) -> dict[str, Any]:
+        project = page.project or self._require_project()
+        manifest = self._markdown_manifest_for_project(project)
+        files = manifest.get("files")
+        if not isinstance(files, dict) or not files:
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+        source_path, item = self._markdown_manifest_entry_for_page(manifest, page.id)
+        if str(item.get("hash") or ""):
+            return {
+                "hydrated": False,
+                "reason": "already_hydrated",
+                "project": project,
+                "page": page.to_summary(),
+                "source_path": source_path,
+                "markdown_graph": self.project_markdown_graph_status_by_name(project),
+            }
+
+        project_row = self.project_metadata(project)
+        if project_row is None:
+            raise ValueError(f"project does not exist: {project}")
+        folder_path = Path(str(project_row.get("source_export") or ""))
+        markdown_path = folder_path / source_path
+        if not folder_path.exists() or not folder_path.is_dir():
+            raise ValueError(f"Markdown folder does not exist: {folder_path}")
+        if not markdown_path.exists() or not markdown_path.is_file():
+            raise ValueError(f"Markdown source path not found: {source_path}")
+
+        expected_event_sequence = latest_project_event_sequence(self.connection, project)
+        record = markdown_page_record_from_file(folder_path, markdown_path)
+        if record.page.id != page.id:
+            raise ValueError(
+                "Markdown hydrate aborted: parsed page id differs from catalog id; "
+                "run normal import --markdown to rebuild this project"
+            )
+        line_payloads = [
+            {
+                "line_id": line.line_id,
+                "line_index": line.index,
+                "text": line.text,
+                "created": line.created,
+                "updated": line.updated,
+                "user_id": line.user_id,
+            }
+            for line in record.page.lines
+        ]
+
+        with self.write_transaction():
+            require_project_events_unchanged(
+                self.connection,
+                project,
+                expected_event_sequence,
+                operation="Markdown hydrate",
+            )
+            current_page = self._page_by_id(page.id, project=project)
+            if current_page is None:
+                raise ValueError(f"page id not found: {page.id}")
+            current_manifest = self._markdown_manifest_for_project(project)
+            current_source_path, current_item = self._markdown_manifest_entry_for_page(current_manifest, page.id)
+            if current_source_path != source_path:
+                raise ValueError("Markdown hydrate aborted: source path changed")
+            if str(current_item.get("hash") or ""):
+                current_files = current_manifest.get("files") if isinstance(current_manifest.get("files"), dict) else {}
+                return {
+                    "hydrated": False,
+                    "reason": "already_hydrated",
+                    "project": project,
+                    "page": current_page.to_summary(),
+                    "source_path": source_path,
+                    "markdown_graph": markdown_graph_status_for_manifest_files(
+                        current_files,
+                        incomplete_mode="partial",
+                        incomplete_reason="partial_hydration",
+                    ),
+                }
+
+            edge_count = self._apply_markdown_page_identity_uncommitted(
+                project,
+                page.id,
+                title=record.page.title,
+                source_path=source_path,
+                aliases=record.aliases,
+                lines=line_payloads,
+                graph_role=record.graph_role,
+                updated=record.page.updated or int(time.time()),
+                source_hash=record.source_hash,
+                mtime_ns=record.mtime_ns,
+            )
+            updated_manifest = self._markdown_manifest_for_project(project)
+            updated_files = updated_manifest.get("files") if isinstance(updated_manifest.get("files"), dict) else {}
+            graph_status = markdown_graph_status_for_manifest_files(
+                updated_files,
+                incomplete_mode="partial",
+                incomplete_reason="partial_hydration",
+            )
+            import_summary = {
+                "mode": "hydrate-page",
+                "changed_files": 1,
+                "parsed_files": 1,
+                "hydrated_source_path": source_path,
+                "graph_complete": graph_status["complete"],
+                "hydrated_files": graph_status["hydrated_files"],
+                "total_files": graph_status["total_files"],
+            }
+            _write_metadata(
+                self.connection,
+                {
+                    f"project.{project}.markdown_graph": json.dumps(
+                        graph_status,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    f"project.{project}.markdown_last_import": json.dumps(
+                        import_summary,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                },
+            )
+            hydrated_page = self._page_by_id(page.id, project=project)
+            return {
+                "hydrated": True,
+                "project": project,
+                "page": hydrated_page.to_summary() if hydrated_page is not None else record.page.to_summary(),
+                "source_path": source_path,
+                "previous_title": page.title,
+                "line_count": len(line_payloads),
+                "edge_count": edge_count,
+                "markdown_graph": graph_status,
+            }
+
     def _markdown_index_projection_text(self, project: str, files: dict[str, Any]) -> str:
         groups: dict[str, list[tuple[str, str, str]]] = {}
         for relative_path in sorted(str(path) for path in files):
@@ -4788,6 +4941,8 @@ class SQLiteStore:
         lines: list[dict[str, Any]],
         graph_role: str,
         updated: int,
+        source_hash: str | None = None,
+        mtime_ns: int | None = None,
     ) -> int:
         with self.connection:
             return self._apply_markdown_page_identity_uncommitted(
@@ -4799,6 +4954,8 @@ class SQLiteStore:
                 lines=lines,
                 graph_role=graph_role,
                 updated=updated,
+                source_hash=source_hash,
+                mtime_ns=mtime_ns,
             )
 
     def _apply_markdown_page_identity_uncommitted(
@@ -4812,6 +4969,8 @@ class SQLiteStore:
         lines: list[dict[str, Any]],
         graph_role: str,
         updated: int,
+        source_hash: str | None = None,
+        mtime_ns: int | None = None,
     ) -> int:
         title = title.strip()
         source_path = _safe_markdown_relative_path(source_path)
@@ -4838,6 +4997,10 @@ class SQLiteStore:
                 "graph_role": graph_role,
             }
         )
+        if source_hash is not None:
+            manifest_item["hash"] = source_hash
+        if mtime_ns is not None:
+            manifest_item["mtime_ns"] = mtime_ns
         new_files[source_path] = manifest_item
         manifest = dict(manifest)
         manifest["files"] = new_files
@@ -6955,6 +7118,7 @@ class SQLiteStore:
         related_snippets: bool = False,
         related_snippet_lines: int = 5,
         related_snippet_mode: str = "lead",
+        hydrate: bool = False,
     ) -> dict[str, Any]:
         if page_id and source_path:
             raise ValueError("read accepts only one of --page-id or --path")
@@ -6985,6 +7149,7 @@ class SQLiteStore:
                     "page": None,
                     "ambiguity": self._handle_ambiguity(title, candidates),
                     "markdown_graph": None,
+                    "markdown_hydration": None,
                     "link_stats": None,
                     "lines": [],
                     "lines_truncated": False,
@@ -7001,6 +7166,14 @@ class SQLiteStore:
             else:
                 page = None
             lookup_title = title
+
+        markdown_hydration: dict[str, Any] | None = None
+        if hydrate and page is not None:
+            markdown_hydration = self.hydrate_markdown_page(page)
+            hydrated_page_id = str((markdown_hydration.get("page") or {}).get("id") or page.id)
+            page = self._page_by_id(hydrated_page_id, project=markdown_hydration.get("project") or page.project) or page
+            if not explicit_page:
+                lookup_title = title or page.title
 
         if page is not None and not explicit_page:
             lookup_title = title or page.title
@@ -7028,6 +7201,7 @@ class SQLiteStore:
                 "page": None,
                 "ambiguity": None,
                 "markdown_graph": self.project_markdown_graph_status_by_name(self._selected_project_or_none()),
+                "markdown_hydration": markdown_hydration,
                 "link_stats": link_stats,
                 "lines": [],
                 "lines_truncated": False,
@@ -7046,6 +7220,7 @@ class SQLiteStore:
             "page": page.to_summary(),
             "ambiguity": None,
             "markdown_graph": self.project_markdown_graph_status_by_name(page.project),
+            "markdown_hydration": markdown_hydration,
             "link_stats": link_stats,
             "lines": [line.to_dict() for line in lines],
             "lines_truncated": lines_truncated,
