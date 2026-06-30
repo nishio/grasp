@@ -1909,3 +1909,8 @@ Mode2 cutover remains a policy decision until owner chooses acceptable overhead 
 
 ## [2026-06-30 23:17] file-back | SQLite authority の読み取り優先を明文化
 - [[native-authority-markdown-projection]] / [[sqlite-ssot-write-plan]] に、current knowledge 確認は SQLite-backed read surface first、Markdown は strict projection clean 時だけ readable cache とする運用を追記。AGENTS/CLAUDE も同趣旨に更新する。
+
+## [2026-06-30 23:20] file-back | stable milestone checklist
+[[grasp-backlog]] に、read v1 stable ではなく mode2/write-authoring を dogfood stable に寄せるための checklist を明記。
+最優先は claim retry throughput gate の broader 実測と owner 閾値決定。append/merge surface や queue は real dogfood で必要が出るまで作らない。
+stable line identity と Markdown direct edit policy、git-diff-of-md に依存しない recovery/review evidence は stable 前の残件として残す。
