@@ -251,6 +251,49 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
         self.assertFalse(required["ok"])
         self.assertEqual(required["failures"], [{"type": "thresholds_not_set"}])
 
+    def test_required_threshold_gate_requires_both_owner_values(self):
+        thresholds = {
+            "min_surviving_throughput_ratio": 0.75,
+            "max_p95_claim_wait_seconds": None,
+        }
+        scenario_gate = benchmark.evaluate_scenario_gate(
+            results=[
+                {
+                    "mode": "claim_retry",
+                    "lost_markers": 0,
+                    "lost_log_markers": 0,
+                    "strict_ok": True,
+                    "strict_failures": [],
+                    "active_claim_overlap_count": 0,
+                }
+            ],
+            comparison={
+                "claim_retry_surviving_markers_per_second_ratio": 0.8,
+                "claim_retry_p95_claim_wait_seconds": 0.42,
+            },
+            thresholds=thresholds,
+        )
+        required = benchmark.summarize_gate(
+            [{"workload": "file-back", "think_seconds": 0.02, "gate": scenario_gate}],
+            thresholds,
+            require_thresholds=True,
+        )
+
+        self.assertTrue(scenario_gate["ok"])
+        self.assertTrue(required["enabled"])
+        self.assertTrue(required["required"])
+        self.assertFalse(required["ok"])
+        self.assertEqual(required["reason"], "required_thresholds_missing")
+        self.assertEqual(
+            required["failures"],
+            [
+                {
+                    "type": "required_thresholds_missing",
+                    "missing": ["max_p95_claim_wait_seconds"],
+                }
+            ],
+        )
+
     def test_rendered_tables_include_cutover_metrics_for_file_back_workload(self):
         output = {
             "scenarios": [
@@ -366,6 +409,29 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
 
         self.assertIn("## Cutover Threshold Gate", table)
         self.assertIn("| all | all | fail | thresholds_not_set |", table)
+
+    def test_rendered_required_threshold_gate_reports_partial_thresholds(self):
+        output = {
+            "scenarios": [],
+            "gate": {
+                "enabled": True,
+                "required": True,
+                "ok": False,
+                "failures": [
+                    {
+                        "type": "required_thresholds_missing",
+                        "missing": ["max_p95_claim_wait_seconds"],
+                    }
+                ],
+                "reason": "required_thresholds_missing",
+            },
+            "metric_summary": {},
+        }
+
+        table = benchmark.render_tables(output)
+
+        self.assertIn("## Cutover Threshold Gate", table)
+        self.assertIn("| all | all | fail | required_thresholds_missing:max_p95_claim_wait_seconds |", table)
 
 
 if __name__ == "__main__":

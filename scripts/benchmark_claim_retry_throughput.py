@@ -28,6 +28,10 @@ LOG_PAGE = "Log"
 WORKER_PREFIX = "agent"
 MODES = ("uncoordinated", "claim_retry")
 WORKLOADS = ("hot-page", "file-back")
+CUTOVER_THRESHOLD_KEYS = (
+    "min_surviving_throughput_ratio",
+    "max_p95_claim_wait_seconds",
+)
 PROFILES: dict[str, dict[str, Any]] = {
     "quick": {
         "iterations": 25,
@@ -499,6 +503,10 @@ def gate_enabled(thresholds: dict[str, float | None]) -> bool:
     return any(value is not None for value in thresholds.values())
 
 
+def missing_cutover_thresholds(thresholds: dict[str, float | None]) -> list[str]:
+    return [key for key in CUTOVER_THRESHOLD_KEYS if thresholds.get(key) is None]
+
+
 def resolve_run_config(args: argparse.Namespace) -> dict[str, Any]:
     profile = PROFILES[str(args.profile)]
     return {
@@ -585,6 +593,7 @@ def summarize_gate(
     require_thresholds: bool = False,
 ) -> dict[str, Any]:
     enabled = gate_enabled(thresholds)
+    missing_required = missing_cutover_thresholds(thresholds) if require_thresholds else []
     if not enabled:
         return {
             "enabled": False,
@@ -593,6 +602,20 @@ def summarize_gate(
             "thresholds": thresholds,
             "failures": [{"type": "thresholds_not_set"}] if require_thresholds else [],
             "reason": "thresholds_not_set",
+        }
+    if missing_required:
+        return {
+            "enabled": True,
+            "required": True,
+            "ok": False,
+            "thresholds": thresholds,
+            "failures": [
+                {
+                    "type": "required_thresholds_missing",
+                    "missing": missing_required,
+                }
+            ],
+            "reason": "required_thresholds_missing",
         }
     failures = [
         {
@@ -821,8 +844,14 @@ def render_tables(output: dict[str, Any]) -> str:
                     "; ".join(str(failure.get("type")) for failure in failures) if failures else "",
                 ]
             )
-        if gate.get("required") and not gate.get("enabled"):
-            gate_rows = [["all", "all", "fail", "thresholds_not_set"]]
+        if gate.get("required") and gate.get("reason") in {"thresholds_not_set", "required_thresholds_missing"}:
+            failures = list(gate.get("failures") or [])
+            failure = failures[0] if failures else {"type": str(gate.get("reason"))}
+            failure_text = str(failure.get("type"))
+            missing = failure.get("missing")
+            if missing:
+                failure_text = f"{failure_text}:{','.join(str(item) for item in missing)}"
+            gate_rows = [["all", "all", "fail", failure_text]]
         sections.extend(
             [
                 "",
