@@ -1834,3 +1834,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 16:15] implementation | opt-in idle Markdown hydration
 - Added global --idle-hydrate-seconds S / --idle-hydrate-limit N for supported read/retrieval commands; results keep their pre-idle partial graph contract and report markdown_idle_hydration for future-command progress.
 - Updated progressive/lazy import backlog: explicit opt-in idle hydration is implemented; remaining work is default policy/env policy, derivative stale flags, and finer contracts for mentions/co-links/path/unresolved.
+
+## [2026-06-30 16:29] implementation | partial Markdown graph contracts for graph verbs
+- Added markdown_query_contract / markdown_graph reporting to mentions, co-links, path, and unresolved on incomplete Markdown graphs so empty results, no-path answers, and rankings are not mistaken for complete-corpus facts.
+- Text formatters reuse the existing incomplete graph warning; regression covers catalog-only mentions/co-links/path/unresolved JSON and unresolved text warning.
