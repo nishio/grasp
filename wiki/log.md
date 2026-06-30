@@ -1997,3 +1997,6 @@ milestone: Cosense/hosted sync external line id is no longer a stable line ident
 
 ## [2026-07-01 02:29] benchmark+file-back | claim retry cutover profile current evidence
 Added scripts/benchmark_claim_retry_throughput.py --profile cutover for the broader hot-page + file-back matrix (think 0/0.02/0.05, 25 iterations/worker, table output). Re-ran the matrix on schema 14 HEAD: claim_retry survived 50/50 in all six scenarios with page/log lost 0, strict green, active claim overlap 0; file-back p95 wait 0.516/0.556/0.504s and surviving throughput ratio 0.787/0.710/0.740. Owner thresholds remain unset.
+
+## [2026-07-01 02:39] benchmark+file-back | cutover metric summary for owner thresholds
+scripts/benchmark_claim_retry_throughput.py now returns metric_summary / Cutover Metric Summary with compared scenario count, min surviving/completed throughput ratio, max p95 claim wait, max overlap, total lost, total log_lost, and all_strict_green. This helps owner choose --min-surviving-throughput-ratio and --max-p95-claim-wait-seconds without Codex choosing policy thresholds.

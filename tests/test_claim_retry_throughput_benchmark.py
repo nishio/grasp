@@ -165,6 +165,60 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
             ],
         )
 
+    def test_cutover_metric_summary_reports_worst_case_without_thresholds(self):
+        summary = benchmark.summarize_cutover_metrics(
+            [
+                {
+                    "workload": "hot-page",
+                    "think_seconds": 0.0,
+                    "comparison": {
+                        "claim_retry_completed_writes_per_second_ratio": 0.4,
+                        "claim_retry_surviving_markers_per_second_ratio": 0.8,
+                        "claim_retry_p95_claim_wait_seconds": 0.42,
+                    },
+                    "results": [
+                        {"mode": "uncoordinated", "lost_markers": 25},
+                        {
+                            "mode": "claim_retry",
+                            "lost_markers": 0,
+                            "lost_log_markers": 0,
+                            "strict_ok": True,
+                            "active_claim_overlap_count": 0,
+                        },
+                    ],
+                },
+                {
+                    "workload": "file-back",
+                    "think_seconds": 0.05,
+                    "comparison": {
+                        "claim_retry_completed_writes_per_second_ratio": 0.35,
+                        "claim_retry_surviving_markers_per_second_ratio": 0.71,
+                        "claim_retry_p95_claim_wait_seconds": 0.56,
+                    },
+                    "results": [
+                        {
+                            "mode": "claim_retry",
+                            "lost_markers": 0,
+                            "lost_log_markers": 0,
+                            "strict_ok": True,
+                            "active_claim_overlap_count": 0,
+                        },
+                    ],
+                },
+            ]
+        )
+
+        self.assertEqual(summary["scenario_count"], 2)
+        self.assertEqual(summary["compared_scenario_count"], 2)
+        self.assertEqual(summary["claim_retry_scenario_count"], 2)
+        self.assertEqual(summary["min_claim_retry_surviving_throughput_ratio"], 0.71)
+        self.assertEqual(summary["min_claim_retry_completed_throughput_ratio"], 0.35)
+        self.assertEqual(summary["max_claim_retry_p95_claim_wait_seconds"], 0.56)
+        self.assertEqual(summary["max_claim_retry_active_claim_overlap_count"], 0)
+        self.assertEqual(summary["total_claim_retry_lost_markers"], 0)
+        self.assertEqual(summary["total_claim_retry_lost_log_markers"], 0)
+        self.assertTrue(summary["all_claim_retry_strict_green"])
+
     def test_threshold_args_are_optional_until_owner_sets_cutover_values(self):
         args = argparse.Namespace(
             min_surviving_throughput_ratio=None,
@@ -233,6 +287,18 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
                 }
             ],
             "gate": {"enabled": True, "ok": True},
+            "metric_summary": {
+                "scenario_count": 1,
+                "compared_scenario_count": 1,
+                "claim_retry_scenario_count": 1,
+                "min_claim_retry_surviving_throughput_ratio": 0.8,
+                "min_claim_retry_completed_throughput_ratio": 0.4,
+                "max_claim_retry_p95_claim_wait_seconds": 0.439,
+                "max_claim_retry_active_claim_overlap_count": 0,
+                "total_claim_retry_lost_markers": 0,
+                "total_claim_retry_lost_log_markers": 0,
+                "all_claim_retry_strict_green": True,
+            },
         }
 
         table = benchmark.render_tables(output)
@@ -240,6 +306,12 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
         self.assertIn("## Claim Retry Throughput Gate", table)
         self.assertIn("| workload | think_s | mode | attempted | survived | lost | log_lost | strict | overlap | p95_wait_s | completed/s | surviving/s | elapsed_s |", table)
         self.assertIn("| file-back | 0.02 | claim_retry | 50 | 50 | 0 | 0 | green | 0 | 0.439 | 2 | 2 | 25 |", table)
+        self.assertIn("## Cutover Metric Summary", table)
+        self.assertIn("| claim_retry_scenarios | 1/1 |", table)
+        self.assertIn("| compared_scenarios | 1/1 |", table)
+        self.assertIn("| min_surviving_ratio | 0.8 |", table)
+        self.assertIn("| max_p95_wait_s | 0.439 |", table)
+        self.assertIn("| all_strict_green | yes |", table)
         self.assertIn("## Claim Retry vs Uncoordinated", table)
         self.assertIn("| file-back | 0.02 | 0.4 | 0.8 | -25 | 0 | 0 | 0.439 |", table)
         self.assertIn("## Optional Cutover Threshold Gate", table)

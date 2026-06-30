@@ -605,6 +605,53 @@ def summarize_gate(scenarios: list[dict[str, Any]], thresholds: dict[str, float 
     }
 
 
+def summarize_cutover_metrics(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
+    comparisons = [
+        scenario.get("comparison")
+        for scenario in scenarios
+        if scenario.get("comparison") is not None
+    ]
+    claim_retry_results = [
+        result
+        for scenario in scenarios
+        for result in list(scenario.get("results") or [])
+        if result.get("mode") == "claim_retry"
+    ]
+    surviving_ratios = [
+        float(comparison["claim_retry_surviving_markers_per_second_ratio"])
+        for comparison in comparisons
+        if comparison.get("claim_retry_surviving_markers_per_second_ratio") is not None
+    ]
+    completed_ratios = [
+        float(comparison["claim_retry_completed_writes_per_second_ratio"])
+        for comparison in comparisons
+        if comparison.get("claim_retry_completed_writes_per_second_ratio") is not None
+    ]
+    p95_waits = [
+        float(comparison["claim_retry_p95_claim_wait_seconds"])
+        for comparison in comparisons
+        if comparison.get("claim_retry_p95_claim_wait_seconds") is not None
+    ]
+    overlap_counts = [
+        int(result.get("active_claim_overlap_count") or 0)
+        for result in claim_retry_results
+    ]
+    return {
+        "scenario_count": len(scenarios),
+        "compared_scenario_count": len(comparisons),
+        "claim_retry_scenario_count": len(claim_retry_results),
+        "min_claim_retry_surviving_throughput_ratio": round(min(surviving_ratios), 3) if surviving_ratios else None,
+        "min_claim_retry_completed_throughput_ratio": round(min(completed_ratios), 3) if completed_ratios else None,
+        "max_claim_retry_p95_claim_wait_seconds": round(max(p95_waits), 3) if p95_waits else None,
+        "max_claim_retry_active_claim_overlap_count": max(overlap_counts) if overlap_counts else None,
+        "total_claim_retry_lost_markers": sum(int(result.get("lost_markers") or 0) for result in claim_retry_results),
+        "total_claim_retry_lost_log_markers": sum(int(result.get("lost_log_markers") or 0) for result in claim_retry_results),
+        "all_claim_retry_strict_green": all(bool(result.get("strict_ok")) for result in claim_retry_results)
+        if claim_retry_results
+        else None,
+    }
+
+
 def format_cell(value: Any) -> str:
     if value is None:
         return "n/a"
@@ -685,6 +732,55 @@ def render_tables(output: dict[str, Any]) -> str:
             result_rows,
         ),
     ]
+    metric_summary = output.get("metric_summary") or {}
+    if metric_summary:
+        sections.extend(
+            [
+                "",
+                "## Cutover Metric Summary",
+                markdown_table(
+                    ["metric", "value"],
+                    [
+                        [
+                            "claim_retry_scenarios",
+                            f"{metric_summary.get('claim_retry_scenario_count')}/{metric_summary.get('scenario_count')}",
+                        ],
+                        [
+                            "compared_scenarios",
+                            f"{metric_summary.get('compared_scenario_count')}/{metric_summary.get('scenario_count')}",
+                        ],
+                        [
+                            "min_surviving_ratio",
+                            metric_summary.get("min_claim_retry_surviving_throughput_ratio"),
+                        ],
+                        [
+                            "min_completed_ratio",
+                            metric_summary.get("min_claim_retry_completed_throughput_ratio"),
+                        ],
+                        [
+                            "max_p95_wait_s",
+                            metric_summary.get("max_claim_retry_p95_claim_wait_seconds"),
+                        ],
+                        [
+                            "max_overlap",
+                            metric_summary.get("max_claim_retry_active_claim_overlap_count"),
+                        ],
+                        [
+                            "total_lost",
+                            metric_summary.get("total_claim_retry_lost_markers"),
+                        ],
+                        [
+                            "total_log_lost",
+                            metric_summary.get("total_claim_retry_lost_log_markers"),
+                        ],
+                        [
+                            "all_strict_green",
+                            metric_summary.get("all_claim_retry_strict_green"),
+                        ],
+                    ],
+                ),
+            ]
+        )
     if comparison_rows:
         sections.extend(
             [
@@ -840,6 +936,7 @@ def main(argv: list[str] | None = None) -> int:
                     }
                 )
     gate = summarize_gate(scenarios, thresholds)
+    metric_summary = summarize_cutover_metrics(scenarios)
     output = {
         "benchmark": "claim_retry_throughput_gate",
         "profile": args.profile,
@@ -851,6 +948,7 @@ def main(argv: list[str] | None = None) -> int:
         "retry_interval_seconds": args.retry_interval_seconds,
         "elapsed_seconds": round(time.perf_counter() - started, 3),
         "gate": gate,
+        "metric_summary": metric_summary,
         "thresholds": thresholds,
         "scenarios": scenarios,
     }
