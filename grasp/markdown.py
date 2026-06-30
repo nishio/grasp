@@ -4,6 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
+import re
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
@@ -28,6 +29,12 @@ class MarkdownPageRecord:
     graph_role: str
     source_hash: str
     mtime_ns: int
+
+
+@dataclass(frozen=True)
+class MarkdownLinkTarget:
+    title: str
+    fragment: str | None = None
 
 
 @dataclass(frozen=True)
@@ -127,7 +134,12 @@ class MarkdownMirror:
         title_collisions = markdown_title_collisions(records)
         title_aliases = build_title_aliases(records)
         pages = [record.page for record in records]
-        edges = [edge for record in records for edge in markdown_edges_for_record(record)]
+        record_targets = markdown_unique_record_targets(records)
+        edges = [
+            edge
+            for record in records
+            for edge in markdown_edges_for_record(record, record_targets=record_targets)
+        ]
 
         return cls(
             pages=pages,
@@ -221,20 +233,37 @@ def markdown_catalog_record_from_file(root: str | Path, path: str | Path) -> Mar
     )
 
 
-def markdown_edges_for_record(record: MarkdownPageRecord) -> list[Edge]:
+def markdown_edges_for_record(
+    record: MarkdownPageRecord,
+    *,
+    record_targets: dict[str, MarkdownPageRecord] | None = None,
+) -> list[Edge]:
     if not markdown_graph_role_emits_edges(record.graph_role):
         return []
+    record_targets = record_targets or {}
     page = record.page
     edges: list[Edge] = []
     line_target_norms: dict[str, set[str]] = defaultdict(set)
     in_code_fence = False
     for line in page.lines:
-        links, in_code_fence = parse_markdown_line_links(
+        links, in_code_fence = parse_markdown_line_link_targets(
             line.text,
             in_code_fence=in_code_fence,
         )
-        for target_title in links:
-            edges.append(markdown_edge(page, line, target_title))
+        for target in links:
+            target_title = target.title or page.title
+            target_line_id = markdown_target_line_id(record, target, record_targets=record_targets)
+            if not target.title and target_line_id is None:
+                continue
+            edges.append(
+                markdown_edge(
+                    page,
+                    line,
+                    target_title,
+                    target_fragment=target.fragment,
+                    target_line_id=target_line_id,
+                )
+            )
             line_target_norms.setdefault(line.line_id, set()).add(normalize_title(target_title))
     for tag, line_index in record.tags:
         if 0 <= line_index < len(page.lines):
@@ -299,15 +328,24 @@ def first_markdown_h1_title(lines: list[str]) -> str | None:
 
 
 def parse_markdown_h1_title(line: str) -> str | None:
+    return parse_markdown_heading_title(line, allowed_levels={1})
+
+
+def parse_markdown_heading_title(line: str, *, allowed_levels: set[int] | None = None) -> str | None:
     stripped = line.lstrip()
     leading_spaces = len(line) - len(stripped)
     if leading_spaces > 3 or not stripped.startswith("#"):
         return None
-    if stripped.startswith("##"):
+    level = 0
+    while level < len(stripped) and stripped[level] == "#":
+        level += 1
+    if level > 6:
         return None
-    if len(stripped) == 1 or not stripped[1].isspace():
+    if allowed_levels is not None and level not in allowed_levels:
         return None
-    title = stripped[1:].strip()
+    if len(stripped) == level or not stripped[level].isspace():
+        return None
+    title = stripped[level:].strip()
     if title.endswith("#"):
         without_closing = title.rstrip("#")
         if not without_closing or without_closing[-1].isspace():
@@ -611,6 +649,23 @@ def markdown_graph_role_emits_edges(graph_role: str) -> bool:
     return graph_role in {"content", "source"}
 
 
+def markdown_unique_record_targets(records: list[MarkdownPageRecord]) -> dict[str, MarkdownPageRecord]:
+    owners: dict[str, list[MarkdownPageRecord]] = defaultdict(list)
+    for record in records:
+        page = record.page
+        for title in [page.title, *record.aliases]:
+            norm = normalize_title(title)
+            if norm:
+                owners[norm].append(record)
+
+    targets: dict[str, MarkdownPageRecord] = {}
+    for norm, entries in owners.items():
+        page_ids = {entry.page.id for entry in entries}
+        if len(page_ids) == 1:
+            targets[norm] = entries[0]
+    return targets
+
+
 def markdown_title_collisions(records: list[MarkdownPageRecord]) -> list[MarkdownCollision]:
     buckets: dict[str, list[MarkdownCollisionEntry]] = defaultdict(list)
     for record in records:
@@ -712,7 +767,14 @@ def resolve_markdown_target(target_title: str, title_aliases: dict[str, str]) ->
     return title_aliases.get(normalize_title(target_title), target_title)
 
 
-def markdown_edge(page: Page, line: Line, target_title: str) -> Edge:
+def markdown_edge(
+    page: Page,
+    line: Line,
+    target_title: str,
+    *,
+    target_fragment: str | None = None,
+    target_line_id: str | None = None,
+) -> Edge:
     return Edge(
         source_page_id=page.id,
         source_title=page.title,
@@ -723,6 +785,8 @@ def markdown_edge(page: Page, line: Line, target_title: str) -> Edge:
         line_text=line.text,
         target_title=target_title,
         target_norm=normalize_title(target_title),
+        target_fragment=target_fragment,
+        target_line_id=target_line_id,
     )
 
 
@@ -732,20 +796,29 @@ def parse_markdown_links(text: str) -> list[str]:
 
 
 def parse_markdown_line_links(text: str, *, in_code_fence: bool) -> tuple[list[str], bool]:
+    targets, in_code_fence = parse_markdown_line_link_targets(text, in_code_fence=in_code_fence)
+    return [target.title for target in targets if target.title], in_code_fence
+
+
+def parse_markdown_line_link_targets(
+    text: str,
+    *,
+    in_code_fence: bool,
+) -> tuple[list[MarkdownLinkTarget], bool]:
     stripped = text.lstrip()
     if is_code_fence(stripped):
         return [], not in_code_fence
     if in_code_fence:
         return [], in_code_fence
 
-    links: list[str] = []
+    links: list[MarkdownLinkTarget] = []
     index = 0
     while index < len(text):
         char = text[index]
         if char == "#":
             tag = parse_markdown_hash_tag(text, index)
             if tag is not None:
-                links.append(tag[0])
+                links.append(MarkdownLinkTarget(tag[0]))
                 index = tag[1]
                 continue
             index += 1
@@ -773,7 +846,7 @@ def parse_markdown_line_links(text: str, *, in_code_fence: bool) -> tuple[list[s
         close = text.find("]]", start + 2)
         if close == -1:
             break
-        target = markdown_wikilink_target(text[start + 2 : close])
+        target = markdown_wikilink_link_target(text[start + 2 : close])
         if target:
             links.append(target)
         index = close + 2
@@ -788,17 +861,25 @@ def parse_markdown_hash_tag(text: str, start: int) -> tuple[str, int] | None:
 
 
 def markdown_wikilink_target(content: str) -> str | None:
-    target = content.split("|", 1)[0].split("#", 1)[0].strip()
-    if not target:
+    target = markdown_wikilink_link_target(content)
+    if target is None:
         return None
-    if target.endswith(".md"):
-        target = target[:-3]
-    if "/" in target:
-        target = target.rsplit("/", 1)[-1]
-    return target.strip() or None
+    return target.title or None
 
 
-def markdown_inline_link_target_at(text: str, start: int) -> tuple[str, int] | None:
+def markdown_wikilink_link_target(content: str) -> MarkdownLinkTarget | None:
+    raw_target = content.split("|", 1)[0].strip()
+    if not raw_target:
+        return None
+    path_part, separator, fragment_part = raw_target.partition("#")
+    fragment = unquote(fragment_part).strip() if separator else None
+    title = markdown_path_link_target(path_part) if path_part.strip() else ""
+    if not title and not fragment:
+        return None
+    return MarkdownLinkTarget(title=title, fragment=fragment or None)
+
+
+def markdown_inline_link_target_at(text: str, start: int) -> tuple[MarkdownLinkTarget, int] | None:
     if start > 0 and text[start - 1] == "!":
         return None
     if is_inside_inline_code(text, start):
@@ -816,7 +897,7 @@ def markdown_inline_link_target_at(text: str, start: int) -> tuple[str, int] | N
     return target, destination_end + 1
 
 
-def markdown_inline_link_target(destination: str) -> str | None:
+def markdown_inline_link_target(destination: str) -> MarkdownLinkTarget | None:
     raw = destination.strip()
     if not raw:
         return None
@@ -827,21 +908,96 @@ def markdown_inline_link_target(destination: str) -> str | None:
         href = raw[1:close].strip()
     else:
         href = raw.split(None, 1)[0].strip()
-    if not href or href.startswith("#") or href.startswith("//"):
+    if not href or href.startswith("//"):
         return None
     parts = urlsplit(href)
     if parts.scheme or parts.netloc:
         return None
+    fragment = unquote(parts.fragment).strip() or None
+    if not parts.path and fragment:
+        return MarkdownLinkTarget(title="", fragment=fragment)
     path = unquote(parts.path).strip()
     if not path or Path(path).suffix.casefold() != ".md":
         return None
-    return markdown_path_link_target(path)
+    title = markdown_path_link_target(path)
+    if title is None:
+        return None
+    return MarkdownLinkTarget(title=title, fragment=fragment)
 
 
 def markdown_path_link_target(path_text: str) -> str | None:
     path = Path(path_text)
     target = path.stem.strip()
     return target or None
+
+
+def markdown_target_line_id(
+    source_record: MarkdownPageRecord,
+    target: MarkdownLinkTarget,
+    *,
+    record_targets: dict[str, MarkdownPageRecord],
+) -> str | None:
+    if not target.fragment:
+        return None
+    if target.title:
+        target_record = record_targets.get(normalize_title(target.title))
+        if target_record is None:
+            return None
+    else:
+        target_record = source_record
+    return markdown_fragment_line_id(target_record.page.lines, target.fragment)
+
+
+def markdown_fragment_line_id(lines: tuple[Line, ...] | list[Line], fragment: str) -> str | None:
+    fragment = fragment.strip()
+    if not fragment:
+        return None
+    if fragment.startswith("^"):
+        block_id = fragment[1:].strip()
+        if not block_id:
+            return None
+        for line in markdown_visible_lines(lines):
+            if markdown_line_has_block_id(line.text, block_id):
+                return line.line_id
+        return None
+
+    target_norms = markdown_heading_anchor_norms(fragment)
+    for line in markdown_visible_lines(lines):
+        heading = parse_markdown_heading_title(line.text)
+        if heading is not None and markdown_heading_anchor_norms(heading) & target_norms:
+            return line.line_id
+    return None
+
+
+def markdown_visible_lines(lines: tuple[Line, ...] | list[Line]) -> list[Line]:
+    visible: list[Line] = []
+    in_frontmatter = bool(lines and lines[0].text.strip() == "---")
+    in_code_fence = False
+    for index, line in enumerate(lines):
+        stripped = line.text.strip()
+        if index == 0 and in_frontmatter:
+            continue
+        if in_frontmatter:
+            if stripped in {"---", "..."}:
+                in_frontmatter = False
+            continue
+        if is_code_fence(line.text.lstrip()):
+            in_code_fence = not in_code_fence
+            continue
+        if in_code_fence:
+            continue
+        visible.append(line)
+    return visible
+
+
+def markdown_heading_anchor_norms(text: str) -> set[str]:
+    text = unquote(text).strip()
+    variants = {text, text.replace("-", " ")}
+    return {norm for variant in variants if (norm := normalize_title(variant))}
+
+
+def markdown_line_has_block_id(text: str, block_id: str) -> bool:
+    return re.search(rf"(?<!\S)\^{re.escape(block_id)}(?!\S)", text) is not None
 
 
 def is_code_fence(stripped_line: str) -> bool:

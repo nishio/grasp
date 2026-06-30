@@ -83,6 +83,67 @@ class MarkdownParsingTests(unittest.TestCase):
         self.assertEqual(set(edges_by_target), {"B", "C"})
         self.assertIn("[heading](B.md#Section)", edges_by_target["B"].line_text)
         self.assertIn("[block](notes/C.md#^block-id)", edges_by_target["C"].line_text)
+        self.assertEqual(edges_by_target["B"].target_fragment, "Section")
+        self.assertEqual(edges_by_target["B"].target_line_id, f"{markdown_page_id(Path('B.md'))}:1")
+        self.assertEqual(edges_by_target["C"].target_fragment, "^block-id")
+        self.assertEqual(edges_by_target["C"].target_line_id, f"{markdown_page_id(Path('notes') / 'C.md')}:1")
+
+    def test_markdown_mirror_materializes_resolved_local_anchor_as_self_line_edge(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "A.md").write_text("# A\n## Section\n[local](#Section)\n[missing](#Missing)\n", encoding="utf-8")
+
+            mirror = MarkdownMirror.from_folder(root)
+
+        self.assertEqual(len(mirror.edges), 1)
+        edge = mirror.edges[0]
+        self.assertEqual(edge.target_title, "A")
+        self.assertEqual(edge.target_fragment, "Section")
+        self.assertEqual(edge.target_line_id, f"{markdown_page_id(Path('A.md'))}:1")
+
+    def test_markdown_import_persists_target_line_ids_for_anchor_edges(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            store_path = root / "store.sqlite"
+            source = root / "wiki"
+            source.mkdir()
+            (source / "A.md").write_text("# A\n[heading](B.md#Section)\n[block](C.md#^block-id)\n", encoding="utf-8")
+            (source / "B.md").write_text("# B\n## Section\n", encoding="utf-8")
+            (source / "C.md").write_text("# C\nblock target ^block-id\n", encoding="utf-8")
+
+            import_markdown_folder_to_sqlite(source, store_path)
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                b_backlinks = store.backlinks_report("B")
+                c_backlinks = store.backlinks_report("C")
+            finally:
+                store.close()
+
+        self.assertEqual(b_backlinks["backlinks"][0]["target_fragment"], "Section")
+        self.assertEqual(b_backlinks["backlinks"][0]["target_line_id"], f"{markdown_page_id(Path('B.md'))}:1")
+        self.assertEqual(c_backlinks["backlinks"][0]["target_fragment"], "^block-id")
+        self.assertEqual(c_backlinks["backlinks"][0]["target_line_id"], f"{markdown_page_id(Path('C.md'))}:1")
+
+    def test_markdown_incremental_import_refreshes_incoming_target_line_ids(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            store_path = root / "store.sqlite"
+            source = root / "wiki"
+            source.mkdir()
+            (source / "A.md").write_text("# A\n[heading](B.md#Section)\n", encoding="utf-8")
+            (source / "B.md").write_text("# B\n## Section\n", encoding="utf-8")
+
+            import_markdown_folder_to_sqlite(source, store_path)
+            (source / "B.md").write_text("# B\nintro\n## Section\n", encoding="utf-8")
+            import_markdown_folder_to_sqlite(source, store_path)
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                backlinks = store.backlinks_report("B")
+            finally:
+                store.close()
+
+        self.assertEqual(backlinks["backlinks"][0]["target_fragment"], "Section")
+        self.assertEqual(backlinks["backlinks"][0]["target_line_id"], f"{markdown_page_id(Path('B.md'))}:2")
 
     def test_parse_frontmatter_reads_title_id_aliases_and_tags(self):
         metadata = parse_frontmatter(
