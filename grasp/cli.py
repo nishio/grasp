@@ -624,7 +624,8 @@ def build_parser() -> argparse.ArgumentParser:
         returns=(
             "query, page|null, link_stats, lines, lines_truncated, backlinks, "
             "line_window|null, backlink_count_returned, backlink_count_total, related, "
-            "unresolved_targets, recovery_hints|null, ambiguity|null, markdown_hydration|null; with --around-line, lines[] is the bounded "
+            "unresolved_targets, recovery_hints|null, ambiguity|null, markdown_hydration|null, "
+            "markdown_graph|null, markdown_query_contract|null; with --around-line, lines[] is the bounded "
             "window around that line; with --related-snippets, related[] items also include "
             "snippet_lines[], snippet_truncated, and snippet_mode"
         ),
@@ -644,6 +645,7 @@ def build_parser() -> argparse.ArgumentParser:
             "--around-line accepts a full line_id from JSON or --full-ids text output. Local aliases like P1:12 are per-output only.",
             "--page-id and --path select a page identity directly when a visible handle is ambiguous.",
             "--hydrate on a catalog-only Markdown graph parses the selected source file before reading it.",
+            "On incomplete Markdown graphs, markdown_query_contract.partial_fields marks page lines and graph neighborhoods as partial.",
             "--related-snippets includes the first N lines of each related/source page, matching the Cosense related-pane reading pattern.",
             "--related-snippet-mode edge centers snippets on the link line that explains each related/source item.",
         ],
@@ -7976,6 +7978,27 @@ def attach_markdown_partial_context(
     )
 
 
+READ_PARTIAL_FIELDS = [
+    "page",
+    "lines",
+    "line_window",
+    "link_stats",
+    "backlinks",
+    "backlink_count_returned",
+    "backlink_count_total",
+    "related",
+    "unresolved_targets",
+    "recovery_hints",
+]
+
+
+def read_result_empty(result: dict[str, Any]) -> bool:
+    return not any(
+        bool(result.get(field))
+        for field in ("lines", "backlinks", "related", "unresolved_targets")
+    )
+
+
 def backlinks_result_empty(result: dict[str, Any]) -> bool:
     if result.get("backlinks"):
         return False
@@ -7999,7 +8022,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
                 raise ValueError("--around-line cannot be combined with --page-id or --path")
             if args.line_limit is not None:
                 raise ValueError("--line-limit cannot be combined with --around-line; use --line-context")
-            return store.read_around_line(
+            result = store.read_around_line(
                 args.around_line,
                 title=args.title,
                 line_context=args.line_context,
@@ -8010,11 +8033,20 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
                 related_snippet_lines=args.related_snippet_lines,
                 related_snippet_mode=args.related_snippet_mode,
             )
+            attach_markdown_query_context(
+                result,
+                store,
+                None,
+                empty_result=read_result_empty(result),
+                hydrate_hint="Run `hydrate-markdown --limit N` or normal `import --markdown` before retrying read.",
+                partial_fields=READ_PARTIAL_FIELDS,
+            )
+            return result
         if args.page_id and args.source_path:
             raise ValueError("read accepts only one of --page-id or --path")
         if args.title is None and args.page_id is None and args.source_path is None:
             raise ValueError("read requires a title, --page-id, --path, or --around-line <line-id>")
-        return store.read(
+        result = store.read(
             args.title,
             page_id=args.page_id,
             source_path=args.source_path,
@@ -8027,6 +8059,15 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             related_snippet_mode=args.related_snippet_mode,
             hydrate=args.hydrate,
         )
+        attach_markdown_query_context(
+            result,
+            store,
+            result.get("markdown_hydration"),
+            empty_result=read_result_empty(result),
+            hydrate_hint="Retry with `read --hydrate` for this page, `hydrate-markdown --limit N`, or normal `import --markdown`.",
+            partial_fields=READ_PARTIAL_FIELDS,
+        )
+        return result
     if args.command == "hydrate-markdown":
         if args.until_complete and args.max_seconds is None:
             raise ValueError("hydrate-markdown --until-complete requires --max-seconds to keep hydration bounded")
@@ -9606,6 +9647,14 @@ def format_read(result: dict[str, Any], aliases: LineIdAliases | None = None) ->
         linked = link_stats.get("link_count", 0) > 0
         page_status = "linked target without page" if linked else "missing page"
         parts.append(f"page: {page_status}\n")
+        markdown_graph = result.get("markdown_graph")
+        if markdown_graph and markdown_graph.get("complete") is False:
+            parts.append(
+                f"graph: incomplete ({markdown_graph.get('mode')}, "
+                f"{markdown_graph.get('hydrated_files')}/{markdown_graph.get('total_files')} files hydrated)\n"
+            )
+            parts.append("note: page resolution and graph neighborhoods may be incomplete until normal import --markdown hydrates this project.\n")
+            parts.append(format_partial_fields_note(result))
         parts.append(format_link_stats_summary(link_stats))
         parts.append(format_recovery_hints(result["query"], result.get("recovery_hints"), aliases=aliases))
     else:
@@ -9628,6 +9677,7 @@ def format_read(result: dict[str, Any], aliases: LineIdAliases | None = None) ->
                 f"{markdown_graph.get('hydrated_files')}/{markdown_graph.get('total_files')} files hydrated)\n"
             )
             parts.append("note: page lines and graph neighborhoods may be incomplete until normal import --markdown hydrates this project.\n")
+            parts.append(format_partial_fields_note(result))
         parts.append(format_link_stats_summary(result.get("link_stats", {})))
         line_window = result.get("line_window")
         if line_window:
@@ -9668,6 +9718,14 @@ def format_read(result: dict[str, Any], aliases: LineIdAliases | None = None) ->
     return with_alias_legend("".join(parts), aliases)
 
 
+def format_partial_fields_note(result: dict[str, Any]) -> str:
+    contract = result.get("markdown_query_contract") or {}
+    partial_fields = contract.get("partial_fields") or []
+    if not partial_fields:
+        return ""
+    return f"partial fields: {', '.join(str(field) for field in partial_fields)}\n"
+
+
 def format_markdown_hydration_summary(result: dict[str, Any]) -> str:
     parts: list[str] = []
     markdown_hydration = result.get("markdown_hydration")
@@ -9697,9 +9755,7 @@ def format_markdown_hydration_summary(result: dict[str, Any]) -> str:
                 "note: retrieval results are limited to hydrated Markdown source files until "
                 "more files are hydrated or normal import --markdown completes the graph.\n"
             )
-        partial_fields = contract.get("partial_fields") or []
-        if partial_fields:
-            parts.append(f"partial fields: {', '.join(str(field) for field in partial_fields)}\n")
+        parts.append(format_partial_fields_note(result))
     return "".join(parts)
 
 
