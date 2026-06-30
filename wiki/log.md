@@ -1866,3 +1866,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 17:50] implementation | incomplete Markdown export guard
 - Added an export-markdown contract for incomplete Markdown graphs: JSON now reports markdown_graph, projection_complete=false, and markdown_projection_contract.
 - Non-check export from catalog-only/partial Markdown graphs now refuses by default because unhydrated files have no stored lines and can be clobbered; explicit --allow-incomplete-markdown-export is required.
+
+## [2026-06-30 18:01] implementation | partial Markdown query contract progress
+- Added result_completeness=partial and result_may_be_incomplete=true to markdown_query_contract so non-empty results on incomplete Markdown graphs are not mistaken for complete result sets.
+- Added hydration_progress to the same contract, exposing command-local hydrate-limit progress such as scan, reason, matched_files, hydrated_count, and limit_reached.
