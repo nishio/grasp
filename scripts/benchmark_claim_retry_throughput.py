@@ -28,6 +28,20 @@ LOG_PAGE = "Log"
 WORKER_PREFIX = "agent"
 MODES = ("uncoordinated", "claim_retry")
 WORKLOADS = ("hot-page", "file-back")
+PROFILES: dict[str, dict[str, Any]] = {
+    "quick": {
+        "iterations": 25,
+        "think_seconds_values": [0.02],
+        "workloads": ["hot-page"],
+        "format": "json",
+    },
+    "cutover": {
+        "iterations": 25,
+        "think_seconds_values": [0.0, 0.02, 0.05],
+        "workloads": list(WORKLOADS),
+        "format": "table",
+    },
+}
 
 
 def run_grasp(
@@ -485,6 +499,19 @@ def gate_enabled(thresholds: dict[str, float | None]) -> bool:
     return any(value is not None for value in thresholds.values())
 
 
+def resolve_run_config(args: argparse.Namespace) -> dict[str, Any]:
+    profile = PROFILES[str(args.profile)]
+    return {
+        "iterations": int(args.iterations if args.iterations is not None else profile["iterations"]),
+        "think_seconds_values": flatten_float_lists(
+            args.think_seconds,
+            default=list(profile["think_seconds_values"]),
+        ),
+        "workloads": list(args.workload or profile["workloads"]),
+        "format": str(args.format or profile["format"]),
+    }
+
+
 def evaluate_scenario_gate(
     *,
     results: list[dict[str, Any]],
@@ -707,13 +734,22 @@ def main(argv: list[str] | None = None) -> int:
         return run_worker(argv[1:])
 
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--profile",
+        choices=sorted(PROFILES),
+        default="quick",
+        help=(
+            "Default matrix preset. quick preserves the original single hot-page scenario; "
+            "cutover runs hot-page and file-back workloads across think times 0,0.02,0.05 and prints a table."
+        ),
+    )
     parser.add_argument("--workers", type=int, default=2)
-    parser.add_argument("--iterations", type=int, default=25)
+    parser.add_argument("--iterations", type=int, default=None)
     parser.add_argument(
         "--think-seconds",
         type=parse_float_list,
         action="append",
-        help="Think time before write. Accepts comma-separated values and can be repeated. Default: 0.02.",
+        help="Think time before write. Accepts comma-separated values and can be repeated. Defaults to the selected profile.",
     )
     parser.add_argument("--wait-seconds", type=float, default=10.0)
     parser.add_argument("--retry-interval-seconds", type=float, default=0.02)
@@ -727,13 +763,13 @@ def main(argv: list[str] | None = None) -> int:
         "--workload",
         choices=WORKLOADS,
         action="append",
-        help="Workload to run. Repeat for multiple workloads. Default: hot-page.",
+        help="Workload to run. Repeat for multiple workloads. Defaults to the selected profile.",
     )
     parser.add_argument(
         "--format",
         choices=["json", "table", "both"],
-        default="json",
-        help="Output format. The table format is a Markdown gate summary.",
+        default=None,
+        help="Output format. The table format is a Markdown gate summary. Defaults to the selected profile.",
     )
     parser.add_argument(
         "--min-surviving-throughput-ratio",
@@ -750,9 +786,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.workers < 1:
         parser.error("--workers must be >= 1")
-    if args.iterations < 1:
+    config = resolve_run_config(args)
+    iterations = int(config["iterations"])
+    think_seconds_values = list(config["think_seconds_values"])
+    workloads = list(config["workloads"])
+    output_format = str(config["format"])
+    if iterations < 1:
         parser.error("--iterations must be >= 1")
-    think_seconds_values = flatten_float_lists(args.think_seconds, default=[0.02])
     if any(value < 0 for value in think_seconds_values):
         parser.error("--think-seconds values must be >= 0")
     if args.wait_seconds < 0:
@@ -765,7 +805,6 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--max-p95-claim-wait-seconds must be >= 0")
 
     modes = args.mode or list(MODES)
-    workloads = args.workload or ["hot-page"]
     thresholds = gate_thresholds(args)
     started = time.perf_counter()
     with tempfile.TemporaryDirectory() as tmp:
@@ -779,7 +818,7 @@ def main(argv: list[str] | None = None) -> int:
                         workload=workload,
                         mode=mode,
                         workers=args.workers,
-                        iterations=args.iterations,
+                        iterations=iterations,
                         think_seconds=think_seconds,
                         wait_seconds=args.wait_seconds,
                         retry_interval_seconds=args.retry_interval_seconds,
@@ -803,8 +842,9 @@ def main(argv: list[str] | None = None) -> int:
     gate = summarize_gate(scenarios, thresholds)
     output = {
         "benchmark": "claim_retry_throughput_gate",
+        "profile": args.profile,
         "workers": args.workers,
-        "iterations_per_worker": args.iterations,
+        "iterations_per_worker": iterations,
         "think_seconds_values": think_seconds_values,
         "workloads": workloads,
         "wait_seconds": args.wait_seconds,
@@ -814,10 +854,10 @@ def main(argv: list[str] | None = None) -> int:
         "thresholds": thresholds,
         "scenarios": scenarios,
     }
-    if args.format in ("table", "both"):
+    if output_format in ("table", "both"):
         print(render_tables(output))
-    if args.format in ("json", "both"):
-        if args.format == "both":
+    if output_format in ("json", "both"):
+        if output_format == "both":
             print()
         print(json.dumps(output, indent=2, sort_keys=True))
     claim_retry_results = [
