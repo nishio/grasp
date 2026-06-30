@@ -885,7 +885,7 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertIn("Markdown graph is incomplete", refused.stderr)
             self.assertEqual((root / "A.md").read_text(encoding="utf-8"), "# Alpha\nlinks to [[B]]\n")
 
-            partial = subprocess.run(
+            unsafe_partial = subprocess.run(
                 [
                     sys.executable,
                     "-m",
@@ -901,6 +901,32 @@ class MarkdownImportTests(unittest.TestCase):
                     "--allow-projection-overwrite",
                     "--allow-incomplete-markdown-export",
                 ],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(unsafe_partial.returncode, 0)
+            self.assertIn("--backup-dir", unsafe_partial.stderr)
+            self.assertEqual((root / "A.md").read_text(encoding="utf-8"), "# Alpha\nlinks to [[B]]\n")
+
+            backup_dir = Path(tmpdir) / "projection-backup"
+            partial = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "export-markdown",
+                    "--output",
+                    str(root),
+                    "--allow-projection-overwrite",
+                    "--allow-incomplete-markdown-export",
+                    "--backup-dir",
+                    str(backup_dir),
+                ],
                 check=True,
                 text=True,
                 capture_output=True,
@@ -908,7 +934,12 @@ class MarkdownImportTests(unittest.TestCase):
             partial_result = json.loads(partial.stdout)
             self.assertEqual(partial_result["projection_complete"], False)
             self.assertEqual(partial_result["markdown_projection_contract"]["safe_to_write"], True)
+            self.assertEqual(partial_result["markdown_projection_contract"]["backup_required"], True)
+            self.assertEqual(partial_result["backup_dir"], str(backup_dir))
+            self.assertEqual(set(partial_result["backed_up_files"]), {"A.md", "B.md"})
             self.assertEqual(set(partial_result["written_files"]), {"A.md", "B.md"})
+            self.assertEqual((backup_dir / "A.md").read_text(encoding="utf-8"), "# Alpha\nlinks to [[B]]\n")
+            self.assertEqual((backup_dir / "B.md").read_text(encoding="utf-8"), "# B\n")
             self.assertIn("title: A", (root / "A.md").read_text(encoding="utf-8"))
 
     def test_read_hydrate_catalog_page_parses_only_selected_markdown_file(self):

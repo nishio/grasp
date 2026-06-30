@@ -1878,3 +1878,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 18:29] implementation | all-project incomplete graph contract
 - Added an all-project aggregate markdown_graph for mixed complete/incomplete Markdown stores, including incomplete_projects and contract incomplete_markdown_projects.
 - Commands that can run without --project now keep incomplete Markdown projects visible instead of presenting aggregate counts as complete.
+
+## [2026-06-30 18:42] implementation+file-back | incomplete export backup policy
+- `export-markdown --allow-incomplete-markdown-export` now requires `--backup-dir` before overwriting existing Markdown files from an incomplete graph, backs up changed existing files, and reports `backup_dir` / `backed_up_files` / `backed_up_count` plus contract `backup_required`.
+- Regression: `tests.test_markdown.MarkdownImportTests.test_export_markdown_refuses_incomplete_graph_write_by_default` covers refusal without backup and successful backup+partial projection.
