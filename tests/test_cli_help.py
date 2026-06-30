@@ -42,6 +42,7 @@ COMMANDS = [
     "release-claim",
     "append-log",
     "write-page",
+    "write-line",
     "rename-page",
     "reconcile-markdown",
     "write-status",
@@ -8071,6 +8072,140 @@ class CliHelpTests(unittest.TestCase):
         self.assertTrue(replay_result["ok"])
         self.assertEqual(replay_result["file_count"], 2)
 
+    def test_write_line_updates_single_line_by_stable_line_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old [[B]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            read_result = json.loads(subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "read",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout)
+            line_id = read_result["lines"][1]["line_id"]
+            write_result = json.loads(subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "test",
+                    "--session-id",
+                    "write-line-test",
+                    "write-line",
+                    line_id,
+                    "--text",
+                    "- new [[B]] and [[C]]",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout)
+            status_result = json.loads(subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                    "--strict",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout)
+            connection = sqlite3.connect(store_path)
+            try:
+                line_rows = connection.execute(
+                    """
+                    SELECT line_id, line_index, text
+                    FROM lines
+                    WHERE page_id = ?
+                    ORDER BY line_index
+                    """,
+                    (read_result["page"]["id"],),
+                ).fetchall()
+                sqlite_events = connection.execute(
+                    """
+                    SELECT event_type, actor, session_id, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            page_text = (root / "A.md").read_text(encoding="utf-8")
+
+        self.assertEqual(write_result["event_type"], "page_update")
+        self.assertEqual(write_result["source_path"], "A.md")
+        self.assertEqual(write_result["line_id"], line_id)
+        self.assertEqual(write_result["line_index"], 1)
+        self.assertEqual(write_result["previous_text"], "- old [[B]]")
+        self.assertEqual(write_result["text"], "- new [[B]] and [[C]]")
+        self.assertEqual(write_result["line"]["line_id"], line_id)
+        self.assertEqual(write_result["line"]["text"], "- new [[B]] and [[C]]")
+        self.assertEqual(write_result["edge_count"], 2)
+        self.assertEqual(write_result["projection"]["written_files"], ["A.md"])
+        self.assertEqual(page_text, "# A\n- new [[B]] and [[C]]\n")
+        self.assertEqual(line_rows[1], (line_id, 1, "- new [[B]] and [[C]]"))
+        self.assertEqual([row[0] for row in sqlite_events], ["page_update"])
+        self.assertEqual(sqlite_events[0][1], "test")
+        self.assertEqual(sqlite_events[0][2], "write-line-test")
+        event_payload = json.loads(sqlite_events[0][3])
+        self.assertEqual(event_payload["target_line_id"], line_id)
+        self.assertEqual(event_payload["previous_line"]["line_id"], line_id)
+        self.assertEqual(event_payload["line"]["line_id"], line_id)
+        self.assertEqual(event_payload["previous_text"], "- old [[B]]")
+        self.assertEqual(event_payload["text"], "- new [[B]] and [[C]]")
+        self.assertTrue(status_result["strict_ok"])
+
     def test_no_journal_writes_update_store_and_projection_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
@@ -9868,6 +10003,91 @@ class CliHelpTests(unittest.TestCase):
         self.assertIn(claim_a["claim"]["claim_event_id"], blocked_write.stderr)
         self.assertEqual([line["text"] for line in read_after_blocked["lines"]], ["# A", "- old A"])
         self.assertTrue(owner_write["projection_deferred"])
+        self.assertEqual([line["text"] for line in read_after_owner["lines"]], ["# A", "- agent A owns claim"])
+
+    def test_write_line_refuses_other_session_active_claim(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "authority.sqlite"
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+            line_id = run_json("read", "A")["lines"][1]["line_id"]
+            claim_a = run_json(
+                "claim-page",
+                "A",
+                "--ttl-seconds",
+                "600",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            blocked_write = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-b",
+                    "--session-id",
+                    "session-b",
+                    "write-line",
+                    line_id,
+                    "--text",
+                    "- agent B ignored claim",
+                    "--no-journal",
+                    "--defer-projection",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            read_after_blocked = run_json("read", "A")
+            owner_write = run_json(
+                "write-line",
+                line_id,
+                "--text",
+                "- agent A owns claim",
+                "--no-journal",
+                "--defer-projection",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            read_after_owner = run_json("read", "A")
+
+        self.assertEqual(blocked_write.returncode, 2)
+        self.assertIn("page has an active claim by another session", blocked_write.stderr)
+        self.assertIn(claim_a["claim"]["claim_event_id"], blocked_write.stderr)
+        self.assertEqual([line["text"] for line in read_after_blocked["lines"]], ["# A", "- old A"])
+        self.assertTrue(owner_write["projection_deferred"])
+        self.assertEqual(owner_write["line_id"], line_id)
         self.assertEqual([line["text"] for line in read_after_owner["lines"]], ["# A", "- agent A owns claim"])
 
     def test_concurrent_release_claim_rechecks_claim_state_inside_write_lock(self):
