@@ -1195,11 +1195,11 @@ class MarkdownImportTests(unittest.TestCase):
                 return json.loads(completed.stdout)
 
             cases = [
-                (("search", "needle", "--limit", "10"), "hits"),
-                (("backlinks", "B", "--limit", "10"), "backlinks"),
-                (("related", "B", "--limit", "10"), "related"),
+                (("search", "needle", "--limit", "10"), "hits", ["hits", "count_returned", "recovery_hints"]),
+                (("backlinks", "B", "--limit", "10"), "backlinks", ["backlinks", "candidate_backlinks", "count_returned", "count_total"]),
+                (("related", "B", "--limit", "10"), "related", ["related", "candidate_related", "recovery_hints"]),
             ]
-            for args, result_key in cases:
+            for args, result_key, partial_fields in cases:
                 with self.subTest(command=args[0]):
                     result = run_json(*args)
                     self.assertEqual(result[result_key], [])
@@ -1210,6 +1210,13 @@ class MarkdownImportTests(unittest.TestCase):
                     self.assertEqual(contract["result_scope"], "partial_markdown_graph")
                     self.assertEqual(contract["graph_complete"], False)
                     self.assertEqual(contract["empty_result_may_be_incomplete"], True)
+                    self.assertEqual(contract["partial_fields"], partial_fields)
+                    for field in partial_fields:
+                        self.assertEqual(contract["result_field_states"][field]["state"], "partial")
+                        self.assertEqual(
+                            contract["result_field_states"][field]["reason"],
+                            "unhydrated_markdown_sources",
+                        )
                     self.assertIn("--hydrate-limit N", contract["hydrate_hint"])
 
             text = subprocess.run(
@@ -1232,6 +1239,36 @@ class MarkdownImportTests(unittest.TestCase):
             ).stdout
             self.assertIn("graph: incomplete", text)
             self.assertIn("empty results may be caused by unhydrated Markdown source files", text)
+            self.assertIn("partial fields: hits, count_returned, recovery_hints", text)
+
+            gather = run_json(
+                "gather",
+                "needle",
+                "--mentions-limit",
+                "10",
+                "--co-links-limit",
+                "10",
+                "--backlinks-limit",
+                "10",
+            )
+            gather_contract = gather["markdown_query_contract"]
+            self.assertEqual(gather_contract["result_scope"], "partial_markdown_graph")
+            self.assertEqual(
+                gather_contract["partial_fields"],
+                [
+                    "link_stats",
+                    "mention_summary",
+                    "mentions",
+                    "co_links",
+                    "backlinks",
+                    "returned_counts",
+                    "total_counts",
+                    "omitted_counts",
+                    "banner",
+                    "recipes",
+                ],
+            )
+            self.assertEqual(gather_contract["result_field_states"]["mentions"]["state"], "partial")
 
     def test_cli_graph_commands_report_incomplete_markdown_graph_contract(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1262,12 +1299,12 @@ class MarkdownImportTests(unittest.TestCase):
                 return json.loads(completed.stdout)
 
             cases = [
-                (("mentions", "needle", "--limit", "10"), lambda result: result["mentions"]),
-                (("co-links", "needle", "--limit", "10"), lambda result: result["co_links"]),
-                (("path", "A", "B", "--max-depth", "2"), lambda result: result["paths"]),
-                (("unresolved", "--limit", "10"), lambda result: result["unresolved_targets"]),
+                (("mentions", "needle", "--limit", "10"), lambda result: result["mentions"], ["summary", "mentions"]),
+                (("co-links", "needle", "--limit", "10"), lambda result: result["co_links"], ["co_links", "count_returned"]),
+                (("path", "A", "B", "--max-depth", "2"), lambda result: result["paths"], ["paths", "path_count", "truncated", "recovery_hints"]),
+                (("unresolved", "--limit", "10"), lambda result: result["unresolved_targets"], ["unresolved_targets"]),
             ]
-            for args, result_items in cases:
+            for args, result_items, partial_fields in cases:
                 with self.subTest(command=args[0]):
                     result = run_json(*args)
                     self.assertEqual(result_items(result), [])
@@ -1278,6 +1315,9 @@ class MarkdownImportTests(unittest.TestCase):
                     self.assertEqual(contract["result_scope"], "partial_markdown_graph")
                     self.assertEqual(contract["graph_complete"], False)
                     self.assertEqual(contract["empty_result_may_be_incomplete"], True)
+                    self.assertEqual(contract["partial_fields"], partial_fields)
+                    for field in partial_fields:
+                        self.assertEqual(contract["result_field_states"][field]["state"], "partial")
                     self.assertIn("hydrate", contract["hydrate_hint"])
 
             text = subprocess.run(

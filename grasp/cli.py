@@ -1087,7 +1087,7 @@ def build_parser() -> argparse.ArgumentParser:
             "and backlinks into one small bundle. This is an initial thin gather surface, not "
             "exact token packing."
         ),
-        returns="query, budget, limits, markdown_graph|null, markdown_hydration|null, co_link_rank_mode, returned_counts, total_counts, omitted_counts, banner|null, link_stats, mention_summary, mentions[], co_links[], backlinks[], recipes[]",
+        returns="query, budget, limits, markdown_graph|null, markdown_hydration|null, markdown_query_contract|null, co_link_rank_mode, returned_counts, total_counts, omitted_counts, banner|null, link_stats, mention_summary, mentions[], co_links[], backlinks[], recipes[]",
         examples=[
             "grasp gather KJ法",
             "grasp gather KJ法 --budget 8000",
@@ -1098,6 +1098,7 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "--budget selects bounded row limits approximately; JSON returns budget_note to make this explicit.",
             "--hydrate-limit N scans incomplete Markdown source files for the query and hydrates up to N matching pages before gathering.",
+            "On incomplete Markdown graphs, markdown_query_contract.partial_fields names the gathered derivatives that are still partial.",
             "For huge hubs, banner explains that bulk-linking bare mentions is the wrong direction.",
         ],
     )
@@ -7922,6 +7923,7 @@ def attach_markdown_query_context(
     *,
     empty_result: bool,
     hydrate_hint: str,
+    partial_fields: list[str] | None = None,
 ) -> None:
     if markdown_hydration is not None:
         result["markdown_hydration"] = markdown_hydration
@@ -7934,6 +7936,7 @@ def attach_markdown_query_context(
         return
     result["markdown_graph"] = markdown_graph
     if markdown_graph.get("complete") is False:
+        partial_field_list = list(partial_fields or [])
         result["markdown_query_contract"] = {
             "result_scope": "partial_markdown_graph",
             "graph_complete": False,
@@ -7942,6 +7945,14 @@ def attach_markdown_query_context(
             "total_files": markdown_graph.get("total_files"),
             "incomplete_reason": markdown_graph.get("incomplete_reason"),
             "hydrate_hint": hydrate_hint,
+            "partial_fields": partial_field_list,
+            "result_field_states": {
+                field: {
+                    "state": "partial",
+                    "reason": "unhydrated_markdown_sources",
+                }
+                for field in partial_field_list
+            },
         }
     else:
         result["markdown_query_contract"] = None
@@ -7953,6 +7964,7 @@ def attach_markdown_partial_context(
     *,
     empty_result: bool,
     hydrate_hint: str,
+    partial_fields: list[str] | None = None,
 ) -> None:
     attach_markdown_query_context(
         result,
@@ -7960,6 +7972,7 @@ def attach_markdown_partial_context(
         None,
         empty_result=empty_result,
         hydrate_hint=hydrate_hint,
+        partial_fields=partial_fields,
     )
 
 
@@ -8031,6 +8044,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             markdown_hydration,
             empty_result=backlinks_result_empty(result),
             hydrate_hint=f"Retry with `backlinks {shlex.quote(args.title)} --hydrate-limit N` or run normal `import --markdown`.",
+            partial_fields=["backlinks", "candidate_backlinks", "count_returned", "count_total"],
         )
         return result
     if args.command == "ambiguities":
@@ -8059,6 +8073,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             markdown_hydration,
             empty_result=related_result_empty(result),
             hydrate_hint=f"Retry with `related {shlex.quote(args.title)} --hydrate-limit N` or run normal `import --markdown`.",
+            partial_fields=["related", "candidate_related", "recovery_hints"],
         )
         return result
     if args.command == "path":
@@ -8075,6 +8090,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             markdown_hydration,
             empty_result=not bool(result.get("paths")),
             hydrate_hint=f"Retry with `path {shlex.quote(args.source)} {shlex.quote(args.target)} --hydrate-limit N` or run normal `import --markdown`.",
+            partial_fields=["paths", "path_count", "truncated", "recovery_hints"],
         )
         return result
     if args.command == "link-stats":
@@ -8137,6 +8153,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             markdown_hydration,
             empty_result=not bool(hits),
             hydrate_hint=f"Retry with `search {shlex.quote(args.query)} --hydrate-limit N` or run normal `import --markdown`.",
+            partial_fields=["hits", "count_returned", "recovery_hints"],
         )
         return result
     if args.command == "mentions":
@@ -8157,6 +8174,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             markdown_hydration,
             empty_result=int(summary.get("returned_lines") or 0) == 0,
             hydrate_hint=f"Retry with `mentions {shlex.quote(args.query)} --hydrate-limit N` or run normal `import --markdown`.",
+            partial_fields=["summary", "mentions"],
         )
         return result
     if args.command == "co-links":
@@ -8181,6 +8199,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             markdown_hydration,
             empty_result=not bool(co_links),
             hydrate_hint=f"Retry with `co-links {shlex.quote(args.query)} --hydrate-limit N` or run normal `import --markdown`.",
+            partial_fields=["co_links", "count_returned"],
         )
         return result
     if args.command == "cross-project-refs":
@@ -8216,7 +8235,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             dry_run=args.dry_run,
         )
     if args.command == "gather":
-        return store.gather(
+        result = store.gather(
             args.query,
             budget=args.budget,
             backlink_limit=args.backlinks_limit,
@@ -8224,6 +8243,27 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             co_link_limit=args.co_links_limit,
             hydrate_limit=args.hydrate_limit,
         )
+        returned_counts = result.get("returned_counts") or {}
+        attach_markdown_query_context(
+            result,
+            store,
+            result.get("markdown_hydration"),
+            empty_result=not any(int(value or 0) for value in returned_counts.values()),
+            hydrate_hint=f"Retry with `gather {shlex.quote(args.query)} --hydrate-limit N` or run normal `import --markdown`.",
+            partial_fields=[
+                "link_stats",
+                "mention_summary",
+                "mentions",
+                "co_links",
+                "backlinks",
+                "returned_counts",
+                "total_counts",
+                "omitted_counts",
+                "banner",
+                "recipes",
+            ],
+        )
+        return result
     if args.command in {"export-ai", "export-for-ai"}:
         result = store.export_ai(
             args.title,
@@ -8275,6 +8315,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             markdown_hydration,
             empty_result=not bool(targets),
             hydrate_hint="Retry with `unresolved --hydrate-limit N` or run normal `import --markdown`.",
+            partial_fields=["unresolved_targets"],
         )
         return result
     if args.command == "sync":
@@ -9656,6 +9697,9 @@ def format_markdown_hydration_summary(result: dict[str, Any]) -> str:
                 "note: retrieval results are limited to hydrated Markdown source files until "
                 "more files are hydrated or normal import --markdown completes the graph.\n"
             )
+        partial_fields = contract.get("partial_fields") or []
+        if partial_fields:
+            parts.append(f"partial fields: {', '.join(str(field) for field in partial_fields)}\n")
     return "".join(parts)
 
 
