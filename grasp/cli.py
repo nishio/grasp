@@ -789,7 +789,8 @@ def build_parser() -> argparse.ArgumentParser:
             "how two concepts are connected through links or co-citation hinges."
         ),
         returns=(
-            "query, source|null, target|null, max_depth, paths[], path_count, truncated, recovery_hints|null; "
+            "query, source|null, target|null, max_depth, paths[], path_count, truncated, recovery_hints|null, "
+            "markdown_hydration|null, markdown_graph|null, markdown_query_contract|null; "
             "paths[] items include distance, nodes[], and edge example lines"
         ),
         examples=[
@@ -802,6 +803,7 @@ def build_parser() -> argparse.ArgumentParser:
             "The search is bounded by --max-depth; use small depths first because dense hubs can expand quickly.",
             "Edges include example source lines so the bridge can be checked against source context.",
             "If both endpoints resolve but no path is found, recovery_hints.path includes next-depth, related, backlinks, and link stats cues.",
+            "On incomplete Markdown graphs, markdown_query_contract marks paths as partial because unhydrated files may add edges.",
         ],
     )
     path_parser.add_argument("source", help="Start page title or unresolved target.")
@@ -922,7 +924,7 @@ def build_parser() -> argparse.ArgumentParser:
             "already has an exact link, a query-containing link target, or no link handle. "
             "By default only lines with bare occurrences are returned."
         ),
-        returns="query, mode, context, summary, mentions[]",
+        returns="query, mode, context, summary, mentions[], markdown_hydration|null, markdown_graph|null, markdown_query_contract|null",
         examples=[
             "grasp mentions KJ法 --limit 20",
             "grasp mentions KJ法 --unlinked --limit 20",
@@ -934,6 +936,7 @@ def build_parser() -> argparse.ArgumentParser:
             "mentions[] items include line fields plus occurrence counts, classification, page link status, query_link_targets[], and line_link_targets[].",
             "summary counts all literal line hits before limit/offset; returned lines are bounded by --limit.",
             "This is a link-gap and come-from audit primitive, not a bulk-link instruction.",
+            "On incomplete Markdown graphs, markdown_query_contract marks results as partial because unhydrated files have no stored lines yet.",
         ],
     )
     mentions_parser.add_argument("query", help="Literal text to find.")
@@ -951,7 +954,7 @@ def build_parser() -> argparse.ArgumentParser:
             "For lines containing a literal query, rank the other internal links on those lines. "
             "This surfaces narrower slice handles for broad hubs."
         ),
-        returns="query, rank_mode, include_self, co_links[], count_returned",
+        returns="query, rank_mode, include_self, co_links[], count_returned, markdown_hydration|null, markdown_graph|null, markdown_query_contract|null",
         examples=[
             "grasp co-links KJ法 --limit 20",
             "grasp co-links KJ法 --rank raw --limit 20",
@@ -962,6 +965,7 @@ def build_parser() -> argparse.ArgumentParser:
             "co_links[] items include title, normalized_title, target_relation, link_count, line_count, source_page_count, total_source_views, latest_source_updated, and examples[].",
             "Default --rank slice demotes query-containing target titles so narrower handles surface first; --rank raw preserves count order.",
             "The exact query target is excluded by default; use --include-self to include it.",
+            "On incomplete Markdown graphs, markdown_query_contract marks results as partial because unhydrated files have no stored lines or edges yet.",
         ],
     )
     co_links_parser.add_argument("query", help="Literal text to find in source lines.")
@@ -1588,14 +1592,15 @@ def build_parser() -> argparse.ArgumentParser:
             "List link targets that have incoming links but no page body. "
             "This is a graph-structure view, not a TODO list."
         ),
-        returns="unresolved_targets[]",
+        returns="unresolved_targets[], markdown_hydration|null, markdown_graph|null, markdown_query_contract|null",
         examples=[
             "grasp unresolved --limit 10",
             "grasp --json unresolved --limit 3",
         ],
         notes=[
             "unresolved_targets[] items: title, normalized_title, link_count, "
-            "source_page_count, total_source_views, latest_source_updated, examples[]."
+            "source_page_count, total_source_views, latest_source_updated, examples[].",
+            "On incomplete Markdown graphs, unresolved rankings cover only hydrated files; markdown_query_contract marks this partial scope.",
         ],
     )
     unresolved_parser.add_argument("--limit", type=int, default=50, help="Maximum unresolved targets to return.")
@@ -7852,6 +7857,22 @@ def attach_markdown_query_context(
         result["markdown_query_contract"] = None
 
 
+def attach_markdown_partial_context(
+    result: dict[str, Any],
+    store: SQLiteStore,
+    *,
+    empty_result: bool,
+    hydrate_hint: str,
+) -> None:
+    attach_markdown_query_context(
+        result,
+        store,
+        None,
+        empty_result=empty_result,
+        hydrate_hint=hydrate_hint,
+    )
+
+
 def backlinks_result_empty(result: dict[str, Any]) -> bool:
     if result.get("backlinks"):
         return False
@@ -7951,12 +7972,19 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         )
         return result
     if args.command == "path":
-        return store.paths_between(
+        result = store.paths_between(
             args.source,
             args.target,
             max_depth=args.max_depth,
             limit=args.limit,
         )
+        attach_markdown_partial_context(
+            result,
+            store,
+            empty_result=not bool(result.get("paths")),
+            hydrate_hint="Run `hydrate-markdown --limit N` or use global `--idle-hydrate-seconds S` to grow the graph before retrying.",
+        )
+        return result
     if args.command == "link-stats":
         return store.link_stats(args.title)
     if args.command == "peek":
@@ -8029,6 +8057,13 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             context=args.context,
         )
         result["offset"] = args.offset
+        summary = result.get("summary") or {}
+        attach_markdown_partial_context(
+            result,
+            store,
+            empty_result=int(summary.get("returned_lines") or 0) == 0,
+            hydrate_hint=f"Run `mentions {shlex.quote(args.query)}` with global `--idle-hydrate-seconds S`, or run `hydrate-markdown --limit N` before retrying.",
+        )
         return result
     if args.command == "co-links":
         co_links = store.co_links(
@@ -8038,13 +8073,20 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             include_self=args.include_self,
             rank_mode=args.rank,
         )
-        return {
+        result = {
             "query": args.query,
             "co_links": co_links,
             "count_returned": len(co_links),
             "include_self": args.include_self,
             "rank_mode": args.rank,
         }
+        attach_markdown_partial_context(
+            result,
+            store,
+            empty_result=not bool(co_links),
+            hydrate_hint=f"Run `co-links {shlex.quote(args.query)}` with global `--idle-hydrate-seconds S`, or run `hydrate-markdown --limit N` before retrying.",
+        )
+        return result
     if args.command == "cross-project-refs":
         result = store.cross_project_refs(
             limit=args.limit,
@@ -8128,9 +8170,15 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
     if args.command == "revert-plan":
         return run_revert_plan(store, args)
     if args.command == "unresolved":
-        return {
-            "unresolved_targets": store.unresolved_targets(limit=args.limit),
-        }
+        targets = store.unresolved_targets(limit=args.limit)
+        result = {"unresolved_targets": targets}
+        attach_markdown_partial_context(
+            result,
+            store,
+            empty_result=not bool(targets),
+            hydrate_hint="Run `hydrate-markdown --limit N` or use global `--idle-hydrate-seconds S` to discover unresolved targets from more source files.",
+        )
+        return result
     if args.command == "sync":
         return sync_from_cosense(
             store,
@@ -8638,7 +8686,7 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
     if command == "replay-journal":
         return format_replay_journal(result)
     if command == "unresolved":
-        return with_alias_legend(format_unresolved_targets(result["unresolved_targets"], aliases=aliases), aliases)
+        return format_unresolved_result(result, aliases=aliases)
     if command == "sync":
         return format_sync(result)
     if command == "acquire":
@@ -9828,6 +9876,7 @@ def format_path(result: dict[str, Any], aliases: LineIdAliases | None = None) ->
         f"# Path: {source_title} -> {target_title}\n",
         f"max_depth: {result['max_depth']}\n",
     ]
+    parts.append(format_markdown_hydration_summary(result))
     if result.get("source") is None:
         parts.append(f"source: missing ({source_title})\n")
     if result.get("target") is None:
@@ -10085,6 +10134,7 @@ def format_mentions(result: dict[str, Any], aliases: LineIdAliases | None = None
     ]
     if result.get("context"):
         parts.append(f"context: {result['context']}\n")
+    parts.append(format_markdown_hydration_summary(result))
     parts.append(format_mention_summary(result["summary"]))
     mentions = result.get("mentions") or []
     parts.append("\n## Lines\n")
@@ -10153,6 +10203,7 @@ def format_co_links(result: dict[str, Any], aliases: LineIdAliases | None = None
     parts.append(f"rank_mode: {result.get('rank_mode', 'slice')}\n")
     if result.get("include_self"):
         parts.append("include_self: true\n")
+    parts.append(format_markdown_hydration_summary(result))
     co_links = result.get("co_links") or []
     if co_links:
         parts.append(format_co_link_items(co_links, aliases=aliases))
@@ -10512,6 +10563,14 @@ def format_export_ai(result: dict[str, Any]) -> str:
             f"indirect: {result['indirect_count']}\n"
         )
     return result["text"]
+
+
+def format_unresolved_result(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
+    aliases = aliases or LineIdAliases(enabled=False)
+    parts = ["# Unresolved Targets\n"]
+    parts.append(format_markdown_hydration_summary(result))
+    parts.append(format_unresolved_targets(result["unresolved_targets"], aliases=aliases))
+    return with_alias_legend("".join(parts), aliases)
 
 
 def format_unresolved_targets(
