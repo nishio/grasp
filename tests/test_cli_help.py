@@ -10897,6 +10897,10 @@ class CliHelpTests(unittest.TestCase):
                 "# A\n- direct page edit from file\n",
                 encoding="utf-8",
             )
+            (root / "New.md").write_text(
+                "# New\n- direct new page [[A]]\n",
+                encoding="utf-8",
+            )
 
             before_completed, before_status = run_json(
                 "write-status",
@@ -10946,8 +10950,14 @@ class CliHelpTests(unittest.TestCase):
                 for event_type, payload in event_payloads
                 if event_type == "log_append" and payload.get("summary") == "direct markdown fallback"
             ]
+            manual_page_creates = [
+                payload
+                for event_type, payload in event_payloads
+                if event_type == "page_create" and payload.get("title") == "New"
+            ]
             log_text = (root / "Log.md").read_text(encoding="utf-8")
             a_text = (root / "A.md").read_text(encoding="utf-8")
+            new_text = (root / "New.md").read_text(encoding="utf-8")
 
         self.assertEqual(before_completed.returncode, 1)
         self.assertEqual(
@@ -10956,11 +10966,15 @@ class CliHelpTests(unittest.TestCase):
         )
         self.assertEqual(dry_run_completed.returncode, 0)
         self.assertEqual(dry_run["normal_page_updates"], [{"source_path": "A.md"}])
+        self.assertEqual(dry_run["new_page_creates"], [{"source_path": "New.md"}])
         self.assertEqual(len(dry_run["log_appends"]), 1)
         self.assertEqual(dry_run["log_appends"][0]["summary"], "direct markdown fallback")
         self.assertEqual(reconcile_completed.returncode, 0)
         self.assertTrue(reconcile["ok"])
         self.assertEqual([update["source_path"] for update in reconcile["normal_page_updates"]], ["A.md"])
+        self.assertEqual([create["source_path"] for create in reconcile["new_page_creates"]], ["New.md"])
+        self.assertEqual(reconcile["new_page_creates"][0]["event_type"], "page_create")
+        self.assertEqual(reconcile["new_page_creates"][0]["title"], "New")
         self.assertEqual(len(reconcile["log_appends"]), 1)
         self.assertTrue(reconcile["log_normalized"])
         self.assertEqual(after_completed.returncode, 0)
@@ -10969,6 +10983,10 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(log_text.count("direct markdown fallback"), 1)
         self.assertEqual(log_text.count("sqlite entry"), 1)
         self.assertIn("- direct page edit from file", a_text)
+        self.assertIn("- direct new page [[A]]", new_text)
+        self.assertEqual(len(manual_page_creates), 1)
+        self.assertEqual(manual_page_creates[0]["source_path"], "New.md")
+        self.assertEqual(manual_page_creates[0]["message"], "reconcile-markdown: adopt new Markdown projection file")
         self.assertEqual(len(manual_log_appends), 1)
         self.assertEqual(manual_log_appends[0]["op"], "file-back")
         self.assertEqual(manual_log_appends[0]["timestamp"], "2026-06-26 02:30")
