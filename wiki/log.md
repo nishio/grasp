@@ -1882,3 +1882,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 18:42] implementation+file-back | incomplete export backup policy
 - `export-markdown --allow-incomplete-markdown-export` now requires `--backup-dir` before overwriting existing Markdown files from an incomplete graph, backs up changed existing files, and reports `backup_dir` / `backed_up_files` / `backed_up_count` plus contract `backup_required`.
 - Regression: `tests.test_markdown.MarkdownImportTests.test_export_markdown_refuses_incomplete_graph_write_by_default` covers refusal without backup and successful backup+partial projection.
+
+## [2026-06-30 18:53] implementation+file-back | relative Markdown heading/block links
+- `import --markdown` now treats relative standard Markdown links to `.md` files, including `[label](Page.md#Heading)` and `[label](Page.md#^block-id)`, as page-level edges while still ignoring HTTP URLs, pure local anchors, and image links.
+- Regression: `tests.test_markdown.MarkdownParsingTests` covers parser output and mirror edge materialization for relative heading/block links.
