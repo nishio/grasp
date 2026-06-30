@@ -117,50 +117,7 @@ class MarkdownMirror:
         if not markdown_files:
             raise ValueError(f"Markdown folder has no .md files: {root}")
 
-        records: list[MarkdownPageRecord] = []
-        for path in markdown_files:
-            relative_path = path.relative_to(root)
-            stat = path.stat()
-            raw_bytes = path.read_bytes()
-            source_hash = hashlib.sha1(raw_bytes).hexdigest()
-            text_lines = raw_bytes.decode("utf-8").splitlines()
-            metadata = parse_frontmatter(text_lines)
-            file_title = markdown_title(path)
-            h1_title = first_markdown_h1_title(text_lines)
-            page_id = metadata.page_id or markdown_page_id(relative_path)
-            title = metadata.title or h1_title or file_title
-            norm_title = normalize_title(title)
-            updated = int(stat.st_mtime)
-            lines = tuple(
-                Line(
-                    line_id=f"{page_id}:{line_index}",
-                    index=line_index,
-                    text=text,
-                    updated=updated,
-                )
-                for line_index, text in enumerate(text_lines)
-            )
-            page = Page(
-                id=page_id,
-                title=title,
-                norm_title=norm_title,
-                created=None,
-                updated=updated,
-                views=0,
-                lines=lines,
-            )
-            aliases = list(dict.fromkeys([file_title, *metadata.aliases]))
-            records.append(
-                MarkdownPageRecord(
-                    relative_path=relative_path,
-                    page=page,
-                    aliases=[alias for alias in aliases if normalize_title(alias) != norm_title],
-                    tags=metadata.tags,
-                    graph_role=markdown_graph_role(relative_path, metadata),
-                    source_hash=source_hash,
-                    mtime_ns=stat.st_mtime_ns,
-                )
-            )
+        records = [markdown_page_record_from_file(root, path) for path in markdown_files]
 
         id_collisions = markdown_id_collisions(records)
         if id_collisions:
@@ -169,30 +126,7 @@ class MarkdownMirror:
         title_collisions = markdown_title_collisions(records)
         title_aliases = build_title_aliases(records)
         pages = [record.page for record in records]
-        edges: list[Edge] = []
-        line_target_norms: dict[str, set[str]] = defaultdict(set)
-        for record in records:
-            if not markdown_graph_role_emits_edges(record.graph_role):
-                continue
-            page = record.page
-            in_code_fence = False
-            for line in page.lines:
-                links, in_code_fence = parse_markdown_line_links(
-                    line.text,
-                    in_code_fence=in_code_fence,
-                )
-                for target_title in links:
-                    edges.append(markdown_edge(page, line, target_title))
-                    line_target_norms.setdefault(line.line_id, set()).add(normalize_title(target_title))
-            for tag, line_index in record.tags:
-                if 0 <= line_index < len(page.lines):
-                    line = page.lines[line_index]
-                else:
-                    line = page.lines[0] if page.lines else Line(line_id=f"{page.id}:0", index=0, text="")
-                if normalize_title(tag) in line_target_norms.get(line.line_id, set()):
-                    continue
-                edges.append(markdown_edge(page, line, tag))
-                line_target_norms.setdefault(line.line_id, set()).add(normalize_title(tag))
+        edges = [edge for record in records for edge in markdown_edges_for_record(record)]
 
         return cls(
             pages=pages,
@@ -209,6 +143,78 @@ class MarkdownMirror:
             display_name=root.name,
             source_folder=root,
         )
+
+
+def markdown_page_record_from_file(root: str | Path, path: str | Path) -> MarkdownPageRecord:
+    root = Path(root)
+    path = Path(path)
+    relative_path = path.relative_to(root)
+    stat = path.stat()
+    raw_bytes = path.read_bytes()
+    source_hash = hashlib.sha1(raw_bytes).hexdigest()
+    text_lines = raw_bytes.decode("utf-8").splitlines()
+    metadata = parse_frontmatter(text_lines)
+    file_title = markdown_title(path)
+    h1_title = first_markdown_h1_title(text_lines)
+    page_id = metadata.page_id or markdown_page_id(relative_path)
+    title = metadata.title or h1_title or file_title
+    norm_title = normalize_title(title)
+    updated = int(stat.st_mtime)
+    lines = tuple(
+        Line(
+            line_id=f"{page_id}:{line_index}",
+            index=line_index,
+            text=text,
+            updated=updated,
+        )
+        for line_index, text in enumerate(text_lines)
+    )
+    page = Page(
+        id=page_id,
+        title=title,
+        norm_title=norm_title,
+        created=None,
+        updated=updated,
+        views=0,
+        lines=lines,
+    )
+    aliases = list(dict.fromkeys([file_title, *metadata.aliases]))
+    return MarkdownPageRecord(
+        relative_path=relative_path,
+        page=page,
+        aliases=[alias for alias in aliases if normalize_title(alias) != norm_title],
+        tags=metadata.tags,
+        graph_role=markdown_graph_role(relative_path, metadata),
+        source_hash=source_hash,
+        mtime_ns=stat.st_mtime_ns,
+    )
+
+
+def markdown_edges_for_record(record: MarkdownPageRecord) -> list[Edge]:
+    if not markdown_graph_role_emits_edges(record.graph_role):
+        return []
+    page = record.page
+    edges: list[Edge] = []
+    line_target_norms: dict[str, set[str]] = defaultdict(set)
+    in_code_fence = False
+    for line in page.lines:
+        links, in_code_fence = parse_markdown_line_links(
+            line.text,
+            in_code_fence=in_code_fence,
+        )
+        for target_title in links:
+            edges.append(markdown_edge(page, line, target_title))
+            line_target_norms.setdefault(line.line_id, set()).add(normalize_title(target_title))
+    for tag, line_index in record.tags:
+        if 0 <= line_index < len(page.lines):
+            line = page.lines[line_index]
+        else:
+            line = page.lines[0] if page.lines else Line(line_id=f"{page.id}:0", index=0, text="")
+        if normalize_title(tag) in line_target_norms.get(line.line_id, set()):
+            continue
+        edges.append(markdown_edge(page, line, tag))
+        line_target_norms.setdefault(line.line_id, set()).add(normalize_title(tag))
+    return edges
 
 
 def normalize_exclude_dirs(exclude_dirs: tuple[str, ...] | list[str]) -> tuple[str, ...]:
