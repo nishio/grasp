@@ -103,8 +103,8 @@ class SQLiteStoreTests(unittest.TestCase):
             finally:
                 connection.close()
 
-        self.assertEqual(SCHEMA_VERSION, "10")
-        self.assertEqual(schema_version, "10")
+        self.assertEqual(SCHEMA_VERSION, "11")
+        self.assertEqual(schema_version, "11")
         self.assertIsNotNone(events_table)
         self.assertEqual(
             columns,
