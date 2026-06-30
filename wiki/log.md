@@ -1818,3 +1818,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 15:20] implementation+file-back | basic retrieval hydrate-limit slice
 - code: `search` / `backlinks` / `related --hydrate-limit N` now hydrate up to N query/target-matching Markdown source pages before returning results; `search --hydrate-limit` is literal-mode only.
 - test: catalog-only 3-page CLI regression verifies `search needle`, `backlinks B`, and `related B` each hydrate one source page and return the expected hit/backlink/2-hop related result.
+
+## [2026-06-30 15:29] implementation+file-back | incomplete Markdown query contract
+- code: `search` / `backlinks` / `related` now report `markdown_graph` and `markdown_query_contract` on incomplete Markdown graphs even without `--hydrate-limit`, so empty results are not treated as complete-corpus absence.
+- test: catalog-only 3-page CLI regression verifies no-hydrate empty results include `empty_result_may_be_incomplete=true`; text output includes an incomplete graph warning and hydrate hint.
