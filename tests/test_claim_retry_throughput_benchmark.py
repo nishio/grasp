@@ -234,12 +234,22 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
             [{"workload": "file-back", "think_seconds": 0.02, "gate": scenario_gate}],
             thresholds,
         )
+        required = benchmark.summarize_gate(
+            [{"workload": "file-back", "think_seconds": 0.02, "gate": scenario_gate}],
+            thresholds,
+            require_thresholds=True,
+        )
 
         self.assertFalse(scenario_gate["enabled"])
         self.assertIsNone(scenario_gate["ok"])
         self.assertEqual(scenario_gate["reason"], "thresholds_not_set")
         self.assertFalse(summary["enabled"])
+        self.assertFalse(summary["required"])
         self.assertIsNone(summary["ok"])
+        self.assertFalse(required["enabled"])
+        self.assertTrue(required["required"])
+        self.assertFalse(required["ok"])
+        self.assertEqual(required["failures"], [{"type": "thresholds_not_set"}])
 
     def test_rendered_tables_include_cutover_metrics_for_file_back_workload(self):
         output = {
@@ -314,8 +324,48 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
         self.assertIn("| all_strict_green | yes |", table)
         self.assertIn("## Claim Retry vs Uncoordinated", table)
         self.assertIn("| file-back | 0.02 | 0.4 | 0.8 | -25 | 0 | 0 | 0.439 |", table)
-        self.assertIn("## Optional Cutover Threshold Gate", table)
+        self.assertIn("## Cutover Threshold Gate", table)
         self.assertIn("| file-back | 0.02 | pass |  |", table)
+
+    def test_rendered_required_threshold_gate_fails_when_thresholds_are_missing(self):
+        output = {
+            "scenarios": [
+                {
+                    "workload": "file-back",
+                    "think_seconds": 0.02,
+                    "results": [
+                        {
+                            "mode": "claim_retry",
+                            "attempted_markers": 2,
+                            "survived_markers": 2,
+                            "lost_markers": 0,
+                            "lost_log_markers": 0,
+                            "strict_ok": True,
+                            "active_claim_overlap_count": 0,
+                            "p95_claim_wait_seconds": 0.42,
+                            "completed_writes_per_second": 1.0,
+                            "surviving_markers_per_second": 1.0,
+                            "elapsed_seconds": 2.0,
+                        }
+                    ],
+                    "comparison": None,
+                    "gate": {"enabled": False, "ok": None, "failures": [], "reason": "thresholds_not_set"},
+                }
+            ],
+            "gate": {
+                "enabled": False,
+                "required": True,
+                "ok": False,
+                "failures": [{"type": "thresholds_not_set"}],
+                "reason": "thresholds_not_set",
+            },
+            "metric_summary": {},
+        }
+
+        table = benchmark.render_tables(output)
+
+        self.assertIn("## Cutover Threshold Gate", table)
+        self.assertIn("| all | all | fail | thresholds_not_set |", table)
 
 
 if __name__ == "__main__":
