@@ -1886,3 +1886,8 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 18:53] implementation+file-back | relative Markdown heading/block links
 - `import --markdown` now treats relative standard Markdown links to `.md` files, including `[label](Page.md#Heading)` and `[label](Page.md#^block-id)`, as page-level edges while still ignoring HTTP URLs, pure local anchors, and image links.
 - Regression: `tests.test_markdown.MarkdownParsingTests` covers parser output and mirror edge materialization for relative heading/block links.
+
+## [2026-06-30 19:17] implementation+file-back | Markdown anchor target line ids
+`import --markdown` now stores `edges.target_fragment` and resolves Markdown heading/block fragments to `edges.target_line_id` when the unique target page contains the heading or block id; resolved local-only anchors become self-page line edges.
+Schema bumped to `10`; `refresh_edge_resolutions` recomputes `target_line_id` from `target_fragment` so incoming edges survive target-only incremental re-imports.
+Regression: `tests.test_markdown.MarkdownParsingTests` covers mirror edge line targets, persisted backlinks output, local anchors, and target-only incremental refresh.

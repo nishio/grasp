@@ -299,6 +299,8 @@ class Edge:
     target_handle: str | None = None
     target_handle_norm: str | None = None
     target_page_id: str | None = None
+    target_fragment: str | None = None
+    target_line_id: str | None = None
     resolution_status: str = "unresolved"
     source_project: str = ""
     target_project: str = ""
@@ -326,6 +328,10 @@ class Edge:
             "link_kind": self.link_kind,
             "connection_strength": self.connection_strength,
         }
+        if self.target_fragment is not None:
+            result["target_fragment"] = self.target_fragment
+        if self.target_line_id is not None:
+            result["target_line_id"] = self.target_line_id
         if not self.source_project:
             result.pop("project")
             result.pop("source_project")
