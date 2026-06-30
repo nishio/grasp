@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from collections import Counter, deque
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 import hashlib
 from html import escape as escape_html
 import json
@@ -1722,11 +1723,107 @@ def _replace_markdown_record(
     record: MarkdownPageRecord,
     edges: list[Edge],
 ) -> None:
+    record, edges = _markdown_record_with_inherited_line_ids(connection, project, record, edges)
     connection.execute(
         "DELETE FROM pages WHERE project = ? AND id = ?",
         (project, record.page.id),
     )
     _insert_markdown_records(connection, project, [record], edges)
+
+
+def _markdown_record_with_inherited_line_ids(
+    connection: sqlite3.Connection,
+    project: str,
+    record: MarkdownPageRecord,
+    edges: list[Edge],
+) -> tuple[MarkdownPageRecord, list[Edge]]:
+    previous_lines = _stored_page_lines(connection, project, record.page.id)
+    if not previous_lines or not record.page.lines:
+        return record, edges
+
+    line_id_by_new_index = _inherited_line_ids_by_new_index(previous_lines, list(record.page.lines))
+    if not line_id_by_new_index:
+        return record, edges
+
+    reserved_line_ids = set(line_id_by_new_index.values())
+    assigned_line_ids: set[str] = set()
+    new_lines: list[Line] = []
+    remap: dict[str, str] = {}
+    for line in record.page.lines:
+        line_id = line_id_by_new_index.get(line.index)
+        if line_id is None:
+            line_id = line.line_id
+            if line_id in reserved_line_ids or line_id in assigned_line_ids:
+                line_id = _mint_markdown_line_id(record.page.id, reserved_line_ids | assigned_line_ids)
+        assigned_line_ids.add(line_id)
+        remap[line.line_id] = line_id
+        new_lines.append(replace(line, line_id=line_id))
+
+    if all(line.line_id == new_line.line_id for line, new_line in zip(record.page.lines, new_lines)):
+        return record, edges
+
+    inherited_page = replace(record.page, lines=tuple(new_lines))
+    inherited_record = replace(record, page=inherited_page)
+    inherited_edges = [_remap_markdown_edge_line_ids(edge, remap) for edge in edges]
+    return inherited_record, inherited_edges
+
+
+def _stored_page_lines(connection: sqlite3.Connection, project: str, page_id: str) -> list[Line]:
+    rows = connection.execute(
+        """
+        SELECT line_id, line_index, text, created, updated, user_id
+        FROM lines
+        WHERE project = ? AND page_id = ?
+        ORDER BY line_index
+        """,
+        (project, page_id),
+    ).fetchall()
+    return [
+        Line(
+            line_id=str(line_id),
+            index=int(line_index),
+            text=str(text),
+            created=created,
+            updated=updated,
+            user_id=user_id,
+        )
+        for line_id, line_index, text, created, updated, user_id in rows
+    ]
+
+
+def _inherited_line_ids_by_new_index(previous_lines: list[Line], new_lines: list[Line]) -> dict[int, str]:
+    matcher = SequenceMatcher(
+        None,
+        [line.text for line in previous_lines],
+        [line.text for line in new_lines],
+        autojunk=False,
+    )
+    inherited: dict[int, str] = {}
+    for tag, old_start, old_end, new_start, _new_end in matcher.get_opcodes():
+        if tag != "equal":
+            continue
+        for offset, old_line in enumerate(previous_lines[old_start:old_end]):
+            inherited[new_start + offset] = old_line.line_id
+    return inherited
+
+
+def _mint_markdown_line_id(page_id: str, used_line_ids: set[str]) -> str:
+    while True:
+        line_id = f"{page_id}:{uuid4().hex[:12]}"
+        if line_id not in used_line_ids:
+            return line_id
+
+
+def _remap_markdown_edge_line_ids(edge: Edge, line_id_remap: dict[str, str]) -> Edge:
+    line_id = line_id_remap.get(edge.line_id, edge.line_id)
+    target_line_id = (
+        line_id_remap.get(edge.target_line_id, edge.target_line_id)
+        if edge.target_line_id is not None
+        else None
+    )
+    if line_id == edge.line_id and target_line_id == edge.target_line_id:
+        return edge
+    return replace(edge, line_id=line_id, target_line_id=target_line_id)
 
 
 def _markdown_edges_by_page_id(edges: list[Edge]) -> dict[str, list[Edge]]:
