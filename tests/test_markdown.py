@@ -32,12 +32,14 @@ class MarkdownParsingTests(unittest.TestCase):
     def test_parse_markdown_links_handles_wikilinks_aliases_headings_embeds_and_tags(self):
         text = (
             "[[Page]] [[Page|alias]] [[Folder/Other.md#Heading]] ![[Embed]] "
-            "`[[Code]]` `parent wiki` #tag #2024 [anchor](#local) # https://example.com/#fragment"
+            "[heading](Folder/Std.md#Heading) [block](Block.md#^block-id) "
+            "[encoded](Space%20Page.md) [remote](https://example.com/Remote.md) "
+            "![image](Image.md) `[[Code]]` `parent wiki` #tag #2024 [anchor](#local) # https://example.com/#fragment"
         )
 
         self.assertEqual(
             parse_markdown_links(text),
-            ["Page", "Page", "Other", "Embed", "tag", "2024"],
+            ["Page", "Page", "Other", "Embed", "Std", "Block", "Space Page", "tag", "2024"],
         )
 
     def test_markdown_mirror_skips_fenced_code_links(self):
@@ -60,6 +62,27 @@ class MarkdownParsingTests(unittest.TestCase):
             mirror = MarkdownMirror.from_folder(root)
 
         self.assertEqual([edge.target_title for edge in mirror.edges], ["B"])
+
+    def test_markdown_mirror_materializes_relative_markdown_links_as_page_edges(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            notes = root / "notes"
+            notes.mkdir()
+            (root / "A.md").write_text(
+                "# A\n"
+                "[heading](B.md#Section) [block](notes/C.md#^block-id) "
+                "[remote](https://example.com/D.md) [local](#section)\n",
+                encoding="utf-8",
+            )
+            (root / "B.md").write_text("# B\n## Section\n", encoding="utf-8")
+            (notes / "C.md").write_text("# C\nblock target ^block-id\n", encoding="utf-8")
+
+            mirror = MarkdownMirror.from_folder(root)
+
+        edges_by_target = {edge.target_title: edge for edge in mirror.edges}
+        self.assertEqual(set(edges_by_target), {"B", "C"})
+        self.assertIn("[heading](B.md#Section)", edges_by_target["B"].line_text)
+        self.assertIn("[block](notes/C.md#^block-id)", edges_by_target["C"].line_text)
 
     def test_parse_frontmatter_reads_title_id_aliases_and_tags(self):
         metadata = parse_frontmatter(

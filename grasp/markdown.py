@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import hashlib
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from .cosense import Edge, Line, Page, normalize_title, parse_cosense_hash_tag
 
@@ -756,6 +757,12 @@ def parse_markdown_line_links(text: str, *, in_code_fence: bool) -> tuple[list[s
 
         start = index
         if start + 1 >= len(text) or text[start + 1] != "[":
+            inline_link = markdown_inline_link_target_at(text, start)
+            if inline_link is not None:
+                target, end = inline_link
+                links.append(target)
+                index = end
+                continue
             index += 1
             continue
         if is_inside_inline_code(text, start):
@@ -789,6 +796,52 @@ def markdown_wikilink_target(content: str) -> str | None:
     if "/" in target:
         target = target.rsplit("/", 1)[-1]
     return target.strip() or None
+
+
+def markdown_inline_link_target_at(text: str, start: int) -> tuple[str, int] | None:
+    if start > 0 and text[start - 1] == "!":
+        return None
+    if is_inside_inline_code(text, start):
+        return None
+    label_end = text.find("]", start + 1)
+    if label_end == -1 or label_end + 1 >= len(text) or text[label_end + 1] != "(":
+        return None
+    destination_start = label_end + 2
+    destination_end = text.find(")", destination_start)
+    if destination_end == -1:
+        return None
+    target = markdown_inline_link_target(text[destination_start:destination_end])
+    if target is None:
+        return None
+    return target, destination_end + 1
+
+
+def markdown_inline_link_target(destination: str) -> str | None:
+    raw = destination.strip()
+    if not raw:
+        return None
+    if raw.startswith("<"):
+        close = raw.find(">")
+        if close == -1:
+            return None
+        href = raw[1:close].strip()
+    else:
+        href = raw.split(None, 1)[0].strip()
+    if not href or href.startswith("#") or href.startswith("//"):
+        return None
+    parts = urlsplit(href)
+    if parts.scheme or parts.netloc:
+        return None
+    path = unquote(parts.path).strip()
+    if not path or Path(path).suffix.casefold() != ".md":
+        return None
+    return markdown_path_link_target(path)
+
+
+def markdown_path_link_target(path_text: str) -> str | None:
+    path = Path(path_text)
+    target = path.stem.strip()
+    return target or None
 
 
 def is_code_fence(stripped_line: str) -> bool:
