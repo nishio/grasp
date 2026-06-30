@@ -54,7 +54,7 @@ v1 stable scope 外:
 
 ## store
 
-- current public compatibility version は `1.9.0`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.10.0`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - authoring SSoT substrate 用の canonical store path helper は `$GRASP_CANONICAL_STORE` → `<repo>/.grasp/authority.sqlite` → `$GRASP_HOME/authority.sqlite` → `~/.grasp/authority.sqlite`。これは Phase 0/1 helper であり、既存 default read/import store path とは分ける。
 - project default: `$GRASP_PROJECT`。retrieval verbs は project 未指定なら whole-store source scope、write/import/source update 系は project-targeted。
@@ -154,7 +154,8 @@ v1 stable scope 外:
 
 Markdown mirror facts:
 
-- `grasp import --markdown <folder>` は再帰的に `.md` を読み、hidden path component 配下の file は除外する。`--markdown-exclude-dir <name>` を繰り返すと、その directory basename 配下の file も除外する（例: `raw/`）。Wikilink は `[[Page]]` / `[[Page|alias]]` / `[[Folder/Page.md#Heading]]` / `[[Page#^block-id]]` を page-level edge として扱う。2026-06-30 Codex follow-up 以降、標準 Markdown inline link も同一 folder 内の相対 `.md` target だけを page-level edge にし、`[label](Folder/Page.md#Heading)` / `[label](Page.md#^block-id)` は target page `Page` への edge になる。HTTP URL、pure local anchor `[label](#heading)`、image link は edge 化しない。
+- `grasp import --markdown <folder>` は再帰的に `.md` を読み、hidden path component 配下の file は除外する。`--markdown-exclude-dir <name>` を繰り返すと、その directory basename 配下の file も除外する（例: `raw/`）。Wikilink は `[[Page]]` / `[[Page|alias]]` / `[[Folder/Page.md#Heading]]` / `[[Page#^block-id]]` を edge として扱う。2026-06-30 Codex follow-up 以降、標準 Markdown inline link も同一 folder 内の相対 `.md` target だけを edge にし、`[label](Folder/Page.md#Heading)` / `[label](Page.md#^block-id)` は target page `Page` への edge になる。HTTP URL と image link は edge 化しない。
+- schema `10` 以降、Markdown heading / block fragment は `edges.target_fragment` に保存し、unique target page 内で heading / block id が見つかる時は `edges.target_line_id` も保存する。対象は `[[Page#Heading]]` / `[[Page#^block-id]]` / `[label](Page.md#Heading)` / `[label](Page.md#^block-id)`。resolved local-only anchor `[label](#Heading)` / `[[#Heading]]` は self-page line edge になり、missing local anchor は edge 化しない。incremental re-import では `target_fragment` から incoming edge の `target_line_id` を再計算する。weak cross-project inferred edge は page-level のまま。
 - page title は frontmatter `title` があればそれ、なければ first H1、さらに無ければ file stem（`foo.md` → `foo`）。同一 normalized title は import 可能で、`page_handles` の 1:N handle として `read <handle>` の ambiguity 候補になる。
 - page id は frontmatter `id` があればそれ、なければ relative path の SHA-1 先頭 24 hex から作る。line id は Cosense import と同じく `<page-id>:<line-index>`。
 - frontmatter `aliases` と file stem は link handle になり、`page_handles` に materialize される。unique handle への `[[alias]]` は `edges.resolution_status=resolved_unique` として `target_page_id` に解決され、duplicate alias は `resolution_status=ambiguous` になる。ambiguous edge は unresolved target には入れず、既存 page backlink / related にも暗黙接続しない。
