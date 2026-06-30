@@ -1842,3 +1842,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 16:40] implementation | idle Markdown hydration environment policy
 - Added GRASP_IDLE_HYDRATE_SECONDS and GRASP_IDLE_HYDRATE_LIMIT as persistent defaults for global idle hydration, so supported retrieval loops can grow incomplete Markdown graphs without repeating CLI flags.
 - CLI --idle-hydrate-seconds 0 explicitly disables the env policy for a command; regression covers env-enabled idle hydration and CLI override-to-zero.
+
+## [2026-06-30 16:53] implementation | graph verb hydrate-limit for partial Markdown graphs
+- Added command-local --hydrate-limit to mentions, co-links, path, and unresolved so catalog/partial Markdown graphs can hydrate the relevant source page(s) before computing graph-verb results.
+- mentions/co-links use query-source scan, path scans both endpoints with a shared limit, and unresolved uses source-order chunk hydration before ranking unresolved targets.

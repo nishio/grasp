@@ -1300,6 +1300,58 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertIn("graph: incomplete", text)
             self.assertIn("empty results may be caused by unhydrated Markdown source files", text)
 
+    def test_cli_graph_command_hydrate_limit_parses_matching_sources(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nneedle links to [[B]] and [[Missing]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+
+            def make_store(name: str) -> Path:
+                store_path = Path(tmpdir) / f"{name}.sqlite"
+                import_markdown_folder_to_sqlite(root, store_path, project_name="wiki", catalog_only=True)
+                return store_path
+
+            def run_json(store_path: Path, *args: str) -> dict:
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            mentions = run_json(make_store("mentions"), "mentions", "needle", "--hydrate-limit", "1", "--limit", "10")
+            self.assertEqual(mentions["markdown_hydration"]["hydrated_count"], 1)
+            self.assertEqual(mentions["markdown_graph"]["hydrated_files"], 1)
+            self.assertEqual([hit["source_title"] for hit in mentions["mentions"]], ["A"])
+
+            co_links = run_json(make_store("co-links"), "co-links", "needle", "--hydrate-limit", "1", "--limit", "10")
+            self.assertEqual(co_links["markdown_hydration"]["hydrated_count"], 1)
+            self.assertEqual(co_links["markdown_graph"]["hydrated_files"], 1)
+            self.assertEqual({item["title"] for item in co_links["co_links"]}, {"B", "Missing"})
+
+            path = run_json(make_store("path"), "path", "A", "B", "--hydrate-limit", "1", "--max-depth", "2")
+            self.assertEqual(path["markdown_hydration"]["hydrated_count"], 1)
+            self.assertEqual(path["markdown_graph"]["hydrated_files"], 1)
+            self.assertEqual(path["path_count"], 1)
+            self.assertEqual([node["title"] for node in path["paths"][0]["nodes"]], ["A", "B"])
+
+            unresolved = run_json(make_store("unresolved"), "unresolved", "--hydrate-limit", "1", "--limit", "10")
+            self.assertEqual(unresolved["markdown_hydration"]["hydrated_count"], 1)
+            self.assertEqual(unresolved["markdown_graph"]["hydrated_files"], 1)
+            self.assertEqual([item["title"] for item in unresolved["unresolved_targets"]], ["Missing"])
+
     def test_cli_idle_hydration_runs_after_result_for_future_commands(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
