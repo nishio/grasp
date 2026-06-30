@@ -1807,6 +1807,25 @@ def _inherited_line_ids_by_new_index(previous_lines: list[Line], new_lines: list
     return inherited
 
 
+def _inherited_line_payloads_by_new_index(
+    previous_lines: list[dict[str, Any]],
+    new_texts: list[str],
+) -> dict[int, dict[str, Any]]:
+    matcher = SequenceMatcher(
+        None,
+        [str(line.get("text", "")) for line in previous_lines],
+        [str(text) for text in new_texts],
+        autojunk=False,
+    )
+    inherited: dict[int, dict[str, Any]] = {}
+    for tag, old_start, old_end, new_start, _new_end in matcher.get_opcodes():
+        if tag != "equal":
+            continue
+        for offset, old_line in enumerate(previous_lines[old_start:old_end]):
+            inherited[new_start + offset] = dict(old_line)
+    return inherited
+
+
 def _mint_markdown_line_id(page_id: str, used_line_ids: set[str]) -> str:
     while True:
         line_id = f"{page_id}:{uuid4().hex[:12]}"
@@ -4734,18 +4753,28 @@ class SQLiteStore:
         source_path, _ = self._markdown_manifest_entry_for_page(manifest, page_id)
         graph_role = self._markdown_graph_role_for_page(project, page_id)
         previous_lines = self._markdown_line_payloads(project, page_id)
-        previous_by_index = {line["line_index"]: line for line in previous_lines}
+        inherited_by_index = _inherited_line_payloads_by_new_index(previous_lines, lines)
         now = int(time.time())
         next_lines = []
+        assigned_line_ids: set[str] = set()
         for line_index, text in enumerate(lines):
-            previous = previous_by_index.get(line_index)
-            if previous is not None and previous["text"] == text:
-                next_lines.append(dict(previous))
-                next_lines[-1]["line_index"] = line_index
-                continue
+            inherited = inherited_by_index.get(line_index)
+            if inherited is not None:
+                line_payload = dict(inherited)
+                line_payload["line_index"] = line_index
+                line_payload["text"] = text
+                line_id = str(line_payload.get("line_id") or "")
+                if line_id and line_id not in assigned_line_ids:
+                    assigned_line_ids.add(line_id)
+                    next_lines.append(line_payload)
+                    continue
+            line_id = f"line-{uuid4().hex}"
+            while line_id in assigned_line_ids:
+                line_id = f"line-{uuid4().hex}"
+            assigned_line_ids.add(line_id)
             next_lines.append(
                 {
-                    "line_id": f"line-{uuid4().hex}",
+                    "line_id": line_id,
                     "line_index": line_index,
                     "text": text,
                     "created": now,
