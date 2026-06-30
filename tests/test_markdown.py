@@ -1100,6 +1100,52 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertEqual(edge[1], 3)
             self.assertEqual(edge[2], old_heading_id)
 
+    def test_write_page_inherits_line_ids_across_inserted_lines(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text("# A\n## Target\n[[#Target]]\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                page = store.resolve_page("A")
+                old_lines, _aliases = store.page_lines(page)
+                old_heading_id = old_lines[1].line_id
+                old_link_id = old_lines[2].line_id
+
+                store.write_markdown_page_with_event(
+                    "A",
+                    lines=["# A", "inserted", "## Target", "[[#Target]]"],
+                    actor="test",
+                    session_id="write-page-line-id-test",
+                )
+                new_page = store.resolve_page("A")
+                new_lines, _aliases = store.page_lines(new_page)
+                edge = store.connection.execute(
+                    """
+                    SELECT e.line_id, l.line_index, e.target_line_id
+                    FROM edges e
+                    JOIN lines l ON l.project = e.project AND l.line_id = e.line_id
+                    WHERE e.project = ? AND e.source_page_id = ? AND e.target_fragment = ?
+                    """,
+                    ("wiki", new_page.id, "Target"),
+                ).fetchone()
+            finally:
+                store.close()
+
+            self.assertEqual([line.text for line in new_lines], ["# A", "inserted", "## Target", "[[#Target]]"])
+            self.assertEqual(new_lines[0].line_id, old_lines[0].line_id)
+            self.assertEqual(new_lines[2].line_id, old_heading_id)
+            self.assertEqual(new_lines[3].line_id, old_link_id)
+            self.assertNotIn(new_lines[1].line_id, {line.line_id for line in old_lines})
+            self.assertEqual(len({line.line_id for line in new_lines}), len(new_lines))
+            self.assertIsNotNone(edge)
+            self.assertEqual(edge[0], old_link_id)
+            self.assertEqual(edge[1], 3)
+            self.assertEqual(edge[2], old_heading_id)
+
     def test_catalog_only_import_marks_markdown_graph_incomplete(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
