@@ -44,6 +44,7 @@ from .markdown import (
     markdown_catalog_record_from_file,
     markdown_edges_for_record,
     markdown_file_manifest,
+    markdown_fragment_line_id,
     markdown_graph_role,
     markdown_graph_role_emits_edges,
     markdown_id_collisions,
@@ -60,7 +61,7 @@ from .markdown import (
 )
 
 
-SCHEMA_VERSION = "9"
+SCHEMA_VERSION = "10"
 IMPORT_CACHE_MANIFEST_VERSION = 1
 CANONICAL_STORE_ENV = "GRASP_CANONICAL_STORE"
 SQLITE_BUSY_TIMEOUT_MS = 30_000
@@ -162,6 +163,8 @@ CREATE TABLE edges (
   target_handle TEXT NOT NULL,
   target_handle_norm TEXT NOT NULL,
   target_page_id TEXT,
+  target_fragment TEXT,
+  target_line_id TEXT,
   resolution_status TEXT NOT NULL,
   link_kind TEXT NOT NULL DEFAULT 'internal',
   connection_strength TEXT NOT NULL DEFAULT 'strong',
@@ -206,6 +209,7 @@ CREATE INDEX idx_edges_project_target_handle_norm ON edges(project, target_handl
 CREATE INDEX idx_edges_target_project_norm ON edges(target_project, target_norm);
 CREATE INDEX idx_edges_target_project_page ON edges(target_project, target_page_id);
 CREATE INDEX idx_edges_project_target_page ON edges(project, target_page_id);
+CREATE INDEX idx_edges_target_project_line ON edges(target_project, target_line_id);
 CREATE INDEX idx_edges_project_resolution ON edges(project, resolution_status);
 CREATE INDEX idx_edges_strength_kind ON edges(connection_strength, link_kind);
 CREATE INDEX idx_edges_strength_resolution_handle ON edges(connection_strength, resolution_status, target_handle_norm);
@@ -1285,11 +1289,13 @@ def _insert_edges(connection: sqlite3.Connection, project: str, edges: list[Edge
           target_handle,
           target_handle_norm,
           target_page_id,
+          target_fragment,
+          target_line_id,
           resolution_status,
           link_kind,
           connection_strength
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             (
@@ -1302,6 +1308,8 @@ def _insert_edges(connection: sqlite3.Connection, project: str, edges: list[Edge
                 edge.target_handle or edge.target_title,
                 edge.target_handle_norm or normalize_title(edge.target_handle or edge.target_title),
                 edge.target_page_id,
+                edge.target_fragment,
+                edge.target_line_id,
                 edge.resolution_status,
                 edge.link_kind or "internal",
                 edge.connection_strength or "strong",
@@ -1347,11 +1355,13 @@ def _insert_edge_rows(connection: sqlite3.Connection, rows: list[tuple[Any, ...]
           target_handle,
           target_handle_norm,
           target_page_id,
+          target_fragment,
+          target_line_id,
           resolution_status,
           link_kind,
           connection_strength
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'unresolved', ?, 'strong')
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 'unresolved', ?, 'strong')
         """,
         values(),
     )
@@ -1407,7 +1417,8 @@ def refresh_edge_resolutions(connection: sqlite3.Connection, project: str, *, re
         UPDATE edges
         SET
           resolution_status = 'unresolved',
-          target_page_id = NULL
+          target_page_id = NULL,
+          target_line_id = NULL
         WHERE connection_strength = 'strong'
           AND NOT EXISTS (
             SELECT 1
@@ -1430,8 +1441,73 @@ def refresh_edge_resolutions(connection: sqlite3.Connection, project: str, *, re
           AND pages.id = e.target_page_id
         """,
     )
+    refresh_markdown_edge_line_targets(connection, project)
     if rebuild_weak:
         rebuild_weak_cross_project_edges(connection)
+
+
+def refresh_markdown_edge_line_targets(connection: sqlite3.Connection, project: str) -> None:
+    connection.execute(
+        """
+        UPDATE edges
+        SET target_line_id = NULL
+        WHERE project = ?
+          AND (
+            target_fragment IS NULL
+            OR resolution_status != 'resolved_unique'
+            OR target_page_id IS NULL
+          )
+        """,
+        (project,),
+    )
+    rows = connection.execute(
+        """
+        SELECT id, target_project, target_page_id, target_fragment
+        FROM edges
+        WHERE project = ?
+          AND target_fragment IS NOT NULL
+          AND resolution_status = 'resolved_unique'
+          AND target_page_id IS NOT NULL
+        """,
+        (project,),
+    ).fetchall()
+    lines_by_page: dict[tuple[str, str], tuple[Line, ...]] = {}
+    updates: list[tuple[str | None, int]] = []
+    for row in rows:
+        edge_id = int(row[0])
+        page_key = (str(row[1]), str(row[2]))
+        target_fragment = str(row[3])
+        if page_key not in lines_by_page:
+            line_rows = connection.execute(
+                """
+                SELECT line_id, line_index, text, created, updated, user_id
+                FROM lines
+                WHERE project = ? AND page_id = ?
+                ORDER BY line_index
+                """,
+                page_key,
+            ).fetchall()
+            lines_by_page[page_key] = tuple(
+                Line(
+                    line_id=str(line[0]),
+                    index=int(line[1]),
+                    text=str(line[2]),
+                    created=line[3],
+                    updated=line[4],
+                    user_id=line[5],
+                )
+                for line in line_rows
+            )
+        target_line_id = markdown_fragment_line_id(lines_by_page[page_key], target_fragment)
+        updates.append((target_line_id, edge_id))
+    connection.executemany(
+        """
+        UPDATE edges
+        SET target_line_id = ?
+        WHERE id = ?
+        """,
+        updates,
+    )
 
 
 def rebuild_weak_cross_project_edges(connection: sqlite3.Connection) -> None:
@@ -1448,6 +1524,8 @@ def rebuild_weak_cross_project_edges(connection: sqlite3.Connection) -> None:
           target_handle,
           target_handle_norm,
           target_page_id,
+          target_fragment,
+          target_line_id,
           resolution_status,
           link_kind,
           connection_strength
@@ -1462,6 +1540,8 @@ def rebuild_weak_cross_project_edges(connection: sqlite3.Connection) -> None:
           e.target_handle,
           e.target_handle_norm,
           h.page_id AS target_page_id,
+          NULL AS target_fragment,
+          NULL AS target_line_id,
           'resolved_unique' AS resolution_status,
           'inferred-normalized-title' AS link_kind,
           'weak' AS connection_strength
@@ -5572,6 +5652,8 @@ class SQLiteStore:
               e.target_handle,
               e.target_handle_norm,
               e.target_page_id,
+              e.target_fragment,
+              e.target_line_id,
               e.resolution_status,
               e.link_kind,
               e.connection_strength
@@ -6087,6 +6169,8 @@ class SQLiteStore:
               e.target_handle,
               e.target_handle_norm,
               e.target_page_id,
+              e.target_fragment,
+              e.target_line_id,
               e.resolution_status,
               e.link_kind,
               e.connection_strength
@@ -6143,6 +6227,10 @@ class SQLiteStore:
                     "link_kind": row["link_kind"],
                     "connection_strength": row["connection_strength"],
                 }
+                if row["target_fragment"] is not None:
+                    example["target_fragment"] = row["target_fragment"]
+                if row["target_line_id"] is not None:
+                    example["target_line_id"] = row["target_line_id"]
                 annotation = edge_semantic_annotation_from_fields(row["target_title"], row["line_text"])
                 if annotation is not None:
                     example["semantic_annotation"] = annotation
@@ -6935,6 +7023,8 @@ class SQLiteStore:
               e.target_handle,
               e.target_handle_norm,
               e.target_page_id,
+              e.target_fragment,
+              e.target_line_id,
               e.resolution_status
             FROM edges e
             JOIN pages source ON source.project = e.project AND source.id = e.source_page_id
@@ -7755,6 +7845,8 @@ class SQLiteStore:
               e.target_handle,
               e.target_handle_norm,
               e.target_page_id,
+              e.target_fragment,
+              e.target_line_id,
               e.resolution_status,
               e.link_kind,
               e.connection_strength
@@ -8179,6 +8271,8 @@ class SQLiteStore:
               e.target_handle,
               e.target_handle_norm,
               e.target_page_id,
+              e.target_fragment,
+              e.target_line_id,
               e.resolution_status,
               e.link_kind,
               e.connection_strength
@@ -8473,6 +8567,8 @@ class SQLiteStore:
             target_handle=row["target_handle"] if "target_handle" in keys else row["target_title"],
             target_handle_norm=row["target_handle_norm"] if "target_handle_norm" in keys else row["target_norm"],
             target_page_id=row["target_page_id"] if "target_page_id" in keys else None,
+            target_fragment=row["target_fragment"] if "target_fragment" in keys else None,
+            target_line_id=row["target_line_id"] if "target_line_id" in keys else None,
             resolution_status=row["resolution_status"] if "resolution_status" in keys else "unresolved",
             source_project=row["source_project"] if "source_project" in keys else row["project"] if "project" in keys else "",
             target_project=row["target_project"] if "target_project" in keys else row["project"] if "project" in keys else "",
