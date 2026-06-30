@@ -1846,3 +1846,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 16:53] implementation | graph verb hydrate-limit for partial Markdown graphs
 - Added command-local --hydrate-limit to mentions, co-links, path, and unresolved so catalog/partial Markdown graphs can hydrate the relevant source page(s) before computing graph-verb results.
 - mentions/co-links use query-source scan, path scans both endpoints with a shared limit, and unresolved uses source-order chunk hydration before ranking unresolved targets.
+
+## [2026-06-30 17:03] implementation | field-level partial contracts for incomplete Markdown graphs
+- Added markdown_query_contract.partial_fields and result_field_states so retrieval/gather results identify which derived fields are partial on incomplete Markdown graphs.
+- gather now attaches the same partial Markdown contract as search/backlinks/related/mentions/co-links/path/unresolved; text output prints the partial field list.
