@@ -24,6 +24,7 @@ from typing import Any
 
 PROJECT = "wiki"
 PAGE = "A"
+LOG_PAGE = "Log"
 WORKER_PREFIX = "agent"
 MODES = ("uncoordinated", "claim_retry")
 WORKLOADS = ("hot-page", "file-back")
@@ -356,6 +357,10 @@ def run_mode(
     )
     status_elapsed = time.perf_counter() - status_started
     read, _completed = run_grasp(store, "read", PAGE)
+    log_line_texts: list[str] = []
+    if workload == "file-back":
+        log_read, _completed = run_grasp(store, "read", LOG_PAGE)
+        log_line_texts = [str(line["text"]) for line in (log_read or {}).get("lines", [])]
     elapsed = time.perf_counter() - started
     line_texts = [str(line["text"]) for line in (read or {}).get("lines", [])]
     attempted_markers = workers * iterations
@@ -366,6 +371,9 @@ def run_mode(
     ]
     survived_markers = [marker for marker in completed_markers if marker in line_texts]
     lost_markers = sorted(set(completed_markers) - set(survived_markers))
+    completed_log_markers = [f"{marker} [[{PAGE}]]" for marker in completed_markers] if workload == "file-back" else []
+    survived_log_markers = [marker for marker in completed_log_markers if marker in log_line_texts]
+    lost_log_markers = sorted(set(completed_log_markers) - set(survived_log_markers))
     claim_attempts = sum(int(summary.get("claim_attempts") or 0) for summary in worker_summaries)
     claim_waited_seconds = sum(float(summary.get("claim_waited_seconds") or 0) for summary in worker_summaries)
     claim_wait_samples_seconds = [
@@ -379,6 +387,7 @@ def run_mode(
         "mode": mode,
         "ok": (
             not lost_markers
+            and not lost_log_markers
             and status_completed.returncode == 0
             and export_completed.returncode == 0
             and int(claim_overlap["active_claim_overlap_count"]) == 0
@@ -391,6 +400,10 @@ def run_mode(
         "survived_markers": len(survived_markers),
         "lost_markers": len(lost_markers),
         "lost_marker_samples": lost_markers[:10],
+        "completed_log_markers": len(completed_log_markers),
+        "survived_log_markers": len(survived_log_markers),
+        "lost_log_markers": len(lost_log_markers),
+        "lost_log_marker_samples": lost_log_markers[:10],
         "worker_elapsed_seconds": round(worker_elapsed, 3),
         "export_elapsed_seconds": round(export_elapsed, 3),
         "write_status_elapsed_seconds": round(status_elapsed, 3),
@@ -454,6 +467,8 @@ def build_comparison(results: list[dict[str, Any]]) -> dict[str, Any] | None:
         ),
         "claim_retry_lost_marker_delta": int(claim_retry.get("lost_markers") or 0)
         - int(uncoordinated.get("lost_markers") or 0),
+        "claim_retry_lost_log_marker_delta": int(claim_retry.get("lost_log_markers") or 0)
+        - int(uncoordinated.get("lost_log_markers") or 0),
         "claim_retry_p95_claim_wait_seconds": claim_retry.get("p95_claim_wait_seconds"),
         "claim_retry_active_claim_overlap_count": claim_retry.get("active_claim_overlap_count"),
     }
@@ -494,6 +509,7 @@ def render_tables(output: dict[str, Any]) -> str:
                     result.get("attempted_markers"),
                     result.get("survived_markers"),
                     result.get("lost_markers"),
+                    result.get("lost_log_markers"),
                     "green" if result.get("strict_ok") else "fail",
                     result.get("active_claim_overlap_count"),
                     result.get("p95_claim_wait_seconds"),
@@ -511,6 +527,7 @@ def render_tables(output: dict[str, Any]) -> str:
                     comparison.get("claim_retry_completed_writes_per_second_ratio"),
                     comparison.get("claim_retry_surviving_markers_per_second_ratio"),
                     comparison.get("claim_retry_lost_marker_delta"),
+                    comparison.get("claim_retry_lost_log_marker_delta"),
                     comparison.get("claim_retry_active_claim_overlap_count"),
                     comparison.get("claim_retry_p95_claim_wait_seconds"),
                 ]
@@ -525,6 +542,7 @@ def render_tables(output: dict[str, Any]) -> str:
                 "attempted",
                 "survived",
                 "lost",
+                "log_lost",
                 "strict",
                 "overlap",
                 "p95_wait_s",
@@ -547,6 +565,7 @@ def render_tables(output: dict[str, Any]) -> str:
                         "completed_ratio",
                         "surviving_ratio",
                         "lost_delta",
+                        "log_lost_delta",
                         "overlap",
                         "p95_wait_s",
                     ],
@@ -658,6 +677,7 @@ def main(argv: list[str] | None = None) -> int:
     ]
     if any(
         result.get("lost_markers")
+        or result.get("lost_log_markers")
         or not result.get("strict_ok")
         or result.get("active_claim_overlap_count")
         or result.get("export_returncode")
