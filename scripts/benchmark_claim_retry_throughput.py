@@ -578,14 +578,20 @@ def evaluate_scenario_gate(
     }
 
 
-def summarize_gate(scenarios: list[dict[str, Any]], thresholds: dict[str, float | None]) -> dict[str, Any]:
+def summarize_gate(
+    scenarios: list[dict[str, Any]],
+    thresholds: dict[str, float | None],
+    *,
+    require_thresholds: bool = False,
+) -> dict[str, Any]:
     enabled = gate_enabled(thresholds)
     if not enabled:
         return {
             "enabled": False,
-            "ok": None,
+            "required": require_thresholds,
+            "ok": False if require_thresholds else None,
             "thresholds": thresholds,
-            "failures": [],
+            "failures": [{"type": "thresholds_not_set"}] if require_thresholds else [],
             "reason": "thresholds_not_set",
         }
     failures = [
@@ -599,6 +605,7 @@ def summarize_gate(scenarios: list[dict[str, Any]], thresholds: dict[str, float 
     ]
     return {
         "enabled": True,
+        "required": require_thresholds,
         "ok": not failures,
         "thresholds": thresholds,
         "failures": failures,
@@ -802,7 +809,7 @@ def render_tables(output: dict[str, Any]) -> str:
             ]
         )
     gate = output.get("gate") or {}
-    if gate.get("enabled"):
+    if gate.get("enabled") or gate.get("required"):
         for scenario in output["scenarios"]:
             scenario_gate = scenario.get("gate") or {}
             failures = scenario_gate.get("failures") or []
@@ -814,10 +821,12 @@ def render_tables(output: dict[str, Any]) -> str:
                     "; ".join(str(failure.get("type")) for failure in failures) if failures else "",
                 ]
             )
+        if gate.get("required") and not gate.get("enabled"):
+            gate_rows = [["all", "all", "fail", "thresholds_not_set"]]
         sections.extend(
             [
                 "",
-                "## Optional Cutover Threshold Gate",
+                "## Cutover Threshold Gate",
                 markdown_table(["workload", "think_s", "gate", "failures"], gate_rows),
             ]
         )
@@ -879,6 +888,14 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Optional owner cutover threshold. Fail if claim_retry p95 claim wait exceeds this many seconds.",
     )
+    parser.add_argument(
+        "--require-cutover-thresholds",
+        action="store_true",
+        help=(
+            "Exit 1 when owner cutover thresholds are omitted. Use this in cutover CI so "
+            "correctness-only runs cannot be mistaken for a stable mode2 gate."
+        ),
+    )
     args = parser.parse_args(argv)
     if args.workers < 1:
         parser.error("--workers must be >= 1")
@@ -935,7 +952,11 @@ def main(argv: list[str] | None = None) -> int:
                         ),
                     }
                 )
-    gate = summarize_gate(scenarios, thresholds)
+    gate = summarize_gate(
+        scenarios,
+        thresholds,
+        require_thresholds=args.require_cutover_thresholds,
+    )
     metric_summary = summarize_cutover_metrics(scenarios)
     output = {
         "benchmark": "claim_retry_throughput_gate",
@@ -973,7 +994,7 @@ def main(argv: list[str] | None = None) -> int:
         for result in claim_retry_results
     ):
         return 1
-    if gate.get("enabled") and not gate.get("ok"):
+    if (gate.get("enabled") or gate.get("required")) and not gate.get("ok"):
         return 1
     return 0
 

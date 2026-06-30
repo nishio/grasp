@@ -2000,3 +2000,6 @@ Added scripts/benchmark_claim_retry_throughput.py --profile cutover for the broa
 
 ## [2026-07-01 02:39] benchmark+file-back | cutover metric summary for owner thresholds
 scripts/benchmark_claim_retry_throughput.py now returns metric_summary / Cutover Metric Summary with compared scenario count, min surviving/completed throughput ratio, max p95 claim wait, max overlap, total lost, total log_lost, and all_strict_green. This helps owner choose --min-surviving-throughput-ratio and --max-p95-claim-wait-seconds without Codex choosing policy thresholds.
+
+## [2026-07-01 02:46] implementation+file-back | require cutover thresholds flag
+Added --require-cutover-thresholds to scripts/benchmark_claim_retry_throughput.py. With this flag, threshold-less benchmark runs exit 1 with thresholds_not_set even when claim_retry correctness is green, so cutover CI cannot mistake evidence-only measurement for a stable mode2 gate. The flag does not choose threshold values.
