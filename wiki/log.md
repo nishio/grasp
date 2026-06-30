@@ -1994,3 +1994,6 @@ milestone: split/merge/large-edit policy is no longer an implicit stable line id
 code: schema `14` adds `lines.external_line_id` and `line_tombstones.external_line_id`. Cosense JSON export and hosted `readPage` line `id` / `lineId` are stored there as source metadata while local `lines.line_id` remains grasp-managed.
 coverage: added regressions for CosenseStore export parsing, SQLite import/read output, hosted sync recent upsert, and full reconcile. `sync` line_id_policy now reports hosted_line_id_persisted=true. Public version is `1.14.0`.
 milestone: Cosense/hosted sync external line id is no longer a stable line identity residual. Remaining line identity work is only explicit split/merge surface if real dogfood proves it necessary; owner cutover throughput/wait thresholds remain a policy decision.
+
+## [2026-07-01 02:29] benchmark+file-back | claim retry cutover profile current evidence
+Added scripts/benchmark_claim_retry_throughput.py --profile cutover for the broader hot-page + file-back matrix (think 0/0.02/0.05, 25 iterations/worker, table output). Re-ran the matrix on schema 14 HEAD: claim_retry survived 50/50 in all six scenarios with page/log lost 0, strict green, active claim overlap 0; file-back p95 wait 0.516/0.556/0.504s and surviving throughput ratio 0.787/0.710/0.740. Owner thresholds remain unset.

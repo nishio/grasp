@@ -21,6 +21,63 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
         )
         self.assertEqual(benchmark.flatten_float_lists(None, default=[0.02]), [0.02])
 
+    def test_profile_defaults_keep_quick_small_and_cutover_broad(self):
+        quick = benchmark.resolve_run_config(
+            argparse.Namespace(
+                profile="quick",
+                iterations=None,
+                think_seconds=None,
+                workload=None,
+                format=None,
+            )
+        )
+        cutover = benchmark.resolve_run_config(
+            argparse.Namespace(
+                profile="cutover",
+                iterations=None,
+                think_seconds=None,
+                workload=None,
+                format=None,
+            )
+        )
+        overridden = benchmark.resolve_run_config(
+            argparse.Namespace(
+                profile="cutover",
+                iterations=3,
+                think_seconds=[[0.01]],
+                workload=["file-back"],
+                format="json",
+            )
+        )
+
+        self.assertEqual(
+            quick,
+            {
+                "iterations": 25,
+                "think_seconds_values": [0.02],
+                "workloads": ["hot-page"],
+                "format": "json",
+            },
+        )
+        self.assertEqual(
+            cutover,
+            {
+                "iterations": 25,
+                "think_seconds_values": [0.0, 0.02, 0.05],
+                "workloads": ["hot-page", "file-back"],
+                "format": "table",
+            },
+        )
+        self.assertEqual(
+            overridden,
+            {
+                "iterations": 3,
+                "think_seconds_values": [0.01],
+                "workloads": ["file-back"],
+                "format": "json",
+            },
+        )
+
     def test_comparison_reports_completed_and_surviving_throughput_ratios(self):
         comparison = benchmark.build_comparison(
             [
