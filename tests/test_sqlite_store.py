@@ -84,7 +84,7 @@ OTHER_FIXTURE = {
 
 
 class SQLiteStoreTests(unittest.TestCase):
-    def test_schema_v8_materializes_events_table(self):
+    def test_schema_materializes_events_and_line_tombstone_tables(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store_path = Path(tmpdir) / "store.sqlite"
             ensure_store_schema(store_path)
@@ -96,16 +96,24 @@ class SQLiteStoreTests(unittest.TestCase):
                 events_table = connection.execute(
                     "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'events'",
                 ).fetchone()
+                line_tombstones_table = connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'line_tombstones'",
+                ).fetchone()
                 columns = {
                     row[1]
                     for row in connection.execute("PRAGMA table_info(events)").fetchall()
                 }
+                line_tombstone_columns = {
+                    row[1]
+                    for row in connection.execute("PRAGMA table_info(line_tombstones)").fetchall()
+                }
             finally:
                 connection.close()
 
-        self.assertEqual(SCHEMA_VERSION, "12")
-        self.assertEqual(schema_version, "12")
+        self.assertEqual(SCHEMA_VERSION, "13")
+        self.assertEqual(schema_version, "13")
         self.assertIsNotNone(events_table)
+        self.assertIsNotNone(line_tombstones_table)
         self.assertEqual(
             columns,
             {
@@ -118,6 +126,21 @@ class SQLiteStoreTests(unittest.TestCase):
                 "actor",
                 "session_id",
                 "payload_json",
+            },
+        )
+        self.assertEqual(
+            line_tombstone_columns,
+            {
+                "project",
+                "line_id",
+                "page_id",
+                "line_index",
+                "text",
+                "created",
+                "updated",
+                "user_id",
+                "tombstoned_at",
+                "tombstone_reason",
             },
         )
 

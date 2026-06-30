@@ -1146,6 +1146,64 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertEqual(edge[1], 3)
             self.assertEqual(edge[2], old_heading_id)
 
+    def test_write_page_tombstones_removed_line_ids_and_revert_revives_them(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text("# A\nkeep\nremove\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                page = store.resolve_page("A")
+                old_lines, _aliases = store.page_lines(page)
+                removed_line_id = old_lines[2].line_id
+
+                update_result, _event = store.write_markdown_page_with_event(
+                    "A",
+                    lines=["# A", "keep"],
+                    actor="test",
+                    session_id="line-tombstone-test",
+                )
+                tombstone = store.connection.execute(
+                    """
+                    SELECT line_id, page_id, line_index, text, tombstone_reason
+                    FROM line_tombstones
+                    WHERE project = ? AND line_id = ?
+                    """,
+                    ("wiki", removed_line_id),
+                ).fetchone()
+                with self.assertRaisesRegex(ValueError, "line-id is tombstoned"):
+                    store.read_around_line(removed_line_id)
+
+                store.revert_markdown_page_update(
+                    page.id,
+                    update_result["previous_lines"],
+                    update_result["lines"],
+                )
+                tombstone_after_revert = store.connection.execute(
+                    """
+                    SELECT 1
+                    FROM line_tombstones
+                    WHERE project = ? AND line_id = ?
+                    """,
+                    ("wiki", removed_line_id),
+                ).fetchone()
+                restored_lines, _aliases = store.page_lines(page)
+            finally:
+                store.close()
+
+            self.assertIsNotNone(tombstone)
+            self.assertEqual(tombstone["line_id"], removed_line_id)
+            self.assertEqual(tombstone["page_id"], page.id)
+            self.assertEqual(tombstone["line_index"], 2)
+            self.assertEqual(tombstone["text"], "remove")
+            self.assertEqual(tombstone["tombstone_reason"], "page_line_replaced")
+            self.assertIsNone(tombstone_after_revert)
+            self.assertEqual([line.text for line in restored_lines], ["# A", "keep", "remove"])
+            self.assertEqual(restored_lines[2].line_id, removed_line_id)
+
     def test_catalog_only_import_marks_markdown_graph_incomplete(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
