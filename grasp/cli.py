@@ -818,6 +818,7 @@ def build_parser() -> argparse.ArgumentParser:
         examples=[
             "grasp path KJ法 弱い紐帯 --max-depth 4",
             "grasp path KJ法 民主主義 --max-depth 4 --limit 1",
+            "grasp path KJ法 民主主義 --max-depth 4 --hydrate-limit 3",
             "grasp --json path KJ法 弱い紐帯 --max-depth 4 --limit 3",
         ],
         notes=[
@@ -825,6 +826,7 @@ def build_parser() -> argparse.ArgumentParser:
             "The search is bounded by --max-depth; use small depths first because dense hubs can expand quickly.",
             "Edges include example source lines so the bridge can be checked against source context.",
             "If both endpoints resolve but no path is found, recovery_hints.path includes next-depth, related, backlinks, and link stats cues.",
+            "--hydrate-limit N scans incomplete Markdown source files for either endpoint and hydrates up to N matching source pages before searching paths.",
             "On incomplete Markdown graphs, markdown_query_contract marks paths as partial because unhydrated files may add edges.",
         ],
     )
@@ -832,6 +834,7 @@ def build_parser() -> argparse.ArgumentParser:
     path_parser.add_argument("target", help="End page title or unresolved target.")
     path_parser.add_argument("--max-depth", type=int, default=4, help="Maximum hop count to search.")
     path_parser.add_argument("--limit", type=int, default=3, help="Maximum shortest paths to return.")
+    path_parser.add_argument("--hydrate-limit", type=int, default=0, help="For incomplete Markdown graphs, scan source files for either endpoint and hydrate up to this many matching pages before path search.")
 
     link_stats_parser = add_command_parser(
         subparsers,
@@ -949,6 +952,7 @@ def build_parser() -> argparse.ArgumentParser:
         returns="query, mode, context, summary, mentions[], markdown_hydration|null, markdown_graph|null, markdown_query_contract|null",
         examples=[
             "grasp mentions KJ法 --limit 20",
+            "grasp mentions KJ法 --hydrate-limit 3 --limit 20",
             "grasp mentions KJ法 --unlinked --limit 20",
             "grasp mentions KJ法 --include-linked --limit 20",
             "grasp mentions KJ法 --context 2 --limit 10",
@@ -958,6 +962,7 @@ def build_parser() -> argparse.ArgumentParser:
             "mentions[] items include line fields plus occurrence counts, classification, page link status, query_link_targets[], and line_link_targets[].",
             "summary counts all literal line hits before limit/offset; returned lines are bounded by --limit.",
             "This is a link-gap and come-from audit primitive, not a bulk-link instruction.",
+            "--hydrate-limit N scans incomplete Markdown source files for the query and hydrates up to N matching source pages before finding mentions.",
             "On incomplete Markdown graphs, markdown_query_contract marks results as partial because unhydrated files have no stored lines yet.",
         ],
     )
@@ -967,6 +972,7 @@ def build_parser() -> argparse.ArgumentParser:
     mentions_parser.add_argument("--include-linked", action="store_true", help="Also return lines where every occurrence is inside a parsed internal link span.")
     mentions_parser.add_argument("--unlinked", action="store_true", help="Only return bare mention lines from pages with no query-containing link target.")
     mentions_parser.add_argument("--context", type=int, default=0, help="Number of lines before and after each returned mention to include.")
+    mentions_parser.add_argument("--hydrate-limit", type=int, default=0, help="For incomplete Markdown graphs, scan source files for the literal query and hydrate up to this many matching pages before finding mentions.")
 
     co_links_parser = add_command_parser(
         subparsers,
@@ -979,6 +985,7 @@ def build_parser() -> argparse.ArgumentParser:
         returns="query, rank_mode, include_self, co_links[], count_returned, markdown_hydration|null, markdown_graph|null, markdown_query_contract|null",
         examples=[
             "grasp co-links KJ法 --limit 20",
+            "grasp co-links KJ法 --hydrate-limit 3 --limit 20",
             "grasp co-links KJ法 --rank raw --limit 20",
             "grasp co-links KJ法 --sample-limit 2 --limit 10",
             "grasp --json co-links KJ法 --limit 5",
@@ -987,6 +994,7 @@ def build_parser() -> argparse.ArgumentParser:
             "co_links[] items include title, normalized_title, target_relation, link_count, line_count, source_page_count, total_source_views, latest_source_updated, and examples[].",
             "Default --rank slice demotes query-containing target titles so narrower handles surface first; --rank raw preserves count order.",
             "The exact query target is excluded by default; use --include-self to include it.",
+            "--hydrate-limit N scans incomplete Markdown source files for the query and hydrates up to N matching source pages before ranking co-links.",
             "On incomplete Markdown graphs, markdown_query_contract marks results as partial because unhydrated files have no stored lines or edges yet.",
         ],
     )
@@ -995,6 +1003,7 @@ def build_parser() -> argparse.ArgumentParser:
     co_links_parser.add_argument("--sample-limit", type=int, default=3, help="Maximum example lines per co-link target.")
     co_links_parser.add_argument("--include-self", action="store_true", help="Include links whose target exactly matches the query.")
     co_links_parser.add_argument("--rank", choices=["slice", "raw"], default="slice", help="Ranking mode: slice demotes query-containing target titles; raw keeps count order.")
+    co_links_parser.add_argument("--hydrate-limit", type=int, default=0, help="For incomplete Markdown graphs, scan source files for the literal query and hydrate up to this many matching pages before ranking co-links.")
 
     cross_project_refs_parser = add_command_parser(
         subparsers,
@@ -1617,15 +1626,18 @@ def build_parser() -> argparse.ArgumentParser:
         returns="unresolved_targets[], markdown_hydration|null, markdown_graph|null, markdown_query_contract|null",
         examples=[
             "grasp unresolved --limit 10",
+            "grasp unresolved --hydrate-limit 10 --limit 10",
             "grasp --json unresolved --limit 3",
         ],
         notes=[
             "unresolved_targets[] items: title, normalized_title, link_count, "
             "source_page_count, total_source_views, latest_source_updated, examples[].",
+            "--hydrate-limit N hydrates up to N incomplete Markdown source files in source-path order before ranking unresolved targets.",
             "On incomplete Markdown graphs, unresolved rankings cover only hydrated files; markdown_query_contract marks this partial scope.",
         ],
     )
     unresolved_parser.add_argument("--limit", type=int, default=50, help="Maximum unresolved targets to return.")
+    unresolved_parser.add_argument("--hydrate-limit", type=int, default=0, help="For incomplete Markdown graphs, hydrate up to this many source files before ranking unresolved targets.")
 
     return parser
 
@@ -7696,7 +7708,7 @@ def main(argv: list[str] | None = None) -> int:
         args.command in STORE_WRITE_COMMANDS
         or (args.command == "read" and getattr(args, "hydrate", False))
         or (
-            args.command in {"backlinks", "gather", "related", "search"}
+            args.command in {"backlinks", "co-links", "gather", "mentions", "path", "related", "search", "unresolved"}
             and getattr(args, "hydrate_limit", 0) > 0
         )
         or idle_hydration_requested
@@ -7817,6 +7829,62 @@ def hydrate_query_sources_for_args(
     if hydrate_limit <= 0:
         return None
     return store.hydrate_markdown_query_sources(query, limit=hydrate_limit)
+
+
+def hydrate_queries_sources_for_args(
+    store: SQLiteStore,
+    args: argparse.Namespace,
+    queries: list[str],
+) -> dict[str, Any] | None:
+    hydrate_limit = max(0, int(getattr(args, "hydrate_limit", 0) or 0))
+    if hydrate_limit <= 0:
+        return None
+
+    remaining = hydrate_limit
+    combined: dict[str, Any] = {
+        "queries": queries,
+        "requested_limit": hydrate_limit,
+        "scan": "markdown-source-query",
+        "hydrated": [],
+        "hydrated_count": 0,
+        "skipped": [],
+        "scanned_files": 0,
+        "matched_files": 0,
+        "markdown_graph_before": store.selected_project_markdown_graph_status(),
+        "markdown_graph": None,
+        "subqueries": [],
+    }
+    for query in queries:
+        if remaining <= 0:
+            break
+        hydration = store.hydrate_markdown_query_sources(query, limit=remaining)
+        combined["subqueries"].append(hydration)
+        combined["hydrated"].extend(hydration.get("hydrated") or [])
+        combined["skipped"].extend(hydration.get("skipped") or [])
+        combined["scanned_files"] += int(hydration.get("scanned_files") or 0)
+        combined["matched_files"] += int(hydration.get("matched_files") or 0)
+        remaining = max(0, hydrate_limit - sum(1 for item in combined["hydrated"] if item.get("hydrated")))
+        combined["markdown_graph"] = hydration.get("markdown_graph")
+        if hydration.get("reason") == "graph_complete":
+            break
+
+    combined["hydrated_count"] = sum(1 for item in combined["hydrated"] if item.get("hydrated"))
+    combined["skipped_count"] = len(combined["skipped"])
+    if combined["markdown_graph"] is None:
+        combined["markdown_graph"] = store.selected_project_markdown_graph_status()
+    if "reason" not in combined:
+        combined["reason"] = "limit_reached" if remaining <= 0 else "scan_exhausted"
+    return combined
+
+
+def hydrate_markdown_chunk_for_args(
+    store: SQLiteStore,
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
+    hydrate_limit = max(0, int(getattr(args, "hydrate_limit", 0) or 0))
+    if hydrate_limit <= 0:
+        return None
+    return store.hydrate_markdown_chunk(limit=hydrate_limit)
 
 
 def command_idle_hydration_requested(args: argparse.Namespace) -> bool:
@@ -7994,17 +8062,19 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         )
         return result
     if args.command == "path":
+        markdown_hydration = hydrate_queries_sources_for_args(store, args, [args.source, args.target])
         result = store.paths_between(
             args.source,
             args.target,
             max_depth=args.max_depth,
             limit=args.limit,
         )
-        attach_markdown_partial_context(
+        attach_markdown_query_context(
             result,
             store,
+            markdown_hydration,
             empty_result=not bool(result.get("paths")),
-            hydrate_hint="Run `hydrate-markdown --limit N` or use global `--idle-hydrate-seconds S` to grow the graph before retrying.",
+            hydrate_hint=f"Retry with `path {shlex.quote(args.source)} {shlex.quote(args.target)} --hydrate-limit N` or run normal `import --markdown`.",
         )
         return result
     if args.command == "link-stats":
@@ -8070,6 +8140,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         )
         return result
     if args.command == "mentions":
+        markdown_hydration = hydrate_query_sources_for_args(store, args, args.query)
         result = store.mentions(
             args.query,
             limit=args.limit,
@@ -8080,14 +8151,16 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         )
         result["offset"] = args.offset
         summary = result.get("summary") or {}
-        attach_markdown_partial_context(
+        attach_markdown_query_context(
             result,
             store,
+            markdown_hydration,
             empty_result=int(summary.get("returned_lines") or 0) == 0,
-            hydrate_hint=f"Run `mentions {shlex.quote(args.query)}` with global `--idle-hydrate-seconds S`, or run `hydrate-markdown --limit N` before retrying.",
+            hydrate_hint=f"Retry with `mentions {shlex.quote(args.query)} --hydrate-limit N` or run normal `import --markdown`.",
         )
         return result
     if args.command == "co-links":
+        markdown_hydration = hydrate_query_sources_for_args(store, args, args.query)
         co_links = store.co_links(
             args.query,
             limit=args.limit,
@@ -8102,11 +8175,12 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             "include_self": args.include_self,
             "rank_mode": args.rank,
         }
-        attach_markdown_partial_context(
+        attach_markdown_query_context(
             result,
             store,
+            markdown_hydration,
             empty_result=not bool(co_links),
-            hydrate_hint=f"Run `co-links {shlex.quote(args.query)}` with global `--idle-hydrate-seconds S`, or run `hydrate-markdown --limit N` before retrying.",
+            hydrate_hint=f"Retry with `co-links {shlex.quote(args.query)} --hydrate-limit N` or run normal `import --markdown`.",
         )
         return result
     if args.command == "cross-project-refs":
@@ -8192,13 +8266,15 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
     if args.command == "revert-plan":
         return run_revert_plan(store, args)
     if args.command == "unresolved":
+        markdown_hydration = hydrate_markdown_chunk_for_args(store, args)
         targets = store.unresolved_targets(limit=args.limit)
         result = {"unresolved_targets": targets}
-        attach_markdown_partial_context(
+        attach_markdown_query_context(
             result,
             store,
+            markdown_hydration,
             empty_result=not bool(targets),
-            hydrate_hint="Run `hydrate-markdown --limit N` or use global `--idle-hydrate-seconds S` to discover unresolved targets from more source files.",
+            hydrate_hint="Retry with `unresolved --hydrate-limit N` or run normal `import --markdown`.",
         )
         return result
     if args.command == "sync":
