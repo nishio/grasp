@@ -1956,3 +1956,8 @@ stable line identity と Markdown direct edit policy、git-diff-of-md に依存�
 - measurement: current HEAD reran scripts/benchmark_claim_retry_throughput.py --iterations 25 --think-seconds 0,0.02,0.05 --workload hot-page --workload file-back --format table. claim_retry had 50/50 survivors, lost 0, log_lost 0, strict green, and active claim overlap 0 in all six scenarios.
 - metrics: file-back workload p95 claim wait was 0.417/0.439/0.639s and surviving throughput ratio was 0.758/0.760/0.747 for think 0/0.02/0.05s. hot-page p95 wait was 0.363/0.376/0.397s and surviving ratio was 0.623/0.768/0.682.
 - coverage: tests/test_claim_retry_throughput_benchmark.py now fixes matrix parsing, completed/surviving throughput ratios, lossless strict non-overlap gate checks, optional owner thresholds, and file-back table columns without putting the heavy synthetic benchmark into the normal unit suite.
+
+## [2026-07-01 01:03] implementation+file-back | line tombstones for stable line identity
+- code: schema v13 adds line_tombstones and records live line_ids removed by Markdown-backed page replacement or append revert; reintroduced line_ids are removed from tombstones when revert restores them.
+- behavior: read --around-line, write-line, and line-id source path lookup now return a tombstone diagnostic for deleted line ids instead of plain not-found.
+- coverage: tests cover schema/table shape plus write-page deletion tombstone, tombstone diagnostic, and revert revival. Full unittest discover ran 340 tests OK; mode2 markdown readonly, file-back runbook, wiki lint, version ledger, and diff check were green.
