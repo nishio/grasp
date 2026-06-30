@@ -1679,7 +1679,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Requires @helpfeel/cosense-cli's `cosense` binary in PATH and a working login.",
             "Global --store selects the local store to update.",
             "sync is for full hosted mirrors. Partial acquisition namespaces should be refreshed by rerunning acquire with the same criteria.",
-            "Hosted lines[].id is not written into local lines.line_id; it remains external source metadata until a separate external_line_id column exists.",
+            "Hosted lines[].id is stored separately as lines.external_line_id and is never mixed into local lines.line_id.",
         ],
     )
     sync_parser.add_argument("project_url", help="Hosted Cosense/Scrapbox project URL, e.g. https://scrapbox.io/nishio/.")

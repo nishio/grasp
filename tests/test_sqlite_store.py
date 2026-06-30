@@ -33,7 +33,7 @@ FIXTURE = {
             "views": 100,
             "lines": [
                 {"text": "A", "created": 1, "updated": 1, "userId": "u"},
-                {"text": "links to [B] and [Missing]", "created": 1, "updated": 2, "userId": "u"},
+                {"id": "hosted-line-a1", "text": "links to [B] and [Missing]", "created": 1, "updated": 2, "userId": "u"},
             ],
         },
         {
@@ -103,6 +103,10 @@ class SQLiteStoreTests(unittest.TestCase):
                     row[1]
                     for row in connection.execute("PRAGMA table_info(events)").fetchall()
                 }
+                line_columns = {
+                    row[1]
+                    for row in connection.execute("PRAGMA table_info(lines)").fetchall()
+                }
                 line_tombstone_columns = {
                     row[1]
                     for row in connection.execute("PRAGMA table_info(line_tombstones)").fetchall()
@@ -110,8 +114,8 @@ class SQLiteStoreTests(unittest.TestCase):
             finally:
                 connection.close()
 
-        self.assertEqual(SCHEMA_VERSION, "13")
-        self.assertEqual(schema_version, "13")
+        self.assertEqual(SCHEMA_VERSION, "14")
+        self.assertEqual(schema_version, "14")
         self.assertIsNotNone(events_table)
         self.assertIsNotNone(line_tombstones_table)
         self.assertEqual(
@@ -129,6 +133,20 @@ class SQLiteStoreTests(unittest.TestCase):
             },
         )
         self.assertEqual(
+            line_columns,
+            {
+                "project",
+                "line_id",
+                "page_id",
+                "line_index",
+                "text",
+                "created",
+                "updated",
+                "user_id",
+                "external_line_id",
+            },
+        )
+        self.assertEqual(
             line_tombstone_columns,
             {
                 "project",
@@ -139,6 +157,7 @@ class SQLiteStoreTests(unittest.TestCase):
                 "created",
                 "updated",
                 "user_id",
+                "external_line_id",
                 "tombstoned_at",
                 "tombstone_reason",
             },
@@ -541,6 +560,9 @@ class SQLiteStoreTests(unittest.TestCase):
 
                 lines, truncated = store.page_lines(page, limit=1, offset=1)
                 self.assertEqual([line.text for line in lines], ["links to [B] and [Missing]"])
+                self.assertEqual(lines[0].line_id, "aaaaaaaaaaaaaaaaaaaaaaaa:1")
+                self.assertEqual(lines[0].external_line_id, "hosted-line-a1")
+                self.assertEqual(lines[0].to_dict()["external_line_id"], "hosted-line-a1")
                 self.assertFalse(truncated)
 
                 backlinks = store.backlinks("b")

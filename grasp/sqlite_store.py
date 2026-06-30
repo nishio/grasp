@@ -26,6 +26,7 @@ from .cosense import (
     Page,
     edge_semantic_annotation,
     edge_semantic_annotation_from_fields,
+    external_line_id_from_cosense_line,
     is_ascii_index_syntax,
     is_internal_cosense_link,
     normalize_title,
@@ -61,7 +62,7 @@ from .markdown import (
 )
 
 
-SCHEMA_VERSION = "13"
+SCHEMA_VERSION = "14"
 IMPORT_CACHE_MANIFEST_VERSION = 1
 CANONICAL_STORE_ENV = "GRASP_CANONICAL_STORE"
 SQLITE_BUSY_TIMEOUT_MS = 30_000
@@ -147,6 +148,7 @@ CREATE TABLE lines (
   created INTEGER,
   updated INTEGER,
   user_id TEXT,
+  external_line_id TEXT,
   PRIMARY KEY(project, line_id),
   FOREIGN KEY(project) REFERENCES projects(name) ON DELETE CASCADE,
   FOREIGN KEY(project, page_id) REFERENCES pages(project, id) ON DELETE CASCADE
@@ -161,6 +163,7 @@ CREATE TABLE line_tombstones (
   created INTEGER,
   updated INTEGER,
   user_id TEXT,
+  external_line_id TEXT,
   tombstoned_at INTEGER NOT NULL,
   tombstone_reason TEXT NOT NULL DEFAULT '',
   PRIMARY KEY(project, line_id),
@@ -548,8 +551,8 @@ def import_export_to_sqlite(
             _insert_page_handles(connection, _page_handle_rows_for_pages(project, source.pages))
             connection.executemany(
                 """
-                INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id, external_line_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     (
@@ -561,6 +564,7 @@ def import_export_to_sqlite(
                         line.created,
                         line.updated,
                         line.user_id,
+                        line.external_line_id,
                     )
                     for page in source.pages
                     for line in page.lines
@@ -1553,7 +1557,7 @@ def refresh_markdown_edge_line_targets(connection: sqlite3.Connection, project: 
         if page_key not in lines_by_page:
             line_rows = connection.execute(
                 """
-                SELECT line_id, line_index, text, created, updated, user_id
+                SELECT line_id, line_index, text, created, updated, user_id, external_line_id
                 FROM lines
                 WHERE project = ? AND page_id = ?
                 ORDER BY line_index
@@ -1568,6 +1572,7 @@ def refresh_markdown_edge_line_targets(connection: sqlite3.Connection, project: 
                     created=line[3],
                     updated=line[4],
                     user_id=line[5],
+                    external_line_id=line[6],
                 )
                 for line in line_rows
             )
@@ -1711,8 +1716,8 @@ def _insert_markdown_records(
     _insert_page_handles(connection, _page_handle_rows_for_markdown_records(project, records))
     connection.executemany(
         """
-        INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id, external_line_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             (
@@ -1724,6 +1729,7 @@ def _insert_markdown_records(
                 line.created,
                 line.updated,
                 line.user_id,
+                line.external_line_id,
             )
             for page in pages
             for line in page.lines
@@ -1785,7 +1791,7 @@ def _markdown_record_with_inherited_line_ids(
 def _stored_page_lines(connection: sqlite3.Connection, project: str, page_id: str) -> list[Line]:
     rows = connection.execute(
         """
-        SELECT line_id, line_index, text, created, updated, user_id
+        SELECT line_id, line_index, text, created, updated, user_id, external_line_id
         FROM lines
         WHERE project = ? AND page_id = ?
         ORDER BY line_index
@@ -1800,8 +1806,9 @@ def _stored_page_lines(connection: sqlite3.Connection, project: str, page_id: st
             created=created,
             updated=updated,
             user_id=user_id,
+            external_line_id=external_line_id,
         )
-        for line_id, line_index, text, created, updated, user_id in rows
+        for line_id, line_index, text, created, updated, user_id, external_line_id in rows
     ]
 
 
@@ -1812,7 +1819,7 @@ def _stored_page_line_payloads(
 ) -> list[dict[str, Any]]:
     rows = connection.execute(
         """
-        SELECT line_id, line_index, text, created, updated, user_id
+        SELECT line_id, line_index, text, created, updated, user_id, external_line_id
         FROM lines
         WHERE project = ? AND page_id = ?
         ORDER BY line_index
@@ -1827,6 +1834,7 @@ def _stored_page_line_payloads(
             "created": row["created"],
             "updated": row["updated"],
             "user_id": row["user_id"],
+            "external_line_id": row["external_line_id"],
         }
         for row in rows
     ]
@@ -1854,10 +1862,11 @@ def _record_line_tombstones_uncommitted(
           created,
           updated,
           user_id,
+          external_line_id,
           tombstoned_at,
           tombstone_reason
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(project, line_id) DO UPDATE SET
           page_id = excluded.page_id,
           line_index = excluded.line_index,
@@ -1865,6 +1874,7 @@ def _record_line_tombstones_uncommitted(
           created = excluded.created,
           updated = excluded.updated,
           user_id = excluded.user_id,
+          external_line_id = excluded.external_line_id,
           tombstoned_at = excluded.tombstoned_at,
           tombstone_reason = excluded.tombstone_reason
         """,
@@ -1878,6 +1888,7 @@ def _record_line_tombstones_uncommitted(
                 line.get("created"),
                 line.get("updated"),
                 line.get("user_id"),
+                line.get("external_line_id"),
                 tombstoned_at,
                 reason,
             )
@@ -4620,7 +4631,7 @@ class SQLiteStore:
             }
             for row in self.connection.execute(
                 """
-                SELECT line_id, line_index, text, created, updated, user_id
+                SELECT line_id, line_index, text, created, updated, user_id, external_line_id
                 FROM lines
                 WHERE project = ? AND page_id = ?
                 ORDER BY line_index
@@ -4653,10 +4664,10 @@ class SQLiteStore:
             )
             self.connection.execute(
                 """
-                INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id, external_line_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (project, line_id, page_id, line_index, text, now, now, "grasp"),
+                (project, line_id, page_id, line_index, text, now, now, "grasp", None),
             )
         edge_rows = _markdown_edge_rows_for_line_payloads(
             project=project,
@@ -4850,8 +4861,8 @@ class SQLiteStore:
         )
         self.connection.executemany(
             """
-            INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id, external_line_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 (
@@ -4863,6 +4874,7 @@ class SQLiteStore:
                     line["created"],
                     line["updated"],
                     line["user_id"],
+                    line.get("external_line_id"),
                 )
                 for line in line_payloads
             ),
@@ -5848,7 +5860,7 @@ class SQLiteStore:
         placeholders = ",".join("?" for _ in line_ids)
         tombstone_rows = self.connection.execute(
             f"""
-            SELECT line_id, line_index, text, created, updated, user_id
+            SELECT line_id, line_index, text, created, updated, user_id, external_line_id
             FROM lines
             WHERE project = ? AND page_id = ? AND line_id IN ({placeholders})
             ORDER BY line_index
@@ -5867,6 +5879,7 @@ class SQLiteStore:
                     "created": row["created"],
                     "updated": row["updated"],
                     "user_id": row["user_id"],
+                    "external_line_id": row["external_line_id"],
                 }
                 for row in tombstone_rows
             ],
@@ -5988,7 +6001,7 @@ class SQLiteStore:
     def _markdown_line_payloads(self, project: str, page_id: str) -> list[dict[str, Any]]:
         rows = self.connection.execute(
             """
-            SELECT line_id, line_index, text, created, updated, user_id
+            SELECT line_id, line_index, text, created, updated, user_id, external_line_id
             FROM lines
             WHERE project = ? AND page_id = ?
             ORDER BY line_index
@@ -6003,6 +6016,7 @@ class SQLiteStore:
                 "created": row["created"],
                 "updated": row["updated"],
                 "user_id": row["user_id"],
+                "external_line_id": row["external_line_id"],
             }
             for row in rows
         ]
@@ -6119,8 +6133,8 @@ class SQLiteStore:
         for line_payload in line_payloads:
             self.connection.execute(
                 """
-                INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id, external_line_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     project,
@@ -6131,6 +6145,7 @@ class SQLiteStore:
                     line_payload["created"],
                     line_payload["updated"],
                     line_payload["user_id"],
+                    line_payload.get("external_line_id"),
                 ),
             )
         if emits_edges:
@@ -9327,6 +9342,7 @@ class SQLiteStore:
                     parse_cosense_time(line.get("created")),
                     parse_cosense_time(line.get("updated")),
                     user.get("id"),
+                    external_line_id_from_cosense_line(line),
                 )
             )
             for target_title in parse_cosense_links(text):
@@ -9348,8 +9364,8 @@ class SQLiteStore:
 
         self.connection.executemany(
             """
-            INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id, external_line_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             line_rows,
         )
@@ -9384,6 +9400,7 @@ class SQLiteStore:
         )
 
     def _line_from_row(self, row: sqlite3.Row) -> Line:
+        keys = set(row.keys())
         return Line(
             line_id=row["line_id"],
             index=row["line_index"],
@@ -9391,6 +9408,7 @@ class SQLiteStore:
             created=row["created"],
             updated=row["updated"],
             user_id=row["user_id"],
+            external_line_id=row["external_line_id"] if "external_line_id" in keys else None,
         )
 
     def _edge_from_row(self, row: sqlite3.Row) -> Edge:

@@ -1989,3 +1989,8 @@ milestone: unique exact move is no longer a stable line identity residual. Remai
 code: `write-page` and `write-lines` now return and event-record a `line_identity` plan with inherited/minted/tombstoned line ids. Split / merge / large-edit rewrites are not inferred as same-line identity under `unique_exact_text_v1`; they mint new ids and tombstone removed old ids unless the caller uses explicit `write-line`.
 coverage: added regressions for Markdown re-import, write-page, and write-lines covering split/merge/large-edit non-inheritance, plus CLI JSON/event visibility. Public version is `1.13.4`; schema remains `13`.
 milestone: split/merge/large-edit policy is no longer an implicit stable line identity residual. Remaining line identity stable work is Cosense/hosted sync external line id; owner cutover throughput/wait thresholds remain a policy decision.
+
+## [2026-07-01 02:39] implementation+file-back | external hosted line id persistence
+code: schema `14` adds `lines.external_line_id` and `line_tombstones.external_line_id`. Cosense JSON export and hosted `readPage` line `id` / `lineId` are stored there as source metadata while local `lines.line_id` remains grasp-managed.
+coverage: added regressions for CosenseStore export parsing, SQLite import/read output, hosted sync recent upsert, and full reconcile. `sync` line_id_policy now reports hosted_line_id_persisted=true. Public version is `1.14.0`.
+milestone: Cosense/hosted sync external line id is no longer a stable line identity residual. Remaining line identity work is only explicit split/merge surface if real dogfood proves it necessary; owner cutover throughput/wait thresholds remain a policy decision.

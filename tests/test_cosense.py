@@ -83,7 +83,7 @@ class CosenseStoreTests(unittest.TestCase):
                     "lines": [
                         "A",
                         "plain string links to [B]",
-                        {"text": "dict line", "created": 1, "updated": 2, "userId": "u"},
+                        {"id": "hosted-line-a2", "text": "dict line", "created": 1, "updated": 2, "userId": "u"},
                     ],
                 },
                 {
@@ -107,6 +107,9 @@ class CosenseStoreTests(unittest.TestCase):
         self.assertIsNone(read["lines"][1]["created"])
         self.assertIsNone(read["lines"][1]["updated"])
         self.assertIsNone(read["lines"][1]["user_id"])
+        self.assertNotIn("external_line_id", read["lines"][1])
+        self.assertEqual(read["lines"][2]["line_id"], "aaaaaaaaaaaaaaaaaaaaaaaa:2")
+        self.assertEqual(read["lines"][2]["external_line_id"], "hosted-line-a2")
         self.assertEqual(store.backlinks("B")[0].line_text, "plain string links to [B]")
 
     def test_store_materializes_backlinks_unresolved_targets_and_related(self):

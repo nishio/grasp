@@ -241,9 +241,10 @@ class Line:
     created: int | None = None
     updated: int | None = None
     user_id: str | None = None
+    external_line_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "line_id": self.line_id,
             "index": self.index,
             "text": self.text,
@@ -251,6 +252,21 @@ class Line:
             "updated": self.updated,
             "user_id": self.user_id,
         }
+        if self.external_line_id is not None:
+            result["external_line_id"] = self.external_line_id
+        return result
+
+
+def external_line_id_from_cosense_line(line_data: dict | str) -> str | None:
+    if not isinstance(line_data, dict):
+        return None
+    external_id = line_data.get("id")
+    if external_id is None:
+        external_id = line_data.get("lineId")
+    if external_id is None:
+        return None
+    external_id = str(external_id)
+    return external_id or None
 
 
 @dataclass(frozen=True)
@@ -431,6 +447,7 @@ class CosenseStore:
                     created=line_data.get("created"),
                     updated=line_data.get("updated"),
                     user_id=line_data.get("userId"),
+                    external_line_id=external_line_id_from_cosense_line(line_data),
                 )
             lines = tuple(
                 _parse_line(line_data, line_index)
