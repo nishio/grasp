@@ -2446,6 +2446,9 @@ class SQLiteStore:
             hydrated_files=total_files,
         )
 
+    def selected_project_markdown_graph_status(self) -> dict[str, Any] | None:
+        return self.project_markdown_graph_status_by_name(self._selected_project_or_none())
+
     def project_title_aliases(self, project: str | None = None) -> dict[str, str]:
         project = self._require_project(project)
         raw = self.metadata().get(f"project.{project}.title_aliases")

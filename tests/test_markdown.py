@@ -960,6 +960,74 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertEqual(related["markdown_graph"]["hydrated_files"], 1)
             self.assertEqual([item["title"] for item in related["related"]], ["C"])
 
+    def test_cli_retrieval_reports_incomplete_markdown_graph_without_hydrate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nneedle links to [[B]] and [[C]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nbody without incoming links\n", encoding="utf-8")
+            (root / "C.md").write_text("# C\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki", catalog_only=True)
+
+            def run_json(*args: str) -> dict:
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            cases = [
+                (("search", "needle", "--limit", "10"), "hits"),
+                (("backlinks", "B", "--limit", "10"), "backlinks"),
+                (("related", "B", "--limit", "10"), "related"),
+            ]
+            for args, result_key in cases:
+                with self.subTest(command=args[0]):
+                    result = run_json(*args)
+                    self.assertEqual(result[result_key], [])
+                    self.assertIsNone(result["markdown_hydration"])
+                    self.assertEqual(result["markdown_graph"]["complete"], False)
+                    self.assertEqual(result["markdown_graph"]["hydrated_files"], 0)
+                    contract = result["markdown_query_contract"]
+                    self.assertEqual(contract["result_scope"], "partial_markdown_graph")
+                    self.assertEqual(contract["graph_complete"], False)
+                    self.assertEqual(contract["empty_result_may_be_incomplete"], True)
+                    self.assertIn("--hydrate-limit N", contract["hydrate_hint"])
+
+            text = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "search",
+                    "needle",
+                    "--limit",
+                    "10",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout
+            self.assertIn("graph: incomplete", text)
+            self.assertIn("empty results may be caused by unhydrated Markdown source files", text)
+
     def test_noop_reimport_uses_manifest_hash_fast_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
