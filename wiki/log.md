@@ -1838,3 +1838,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 16:29] implementation | partial Markdown graph contracts for graph verbs
 - Added markdown_query_contract / markdown_graph reporting to mentions, co-links, path, and unresolved on incomplete Markdown graphs so empty results, no-path answers, and rankings are not mistaken for complete-corpus facts.
 - Text formatters reuse the existing incomplete graph warning; regression covers catalog-only mentions/co-links/path/unresolved JSON and unresolved text warning.
+
+## [2026-06-30 16:40] implementation | idle Markdown hydration environment policy
+- Added GRASP_IDLE_HYDRATE_SECONDS and GRASP_IDLE_HYDRATE_LIMIT as persistent defaults for global idle hydration, so supported retrieval loops can grow incomplete Markdown graphs without repeating CLI flags.
+- CLI --idle-hydrate-seconds 0 explicitly disables the env policy for a command; regression covers env-enabled idle hydration and CLI override-to-zero.
