@@ -1668,6 +1668,111 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertIn("graph: incomplete", text)
             self.assertIn("partial fields: page, lines", text)
 
+    def test_cli_all_project_commands_report_mixed_incomplete_markdown_graph_contract(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            incomplete_root = base / "incomplete"
+            complete_root = base / "complete"
+            incomplete_root.mkdir()
+            complete_root.mkdir()
+            (incomplete_root / "A.md").write_text("# A\nlinks to [[B]]\n", encoding="utf-8")
+            (incomplete_root / "B.md").write_text("# B\n", encoding="utf-8")
+            (incomplete_root / "one").mkdir()
+            (incomplete_root / "two").mkdir()
+            (incomplete_root / "one" / "Dupe.md").write_text("# Dupe one\n", encoding="utf-8")
+            (incomplete_root / "two" / "Dupe.md").write_text("# Dupe two\n", encoding="utf-8")
+            (complete_root / "C.md").write_text("# C\nlinks to [[B]]\n", encoding="utf-8")
+            store_path = base / "store.sqlite"
+            import_markdown_folder_to_sqlite(
+                incomplete_root,
+                store_path,
+                project_name="incomplete",
+                catalog_only=True,
+            )
+            import_markdown_folder_to_sqlite(complete_root, store_path, project_name="complete")
+
+            def run_json(*args: str) -> dict:
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            cases = [
+                (
+                    ("link-stats", "B"),
+                    ["page", "link_count", "source_page_count", "link_multiplicity", "recovery_hints"],
+                    False,
+                ),
+                (
+                    ("peek", "A"),
+                    ["page", "lines", "lines_truncated", "lines_truncated_before", "lines_truncated_after"],
+                    True,
+                ),
+                (("suggest", "Dupe"), ["suggestions"], False),
+                (
+                    ("ambiguities", "--limit", "10"),
+                    ["projects", "ambiguities", "handle_count", "handles_returned"],
+                    False,
+                ),
+                (
+                    ("cross-project-spread", "B", "--limit", "10"),
+                    ["totals", "top_source_projects", "projects", "signal_project_count"],
+                    False,
+                ),
+                (
+                    ("cross-project-spreads", "--min-projects", "1", "--limit", "10"),
+                    ["spreads", "handle_count", "handles_returned"],
+                    False,
+                ),
+            ]
+            for args, partial_fields, empty_result in cases:
+                with self.subTest(command=args[0]):
+                    result = run_json(*args)
+                    graph = result["markdown_graph"]
+                    self.assertEqual(graph["complete"], False)
+                    self.assertEqual(graph["mode"], "all-projects")
+                    self.assertEqual(graph["markdown_project_count"], 2)
+                    self.assertEqual(graph["incomplete_project_count"], 1)
+                    self.assertEqual(graph["incomplete_projects"][0]["project"], "incomplete")
+                    contract = result["markdown_query_contract"]
+                    self.assertEqual(contract["result_scope"], "partial_markdown_graph")
+                    self.assertEqual(contract["result_completeness"], "partial")
+                    self.assertEqual(contract["result_may_be_incomplete"], True)
+                    self.assertEqual(contract["empty_result_may_be_incomplete"], empty_result)
+                    self.assertEqual(contract["partial_fields"], partial_fields)
+                    self.assertEqual(
+                        contract["incomplete_markdown_projects"][0]["project"],
+                        "incomplete",
+                    )
+
+            text = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "link-stats",
+                    "B",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout
+            self.assertIn("graph: incomplete (all-projects", text)
+            self.assertIn("incomplete projects: incomplete", text)
+
     def test_cli_graph_command_hydrate_limit_parses_matching_sources(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
