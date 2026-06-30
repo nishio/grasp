@@ -567,9 +567,10 @@ def build_parser() -> argparse.ArgumentParser:
         "backlinks",
         help="List line-level backlinks to a page, missing target, or ambiguous handle.",
         description="Return source lines whose parsed links point at title.",
-        returns="query, resolution_status, ambiguity|null, backlinks[], count_returned, count_total, offset",
+        returns="query, resolution_status, ambiguity|null, backlinks[], count_returned, count_total, offset, markdown_hydration|null, markdown_graph|null",
         examples=[
             "grasp backlinks 盲点 --limit 5",
+            "grasp backlinks 盲点 --hydrate-limit 3",
             "grasp backlinks 民主主義 --limit 20 --offset 20",
             "grasp --json backlinks 盲点 --limit 2",
         ],
@@ -577,12 +578,14 @@ def build_parser() -> argparse.ArgumentParser:
             "backlinks[] items: source_page_id, source_title, source_views, "
             "source_updated, line_id, line_index, line_text, target_title. "
             "For ambiguous handles, backlinks[] are incoming lines to the handle; "
-            "candidate_backlinks[] contains resolved backlinks to each candidate page."
+            "candidate_backlinks[] contains resolved backlinks to each candidate page.",
+            "--hydrate-limit N scans incomplete Markdown source files for the target and hydrates up to N matching source pages before listing backlinks.",
         ],
     )
     backlinks_parser.add_argument("title", help="Target page title or missing linked target.")
     backlinks_parser.add_argument("--limit", type=int, default=50, help="Maximum backlink lines to return.")
     backlinks_parser.add_argument("--offset", type=int, default=0, help="Number of ranked backlink lines to skip.")
+    backlinks_parser.add_argument("--hydrate-limit", type=int, default=0, help="For incomplete Markdown graphs, scan source files for the target and hydrate up to this many matching pages before listing backlinks.")
 
     ambiguities_parser = add_command_parser(
         subparsers,
@@ -677,9 +680,10 @@ def build_parser() -> argparse.ArgumentParser:
             "For a missing linked target, return source pages that link to it. "
             "For an ambiguous handle, return source pages that link to the handle and candidate page related sets."
         ),
-        returns="query, resolution_status, ambiguity|null, related[], candidate_related[], recovery_hints|null",
+        returns="query, resolution_status, ambiguity|null, related[], candidate_related[], recovery_hints|null, markdown_hydration|null, markdown_graph|null",
         examples=[
             "grasp related 盲点カード --limit 10",
+            "grasp related 盲点カード --hydrate-limit 3",
             "grasp related 民主主義 --limit 5",
             "grasp --json related 民主主義 --limit 5",
         ],
@@ -688,10 +692,12 @@ def build_parser() -> argparse.ArgumentParser:
             "Missing-target related[] items include relation=backlink-source and score=link count from that page.",
             "Ambiguous-handle related[] items are incoming source pages for the handle; candidate_related[] keeps each candidate page separate.",
             "If related[] is empty, recovery_hints gives title/search/unresolved suggestions.",
+            "--hydrate-limit N scans incomplete Markdown source files for the target and hydrates up to N matching source pages before calculating related pages.",
         ],
     )
     related_parser.add_argument("title", help="Existing page title or missing linked target.")
     related_parser.add_argument("--limit", type=int, default=50, help="Maximum related items to return.")
+    related_parser.add_argument("--hydrate-limit", type=int, default=0, help="For incomplete Markdown graphs, scan source files for the target and hydrate up to this many matching pages before calculating related pages.")
 
     path_parser = add_command_parser(
         subparsers,
@@ -796,9 +802,10 @@ def build_parser() -> argparse.ArgumentParser:
             "line or page to choose where the expression must hold. If literal search "
             "returns no hits, search retries with normalized fallback matching."
         ),
-        returns="query, mode, scope, context, hits[], count_returned, offset, recovery_hints|null",
+        returns="query, mode, scope, context, hits[], count_returned, offset, recovery_hints|null, markdown_hydration|null, markdown_graph|null",
         examples=[
             "grasp search 盲点 --limit 20",
+            "grasp search 盲点 --hydrate-limit 3",
             "grasp search \"weak ties\" --limit 20",
             "grasp search KJ法 --context 2 --limit 10",
             "grasp search \"KJ法 AND 表札\" --mode boolean --scope page --limit 20",
@@ -814,6 +821,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Boolean mode supports AND, OR, NOT, parentheses, quoted phrases, and implicit AND between adjacent terms.",
             "--scope line evaluates the expression per line. --scope page evaluates it across all lines in a page, then returns matching lines from those pages.",
             "match_mode is literal for direct substring hits and normalized for loose fallback matches. Normalized fallback applies to literal mode.",
+            "--hydrate-limit N is literal-mode only: it scans incomplete Markdown source files for the query and hydrates up to N matching pages before searching stored lines.",
         ],
     )
     search_parser.add_argument("query", help="Literal substring, or a boolean expression when --mode boolean is set.")
@@ -822,6 +830,7 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--limit", type=int, default=50, help="Maximum line hits to return.")
     search_parser.add_argument("--offset", type=int, default=0, help="Number of ranked line hits to skip.")
     search_parser.add_argument("--context", type=int, default=0, help="Number of lines before and after each hit to include.")
+    search_parser.add_argument("--hydrate-limit", type=int, default=0, help="For incomplete Markdown graphs, scan source files for the literal query and hydrate up to this many matching pages before searching.")
 
     mentions_parser = add_command_parser(
         subparsers,
@@ -7577,7 +7586,10 @@ def main(argv: list[str] | None = None) -> int:
     store_for_write = (
         args.command in STORE_WRITE_COMMANDS
         or (args.command == "read" and getattr(args, "hydrate", False))
-        or (args.command == "gather" and getattr(args, "hydrate_limit", 0) > 0)
+        or (
+            args.command in {"backlinks", "gather", "related", "search"}
+            and getattr(args, "hydrate_limit", 0) > 0
+        )
     )
     store: SQLiteStore | None = SQLiteStore(args.store, project=args.project, for_write=store_for_write)
     try:
@@ -7683,6 +7695,24 @@ def emit_cli_error_result(error: GraspCliError) -> None:
     sys.stderr.write("\n")
 
 
+def hydrate_query_sources_for_args(
+    store: SQLiteStore,
+    args: argparse.Namespace,
+    query: str,
+) -> dict[str, Any] | None:
+    hydrate_limit = max(0, int(getattr(args, "hydrate_limit", 0) or 0))
+    if hydrate_limit <= 0:
+        return None
+    return store.hydrate_markdown_query_sources(query, limit=hydrate_limit)
+
+
+def attach_markdown_hydration(result: dict[str, Any], markdown_hydration: dict[str, Any] | None) -> None:
+    if markdown_hydration is None:
+        return
+    result["markdown_hydration"] = markdown_hydration
+    result["markdown_graph"] = markdown_hydration.get("markdown_graph")
+
+
 def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
     if args.command == "stats":
         return store.stats()
@@ -7723,7 +7753,10 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             hydrate=args.hydrate,
         )
     if args.command == "backlinks":
-        return store.backlinks_report(args.title, limit=args.limit, offset=args.offset)
+        markdown_hydration = hydrate_query_sources_for_args(store, args, args.title)
+        result = store.backlinks_report(args.title, limit=args.limit, offset=args.offset)
+        attach_markdown_hydration(result, markdown_hydration)
+        return result
     if args.command == "ambiguities":
         return store.ambiguities(limit=args.limit, offset=args.offset, candidate_limit=args.candidate_limit)
     if args.command == "cross-project-spread":
@@ -7742,7 +7775,10 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             candidate_limit=args.candidate_limit,
         )
     if args.command == "related":
-        return store.related_report(args.title, limit=args.limit)
+        markdown_hydration = hydrate_query_sources_for_args(store, args, args.title)
+        result = store.related_report(args.title, limit=args.limit)
+        attach_markdown_hydration(result, markdown_hydration)
+        return result
     if args.command == "path":
         return store.paths_between(
             args.source,
@@ -7783,6 +7819,9 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             "suggestions": store.suggest(args.partial, limit=args.limit, mode=args.mode),
         }
     if args.command == "search":
+        if args.mode != "literal" and getattr(args, "hydrate_limit", 0) > 0:
+            raise ValueError("search --hydrate-limit is only supported with --mode literal")
+        markdown_hydration = hydrate_query_sources_for_args(store, args, args.query)
         hits = store.search(
             args.query,
             limit=args.limit,
@@ -7791,7 +7830,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             scope=args.scope,
             context=args.context,
         )
-        return {
+        result = {
             "query": args.query,
             "mode": args.mode,
             "scope": args.scope,
@@ -7801,6 +7840,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             "offset": args.offset,
             "recovery_hints": None if hits else store.recovery_hints(args.query, limit=3),
         }
+        attach_markdown_hydration(result, markdown_hydration)
+        return result
     if args.command == "mentions":
         result = store.mentions(
             args.query,
@@ -8344,6 +8385,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
             mode=result.get("mode", "literal"),
             scope=result.get("scope", "line"),
             context=result.get("context", 0),
+            markdown_hydration=result.get("markdown_hydration"),
+            markdown_graph=result.get("markdown_graph"),
             aliases=aliases,
         )
     if command == "mentions":
@@ -9182,12 +9225,27 @@ def format_read(result: dict[str, Any], aliases: LineIdAliases | None = None) ->
     return with_alias_legend("".join(parts), aliases)
 
 
+def format_markdown_hydration_summary(result: dict[str, Any]) -> str:
+    markdown_hydration = result.get("markdown_hydration")
+    if not markdown_hydration:
+        return ""
+    graph = markdown_hydration.get("markdown_graph") or result.get("markdown_graph") or {}
+    return (
+        f"hydrated: {markdown_hydration.get('hydrated_count', 0)} files "
+        f"(matched {markdown_hydration.get('matched_files', 0)}, "
+        f"scanned {markdown_hydration.get('scanned_files', 0)}, "
+        f"reason {markdown_hydration.get('reason')}, "
+        f"{graph.get('hydrated_files')}/{graph.get('total_files')} files)\n"
+    )
+
+
 def format_backlinks(result: dict[str, Any], aliases: LineIdAliases | None = None) -> str:
     aliases = aliases or LineIdAliases(enabled=False)
     query = result["query"]
     backlinks = result["backlinks"]
     offset = result.get("offset", 0)
     parts = [f"# Backlinks: {query}\n", f"offset: {offset}\n"]
+    parts.append(format_markdown_hydration_summary(result))
     if result.get("resolution_status") == "ambiguous":
         ambiguity = result.get("ambiguity") or {}
         parts.append(f"resolution: ambiguous ({ambiguity.get('candidate_count', 0)} candidates)\n")
@@ -9391,6 +9449,8 @@ def format_related_result(result: dict[str, Any], aliases: LineIdAliases | None 
         result["related"],
         result.get("recovery_hints"),
         aliases=aliases,
+        markdown_hydration=result.get("markdown_hydration"),
+        markdown_graph=result.get("markdown_graph"),
     )
 
 
@@ -9401,8 +9461,9 @@ def format_ambiguous_related(result: dict[str, Any], aliases: LineIdAliases | No
     parts = [
         f"# Related source pages: {query}\n",
         f"resolution: ambiguous ({ambiguity.get('candidate_count', 0)} candidates)\n",
-        "\n## Source pages linking to ambiguous handle\n",
     ]
+    parts.append(format_markdown_hydration_summary(result))
+    parts.append("\n## Source pages linking to ambiguous handle\n")
     related = result.get("related") or []
     if not related:
         parts.append("(none)\n")
@@ -9427,10 +9488,16 @@ def format_related(
     related: list[dict[str, Any]],
     recovery_hints: dict[str, Any] | None = None,
     aliases: LineIdAliases | None = None,
+    markdown_hydration: dict[str, Any] | None = None,
+    markdown_graph: dict[str, Any] | None = None,
 ) -> str:
     aliases = aliases or LineIdAliases(enabled=False)
     heading = "Related source pages" if is_source_page_related(related) else "Related 2-hop"
     parts = [f"# {heading}: {query}\n"]
+    parts.append(format_markdown_hydration_summary({
+        "markdown_hydration": markdown_hydration,
+        "markdown_graph": markdown_graph,
+    }))
     if not related:
         parts.append("(none)\n")
     else:
@@ -9698,6 +9765,8 @@ def format_search(
     mode: str = "literal",
     scope: str = "line",
     context: int = 0,
+    markdown_hydration: dict[str, Any] | None = None,
+    markdown_graph: dict[str, Any] | None = None,
     aliases: LineIdAliases | None = None,
 ) -> str:
     aliases = aliases or LineIdAliases(enabled=False)
@@ -9705,6 +9774,10 @@ def format_search(
     if context:
         parts.append(f"context: {context}\n")
     parts.append(f"offset: {offset}\n")
+    parts.append(format_markdown_hydration_summary({
+        "markdown_hydration": markdown_hydration,
+        "markdown_graph": markdown_graph,
+    }))
     if not hits:
         parts.append("(none)\n")
     else:
@@ -9986,16 +10059,7 @@ def format_gather(result: dict[str, Any], aliases: LineIdAliases | None = None) 
         f"mentions {limits.get('mentions')}, co_links {limits.get('co_links')}, "
         f"backlinks {limits.get('backlinks')}, hydrate {limits.get('hydrate', 0)}\n"
     )
-    markdown_hydration = result.get("markdown_hydration")
-    if markdown_hydration:
-        graph = markdown_hydration.get("markdown_graph") or result.get("markdown_graph") or {}
-        parts.append(
-            f"hydrated: {markdown_hydration.get('hydrated_count', 0)} files "
-            f"(matched {markdown_hydration.get('matched_files', 0)}, "
-            f"scanned {markdown_hydration.get('scanned_files', 0)}, "
-            f"reason {markdown_hydration.get('reason')}, "
-            f"{graph.get('hydrated_files')}/{graph.get('total_files')} files)\n"
-        )
+    parts.append(format_markdown_hydration_summary(result))
     parts.append(f"co_link_rank_mode: {result.get('co_link_rank_mode', 'slice')}\n")
     returned_counts = result.get("returned_counts") or {}
     total_counts = result.get("total_counts") or {}
