@@ -1854,3 +1854,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 17:14] implementation | read partial field contract for incomplete Markdown graphs
 - Added markdown_query_contract.partial_fields/result_field_states to read/read --around-line on incomplete Markdown graphs, marking page lines and graph-neighborhood fields as partial.
 - Text read output now prints partial fields alongside the incomplete graph warning; regression covers catalog-only read and read --hydrate.
+
+## [2026-06-30 17:25] implementation | hot-page claim retry regression for cutover gate
+- Added a subprocess hot-page regression where two workers claim/read/write/release the same page with claim retry and deferred projection; all markers must survive.
+- The regression exports the projection and requires write-status --no-journal --strict to stay green, fixing the first lost-update cutover gate in tests.
