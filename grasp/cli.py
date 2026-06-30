@@ -962,15 +962,17 @@ def build_parser() -> argparse.ArgumentParser:
             "and backlinks into one small bundle. This is an initial thin gather surface, not "
             "exact token packing."
         ),
-        returns="query, budget, limits, co_link_rank_mode, returned_counts, total_counts, omitted_counts, banner|null, link_stats, mention_summary, mentions[], co_links[], backlinks[], recipes[]",
+        returns="query, budget, limits, markdown_graph|null, markdown_hydration|null, co_link_rank_mode, returned_counts, total_counts, omitted_counts, banner|null, link_stats, mention_summary, mentions[], co_links[], backlinks[], recipes[]",
         examples=[
             "grasp gather KJ法",
             "grasp gather KJ法 --budget 8000",
+            "grasp gather KJ法 --hydrate-limit 3",
             "grasp gather KJ法 --mentions-limit 5 --co-links-limit 10 --backlinks-limit 5",
             "grasp --json gather KJ法 --budget 4000",
         ],
         notes=[
             "--budget selects bounded row limits approximately; JSON returns budget_note to make this explicit.",
+            "--hydrate-limit N scans incomplete Markdown source files for the query and hydrates up to N matching pages before gathering.",
             "For huge hubs, banner explains that bulk-linking bare mentions is the wrong direction.",
         ],
     )
@@ -979,6 +981,7 @@ def build_parser() -> argparse.ArgumentParser:
     gather_parser.add_argument("--mentions-limit", type=int, default=None, help="Maximum bare mention lines to include; defaults from --budget.")
     gather_parser.add_argument("--co-links-limit", type=int, default=None, help="Maximum co-link targets to include; defaults from --budget.")
     gather_parser.add_argument("--backlinks-limit", type=int, default=None, help="Maximum backlink lines to include; defaults from --budget.")
+    gather_parser.add_argument("--hydrate-limit", type=int, default=0, help="For incomplete Markdown graphs, scan source files for the query and hydrate up to this many matching pages before gathering.")
 
     export_ai_parser = add_command_parser(
         subparsers,
@@ -7571,7 +7574,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         parser.error(store_missing_error(args.store))
 
-    store_for_write = args.command in STORE_WRITE_COMMANDS or (args.command == "read" and getattr(args, "hydrate", False))
+    store_for_write = (
+        args.command in STORE_WRITE_COMMANDS
+        or (args.command == "read" and getattr(args, "hydrate", False))
+        or (args.command == "gather" and getattr(args, "hydrate_limit", 0) > 0)
+    )
     store: SQLiteStore | None = SQLiteStore(args.store, project=args.project, for_write=store_for_write)
     try:
         if args.command != "stats" and not store.schema_ok():
@@ -7859,6 +7866,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             backlink_limit=args.backlinks_limit,
             mention_limit=args.mentions_limit,
             co_link_limit=args.co_links_limit,
+            hydrate_limit=args.hydrate_limit,
         )
     if args.command in {"export-ai", "export-for-ai"}:
         result = store.export_ai(
@@ -9975,8 +9983,19 @@ def format_gather(result: dict[str, Any], aliases: LineIdAliases | None = None) 
     limits = result.get("limits") or {}
     parts.append(
         "limits: "
-        f"mentions {limits.get('mentions')}, co_links {limits.get('co_links')}, backlinks {limits.get('backlinks')}\n"
+        f"mentions {limits.get('mentions')}, co_links {limits.get('co_links')}, "
+        f"backlinks {limits.get('backlinks')}, hydrate {limits.get('hydrate', 0)}\n"
     )
+    markdown_hydration = result.get("markdown_hydration")
+    if markdown_hydration:
+        graph = markdown_hydration.get("markdown_graph") or result.get("markdown_graph") or {}
+        parts.append(
+            f"hydrated: {markdown_hydration.get('hydrated_count', 0)} files "
+            f"(matched {markdown_hydration.get('matched_files', 0)}, "
+            f"scanned {markdown_hydration.get('scanned_files', 0)}, "
+            f"reason {markdown_hydration.get('reason')}, "
+            f"{graph.get('hydrated_files')}/{graph.get('total_files')} files)\n"
+        )
     parts.append(f"co_link_rank_mode: {result.get('co_link_rank_mode', 'slice')}\n")
     returned_counts = result.get("returned_counts") or {}
     total_counts = result.get("total_counts") or {}
