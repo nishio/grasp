@@ -9367,6 +9367,451 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(claim_b["claim"]["source_path"], "B.md")
         self.assertNotEqual(claim_b["claim"]["page_id"], a_page_id)
 
+    def test_concurrent_claim_page_rechecks_active_claims_inside_write_lock(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "authority.sqlite"
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+
+            lock_holder = sqlite3.connect(store_path, timeout=0.1)
+            lock_holder.execute("BEGIN IMMEDIATE")
+            try:
+                processes = [
+                    subprocess.Popen(
+                        [
+                            sys.executable,
+                            "-m",
+                            "grasp",
+                            "--json",
+                            "--store",
+                            str(store_path),
+                            "--project",
+                            "wiki",
+                            "--actor",
+                            "agent-a",
+                            "--session-id",
+                            "session-a",
+                            "claim-page",
+                            "A",
+                            "--ttl-seconds",
+                            "600",
+                        ],
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    ),
+                    subprocess.Popen(
+                        [
+                            sys.executable,
+                            "-m",
+                            "grasp",
+                            "--json",
+                            "--store",
+                            str(store_path),
+                            "--project",
+                            "wiki",
+                            "--actor",
+                            "agent-b",
+                            "--session-id",
+                            "session-b",
+                            "claim-page",
+                            "A",
+                            "--ttl-seconds",
+                            "600",
+                        ],
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    ),
+                ]
+                time.sleep(0.2)
+                both_waiting = all(process.poll() is None for process in processes)
+                lock_holder.rollback()
+                self.assertTrue(both_waiting)
+            finally:
+                lock_holder.close()
+
+            completed = []
+            for process in processes:
+                stdout, stderr = process.communicate(timeout=30)
+                completed.append((process.returncode, stdout, stderr))
+            successes = [(stdout, stderr) for returncode, stdout, stderr in completed if returncode == 0]
+            failures = [(returncode, stderr) for returncode, stdout, stderr in completed if returncode != 0]
+            claims_a = run_json("claims", "A", "--include-expired")
+            with sqlite3.connect(store_path) as connection:
+                claim_event_count = connection.execute(
+                    "SELECT COUNT(*) FROM events WHERE event_type = 'page_claim'"
+                ).fetchone()[0]
+
+        self.assertEqual(len(successes), 1, completed)
+        self.assertEqual(len(failures), 1, completed)
+        self.assertEqual(failures[0][0], 2)
+        self.assertIn("page already has an active claim", failures[0][1])
+        self.assertEqual(claim_event_count, 1)
+        self.assertEqual(claims_a["active_count"], 1)
+        self.assertEqual(claims_a["active_claims"][0]["title"], "A")
+
+    def test_claim_page_waits_for_conflicting_claim_release(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "authority.sqlite"
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+            claim_a = run_json(
+                "claim-page",
+                "A",
+                "--ttl-seconds",
+                "600",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            waiter = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-b",
+                    "--session-id",
+                    "session-b",
+                    "claim-page",
+                    "A",
+                    "--ttl-seconds",
+                    "600",
+                    "--wait-seconds",
+                    "5",
+                    "--retry-interval-seconds",
+                    "0.05",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            time.sleep(0.2)
+            still_waiting = waiter.poll() is None
+            release_a = run_json(
+                "release-claim",
+                claim_a["claim"]["claim_event_id"],
+                actor="agent-a",
+                session_id="session-a",
+            )
+            waiter_stdout, waiter_stderr = waiter.communicate(timeout=30)
+            waiter_result = json.loads(waiter_stdout)
+            claims_a = run_json("claims", "A", "--include-expired")
+
+        self.assertTrue(still_waiting)
+        self.assertEqual(release_a["released_claim"]["claim_event_id"], claim_a["claim"]["claim_event_id"])
+        self.assertEqual(waiter.returncode, 0, waiter_stderr)
+        self.assertEqual(waiter_result["claim"]["session_id"], "session-b")
+        self.assertGreater(waiter_result["claim_attempts"], 1)
+        self.assertGreater(waiter_result["claim_waited_seconds"], 0)
+        self.assertEqual(claims_a["active_count"], 1)
+        self.assertEqual(claims_a["active_claims"][0]["claim_event_id"], waiter_result["claim"]["claim_event_id"])
+        self.assertEqual(claims_a["released_claims"][0]["claim_event_id"], claim_a["claim"]["claim_event_id"])
+
+    def test_claim_page_refuses_duplicate_active_claim_from_same_session(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "authority.sqlite"
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+            first_claim = run_json(
+                "claim-page",
+                "A",
+                "--ttl-seconds",
+                "600",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            duplicate_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-a",
+                    "--session-id",
+                    "session-a",
+                    "claim-page",
+                    "A",
+                    "--ttl-seconds",
+                    "600",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            claims_a = run_json("claims", "A")
+
+        self.assertEqual(duplicate_completed.returncode, 2)
+        self.assertIn("page already has an active claim", duplicate_completed.stderr)
+        self.assertIn("session-a", duplicate_completed.stderr)
+        self.assertEqual(claims_a["active_count"], 1)
+        self.assertEqual(claims_a["active_claims"][0]["claim_event_id"], first_claim["claim"]["claim_event_id"])
+
+    def test_write_page_refuses_other_session_active_claim(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "authority.sqlite"
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+            claim_a = run_json(
+                "claim-page",
+                "A",
+                "--ttl-seconds",
+                "600",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            blocked_write = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-b",
+                    "--session-id",
+                    "session-b",
+                    "write-page",
+                    "A",
+                    "--line",
+                    "# A",
+                    "--line",
+                    "- agent B ignored claim",
+                    "--no-journal",
+                    "--defer-projection",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            read_after_blocked = run_json("read", "A")
+            owner_write = run_json(
+                "write-page",
+                "A",
+                "--line",
+                "# A",
+                "--line",
+                "- agent A owns claim",
+                "--no-journal",
+                "--defer-projection",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            read_after_owner = run_json("read", "A")
+
+        self.assertEqual(blocked_write.returncode, 2)
+        self.assertIn("page has an active claim by another session", blocked_write.stderr)
+        self.assertIn(claim_a["claim"]["claim_event_id"], blocked_write.stderr)
+        self.assertEqual([line["text"] for line in read_after_blocked["lines"]], ["# A", "- old A"])
+        self.assertTrue(owner_write["projection_deferred"])
+        self.assertEqual([line["text"] for line in read_after_owner["lines"]], ["# A", "- agent A owns claim"])
+
+    def test_concurrent_release_claim_rechecks_claim_state_inside_write_lock(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "authority.sqlite"
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+            claim_a = run_json(
+                "claim-page",
+                "A",
+                "--ttl-seconds",
+                "600",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            claim_event_id = claim_a["claim"]["claim_event_id"]
+
+            lock_holder = sqlite3.connect(store_path, timeout=0.1)
+            lock_holder.execute("BEGIN IMMEDIATE")
+            try:
+                release_command = [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-a",
+                    "--session-id",
+                    "session-a",
+                    "release-claim",
+                    claim_event_id,
+                ]
+                processes = [
+                    subprocess.Popen(release_command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE),
+                    subprocess.Popen(release_command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE),
+                ]
+                time.sleep(0.2)
+                both_waiting = all(process.poll() is None for process in processes)
+                lock_holder.rollback()
+                self.assertTrue(both_waiting)
+            finally:
+                lock_holder.close()
+
+            completed = []
+            for process in processes:
+                stdout, stderr = process.communicate(timeout=30)
+                completed.append((process.returncode, stdout, stderr))
+            successes = [(stdout, stderr) for returncode, stdout, stderr in completed if returncode == 0]
+            failures = [(returncode, stderr) for returncode, stdout, stderr in completed if returncode != 0]
+            claims_a = run_json("claims", "A", "--include-expired")
+            with sqlite3.connect(store_path) as connection:
+                release_event_count = connection.execute(
+                    "SELECT COUNT(*) FROM events WHERE event_type = 'page_claim_release'"
+                ).fetchone()[0]
+
+        self.assertEqual(len(successes), 1, completed)
+        self.assertEqual(len(failures), 1, completed)
+        self.assertEqual(failures[0][0], 2)
+        self.assertIn("claim is not active", failures[0][1])
+        self.assertEqual(release_event_count, 1)
+        self.assertEqual(claims_a["active_count"], 0)
+        self.assertEqual(claims_a["released_claims"][0]["claim_event_id"], claim_event_id)
+
     def test_activity_folds_stale_claim_state_out_of_active_sessions(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
@@ -10723,6 +11168,99 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(status_result["journal_log_changed_files"], [])
         self.assertFalse(status_result["journal_log_projection"]["ok"])
         self.assertEqual(status_result["journal_log_projection"]["changed_files"], ["A.md"])
+
+    def test_write_status_strict_detects_cross_session_page_update_overwrite(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+            first_write = run_json(
+                "write-page",
+                "A",
+                "--line",
+                "# A",
+                "--line",
+                "- old A",
+                "--line",
+                "- agent A marker",
+                "--output",
+                str(root),
+                "--no-journal",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            second_write = run_json(
+                "write-page",
+                "A",
+                "--line",
+                "# A",
+                "--line",
+                "- old A",
+                "--line",
+                "- agent B marker",
+                "--output",
+                str(root),
+                "--no-journal",
+                actor="agent-b",
+                session_id="session-b",
+            )
+            status_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                    "--strict",
+                ],
+                text=True,
+                capture_output=True,
+            )
+
+        status_result = json.loads(status_completed.stdout)
+        overwrite = status_result["concurrent_page_update_overwrites"][0]
+        self.assertEqual(status_completed.returncode, 1)
+        self.assertTrue(status_result["projection"]["ok"])
+        self.assertFalse(status_result["strict_ok"])
+        self.assertEqual([failure["type"] for failure in status_result["strict_failures"]], ["concurrent_page_update_overwrite"])
+        self.assertEqual(overwrite["previous_event_id"], first_write["event_id"])
+        self.assertEqual(overwrite["current_event_id"], second_write["event_id"])
+        self.assertEqual(overwrite["previous_session_id"], "session-a")
+        self.assertEqual(overwrite["current_session_id"], "session-b")
+        self.assertEqual(overwrite["removed_line_samples"], ["- agent A marker"])
 
     def test_write_status_strict_fails_when_journal_is_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -14,6 +14,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from textwrap import dedent
 from typing import Any
 
@@ -62,6 +63,7 @@ STORE_WRITE_COMMANDS = {
 REVERSIBLE_EVENT_TYPES = {"page_create", "section_append", "log_append", "page_update", "page_rename"}
 CLAIM_EVENT_TYPES = {"page_claim", "page_claim_release"}
 ACTIVITY_EVENT_TYPES = {"page_create", "section_append", "log_append", "page_update", "page_rename", *CLAIM_EVENT_TYPES}
+CONCURRENT_PAGE_UPDATE_OVERWRITE_WINDOW_SECONDS = 300
 
 
 class GraspCliError(ValueError):
@@ -389,17 +391,21 @@ def build_parser() -> argparse.ArgumentParser:
             "grasp --project grasp-wiki --actor codex --session-id work-1 claim-page grasp-backlog",
             "grasp --project grasp-wiki --json claim-page concepts/sqlite-write-concurrency.md --target path --ttl-seconds 900",
             "grasp --project grasp-wiki --json claim-page <page-id> --target page-id",
+            "grasp --project grasp-wiki --session-id work-1 claim-page A --wait-seconds 30",
         ],
         notes=[
             "claim-page requires --session-id or GRASP_SESSION_ID so the claim can be attributed and released.",
             "Use --target page-id or --target path when activity/read/claims returned a concrete page identity.",
-            "A different active session claim for the same page is refused; use claims <page> to inspect the owner.",
+            "Any active claim for the same page is refused; use claims <page> to inspect the owner.",
+            "--wait-seconds retries conflicts until the claim becomes available or the timeout expires.",
             "Claims are soft leases with TTL. They coordinate agents; they are not mandatory write locks.",
         ],
     )
     claim_page_parser.add_argument("title", help="Target page title/handle/page-id/path to claim.")
     claim_page_parser.add_argument("--target", dest="target_kind", choices=["handle", "page-id", "path"], default="handle", help="How to interpret the claim target. Default: handle.")
     claim_page_parser.add_argument("--ttl-seconds", type=int, default=1800, help="How long the soft claim remains active.")
+    claim_page_parser.add_argument("--wait-seconds", type=float, default=0.0, help="Wait and retry for this many seconds when another session has an active claim. Default: fail immediately.")
+    claim_page_parser.add_argument("--retry-interval-seconds", type=float, default=0.25, help="Delay between claim retry attempts when --wait-seconds is used.")
     claim_page_parser.add_argument("--message", default="", help="Optional claim message stored in the event payload.")
 
     claims_parser = add_command_parser(
@@ -1117,6 +1123,7 @@ def build_parser() -> argparse.ArgumentParser:
             "--path is required with --create and deliberately ignored for existing-page updates.",
             "Rename and source-path changes for existing pages are handled by rename-page.",
             "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
+            "Existing-page writes are refused while another session has an active claim for the target page.",
             "--from-file may intentionally use the target projection file itself as the replacement input.",
             "Dirty projection paths outside the target page are refused before export.",
             "--defer-projection writes only SQLite state/events and optional journal; run export-markdown later to update Markdown.",
@@ -2745,36 +2752,69 @@ def run_activity(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]
 def run_claim_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     if args.ttl_seconds < 1:
         raise ValueError("--ttl-seconds must be >= 1")
+    if args.wait_seconds < 0:
+        raise ValueError("--wait-seconds must be >= 0")
+    if args.retry_interval_seconds <= 0:
+        raise ValueError("--retry-interval-seconds must be > 0")
     metadata = event_metadata(args)
     session_id = metadata["session_id"]
     if not session_id:
         raise ValueError("claim-page requires --session-id or GRASP_SESSION_ID")
-    target = page_claim_target(store, args.title, target_kind=args.target_kind)
-    now = datetime.now(timezone.utc).replace(microsecond=0)
-    active_claims = current_page_claims(store, now=now, query=args.title, include_inactive=False)
-    conflicting_claims = [
-        claim
-        for claim in active_claims
-        if claim["page_id"] == target["page_id"] and claim["session_id"] != session_id
-    ]
-    if conflicting_claims:
-        owner = conflicting_claims[0]
-        raise ValueError(
-            "page already has an active claim: "
-            f"{target['title']} session_id={owner['session_id']!r} actor={owner['actor']!r} "
-            f"claim_event_id={owner['claim_event_id']}"
-        )
-    expires_at = (now.timestamp() + int(args.ttl_seconds))
-    expires_datetime = datetime.fromtimestamp(expires_at, timezone.utc).replace(microsecond=0)
-    payload = {
-        **target,
-        "ttl_seconds": int(args.ttl_seconds),
-        "expires_at": expires_datetime.isoformat(),
-        "message": str(args.message or ""),
-    }
-    event = make_journal_event("page_claim", project=target["project"], payload=payload)
+    started = time.monotonic()
+    deadline = started + float(args.wait_seconds)
+    attempts = 0
+    last_conflicts: list[dict[str, Any]] = []
+    last_target: dict[str, str] | None = None
+    while True:
+        attempts += 1
+        result, conflicts, target = try_claim_page_once(store, args, metadata=metadata, session_id=session_id)
+        if result is not None:
+            result["claim_attempts"] = attempts
+            result["claim_waited_seconds"] = round(time.monotonic() - started, 3)
+            return result
+        last_conflicts = conflicts
+        last_target = target
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise page_claim_conflict_error(last_target, last_conflicts)
+        time.sleep(min(float(args.retry_interval_seconds), remaining))
+
+
+def try_claim_page_once(
+    store: SQLiteStore,
+    args: argparse.Namespace,
+    *,
+    metadata: dict[str, str],
+    session_id: str,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], dict[str, str] | None]:
+    target: dict[str, str] | None = None
+    event: dict[str, Any] | None = None
+    now: datetime | None = None
+    conflicting_claims: list[dict[str, Any]] = []
     with store.write_transaction():
+        target = page_claim_target(store, args.title, target_kind=args.target_kind)
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        active_claims = current_page_claims(store, now=now, include_inactive=False)
+        conflicting_claims = [
+            claim
+            for claim in active_claims
+            if claim["page_id"] == target["page_id"]
+        ]
+        if conflicting_claims:
+            return None, conflicting_claims, target
+        expires_at = (now.timestamp() + int(args.ttl_seconds))
+        expires_datetime = datetime.fromtimestamp(expires_at, timezone.utc).replace(microsecond=0)
+        payload = {
+            **target,
+            "ttl_seconds": int(args.ttl_seconds),
+            "expires_at": expires_datetime.isoformat(),
+            "message": str(args.message or ""),
+        }
+        event = make_journal_event("page_claim", project=target["project"], payload=payload)
         insert_store_event(store.connection, event, **metadata)
+    assert target is not None
+    assert event is not None
+    assert now is not None
     stored_event = next(
         (
             candidate
@@ -2793,7 +2833,23 @@ def run_claim_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
         "claim": claim,
         "conflicting_claims": [],
         "active_claims": active_after,
-    }
+    }, [], target
+
+
+def page_claim_conflict_error(
+    target: dict[str, str] | None,
+    conflicting_claims: list[dict[str, Any]],
+) -> ValueError:
+    if not conflicting_claims:
+        target_title = (target or {}).get("title") or "target"
+        return ValueError(f"page already has an active claim: {target_title}")
+    owner = conflicting_claims[0]
+    title = (target or {}).get("title") or owner.get("title") or "target"
+    return ValueError(
+        "page already has an active claim: "
+        f"{title} session_id={owner['session_id']!r} actor={owner['actor']!r} "
+        f"claim_event_id={owner['claim_event_id']}"
+    )
 
 
 def run_claims(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
@@ -2820,28 +2876,32 @@ def run_release_claim(store: SQLiteStore, args: argparse.Namespace) -> dict[str,
     if not session_id:
         raise ValueError("release-claim requires --session-id or GRASP_SESSION_ID")
     now = datetime.now(timezone.utc).replace(microsecond=0)
-    claims = current_page_claims(store, now=now, include_inactive=True)
-    claim = next((item for item in claims if item["claim_event_id"] == args.claim_event_id), None)
-    if claim is None:
-        raise ValueError(f"claim not found: {args.claim_event_id}")
-    if claim["status"] != "active":
-        raise ValueError(f"claim is not active: {args.claim_event_id} status={claim['status']}")
-    if claim["session_id"] != session_id and not args.force:
-        raise ValueError(
-            "release-claim requires the owning session_id; "
-            f"claim session_id={claim['session_id']!r}, current session_id={session_id!r}"
-        )
-    payload = {
-        "claim_event_id": claim["claim_event_id"],
-        "page_id": claim["page_id"],
-        "title": claim["title"],
-        "source_path": claim["source_path"],
-        "graph_role": claim["graph_role"],
-        "message": str(args.message or ""),
-    }
-    event = make_journal_event("page_claim_release", project=claim["project"], payload=payload)
+    claim: dict[str, Any] | None = None
+    event: dict[str, Any] | None = None
     with store.write_transaction():
+        claims = current_page_claims(store, now=now, include_inactive=True)
+        claim = next((item for item in claims if item["claim_event_id"] == args.claim_event_id), None)
+        if claim is None:
+            raise ValueError(f"claim not found: {args.claim_event_id}")
+        if claim["status"] != "active":
+            raise ValueError(f"claim is not active: {args.claim_event_id} status={claim['status']}")
+        if claim["session_id"] != session_id and not args.force:
+            raise ValueError(
+                "release-claim requires the owning session_id; "
+                f"claim session_id={claim['session_id']!r}, current session_id={session_id!r}"
+            )
+        payload = {
+            "claim_event_id": claim["claim_event_id"],
+            "page_id": claim["page_id"],
+            "title": claim["title"],
+            "source_path": claim["source_path"],
+            "graph_role": claim["graph_role"],
+            "message": str(args.message or ""),
+        }
+        event = make_journal_event("page_claim_release", project=claim["project"], payload=payload)
         insert_store_event(store.connection, event, **metadata)
+    assert claim is not None
+    assert event is not None
     active_after = current_page_claims(store, now=now, query=claim["title"], include_inactive=False)
     return {
         "project": claim["project"],
@@ -3241,6 +3301,7 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
         target_kind=args.target_kind,
         source_path=args.source_path,
         message=args.message,
+        enforce_active_claim_session_id=event_metadata(args)["session_id"],
         **event_metadata(args),
     )
     projection = append_event_and_maybe_export_projection(
@@ -4048,6 +4109,7 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
     sqlite_events = store.events(project=projection["project"], limit=None)
     sqlite_event_count = len(sqlite_events)
     sqlite_last_event = sqlite_events[-1] if sqlite_events else None
+    page_update_overwrites = detect_concurrent_page_update_overwrites(sqlite_events)
     event_stream_mismatch = (
         compare_event_streams(journal_project_events, sqlite_events)
         if journal is not None
@@ -4097,6 +4159,7 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
         semantic_log_changed_files=semantic_log_changed_files,
         semantic_log_error=semantic_log_error,
         semantic_log_policy_errors=semantic_log_policy_errors,
+        page_update_overwrites=page_update_overwrites,
         event_stream_mismatch=event_stream_mismatch,
     )
     return {
@@ -4123,6 +4186,7 @@ def run_write_status(store: SQLiteStore, args: argparse.Namespace) -> dict[str, 
         "semantic_log_projection": semantic_log_projection,
         "semantic_log_error": semantic_log_error,
         "semantic_log_policy_errors": semantic_log_policy_errors,
+        "concurrent_page_update_overwrites": page_update_overwrites,
         "strict_ok": not strict_failures,
         "strict_failures": strict_failures,
     }
@@ -4180,6 +4244,131 @@ def journal_log_record_count(events: list[dict[str, Any]], *, project: str) -> i
     )
 
 
+def detect_concurrent_page_update_overwrites(sqlite_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    previous_update_by_page: dict[str, dict[str, Any]] = {}
+    overwrites: list[dict[str, Any]] = []
+    for event in sqlite_events:
+        if event.get("event_type") != "page_update":
+            continue
+        payload = event.get("payload") or {}
+        page_id = str(payload.get("page_id") or "")
+        if not page_id:
+            continue
+        previous_lines = event_payload_line_records(payload.get("previous_lines") or [])
+        current_lines = event_payload_line_records(payload.get("lines") or [])
+        prior = previous_update_by_page.get(page_id)
+        if (
+            prior is not None
+            and events_have_different_sessions(prior["event"], event)
+            and events_within_concurrent_update_window(prior["event"], event)
+        ):
+            removed_prior_additions = removed_added_lines(
+                added_lines=prior["added_lines"],
+                previous_lines=previous_lines,
+                current_lines=current_lines,
+            )
+            if removed_prior_additions:
+                prior_event = prior["event"]
+                overwrites.append(
+                    {
+                        "page_id": page_id,
+                        "title": str(payload.get("title") or prior["title"] or ""),
+                        "source_path": str(payload.get("source_path") or prior["source_path"] or ""),
+                        "previous_event_id": str(prior_event.get("event_id") or ""),
+                        "previous_event_sequence": int(prior_event.get("event_sequence") or 0),
+                        "previous_actor": str(prior_event.get("actor") or ""),
+                        "previous_session_id": str(prior_event.get("session_id") or ""),
+                        "current_event_id": str(event.get("event_id") or ""),
+                        "current_event_sequence": int(event.get("event_sequence") or 0),
+                        "current_actor": str(event.get("actor") or ""),
+                        "current_session_id": str(event.get("session_id") or ""),
+                        "window_seconds": CONCURRENT_PAGE_UPDATE_OVERWRITE_WINDOW_SECONDS,
+                        "removed_line_count": len(removed_prior_additions),
+                        "removed_line_samples": [line["text"] for line in removed_prior_additions[:5]],
+                    }
+                )
+        added_lines = added_line_records(previous_lines=previous_lines, current_lines=current_lines)
+        previous_update_by_page[page_id] = {
+            "event": event,
+            "added_lines": added_lines,
+            "title": str(payload.get("title") or ""),
+            "source_path": str(payload.get("source_path") or ""),
+        }
+    return overwrites
+
+
+def event_payload_line_records(lines: list[Any]) -> list[dict[str, str]]:
+    records: list[dict[str, str]] = []
+    for line in lines:
+        if isinstance(line, dict):
+            records.append(
+                {
+                    "line_id": str(line.get("line_id") or ""),
+                    "text": str(line.get("text") or ""),
+                }
+            )
+        else:
+            records.append({"line_id": "", "text": str(line)})
+    return records
+
+
+def events_have_different_sessions(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left_session = str(left.get("session_id") or "")
+    right_session = str(right.get("session_id") or "")
+    if left_session and right_session:
+        return left_session != right_session
+    left_actor = str(left.get("actor") or "")
+    right_actor = str(right.get("actor") or "")
+    return bool(left_actor and right_actor and left_actor != right_actor)
+
+
+def events_within_concurrent_update_window(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left_timestamp = event_created_timestamp(left.get("created_at"))
+    right_timestamp = event_created_timestamp(right.get("created_at"))
+    if left_timestamp is None or right_timestamp is None:
+        return False
+    return abs(right_timestamp - left_timestamp) <= CONCURRENT_PAGE_UPDATE_OVERWRITE_WINDOW_SECONDS
+
+
+def added_line_records(
+    *,
+    previous_lines: list[dict[str, str]],
+    current_lines: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    previous_counts = Counter(line["line_id"] for line in previous_lines if line["line_id"])
+    added: list[dict[str, str]] = []
+    for line in current_lines:
+        line_id = line["line_id"]
+        if line_id and previous_counts[line_id] > 0:
+            previous_counts[line_id] -= 1
+        else:
+            added.append(line)
+    return added
+
+
+def removed_added_lines(
+    *,
+    added_lines: list[dict[str, str]],
+    previous_lines: list[dict[str, str]],
+    current_lines: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    if not added_lines:
+        return []
+    previous_counts = Counter(line["line_id"] for line in previous_lines if line["line_id"])
+    current_counts = Counter(line["line_id"] for line in current_lines if line["line_id"])
+    removed: list[dict[str, str]] = []
+    for line in added_lines:
+        line_id = line["line_id"]
+        if not line_id or previous_counts[line_id] <= 0:
+            continue
+        previous_counts[line_id] -= 1
+        if current_counts[line_id] > 0:
+            current_counts[line_id] -= 1
+            continue
+        removed.append(line)
+    return removed
+
+
 def write_status_strict_failures(
     *,
     projection: dict[str, Any],
@@ -4192,6 +4381,7 @@ def write_status_strict_failures(
     semantic_log_changed_files: list[str],
     semantic_log_error: str | None,
     semantic_log_policy_errors: list[str],
+    page_update_overwrites: list[dict[str, Any]],
     event_stream_mismatch: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     failures: list[dict[str, Any]] = []
@@ -4263,6 +4453,13 @@ def write_status_strict_failures(
             {
                 "type": "semantic_log_policy",
                 "errors": semantic_log_policy_errors,
+            }
+        )
+    if page_update_overwrites:
+        failures.append(
+            {
+                "type": "concurrent_page_update_overwrite",
+                "overwrites": page_update_overwrites,
             }
         )
     return failures
@@ -8385,6 +8582,8 @@ def format_claim_page(result: dict[str, Any]) -> str:
         f"session_id: {claim.get('session_id', '')}\n"
         f"expires_at: {claim.get('expires_at', '')}\n"
         f"status: {claim.get('status', '')}\n"
+        f"claim_attempts: {result.get('claim_attempts', 1)}\n"
+        f"claim_waited_seconds: {result.get('claim_waited_seconds', 0)}\n"
     )
 
 
