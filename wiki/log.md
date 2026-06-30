@@ -1814,3 +1814,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 14:55] implementation+file-back | gather hydrate-limit query-source slice
 - code: `gather --hydrate-limit N` scans incomplete Markdown source files for the query and hydrates up to N matching source pages before calculating link stats, mentions, co-links, and backlinks.
 - test: catalog-only 3-page corpus proves only the query-matching source file is parsed and the returned bundle gains backlink/co-link evidence while `markdown_graph` stays partial.
+
+## [2026-06-30 15:20] implementation+file-back | basic retrieval hydrate-limit slice
+- code: `search` / `backlinks` / `related --hydrate-limit N` now hydrate up to N query/target-matching Markdown source pages before returning results; `search --hydrate-limit` is literal-mode only.
+- test: catalog-only 3-page CLI regression verifies `search needle`, `backlinks B`, and `related B` each hydrate one source page and return the expected hit/backlink/2-hop related result.
