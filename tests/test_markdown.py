@@ -1232,6 +1232,73 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertIn("graph: incomplete", text)
             self.assertIn("empty results may be caused by unhydrated Markdown source files", text)
 
+    def test_cli_graph_commands_report_incomplete_markdown_graph_contract(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nneedle links to [[B]] and [[Missing]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki", catalog_only=True)
+
+            def run_json(*args: str) -> dict:
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            cases = [
+                (("mentions", "needle", "--limit", "10"), lambda result: result["mentions"]),
+                (("co-links", "needle", "--limit", "10"), lambda result: result["co_links"]),
+                (("path", "A", "B", "--max-depth", "2"), lambda result: result["paths"]),
+                (("unresolved", "--limit", "10"), lambda result: result["unresolved_targets"]),
+            ]
+            for args, result_items in cases:
+                with self.subTest(command=args[0]):
+                    result = run_json(*args)
+                    self.assertEqual(result_items(result), [])
+                    self.assertIsNone(result["markdown_hydration"])
+                    self.assertEqual(result["markdown_graph"]["complete"], False)
+                    self.assertEqual(result["markdown_graph"]["hydrated_files"], 0)
+                    contract = result["markdown_query_contract"]
+                    self.assertEqual(contract["result_scope"], "partial_markdown_graph")
+                    self.assertEqual(contract["graph_complete"], False)
+                    self.assertEqual(contract["empty_result_may_be_incomplete"], True)
+                    self.assertIn("hydrate", contract["hydrate_hint"])
+
+            text = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "unresolved",
+                    "--limit",
+                    "10",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout
+            self.assertIn("graph: incomplete", text)
+            self.assertIn("empty results may be caused by unhydrated Markdown source files", text)
+
     def test_cli_idle_hydration_runs_after_result_for_future_commands(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
