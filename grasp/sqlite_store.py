@@ -4,6 +4,7 @@ from collections import Counter, deque
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 from html import escape as escape_html
 import json
 from pathlib import Path
@@ -48,6 +49,7 @@ from .markdown import (
     parse_markdown_line_links,
     parse_markdown_links,
     parse_markdown_h1_title,
+    normalize_exclude_dirs,
 )
 
 
@@ -592,8 +594,53 @@ def import_markdown_folder_to_sqlite(
     snapshot_connection = connect_sqlite_store(store_path)
     try:
         expected_event_sequence = latest_project_event_sequence(snapshot_connection, project)
+        fast_noop_summary = _fast_noop_markdown_import_summary(
+            snapshot_connection,
+            project,
+            folder_path,
+            exclude_dirs,
+        )
     finally:
         snapshot_connection.close()
+
+    if fast_noop_summary is not None:
+        connection = connect_sqlite_store(store_path, for_write=True)
+        try:
+            with sqlite_write_transaction(connection):
+                require_project_events_unchanged(
+                    connection,
+                    project,
+                    expected_event_sequence,
+                    operation="Markdown import",
+                )
+                now = int(time.time())
+                _write_metadata(
+                    connection,
+                    {
+                        "schema_version": SCHEMA_VERSION,
+                        "last_imported_project": project,
+                        "last_source_export": str(folder_path),
+                        "last_source_type": "markdown",
+                        "last_imported_at": str(now),
+                        f"project.{project}.source_type": "markdown",
+                        f"project.{project}.markdown_last_import": json.dumps(
+                            fast_noop_summary,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                    },
+                )
+        finally:
+            connection.close()
+
+        _cache_import_source(folder_path, store_path, project, source_type="markdown", exclude_dirs=exclude_dirs)
+        store = SQLiteStore(store_path, project=project)
+        try:
+            stats = store.stats()
+            stats["markdown_import"] = fast_noop_summary
+            return stats
+        finally:
+            store.close()
 
     source = MarkdownMirror.from_folder(folder_path, exclude_dirs=exclude_dirs)
 
@@ -1330,6 +1377,64 @@ def _markdown_edges_by_page_id(edges: list[Edge]) -> dict[str, list[Edge]]:
     for edge in edges:
         by_page_id.setdefault(edge.source_page_id, []).append(edge)
     return by_page_id
+
+
+def _fast_noop_markdown_import_summary(
+    connection: sqlite3.Connection,
+    project: str,
+    folder_path: Path,
+    exclude_dirs: tuple[str, ...],
+) -> dict[str, Any] | None:
+    if not folder_path.exists():
+        raise ValueError(f"Markdown folder does not exist: {folder_path}")
+    if not folder_path.is_dir():
+        raise ValueError(f"Markdown source must be a folder: {folder_path}")
+
+    metadata = _connection_metadata(connection)
+    old_manifest = _json_metadata(metadata, f"project.{project}.markdown_manifest")
+    if (
+        not _project_exists(connection, project)
+        or metadata.get(f"project.{project}.source_type") != "markdown"
+        or old_manifest is None
+        or old_manifest.get("version") != 3
+        or _json_metadata(metadata, f"project.{project}.title_aliases") is None
+    ):
+        return None
+
+    normalized_exclude_dirs = normalize_exclude_dirs(exclude_dirs)
+    if sorted(str(item) for item in old_manifest.get("exclude_dirs") or []) != list(normalized_exclude_dirs):
+        return None
+
+    old_files = old_manifest.get("files")
+    if not isinstance(old_files, dict) or not old_files:
+        return None
+
+    markdown_paths = list(iter_markdown_files(folder_path, exclude_dirs=normalized_exclude_dirs))
+    if not markdown_paths:
+        return None
+
+    current_paths = {path.relative_to(folder_path).as_posix() for path in markdown_paths}
+    if current_paths != {str(path) for path in old_files}:
+        return None
+
+    for path in markdown_paths:
+        relative_path = path.relative_to(folder_path).as_posix()
+        old_item = old_files.get(relative_path)
+        if not isinstance(old_item, dict):
+            return None
+        old_hash = old_item.get("hash")
+        if not isinstance(old_hash, str) or not old_hash:
+            return None
+        if hashlib.sha1(path.read_bytes()).hexdigest() != old_hash:
+            return None
+
+    return {
+        "mode": "incremental",
+        "changed_files": 0,
+        "full_rebuild_reason": None,
+        "fast_path": "manifest_hash_noop",
+        "scanned_files": len(markdown_paths),
+    }
 
 
 def _markdown_full_rebuild_reason(
