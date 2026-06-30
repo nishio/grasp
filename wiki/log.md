@@ -1979,3 +1979,8 @@ owner 閾値なしで進められる作業は duplicate ambiguity regression に
 code: Markdown line-id inheritance now requires unambiguous exact text matches. If old or new lines contain duplicate text, `import --markdown`, `write-page`, and `write-lines` do not auto-reuse the old `line_id`; write-page/write-lines mint new ids and tombstone removed duplicate ids.
 coverage: added regressions for content-only re-import, write-page old-duplicate removal, write-page new duplicate insertion, and write-lines duplicate range replacement. Public version is `1.13.2`; schema remains `13`.
 milestone: duplicate text line policy is no longer a stable line identity residual. Remaining identity gaps are split/merge/move/large-edit policy and Cosense/hosted sync external line id; owner cutover throughput/wait thresholds remain a policy decision.
+
+## [2026-07-01 01:51] implementation+file-back | unique moved line identity policy
+code: line-id inheritance now uses unique exact text matching instead of contiguous SequenceMatcher equal blocks. Markdown re-import, `write-page`, and `write-lines` preserve `line_id` for exact moved lines when the text is unique in both old and new lines.
+coverage: added regressions for content-only re-import moving unique lines, write-page moving unique lines, and write-lines swapping unique lines within a range. Duplicate text lines still do not auto-inherit. Public version is `1.13.3`; schema remains `13`.
+milestone: unique exact move is no longer a stable line identity residual. Remaining identity gaps are split/merge/large-edit policy and Cosense/hosted sync external line id; owner cutover throughput/wait thresholds remain a policy decision.

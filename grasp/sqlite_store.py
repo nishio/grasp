@@ -4,7 +4,6 @@ from collections import Counter, deque
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from difflib import SequenceMatcher
 import hashlib
 from html import escape as escape_html
 import json
@@ -1906,21 +1905,16 @@ def _remove_line_tombstones_for_live_ids_uncommitted(
 def _inherited_line_ids_by_new_index(previous_lines: list[Line], new_lines: list[Line]) -> dict[int, str]:
     previous_text_counts = Counter(line.text for line in previous_lines)
     new_text_counts = Counter(line.text for line in new_lines)
-    matcher = SequenceMatcher(
-        None,
-        [line.text for line in previous_lines],
-        [line.text for line in new_lines],
-        autojunk=False,
-    )
-    inherited: dict[int, str] = {}
-    for tag, old_start, old_end, new_start, _new_end in matcher.get_opcodes():
-        if tag != "equal":
-            continue
-        for offset, old_line in enumerate(previous_lines[old_start:old_end]):
-            if previous_text_counts[old_line.text] != 1 or new_text_counts[old_line.text] != 1:
-                continue
-            inherited[new_start + offset] = old_line.line_id
-    return inherited
+    previous_line_id_by_unique_text = {
+        line.text: line.line_id
+        for line in previous_lines
+        if previous_text_counts[line.text] == 1 and new_text_counts[line.text] == 1
+    }
+    return {
+        line.index: previous_line_id_by_unique_text[line.text]
+        for line in new_lines
+        if line.text in previous_line_id_by_unique_text
+    }
 
 
 def _inherited_line_payloads_by_new_index(
@@ -1931,22 +1925,16 @@ def _inherited_line_payloads_by_new_index(
     normalized_new_texts = [str(text) for text in new_texts]
     previous_text_counts = Counter(previous_texts)
     new_text_counts = Counter(normalized_new_texts)
-    matcher = SequenceMatcher(
-        None,
-        previous_texts,
-        normalized_new_texts,
-        autojunk=False,
-    )
-    inherited: dict[int, dict[str, Any]] = {}
-    for tag, old_start, old_end, new_start, _new_end in matcher.get_opcodes():
-        if tag != "equal":
-            continue
-        for offset, old_line in enumerate(previous_lines[old_start:old_end]):
-            old_text = str(old_line.get("text", ""))
-            if previous_text_counts[old_text] != 1 or new_text_counts[old_text] != 1:
-                continue
-            inherited[new_start + offset] = dict(old_line)
-    return inherited
+    previous_payload_by_unique_text = {
+        text: dict(line)
+        for line, text in zip(previous_lines, previous_texts)
+        if previous_text_counts[text] == 1 and new_text_counts[text] == 1
+    }
+    return {
+        index: dict(previous_payload_by_unique_text[text])
+        for index, text in enumerate(normalized_new_texts)
+        if text in previous_payload_by_unique_text
+    }
 
 
 def _mint_markdown_line_id(page_id: str, used_line_ids: set[str]) -> str:

@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.13.3`（更新: 2026-07-01 01:52、store: schema `13`、compat: schema `13` compatible）: Markdown line-id inheritance を unique exact text matching に変更し、同じ text が旧新それぞれで一意なら位置が変わっても旧 `line_id` を引き継ぐようにした。これにより Markdown content-only re-import / `write-page` / `write-lines` は unique exact moved line の identity を維持する。duplicate text line は引き続き自動継承しない。schema は不変
 - `1.13.2`（更新: 2026-07-01 01:38、store: schema `13`、compat: schema `13` compatible）: Markdown line-id inheritance を conservative にし、旧側または新側に同じ text line が複数ある場合は exact unchanged でも自動で旧 `line_id` に寄せない。Markdown content-only re-import / `write-page` / `write-lines` は unambiguous exact match だけ `line_id` を引き継ぎ、duplicate text line は新 id を mint する。`write-page` / `write-lines` で消えた旧 duplicate `line_id` は `line_tombstones` に残る。schema は不変
 - `1.13.1`（更新: 2026-07-01 01:23、store: schema `13`、compat: schema `13` compatible）: `write-lines <start-line-id> <end-line-id>` を追加した。Markdown-backed page の同一 page 上の inclusive line-id range を置換し、範囲外の line_id と範囲内の exact unchanged line_id を維持し、挿入 line には opaque id を mint し、削除された範囲 line_id は `line_tombstones` に残す。event は `page_update` として `target_start_line_id` / `target_end_line_id` / `previous_range_lines` / `range_lines` / full before/after lines を持つ。active claim、dirty projection guard、`--no-journal`、`--defer-projection`、projection rollback に対応する。schema は不変
 - `1.13.0`（更新: 2026-07-01 01:03、store: schema `13`、compat: schema `13`）: stable line identity の削除側 memory として `line_tombstones` table を追加した。Markdown-backed page replacement / append revert で live `lines` から消える `line_id` は tombstone に入り、同じ `line_id` が revert などで live に戻る時は tombstone から外れる。`read --around-line` / `write-line` / line-id source path lookup は tombstoned line id を通常の not-found ではなく tombstone diagnostic として返す。schema は `13`
@@ -229,6 +230,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.13.2`
+- Current public compatibility version: `1.13.3`
 - Current internal `SCHEMA_VERSION`: `13`
-- Current package metadata should match `1.13.2`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.13.3`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

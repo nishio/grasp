@@ -1357,7 +1357,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace a contiguous Markdown-backed line range by stable line_id anchors.",
         description=(
             "Replace the inclusive line range between two existing stored line_ids on one Markdown-backed page. "
-            "The command preserves unambiguous exact unchanged line_ids inside the replacement, records a page_update SQLite event, "
+            "The command preserves unambiguous exact matching line_ids inside the replacement, records a page_update SQLite event, "
             "updates derived edges, optionally appends the compatibility JSONL journal, and exports the Markdown projection unless --defer-projection is used."
         ),
         returns=(
@@ -1374,7 +1374,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Alpha write surface for Markdown-backed projects.",
             "Both anchors must be full stored line_ids from the same current page, and start must appear before or equal to end.",
             "--line values are stored lines and cannot contain newline characters; use --from-file for multi-line text.",
-            "Only unambiguous exact unchanged replacement lines inherit line_ids; duplicate text lines receive new opaque line_ids, and removed line_ids are tombstoned.",
+            "Only unambiguous exact matching replacement lines inherit line_ids; duplicate text lines receive new opaque line_ids, and removed line_ids are tombstoned.",
             "Writes are refused while another session has an active claim for the target page.",
             "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
             "--defer-projection writes only SQLite state/events and optional journal; run export-markdown later to update Markdown.",
