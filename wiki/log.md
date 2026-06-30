@@ -1941,3 +1941,8 @@ stable line identity と Markdown direct edit policy、git-diff-of-md に依存�
 ## [2026-07-01 00:42] implementation+file-back | session revert-plan review evidence
 - code: tests.test_cli_help.CliHelpTests.test_revert_plan_session_reviews_file_back_work_unit_without_markdown_diff fixes the minimal review/recover evidence for mode2 file-back: same-session page_update + log_append are planned together, other session writes are excluded, and planning mutates neither projection nor SQLite events.
 - docs: [[grasp-backlog]] now treats git-diff-of-Markdown-independent review/recovery as minimally evidenced; remaining work is only concrete gaps outside existing revert-plan scopes or generated Markdown backup/review policy.
+
+## [2026-07-01 01:08] implementation+file-back | write-page line id inheritance
+- code: write-page replacement now uses exact line diff inheritance instead of same-index-only reuse, so inserted lines no longer force unchanged following lines to get new line_id values.
+- coverage: tests.test_markdown.MarkdownImportTests.test_write_page_inherits_line_ids_across_inserted_lines verifies moved heading/link line_ids and self-anchor target_line_id survive a write-page insertion. Full unittest discover ran 332 tests OK.
+- caveat: stable line identity is still not complete; remaining gaps are line-id addressed edit surface, Cosense/hosted sync, tombstones, and split/merge/move/duplicate-line policy.
