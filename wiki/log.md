@@ -2003,3 +2003,6 @@ scripts/benchmark_claim_retry_throughput.py now returns metric_summary / Cutover
 
 ## [2026-07-01 02:46] implementation+file-back | require cutover thresholds flag
 Added --require-cutover-thresholds to scripts/benchmark_claim_retry_throughput.py. With this flag, threshold-less benchmark runs exit 1 with thresholds_not_set even when claim_retry correctness is green, so cutover CI cannot mistake evidence-only measurement for a stable mode2 gate. The flag does not choose threshold values.
+
+## [2026-07-01 02:53] implementation+file-back | require both cutover thresholds
+Tightened --require-cutover-thresholds: a cutover gate now requires both --min-surviving-throughput-ratio and --max-p95-claim-wait-seconds. With only one value it exits 1 as required_thresholds_missing, preventing a half-specified owner policy from being treated as stable mode2 cutover.
