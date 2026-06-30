@@ -822,6 +822,53 @@ class MarkdownImportTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_read_hydrate_catalog_page_parses_only_selected_markdown_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "A.md").write_text("# Alpha\nlinks to [[B]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki", catalog_only=True)
+            original_record_from_file = sqlite_store.markdown_page_record_from_file
+            parsed_paths: list[str] = []
+
+            def record_from_file(root_arg, path_arg):
+                parsed_paths.append(Path(path_arg).relative_to(root_arg).as_posix())
+                return original_record_from_file(root_arg, path_arg)
+
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                with patch("grasp.sqlite_store.markdown_page_record_from_file", side_effect=record_from_file):
+                    read = store.read("A", hydrate=True, backlink_limit=10, related_limit=10, unresolved_limit=10)
+
+                self.assertEqual(parsed_paths, ["A.md"])
+                self.assertEqual(read["page"]["title"], "Alpha")
+                self.assertEqual([line["text"] for line in read["lines"]], ["# Alpha", "links to [[B]]"])
+                self.assertEqual(read["markdown_hydration"]["hydrated"], True)
+                self.assertEqual(read["markdown_hydration"]["source_path"], "A.md")
+                self.assertEqual(read["markdown_graph"]["complete"], False)
+                self.assertEqual(read["markdown_graph"]["mode"], "partial")
+                self.assertEqual(read["markdown_graph"]["hydrated_files"], 1)
+                self.assertEqual(read["markdown_graph"]["total_files"], 2)
+                self.assertEqual(store.stats()["lines"], 2)
+                self.assertEqual(store.stats()["edges"], 1)
+
+                b_read = store.read("B", backlink_limit=10, related_limit=10, unresolved_limit=10)
+                self.assertEqual(b_read["page"]["title"], "B")
+                self.assertEqual(b_read["lines"], [])
+                self.assertEqual(b_read["backlink_count_total"], 1)
+
+                with patch("grasp.sqlite_store.markdown_page_record_from_file", side_effect=record_from_file):
+                    b_hydrated = store.read("B", hydrate=True, backlink_limit=10, related_limit=10, unresolved_limit=10)
+                self.assertEqual(parsed_paths, ["A.md", "B.md"])
+                self.assertEqual([line["text"] for line in b_hydrated["lines"]], ["# B"])
+                self.assertEqual(b_hydrated["markdown_graph"]["complete"], True)
+                self.assertEqual(b_hydrated["markdown_graph"]["mode"], "on-demand")
+                self.assertEqual(b_hydrated["markdown_graph"]["hydrated_files"], 2)
+            finally:
+                store.close()
+
     def test_noop_reimport_uses_manifest_hash_fast_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

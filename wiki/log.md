@@ -1804,3 +1804,9 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 - UX: `stats` and `read` surface incomplete graph status so lines/backlinks/related/unresolved are not mistaken for complete until normal `import --markdown` hydrates the graph.
 - benchmark: 3000p/54000 edges synthetic corpus measured catalog-only 0.27s, later hydrate import 12.44s with 6000 lines / 54000 edges and complete graph.
 - docs: [[grasp-v1-implemented]] updated with current facts; [[grasp-backlog]] now leaves page-on-demand / background hydration and finer incomplete/stale query contracts as the remaining progressive import work.
+
+## [2026-06-30 14:38] implementation+file-back | read-hydrate Markdown page-on-demand slice
+- code: `read --hydrate` now parses only the selected source file for catalog/partial Markdown graphs, updates title/aliases/lines/edges/manifest hash, and returns `markdown_hydration` plus updated `markdown_graph`.
+- UX: normal `read` remains read-only; `--hydrate` is explicit opt-in and refuses `--around-line`.
+- benchmark: 3000p/54000 edges synthetic corpus measured catalog-only 0.19s, first page hydrate 0.038s, next 10 page hydrates 0.412s total (~0.041s/page), leaving graph partial at 11/3000 hydrated files.
+- docs: [[grasp-v1-implemented]] updated with current facts; [[grasp-backlog]] now leaves auto/background hydration policy and finer stale/incomplete query contracts as remaining work.
