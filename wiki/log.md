@@ -1870,3 +1870,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 18:01] implementation | partial Markdown query contract progress
 - Added result_completeness=partial and result_may_be_incomplete=true to markdown_query_contract so non-empty results on incomplete Markdown graphs are not mistaken for complete result sets.
 - Added hydration_progress to the same contract, exposing command-local hydrate-limit progress such as scan, reason, matched_files, hydrated_count, and limit_reached.
+
+## [2026-06-30 18:17] implementation | incomplete graph contract coverage
+- Added markdown_query_contract coverage for selected-project link-stats, peek, suggest, ambiguities, cross-project-spread, and cross-project-spreads so catalog-only results are not read as complete corpus facts.
+- Text output for those commands now prints the same incomplete graph warning and partial fields note used by retrieval commands.

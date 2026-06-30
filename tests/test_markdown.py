@@ -1572,6 +1572,102 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertIn("graph: incomplete", text)
             self.assertIn("empty results may be caused by unhydrated Markdown source files", text)
 
+    def test_cli_misc_catalog_commands_report_incomplete_markdown_graph_contract(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text(
+                "---\ntitle: Alpha Title\naliases:\n  - Alias Title\n---\n# Alpha Title\nlinks to [[B]]\n",
+                encoding="utf-8",
+            )
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            (root / "one").mkdir()
+            (root / "two").mkdir()
+            (root / "one" / "Dupe.md").write_text("# Dupe one\n", encoding="utf-8")
+            (root / "two" / "Dupe.md").write_text("# Dupe two\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki", catalog_only=True)
+
+            def run_json(*args: str) -> dict:
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            cases = [
+                (
+                    ("link-stats", "B"),
+                    ["page", "link_count", "source_page_count", "link_multiplicity", "recovery_hints"],
+                    True,
+                ),
+                (
+                    ("peek", "A"),
+                    ["page", "lines", "lines_truncated", "lines_truncated_before", "lines_truncated_after"],
+                    True,
+                ),
+                (("suggest", "Alpha"), ["suggestions"], True),
+                (
+                    ("ambiguities", "--limit", "10"),
+                    ["projects", "ambiguities", "handle_count", "handles_returned"],
+                    False,
+                ),
+                (
+                    ("cross-project-spread", "B", "--limit", "10"),
+                    ["totals", "top_source_projects", "projects", "signal_project_count"],
+                    False,
+                ),
+                (
+                    ("cross-project-spreads", "--min-projects", "1", "--limit", "10"),
+                    ["spreads", "handle_count", "handles_returned"],
+                    False,
+                ),
+            ]
+            for args, partial_fields, empty_result in cases:
+                with self.subTest(command=args[0]):
+                    result = run_json(*args)
+                    self.assertEqual(result["markdown_graph"]["complete"], False)
+                    self.assertEqual(result["markdown_graph"]["hydrated_files"], 0)
+                    contract = result["markdown_query_contract"]
+                    self.assertEqual(contract["result_scope"], "partial_markdown_graph")
+                    self.assertEqual(contract["result_completeness"], "partial")
+                    self.assertEqual(contract["result_may_be_incomplete"], True)
+                    self.assertEqual(contract["empty_result_may_be_incomplete"], empty_result)
+                    self.assertEqual(contract["partial_fields"], partial_fields)
+                    for field in partial_fields:
+                        self.assertEqual(contract["result_field_states"][field]["state"], "partial")
+
+            text = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "peek",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout
+            self.assertIn("graph: incomplete", text)
+            self.assertIn("partial fields: page, lines", text)
+
     def test_cli_graph_command_hydrate_limit_parses_matching_sources(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
