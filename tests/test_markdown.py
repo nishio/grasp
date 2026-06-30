@@ -124,7 +124,7 @@ class MarkdownParsingTests(unittest.TestCase):
         self.assertEqual(c_backlinks["backlinks"][0]["target_fragment"], "^block-id")
         self.assertEqual(c_backlinks["backlinks"][0]["target_line_id"], f"{markdown_page_id(Path('C.md'))}:1")
 
-    def test_markdown_incremental_import_refreshes_incoming_target_line_ids(self):
+    def test_markdown_incremental_import_keeps_target_line_ids_stable_across_insertion(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             store_path = root / "store.sqlite"
@@ -134,16 +134,21 @@ class MarkdownParsingTests(unittest.TestCase):
             (source / "B.md").write_text("# B\n## Section\n", encoding="utf-8")
 
             import_markdown_folder_to_sqlite(source, store_path)
+            old_target_line_id = f"{markdown_page_id(Path('B.md'))}:1"
             (source / "B.md").write_text("# B\nintro\n## Section\n", encoding="utf-8")
             import_markdown_folder_to_sqlite(source, store_path)
             store = SQLiteStore(store_path, project="wiki")
             try:
                 backlinks = store.backlinks_report("B")
+                page = store.resolve_page("B")
+                lines, _aliases = store.page_lines(page)
             finally:
                 store.close()
 
         self.assertEqual(backlinks["backlinks"][0]["target_fragment"], "Section")
-        self.assertEqual(backlinks["backlinks"][0]["target_line_id"], f"{markdown_page_id(Path('B.md'))}:2")
+        self.assertEqual(backlinks["backlinks"][0]["target_line_id"], old_target_line_id)
+        self.assertEqual(lines[2].text, "## Section")
+        self.assertEqual(lines[2].line_id, old_target_line_id)
 
     def test_markdown_write_page_persists_target_fragments_for_anchor_edges(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -985,6 +990,115 @@ class MarkdownImportTests(unittest.TestCase):
                 self.assertEqual({item["title"] for item in read["unresolved_targets"]}, {"Missing"})
             finally:
                 store.close()
+
+    def test_reimport_inherits_line_ids_across_inserted_lines(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text("# A\nalpha\nbeta\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                page = store.resolve_page("A")
+                old_lines, _aliases = store.page_lines(page)
+            finally:
+                store.close()
+
+            page_a.write_text("# A\ninserted\nalpha\nbeta\n", encoding="utf-8")
+            result = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            self.assertEqual(result["markdown_import"]["mode"], "incremental")
+            self.assertEqual(result["markdown_import"]["fast_path"], "manifest_hash_changed_files")
+
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                page = store.resolve_page("A")
+                new_lines, _aliases = store.page_lines(page)
+            finally:
+                store.close()
+
+            self.assertEqual([line.text for line in new_lines], ["# A", "inserted", "alpha", "beta"])
+            self.assertEqual(new_lines[0].line_id, old_lines[0].line_id)
+            self.assertEqual(new_lines[2].line_id, old_lines[1].line_id)
+            self.assertEqual(new_lines[3].line_id, old_lines[2].line_id)
+            self.assertNotIn(new_lines[1].line_id, {line.line_id for line in old_lines})
+            self.assertEqual(len({line.line_id for line in new_lines}), len(new_lines))
+
+    def test_reimport_full_parse_incremental_path_inherits_line_ids(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text("# A\nalpha\nbeta\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                page = store.resolve_page("A")
+                old_lines, _aliases = store.page_lines(page)
+            finally:
+                store.close()
+
+            page_a.write_text("# A\ninserted\nalpha\nbeta\n", encoding="utf-8")
+            with patch("grasp.sqlite_store._try_fast_changed_markdown_import", return_value=None):
+                result = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            self.assertEqual(result["markdown_import"]["mode"], "incremental")
+            self.assertNotIn("fast_path", result["markdown_import"])
+
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                page = store.resolve_page("A")
+                new_lines, _aliases = store.page_lines(page)
+            finally:
+                store.close()
+
+            self.assertEqual(new_lines[0].line_id, old_lines[0].line_id)
+            self.assertEqual(new_lines[2].line_id, old_lines[1].line_id)
+            self.assertEqual(new_lines[3].line_id, old_lines[2].line_id)
+            self.assertEqual(len({line.line_id for line in new_lines}), len(new_lines))
+
+    def test_reimport_remaps_self_anchor_target_line_ids_after_insertion(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text("# A\n## Target\n[[#Target]]\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                page = store.resolve_page("A")
+                old_lines, _aliases = store.page_lines(page)
+                old_heading_id = old_lines[1].line_id
+                old_link_id = old_lines[2].line_id
+            finally:
+                store.close()
+
+            page_a.write_text("# A\ninserted\n## Target\n[[#Target]]\n", encoding="utf-8")
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                page = store.resolve_page("A")
+                edge = store.connection.execute(
+                    """
+                    SELECT e.line_id, l.line_index, e.target_line_id
+                    FROM edges e
+                    JOIN lines l ON l.project = e.project AND l.line_id = e.line_id
+                    WHERE e.project = ? AND e.source_page_id = ? AND e.target_fragment = ?
+                    """,
+                    ("wiki", page.id, "Target"),
+                ).fetchone()
+            finally:
+                store.close()
+
+            self.assertIsNotNone(edge)
+            self.assertEqual(edge[0], old_link_id)
+            self.assertEqual(edge[1], 3)
+            self.assertEqual(edge[2], old_heading_id)
 
     def test_catalog_only_import_marks_markdown_graph_incomplete(self):
         with tempfile.TemporaryDirectory() as tmpdir:
