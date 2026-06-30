@@ -45,6 +45,10 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "repo default store/output pair",
             "temp dogfood は temp store + temp output",
             "default store と temp output を混在させない",
+            "Mode2 Markdown 直接編集は既定 reject",
+            "python3 scripts/check_mode2_markdown_readonly.py",
+            "`reconcile-markdown --dry-run`",
+            "generic merge / queue",
         ),
         forbidden=(
             "check_file_back_preflight.py --no-journal",
@@ -94,6 +98,10 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "repo default store/output pair",
             "temp dogfood は temp store + temp output",
             "default store と temp output を混在させない",
+            "Mode2 Markdown 直接編集は既定 reject",
+            "python3 scripts/check_mode2_markdown_readonly.py",
+            "`reconcile-markdown --dry-run`",
+            "generic merge / queue",
         ),
         forbidden=(
             "check_file_back_preflight.py --no-journal",
@@ -144,6 +152,10 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "repo default store/output pair",
             "temp dogfood は temp store + temp output",
             "default store と temp output を混在させない",
+            "Mode2 Markdown 直接編集は既定 reject",
+            "python3 scripts/check_mode2_markdown_readonly.py",
+            "`reconcile-markdown --dry-run`",
+            "generic merge / queue",
         ),
         forbidden=(
             "check_file_back_preflight.py --no-journal",
@@ -191,6 +203,10 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "repo default store/output pair",
             "temporary dogfood must use a temporary store and temporary output",
             "never the repo store with a temporary output",
+            "Mode2 Markdown direct edits are rejected by default",
+            "python3 scripts/check_mode2_markdown_readonly.py",
+            "`reconcile-markdown --dry-run`",
+            "generic merge / queue",
         ),
         forbidden=(
             "check_file_back_preflight.py --no-journal",
@@ -236,6 +252,10 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "repo default store/output pair",
             "temp dogfood は temp store + temp output",
             "default store と temp output を混在させない",
+            "Mode2 Markdown 直接編集は既定 reject",
+            "python3 scripts/check_mode2_markdown_readonly.py",
+            "`reconcile-markdown --dry-run`",
+            "generic merge / queue",
         ),
         forbidden=(
             "wiki・journal dirty",
@@ -286,7 +306,11 @@ def main() -> int:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
-    print("file-back runbook ok: no-journal default, retired journal, semantic log guard, session window marker, preflight stamp, file-back lock, write-start guard, store/output pair guard, and push ownership guard documented")
+    print(
+        "file-back runbook ok: no-journal default, retired journal, semantic log guard, "
+        "session window marker, preflight stamp, file-back lock, write-start guard, "
+        "store/output pair guard, mode2 Markdown readonly guard, and push ownership guard documented"
+    )
     return 0
 
 
