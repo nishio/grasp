@@ -154,7 +154,7 @@ v1 stable scope 外:
 
 Markdown mirror facts:
 
-- `grasp import --markdown <folder>` は再帰的に `.md` を読み、hidden path component 配下の file は除外する。`--markdown-exclude-dir <name>` を繰り返すと、その directory basename 配下の file も除外する（例: `raw/`）。
+- `grasp import --markdown <folder>` は再帰的に `.md` を読み、hidden path component 配下の file は除外する。`--markdown-exclude-dir <name>` を繰り返すと、その directory basename 配下の file も除外する（例: `raw/`）。Wikilink は `[[Page]]` / `[[Page|alias]]` / `[[Folder/Page.md#Heading]]` / `[[Page#^block-id]]` を page-level edge として扱う。2026-06-30 Codex follow-up 以降、標準 Markdown inline link も同一 folder 内の相対 `.md` target だけを page-level edge にし、`[label](Folder/Page.md#Heading)` / `[label](Page.md#^block-id)` は target page `Page` への edge になる。HTTP URL、pure local anchor `[label](#heading)`、image link は edge 化しない。
 - page title は frontmatter `title` があればそれ、なければ first H1、さらに無ければ file stem（`foo.md` → `foo`）。同一 normalized title は import 可能で、`page_handles` の 1:N handle として `read <handle>` の ambiguity 候補になる。
 - page id は frontmatter `id` があればそれ、なければ relative path の SHA-1 先頭 24 hex から作る。line id は Cosense import と同じく `<page-id>:<line-index>`。
 - frontmatter `aliases` と file stem は link handle になり、`page_handles` に materialize される。unique handle への `[[alias]]` は `edges.resolution_status=resolved_unique` として `target_page_id` に解決され、duplicate alias は `resolution_status=ambiguous` になる。ambiguous edge は unresolved target には入れず、既存 page backlink / related にも暗黙接続しない。
