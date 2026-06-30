@@ -62,7 +62,7 @@ from .markdown import (
 )
 
 
-SCHEMA_VERSION = "12"
+SCHEMA_VERSION = "13"
 IMPORT_CACHE_MANIFEST_VERSION = 1
 CANONICAL_STORE_ENV = "GRASP_CANONICAL_STORE"
 SQLITE_BUSY_TIMEOUT_MS = 30_000
@@ -153,6 +153,21 @@ CREATE TABLE lines (
   FOREIGN KEY(project, page_id) REFERENCES pages(project, id) ON DELETE CASCADE
 );
 
+CREATE TABLE line_tombstones (
+  project TEXT NOT NULL,
+  line_id TEXT NOT NULL,
+  page_id TEXT NOT NULL,
+  line_index INTEGER NOT NULL,
+  text TEXT NOT NULL,
+  created INTEGER,
+  updated INTEGER,
+  user_id TEXT,
+  tombstoned_at INTEGER NOT NULL,
+  tombstone_reason TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(project, line_id),
+  FOREIGN KEY(project) REFERENCES projects(name) ON DELETE CASCADE
+);
+
 CREATE TABLE edges (
   id INTEGER PRIMARY KEY,
   project TEXT NOT NULL,
@@ -205,6 +220,7 @@ CREATE INDEX idx_page_handles_project_handle_norm ON page_handles(project, handl
 CREATE INDEX idx_page_handles_handle_norm_project ON page_handles(handle_norm, project);
 CREATE INDEX idx_page_handles_project_source_path ON page_handles(project, source_path);
 CREATE INDEX idx_lines_project_page_index ON lines(project, page_id, line_index);
+CREATE INDEX idx_line_tombstones_project_page ON line_tombstones(project, page_id, line_index);
 CREATE INDEX idx_edges_project_target_norm ON edges(project, target_norm);
 CREATE INDEX idx_edges_project_target_handle_norm ON edges(project, target_handle_norm);
 CREATE INDEX idx_edges_target_project_norm ON edges(target_project, target_norm);
@@ -1789,6 +1805,103 @@ def _stored_page_lines(connection: sqlite3.Connection, project: str, page_id: st
         )
         for line_id, line_index, text, created, updated, user_id in rows
     ]
+
+
+def _stored_page_line_payloads(
+    connection: sqlite3.Connection,
+    project: str,
+    page_id: str,
+) -> list[dict[str, Any]]:
+    rows = connection.execute(
+        """
+        SELECT line_id, line_index, text, created, updated, user_id
+        FROM lines
+        WHERE project = ? AND page_id = ?
+        ORDER BY line_index
+        """,
+        (project, page_id),
+    ).fetchall()
+    return [
+        {
+            "line_id": row["line_id"],
+            "line_index": row["line_index"],
+            "text": row["text"],
+            "created": row["created"],
+            "updated": row["updated"],
+            "user_id": row["user_id"],
+        }
+        for row in rows
+    ]
+
+
+def _record_line_tombstones_uncommitted(
+    connection: sqlite3.Connection,
+    project: str,
+    page_id: str,
+    lines: list[dict[str, Any]],
+    *,
+    tombstoned_at: int,
+    reason: str,
+) -> None:
+    if not lines:
+        return
+    connection.executemany(
+        """
+        INSERT INTO line_tombstones (
+          project,
+          line_id,
+          page_id,
+          line_index,
+          text,
+          created,
+          updated,
+          user_id,
+          tombstoned_at,
+          tombstone_reason
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project, line_id) DO UPDATE SET
+          page_id = excluded.page_id,
+          line_index = excluded.line_index,
+          text = excluded.text,
+          created = excluded.created,
+          updated = excluded.updated,
+          user_id = excluded.user_id,
+          tombstoned_at = excluded.tombstoned_at,
+          tombstone_reason = excluded.tombstone_reason
+        """,
+        (
+            (
+                project,
+                str(line.get("line_id") or ""),
+                page_id,
+                int(line.get("line_index", -1)),
+                str(line.get("text", "")),
+                line.get("created"),
+                line.get("updated"),
+                line.get("user_id"),
+                tombstoned_at,
+                reason,
+            )
+            for line in lines
+            if str(line.get("line_id") or "")
+        ),
+    )
+
+
+def _remove_line_tombstones_for_live_ids_uncommitted(
+    connection: sqlite3.Connection,
+    project: str,
+    line_ids: set[str],
+) -> None:
+    if not line_ids:
+        return
+    ordered = sorted(line_ids)
+    placeholders = ",".join("?" for _ in ordered)
+    connection.execute(
+        f"DELETE FROM line_tombstones WHERE project = ? AND line_id IN ({placeholders})",
+        (project, *ordered),
+    )
 
 
 def _inherited_line_ids_by_new_index(previous_lines: list[Line], new_lines: list[Line]) -> dict[int, str]:
@@ -4892,6 +5005,14 @@ class SQLiteStore:
 
         line_page = self._line_and_page_by_id(line_id)
         if line_page is None:
+            tombstone = self._line_tombstone_by_id(line_id)
+            if tombstone is not None:
+                page_title = str(tombstone.get("page_title") or tombstone.get("page_id") or "")
+                raise ValueError(
+                    f"line-id is tombstoned in selected project: {line_id}; "
+                    f"last page={page_title!r} last_line_index={tombstone['line_index']} "
+                    f"reason={tombstone['tombstone_reason']!r}"
+                )
             raise ValueError(
                 f"line-id not found in selected project: {line_id}; "
                 "use a full line_id from --json or --full-ids output"
@@ -5039,6 +5160,14 @@ class SQLiteStore:
             raise ValueError(f"project is not a Markdown-backed project: {project}")
         line_page = self._line_and_page_by_id(line_id)
         if line_page is None:
+            tombstone = self._line_tombstone_by_id(line_id)
+            if tombstone is not None:
+                page_title = str(tombstone.get("page_title") or tombstone.get("page_id") or "")
+                raise ValueError(
+                    f"line-id is tombstoned in selected project: {line_id}; "
+                    f"last page={page_title!r} last_line_index={tombstone['line_index']} "
+                    f"reason={tombstone['tombstone_reason']!r}"
+                )
             raise ValueError(
                 f"line-id not found in selected project: {line_id}; "
                 "use a full line_id from --json or --full-ids output"
@@ -5465,6 +5594,33 @@ class SQLiteStore:
         now = int(time.time())
         line_ids = [item["line_id"] for item in expected]
         placeholders = ",".join("?" for _ in line_ids)
+        tombstone_rows = self.connection.execute(
+            f"""
+            SELECT line_id, line_index, text, created, updated, user_id
+            FROM lines
+            WHERE project = ? AND page_id = ? AND line_id IN ({placeholders})
+            ORDER BY line_index
+            """,
+            (project, page_id, *line_ids),
+        ).fetchall()
+        _record_line_tombstones_uncommitted(
+            self.connection,
+            project,
+            page_id,
+            [
+                {
+                    "line_id": row["line_id"],
+                    "line_index": row["line_index"],
+                    "text": row["text"],
+                    "created": row["created"],
+                    "updated": row["updated"],
+                    "user_id": row["user_id"],
+                }
+                for row in tombstone_rows
+            ],
+            tombstoned_at=now,
+            reason="append_reverted",
+        )
         self.connection.execute(
             f"DELETE FROM edges WHERE project = ? AND line_id IN ({placeholders})",
             (project, *line_ids),
@@ -5668,7 +5824,38 @@ class SQLiteStore:
             (project, page_id),
         ).fetchone()
         page_title = str(page_row["title"]) if page_row is not None else ""
+        previous_line_payloads = _stored_page_line_payloads(self.connection, project, page_id)
         line_payloads: list[dict[str, Any]] = []
+        assigned_line_ids: set[str] = set()
+        for line_index, item in enumerate(lines):
+            line_id = str(item.get("line_id") or "")
+            while not line_id or line_id in assigned_line_ids:
+                line_id = f"line-{uuid4().hex}"
+            assigned_line_ids.add(line_id)
+            line_payloads.append(
+                {
+                    "line_id": line_id,
+                    "line_index": line_index,
+                    "text": str(item.get("text", "")),
+                    "created": item.get("created"),
+                    "updated": item.get("updated"),
+                    "user_id": item.get("user_id"),
+                }
+            )
+        tombstoned_lines = [
+            line
+            for line in previous_line_payloads
+            if str(line.get("line_id") or "") not in assigned_line_ids
+        ]
+        _record_line_tombstones_uncommitted(
+            self.connection,
+            project,
+            page_id,
+            tombstoned_lines,
+            tombstoned_at=updated,
+            reason="page_line_replaced",
+        )
+        _remove_line_tombstones_for_live_ids_uncommitted(self.connection, project, assigned_line_ids)
         self.connection.execute(
             "DELETE FROM edges WHERE project = ? AND source_page_id = ?",
             (project, page_id),
@@ -5677,27 +5864,22 @@ class SQLiteStore:
             "DELETE FROM lines WHERE project = ? AND page_id = ?",
             (project, page_id),
         )
-        for line_index, item in enumerate(lines):
-            line_id = str(item.get("line_id") or f"line-{uuid4().hex}")
-            text = str(item.get("text", ""))
-            created = item.get("created")
-            line_updated = item.get("updated")
-            user_id = item.get("user_id")
-            line_payload = {
-                "line_id": line_id,
-                "line_index": line_index,
-                "text": text,
-                "created": created,
-                "updated": line_updated,
-                "user_id": user_id,
-            }
-            line_payloads.append(line_payload)
+        for line_payload in line_payloads:
             self.connection.execute(
                 """
                 INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (project, line_id, page_id, line_index, text, created, line_updated, user_id),
+                (
+                    project,
+                    line_payload["line_id"],
+                    page_id,
+                    line_payload["line_index"],
+                    line_payload["text"],
+                    line_payload["created"],
+                    line_payload["updated"],
+                    line_payload["user_id"],
+                ),
             )
         if emits_edges:
             edge_rows = _markdown_edge_rows_for_line_payloads(
@@ -8061,6 +8243,14 @@ class SQLiteStore:
 
         line_page = self._line_and_page_by_id(line_id)
         if line_page is None:
+            tombstone = self._line_tombstone_by_id(line_id)
+            if tombstone is not None:
+                page_title = str(tombstone.get("page_title") or tombstone.get("page_id") or "")
+                raise ValueError(
+                    f"line-id is tombstoned in selected project: {line_id}; "
+                    f"last page={page_title!r} last_line_index={tombstone['line_index']} "
+                    f"reason={tombstone['tombstone_reason']!r}"
+                )
             raise ValueError(
                 f"line-id not found in selected project: {line_id}; "
                 "use a full line_id from --json or --full-ids output"
@@ -8761,6 +8951,26 @@ class SQLiteStore:
         if page is None:
             return None
         return page, self._line_from_row(line_row)
+
+    def _line_tombstone_by_id(self, line_id: str) -> dict[str, Any] | None:
+        scope_filter, scope_params = self._scope_filter("tombstone.project")
+        row = self.connection.execute(
+            f"""
+            SELECT
+              tombstone.*,
+              page.title AS page_title
+            FROM line_tombstones tombstone
+            LEFT JOIN pages page
+              ON page.project = tombstone.project
+             AND page.id = tombstone.page_id
+            WHERE {scope_filter}
+              AND tombstone.line_id = ?
+            ORDER BY tombstone.project
+            LIMIT 1
+            """,
+            [*scope_params, line_id],
+        ).fetchone()
+        return None if row is None else dict(row)
 
     def _upsert_cosense_page(self, page: dict[str, Any], project: str) -> None:
         page_id = str(page["id"])
