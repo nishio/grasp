@@ -1822,3 +1822,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 15:29] implementation+file-back | incomplete Markdown query contract
 - code: `search` / `backlinks` / `related` now report `markdown_graph` and `markdown_query_contract` on incomplete Markdown graphs even without `--hydrate-limit`, so empty results are not treated as complete-corpus absence.
 - test: catalog-only 3-page CLI regression verifies no-hydrate empty results include `empty_result_may_be_incomplete=true`; text output includes an incomplete graph warning and hydrate hint.
+
+## [2026-06-30 15:46] implementation+file-back | manual chunked Markdown hydration
+- code: added `hydrate-markdown --limit N` as a manual chunk worker for incomplete Markdown graphs; it hydrates unhydrated source files in source-path order and reports before/after graph progress, remaining files, skipped sources, and reason.
+- test: catalog-only 3-page regression verifies `limit=2` hydrates exactly A/B, leaves one remaining, and the next chunk completes the graph; CLI regression verifies JSON/text progress output.
