@@ -1850,3 +1850,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 17:03] implementation | field-level partial contracts for incomplete Markdown graphs
 - Added markdown_query_contract.partial_fields and result_field_states so retrieval/gather results identify which derived fields are partial on incomplete Markdown graphs.
 - gather now attaches the same partial Markdown contract as search/backlinks/related/mentions/co-links/path/unresolved; text output prints the partial field list.
+
+## [2026-06-30 17:14] implementation | read partial field contract for incomplete Markdown graphs
+- Added markdown_query_contract.partial_fields/result_field_states to read/read --around-line on incomplete Markdown graphs, marking page lines and graph-neighborhood fields as partial.
+- Text read output now prints partial fields alongside the incomplete graph warning; regression covers catalog-only read and read --hydrate.

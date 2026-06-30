@@ -873,6 +873,104 @@ class MarkdownImportTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_cli_read_reports_partial_fields_on_incomplete_markdown_graph(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# Alpha\nlinks to [[B]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki", catalog_only=True)
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "read",
+                    "A",
+                    "--backlinks-limit",
+                    "10",
+                    "--related-limit",
+                    "10",
+                    "--unresolved-limit",
+                    "10",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            result = json.loads(completed.stdout)
+            self.assertEqual(result["page"]["title"], "A")
+            self.assertEqual(result["lines"], [])
+            self.assertIsNone(result["markdown_hydration"])
+            self.assertEqual(result["markdown_graph"]["complete"], False)
+            contract = result["markdown_query_contract"]
+            self.assertEqual(contract["result_scope"], "partial_markdown_graph")
+            self.assertEqual(contract["partial_fields"], [
+                "page",
+                "lines",
+                "line_window",
+                "link_stats",
+                "backlinks",
+                "backlink_count_returned",
+                "backlink_count_total",
+                "related",
+                "unresolved_targets",
+                "recovery_hints",
+            ])
+            self.assertEqual(contract["result_field_states"]["lines"]["state"], "partial")
+            self.assertEqual(contract["result_field_states"]["backlinks"]["reason"], "unhydrated_markdown_sources")
+            self.assertEqual(contract["empty_result_may_be_incomplete"], True)
+
+            hydrated = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "read",
+                    "A",
+                    "--hydrate",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            hydrated_result = json.loads(hydrated.stdout)
+            self.assertEqual([line["text"] for line in hydrated_result["lines"]], ["# Alpha", "links to [[B]]"])
+            self.assertEqual(hydrated_result["markdown_hydration"]["hydrated"], True)
+            self.assertEqual(hydrated_result["markdown_query_contract"]["partial_fields"], contract["partial_fields"])
+            self.assertEqual(hydrated_result["markdown_query_contract"]["empty_result_may_be_incomplete"], False)
+
+            text = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "read",
+                    "B",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout
+            self.assertIn("graph: incomplete", text)
+            self.assertIn("partial fields: page, lines, line_window", text)
+
     def test_hydrate_markdown_chunk_parses_source_order_limit(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
