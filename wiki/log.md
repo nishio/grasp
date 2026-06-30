@@ -1826,3 +1826,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 15:46] implementation+file-back | manual chunked Markdown hydration
 - code: added `hydrate-markdown --limit N` as a manual chunk worker for incomplete Markdown graphs; it hydrates unhydrated source files in source-path order and reports before/after graph progress, remaining files, skipped sources, and reason.
 - test: catalog-only 3-page regression verifies `limit=2` hydrates exactly A/B, leaves one remaining, and the next chunk completes the graph; CLI regression verifies JSON/text progress output.
+
+## [2026-06-30 16:02] implementation+file-back | bounded Markdown hydration loop
+- code: `hydrate-markdown` now supports `--until-complete --max-seconds S`, repeating source-order chunks until graph complete, no progress, or time budget exhaustion; output includes iterations, elapsed_seconds, stopped_by, and the before/after graph.
+- test: regression covers `max_seconds=0` no-start behavior, `--until-complete --max-seconds 10 --limit 1` completing a 3-page catalog in 3 iterations, and CLI rejection of unbounded `--until-complete` without `--max-seconds`.
