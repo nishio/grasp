@@ -34,14 +34,19 @@ from .cosense import (
     parse_cosense_links,
 )
 from .markdown import (
+    MarkdownCollisionError,
     MarkdownMirror,
     MarkdownPageRecord,
+    build_title_aliases,
     first_markdown_h1_title,
     is_code_fence,
     iter_markdown_files,
+    markdown_catalog_record_from_file,
     markdown_edges_for_record,
+    markdown_file_manifest,
     markdown_graph_role,
     markdown_graph_role_emits_edges,
+    markdown_id_collisions,
     markdown_page_record_from_file,
     markdown_page_id,
     markdown_projection_text,
@@ -586,6 +591,7 @@ def import_markdown_folder_to_sqlite(
     project_name: str | None = None,
     exclude_dirs: tuple[str, ...] = (),
     defer_weak_edges: bool = False,
+    catalog_only: bool = False,
 ) -> dict[str, Any]:
     folder_path = Path(folder_path)
     store_path = Path(store_path)
@@ -593,6 +599,14 @@ def import_markdown_folder_to_sqlite(
     if not project:
         raise ValueError(f"could not determine project name for Markdown folder: {folder_path}")
     ensure_store_schema(store_path)
+    if catalog_only:
+        return _import_markdown_catalog_to_sqlite(
+            folder_path,
+            store_path,
+            project,
+            exclude_dirs=exclude_dirs,
+        )
+
     snapshot_connection = connect_sqlite_store(store_path)
     try:
         expected_event_sequence = latest_project_event_sequence(snapshot_connection, project)
@@ -752,6 +766,16 @@ def import_markdown_folder_to_sqlite(
                         ensure_ascii=False,
                         sort_keys=True,
                     ),
+                    f"project.{project}.markdown_graph": json.dumps(
+                        markdown_graph_status_metadata(
+                            complete=True,
+                            mode="full",
+                            total_files=len(source.records),
+                            hydrated_files=len(source.records),
+                        ),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
                     f"project.{project}.markdown_last_import": json.dumps(
                         import_summary,
                         ensure_ascii=False,
@@ -770,6 +794,165 @@ def import_markdown_folder_to_sqlite(
         return stats
     finally:
         store.close()
+
+
+def _import_markdown_catalog_to_sqlite(
+    folder_path: Path,
+    store_path: Path,
+    project: str,
+    *,
+    exclude_dirs: tuple[str, ...],
+) -> dict[str, Any]:
+    records, normalized_exclude_dirs = _markdown_catalog_records_from_folder(folder_path, exclude_dirs)
+    now = int(time.time())
+    title_aliases = {
+        alias_norm: title
+        for alias_norm, title in build_title_aliases(records).items()
+        if normalize_title(title) != alias_norm
+    }
+    file_manifest = markdown_file_manifest(records, exclude_dirs=normalized_exclude_dirs)
+    graph_status = markdown_graph_status_metadata(
+        complete=False,
+        mode="catalog-only",
+        total_files=len(records),
+        hydrated_files=0,
+        reason="catalog_only",
+    )
+    import_summary = {
+        "mode": "catalog",
+        "changed_files": len(records),
+        "full_rebuild_reason": "catalog_only",
+        "catalog_only": True,
+        "graph_complete": False,
+        "scanned_files": len(records),
+        "parsed_files": 0,
+        "identity_source": "path",
+    }
+
+    connection = connect_sqlite_store(store_path, for_write=True)
+    try:
+        expected_event_sequence = latest_project_event_sequence(connection, project)
+        with sqlite_write_transaction(connection):
+            require_project_events_unchanged(
+                connection,
+                project,
+                expected_event_sequence,
+                operation="Markdown import",
+            )
+            _delete_project(connection, project)
+            _insert_markdown_catalog_project(connection, project, records, folder_path, now)
+            _write_metadata(
+                connection,
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "last_imported_project": project,
+                    "last_source_export": str(folder_path),
+                    "last_source_type": "markdown",
+                    "last_imported_at": str(now),
+                    f"project.{project}.source_type": "markdown",
+                    f"project.{project}.title_aliases": json.dumps(
+                        title_aliases,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    f"project.{project}.markdown_manifest": json.dumps(
+                        file_manifest,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    f"project.{project}.markdown_graph": json.dumps(
+                        graph_status,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    f"project.{project}.markdown_last_import": json.dumps(
+                        import_summary,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                },
+            )
+    finally:
+        connection.close()
+
+    _cache_import_source(folder_path, store_path, project, source_type="markdown", exclude_dirs=exclude_dirs)
+    store = SQLiteStore(store_path, project=project)
+    try:
+        stats = store.stats()
+        stats["markdown_import"] = import_summary
+        return stats
+    finally:
+        store.close()
+
+
+def _markdown_catalog_records_from_folder(
+    folder_path: Path,
+    exclude_dirs: tuple[str, ...],
+) -> tuple[list[MarkdownPageRecord], tuple[str, ...]]:
+    if not folder_path.exists():
+        raise ValueError(f"Markdown folder does not exist: {folder_path}")
+    if not folder_path.is_dir():
+        raise ValueError(f"Markdown source must be a folder: {folder_path}")
+    normalized_exclude_dirs = normalize_exclude_dirs(exclude_dirs)
+    markdown_files = list(iter_markdown_files(folder_path, exclude_dirs=normalized_exclude_dirs))
+    if not markdown_files:
+        raise ValueError(f"Markdown folder has no .md files: {folder_path}")
+    records = [markdown_catalog_record_from_file(folder_path, path) for path in markdown_files]
+    id_collisions = markdown_id_collisions(records)
+    if id_collisions:
+        raise MarkdownCollisionError(id_collisions)
+    return records, normalized_exclude_dirs
+
+
+def _insert_markdown_catalog_project(
+    connection: sqlite3.Connection,
+    project: str,
+    records: list[MarkdownPageRecord],
+    folder_path: Path,
+    imported_at: int,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO projects (
+          name,
+          display_name,
+          source_export,
+          exported,
+          imported_at,
+          pages,
+          lines,
+          edges,
+          unresolved_targets
+        )
+        VALUES (?, ?, ?, NULL, ?, ?, 0, 0, 0)
+        """,
+        (
+            project,
+            folder_path.name or project,
+            str(folder_path),
+            imported_at,
+            len(records),
+        ),
+    )
+    _insert_markdown_records(connection, project, records, [])
+
+
+def markdown_graph_status_metadata(
+    *,
+    complete: bool,
+    mode: str,
+    total_files: int | None,
+    hydrated_files: int | None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "complete": bool(complete),
+        "status": "complete" if complete else "incomplete",
+        "mode": mode,
+        "total_files": total_files,
+        "hydrated_files": hydrated_files,
+        "incomplete_reason": None if complete else (reason or "unknown"),
+    }
 
 
 def ensure_store_schema(store_path: str | Path) -> None:
@@ -2017,6 +2200,7 @@ class SQLiteStore:
         source_export = metadata.get("last_source_export") or metadata.get("source_export")
         imported_at = _int_or_none(metadata.get("last_imported_at") or metadata.get("imported_at"))
         acquisition = self.project_acquisition_metadata(project) if project is not None else None
+        markdown_graph = self.project_markdown_graph_status_by_name(project) if project is not None else None
         return {
             "store": str(self.path),
             "project": project,
@@ -2032,6 +2216,7 @@ class SQLiteStore:
             "edges": self._count_if_exists("edges", project=project),
             "unresolved_targets": self._count_if_exists("unresolved_targets", project=project),
             "acquisition": acquisition,
+            "markdown_graph": markdown_graph,
         }
 
     def import_journal_events(
@@ -2210,6 +2395,33 @@ class SQLiteStore:
         except json.JSONDecodeError:
             return None
         return data if isinstance(data, dict) else None
+
+    def project_markdown_graph_status_by_name(self, project: str | None) -> dict[str, Any] | None:
+        if project is None:
+            return None
+        project = normalize_project_name(project)
+        metadata = self.metadata()
+        if metadata.get(f"project.{project}.source_type") != "markdown":
+            return None
+        raw_status = _json_metadata(metadata, f"project.{project}.markdown_graph")
+        if raw_status is not None:
+            return {
+                "complete": bool(raw_status.get("complete")),
+                "status": str(raw_status.get("status") or ("complete" if raw_status.get("complete") else "incomplete")),
+                "mode": str(raw_status.get("mode") or ""),
+                "total_files": raw_status.get("total_files"),
+                "hydrated_files": raw_status.get("hydrated_files"),
+                "incomplete_reason": raw_status.get("incomplete_reason"),
+            }
+        manifest = _json_metadata(metadata, f"project.{project}.markdown_manifest")
+        files = manifest.get("files") if isinstance(manifest, dict) else None
+        total_files = len(files) if isinstance(files, dict) else None
+        return markdown_graph_status_metadata(
+            complete=True,
+            mode="legacy-full",
+            total_files=total_files,
+            hydrated_files=total_files,
+        )
 
     def project_title_aliases(self, project: str | None = None) -> dict[str, str]:
         project = self._require_project(project)
@@ -6772,6 +6984,7 @@ class SQLiteStore:
                     "query": title,
                     "page": None,
                     "ambiguity": self._handle_ambiguity(title, candidates),
+                    "markdown_graph": None,
                     "link_stats": None,
                     "lines": [],
                     "lines_truncated": False,
@@ -6814,6 +7027,7 @@ class SQLiteStore:
                 "query": query,
                 "page": None,
                 "ambiguity": None,
+                "markdown_graph": self.project_markdown_graph_status_by_name(self._selected_project_or_none()),
                 "link_stats": link_stats,
                 "lines": [],
                 "lines_truncated": False,
@@ -6831,6 +7045,7 @@ class SQLiteStore:
             "query": query,
             "page": page.to_summary(),
             "ambiguity": None,
+            "markdown_graph": self.project_markdown_graph_status_by_name(page.project),
             "link_stats": link_stats,
             "lines": [line.to_dict() for line in lines],
             "lines_truncated": lines_truncated,

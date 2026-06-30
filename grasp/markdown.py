@@ -190,6 +190,36 @@ def markdown_page_record_from_file(root: str | Path, path: str | Path) -> Markdo
     )
 
 
+def markdown_catalog_record_from_file(root: str | Path, path: str | Path) -> MarkdownPageRecord:
+    root = Path(root)
+    path = Path(path)
+    relative_path = path.relative_to(root)
+    stat = path.stat()
+    file_title = markdown_title(path)
+    page_id = markdown_page_id(relative_path)
+    title = file_title
+    norm_title = normalize_title(title)
+    updated = int(stat.st_mtime)
+    page = Page(
+        id=page_id,
+        title=title,
+        norm_title=norm_title,
+        created=None,
+        updated=updated,
+        views=0,
+        lines=(),
+    )
+    return MarkdownPageRecord(
+        relative_path=relative_path,
+        page=page,
+        aliases=[],
+        tags=[],
+        graph_role=markdown_graph_role(relative_path, parse_frontmatter([])),
+        source_hash="",
+        mtime_ns=stat.st_mtime_ns,
+    )
+
+
 def markdown_edges_for_record(record: MarkdownPageRecord) -> list[Edge]:
     if not markdown_graph_role_emits_edges(record.graph_role):
         return []
