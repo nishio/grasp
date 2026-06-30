@@ -1951,3 +1951,8 @@ stable line identity と Markdown direct edit policy、git-diff-of-md に依存�
 - code: added write-line <line-id> --text to replace one Markdown-backed stored line while preserving that line_id, recording a page_update event, refreshing derived edges, and supporting no-journal/defer-projection/projection rollback.
 - coverage: tests.test_cli_help.CliHelpTests.test_write_line_updates_single_line_by_stable_line_id verifies full-line-id edit, event payload, projection, edge refresh, and strict status; test_write_line_refuses_other_session_active_claim keeps claim enforcement aligned with write-page. Full unittest discover ran 334 tests OK.
 - caveat: stable line identity still needs Cosense/hosted sync, line tombstones, multi-line/range edit surface, and split/merge/move/duplicate-line policy.
+
+## [2026-07-01 00:55] implementation+file-back | claim retry throughput gate current evidence
+- measurement: current HEAD reran scripts/benchmark_claim_retry_throughput.py --iterations 25 --think-seconds 0,0.02,0.05 --workload hot-page --workload file-back --format table. claim_retry had 50/50 survivors, lost 0, log_lost 0, strict green, and active claim overlap 0 in all six scenarios.
+- metrics: file-back workload p95 claim wait was 0.417/0.439/0.639s and surviving throughput ratio was 0.758/0.760/0.747 for think 0/0.02/0.05s. hot-page p95 wait was 0.363/0.376/0.397s and surviving ratio was 0.623/0.768/0.682.
+- coverage: tests/test_claim_retry_throughput_benchmark.py now fixes matrix parsing, completed/surviving throughput ratios, lossless strict non-overlap gate checks, optional owner thresholds, and file-back table columns without putting the heavy synthetic benchmark into the normal unit suite.
