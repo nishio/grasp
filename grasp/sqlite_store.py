@@ -3659,34 +3659,54 @@ class SQLiteStore:
                 "markdown_graph": graph_status,
             }
 
-    def hydrate_markdown_chunk(self, *, limit: int = 10) -> dict[str, Any]:
+    def hydrate_markdown_chunk(
+        self,
+        *,
+        limit: int = 10,
+        until_complete: bool = False,
+        max_seconds: float | None = None,
+    ) -> dict[str, Any]:
         project = self._require_project()
         limit = max(0, int(limit))
+        max_seconds_value = None if max_seconds is None else max(0.0, float(max_seconds))
+        started = time.monotonic()
+        deadline = None if max_seconds_value is None else started + max_seconds_value
         manifest = self._markdown_manifest_for_project(project)
         files = manifest.get("files")
         graph_status_before = self.project_markdown_graph_status_by_name(project)
         result: dict[str, Any] = {
             "project": project,
             "requested_limit": limit,
+            "until_complete": bool(until_complete),
+            "max_seconds": max_seconds_value,
             "scan": "markdown-source-order",
             "hydrated": [],
             "hydrated_count": 0,
             "skipped": [],
             "skipped_count": 0,
             "scanned_files": 0,
+            "iterations": 0,
+            "elapsed_seconds": 0.0,
+            "stopped_by": None,
             "markdown_graph_before": graph_status_before,
             "markdown_graph": graph_status_before,
             "remaining_files": None,
         }
         if limit <= 0:
             result["reason"] = "limit_zero"
+            result["stopped_by"] = "limit_zero"
+            result["elapsed_seconds"] = round(time.monotonic() - started, 6)
             return result
         if not isinstance(files, dict) or not files:
             result["reason"] = "not_markdown_project"
+            result["stopped_by"] = "not_markdown_project"
+            result["elapsed_seconds"] = round(time.monotonic() - started, 6)
             return result
         if graph_status_before and graph_status_before.get("complete"):
             result["reason"] = "graph_complete"
+            result["stopped_by"] = "graph_complete"
             result["remaining_files"] = 0
+            result["elapsed_seconds"] = round(time.monotonic() - started, 6)
             return result
 
         project_row = self.project_metadata(project)
@@ -3696,42 +3716,78 @@ class SQLiteStore:
         if not folder_path.exists() or not folder_path.is_dir():
             raise ValueError(f"Markdown folder does not exist: {folder_path}")
 
-        for source_path in sorted(str(path) for path in files):
-            if result["hydrated_count"] >= limit:
+        while True:
+            if deadline is not None and time.monotonic() >= deadline:
+                result["reason"] = "time_budget_exhausted"
+                result["stopped_by"] = "max_seconds"
                 break
-            item = files.get(source_path)
-            if not isinstance(item, dict):
-                continue
-            if str(item.get("hash") or ""):
-                continue
-            result["scanned_files"] += 1
-            markdown_path = folder_path / source_path
-            if not markdown_path.exists() or not markdown_path.is_file():
-                result["skipped"].append({"source_path": source_path, "reason": "source_missing"})
-                continue
-            page_id = str(item.get("page_id") or "")
-            page = self._page_by_id(page_id, project=project) if page_id else None
-            if page is None:
-                result["skipped"].append({"source_path": source_path, "reason": "page_missing"})
-                continue
-            hydration = self.hydrate_markdown_page(page)
-            result["hydrated"].append(hydration)
-            if hydration.get("hydrated"):
-                result["hydrated_count"] += 1
 
-        result["skipped_count"] = len(result["skipped"])
-        result["markdown_graph"] = self.project_markdown_graph_status_by_name(project)
-        graph = result["markdown_graph"] or {}
-        total_files = graph.get("total_files")
-        hydrated_files = graph.get("hydrated_files")
-        if isinstance(total_files, int) and isinstance(hydrated_files, int):
-            result["remaining_files"] = max(0, total_files - hydrated_files)
-        if graph.get("complete"):
-            result["reason"] = "graph_complete"
-        elif result["hydrated_count"] >= limit:
-            result["reason"] = "limit_reached"
-        else:
-            result["reason"] = "scan_exhausted"
+            result["iterations"] += 1
+            chunk_hydrated = 0
+            chunk_progress_before = result["hydrated_count"]
+            current_manifest = self._markdown_manifest_for_project(project)
+            current_files = current_manifest.get("files")
+            if not isinstance(current_files, dict) or not current_files:
+                result["reason"] = "not_markdown_project"
+                result["stopped_by"] = "not_markdown_project"
+                break
+
+            for source_path in sorted(str(path) for path in current_files):
+                if chunk_hydrated >= limit:
+                    break
+                if deadline is not None and time.monotonic() >= deadline:
+                    result["reason"] = "time_budget_exhausted"
+                    result["stopped_by"] = "max_seconds"
+                    break
+                item = current_files.get(source_path)
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("hash") or ""):
+                    continue
+                result["scanned_files"] += 1
+                markdown_path = folder_path / source_path
+                if not markdown_path.exists() or not markdown_path.is_file():
+                    result["skipped"].append({"source_path": source_path, "reason": "source_missing"})
+                    continue
+                page_id = str(item.get("page_id") or "")
+                page = self._page_by_id(page_id, project=project) if page_id else None
+                if page is None:
+                    result["skipped"].append({"source_path": source_path, "reason": "page_missing"})
+                    continue
+                hydration = self.hydrate_markdown_page(page)
+                result["hydrated"].append(hydration)
+                if hydration.get("hydrated"):
+                    result["hydrated_count"] += 1
+                    chunk_hydrated += 1
+
+            result["skipped_count"] = len(result["skipped"])
+            result["markdown_graph"] = self.project_markdown_graph_status_by_name(project)
+            graph = result["markdown_graph"] or {}
+            total_files = graph.get("total_files")
+            hydrated_files = graph.get("hydrated_files")
+            if isinstance(total_files, int) and isinstance(hydrated_files, int):
+                result["remaining_files"] = max(0, total_files - hydrated_files)
+
+            if result["stopped_by"] == "max_seconds":
+                break
+            if graph.get("complete"):
+                result["reason"] = "graph_complete"
+                result["stopped_by"] = "graph_complete"
+                break
+            if not until_complete:
+                if chunk_hydrated >= limit:
+                    result["reason"] = "limit_reached"
+                    result["stopped_by"] = "limit"
+                else:
+                    result["reason"] = "scan_exhausted"
+                    result["stopped_by"] = "scan_exhausted"
+                break
+            if chunk_hydrated <= 0 and result["hydrated_count"] == chunk_progress_before:
+                result["reason"] = "no_progress"
+                result["stopped_by"] = "no_progress"
+                break
+
+        result["elapsed_seconds"] = round(time.monotonic() - started, 6)
         return result
 
     def hydrate_markdown_query_sources(self, query: str, *, limit: int = 1) -> dict[str, Any]:
