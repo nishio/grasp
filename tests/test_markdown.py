@@ -1059,6 +1059,39 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertNotIn(new_lines[1].line_id, old_duplicate_ids)
             self.assertEqual(new_lines[2].line_id, old_tail_id)
 
+    def test_reimport_inherits_unique_moved_line_ids(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text("# A\none\ntwo\nthree\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                page = store.resolve_page("A")
+                old_lines, _aliases = store.page_lines(page)
+            finally:
+                store.close()
+
+            page_a.write_text("# A\ntwo\none\nthree\n", encoding="utf-8")
+            result = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            self.assertEqual(result["markdown_import"]["mode"], "incremental")
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                page = store.resolve_page("A")
+                new_lines, _aliases = store.page_lines(page)
+            finally:
+                store.close()
+
+            self.assertEqual([line.text for line in new_lines], ["# A", "two", "one", "three"])
+            self.assertEqual(new_lines[0].line_id, old_lines[0].line_id)
+            self.assertEqual(new_lines[1].line_id, old_lines[2].line_id)
+            self.assertEqual(new_lines[2].line_id, old_lines[1].line_id)
+            self.assertEqual(new_lines[3].line_id, old_lines[3].line_id)
+            self.assertEqual(len({line.line_id for line in new_lines}), len(new_lines))
+
     def test_reimport_full_parse_incremental_path_inherits_line_ids(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1265,6 +1298,43 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertEqual(tombstone["text"], "- dup")
             self.assertEqual(tombstone["tombstone_reason"], "page_line_replaced")
 
+    def test_write_page_inherits_unique_moved_line_ids(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text("# A\none\ntwo\nthree\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                page = store.resolve_page("A")
+                old_lines, _aliases = store.page_lines(page)
+
+                store.write_markdown_page_with_event(
+                    "A",
+                    lines=["# A", "two", "one", "three"],
+                    actor="test",
+                    session_id="moved-line-write-page-test",
+                )
+                new_page = store.resolve_page("A")
+                new_lines, _aliases = store.page_lines(new_page)
+                tombstone_rows = store.connection.execute(
+                    """
+                    SELECT line_id
+                    FROM line_tombstones
+                    WHERE project = ? AND line_id IN (?, ?)
+                    """,
+                    ("wiki", old_lines[1].line_id, old_lines[2].line_id),
+                ).fetchall()
+            finally:
+                store.close()
+
+            self.assertEqual([line.text for line in new_lines], ["# A", "two", "one", "three"])
+            self.assertEqual(new_lines[1].line_id, old_lines[2].line_id)
+            self.assertEqual(new_lines[2].line_id, old_lines[1].line_id)
+            self.assertEqual(tombstone_rows, [])
+
     def test_write_line_range_does_not_inherit_ambiguous_duplicate_line_ids(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1319,6 +1389,48 @@ class MarkdownImportTests(unittest.TestCase):
                     for line_id in sorted(old_duplicate_ids)
                 ],
             )
+
+    def test_write_line_range_inherits_unique_moved_line_ids(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text("# A\n- before\n- one\n- two\n- after\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                page = store.resolve_page("A")
+                old_lines, _aliases = store.page_lines(page)
+                old_one_id = old_lines[2].line_id
+                old_two_id = old_lines[3].line_id
+
+                update_result, _event = store.write_markdown_line_range_with_event(
+                    old_one_id,
+                    old_two_id,
+                    lines=["- two", "- one"],
+                    actor="test",
+                    session_id="moved-line-write-lines-test",
+                )
+                new_page = store.resolve_page("A")
+                new_lines, _aliases = store.page_lines(new_page)
+                tombstone_rows = store.connection.execute(
+                    """
+                    SELECT line_id
+                    FROM line_tombstones
+                    WHERE project = ? AND line_id IN (?, ?)
+                    """,
+                    ("wiki", old_one_id, old_two_id),
+                ).fetchall()
+            finally:
+                store.close()
+
+            self.assertEqual([line.text for line in new_lines], ["# A", "- before", "- two", "- one", "- after"])
+            self.assertEqual(new_lines[2].line_id, old_two_id)
+            self.assertEqual(new_lines[3].line_id, old_one_id)
+            self.assertEqual(update_result["previous_range_line_count"], 2)
+            self.assertEqual(update_result["range_line_count"], 2)
+            self.assertEqual(tombstone_rows, [])
 
     def test_write_page_tombstones_removed_line_ids_and_revert_revives_them(self):
         with tempfile.TemporaryDirectory() as tmpdir:
