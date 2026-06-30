@@ -1348,6 +1348,55 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertEqual(related["markdown_graph"]["hydrated_files"], 1)
             self.assertEqual([item["title"] for item in related["related"]], ["C"])
 
+    def test_cli_hydrate_limit_contract_reports_partial_nonempty_results(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nneedle links to [[B]]\n", encoding="utf-8")
+            (root / "D.md").write_text("# D\nneedle links to [[C]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            (root / "C.md").write_text("# C\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki", catalog_only=True)
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "search",
+                    "needle",
+                    "--hydrate-limit",
+                    "1",
+                    "--limit",
+                    "10",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            result = json.loads(completed.stdout)
+            self.assertEqual([hit["source_title"] for hit in result["hits"]], ["A"])
+            contract = result["markdown_query_contract"]
+            self.assertEqual(contract["result_scope"], "partial_markdown_graph")
+            self.assertEqual(contract["result_completeness"], "partial")
+            self.assertEqual(contract["result_may_be_incomplete"], True)
+            self.assertEqual(contract["empty_result_may_be_incomplete"], False)
+            self.assertEqual(contract["result_field_states"]["hits"]["state"], "partial")
+            progress = contract["hydration_progress"]
+            self.assertEqual(progress["scan"], "markdown-source-query")
+            self.assertEqual(progress["reason"], "limit_reached")
+            self.assertEqual(progress["requested_limit"], 1)
+            self.assertEqual(progress["matched_files"], 1)
+            self.assertEqual(progress["hydrated_count"], 1)
+            self.assertEqual(progress["limit_reached"], True)
+            self.assertEqual(progress["scan_exhausted"], False)
+
     def test_cli_retrieval_reports_incomplete_markdown_graph_without_hydrate(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"

@@ -7952,11 +7952,14 @@ def attach_markdown_query_context(
         result["markdown_query_contract"] = {
             "result_scope": "partial_markdown_graph",
             "graph_complete": False,
+            "result_completeness": "partial",
+            "result_may_be_incomplete": True,
             "empty_result_may_be_incomplete": bool(empty_result),
             "hydrated_files": markdown_graph.get("hydrated_files"),
             "total_files": markdown_graph.get("total_files"),
             "incomplete_reason": markdown_graph.get("incomplete_reason"),
             "hydrate_hint": hydrate_hint,
+            "hydration_progress": markdown_hydration_progress(markdown_hydration),
             "partial_fields": partial_field_list,
             "result_field_states": {
                 field: {
@@ -7968,6 +7971,25 @@ def attach_markdown_query_context(
         }
     else:
         result["markdown_query_contract"] = None
+
+
+def markdown_hydration_progress(markdown_hydration: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not markdown_hydration:
+        return None
+    progress = {
+        "scan": markdown_hydration.get("scan"),
+        "reason": markdown_hydration.get("reason"),
+        "requested_limit": markdown_hydration.get("requested_limit"),
+        "hydrated_count": markdown_hydration.get("hydrated_count"),
+        "scanned_files": markdown_hydration.get("scanned_files"),
+        "matched_files": markdown_hydration.get("matched_files"),
+        "skipped_count": len(markdown_hydration.get("skipped") or []),
+        "limit_reached": markdown_hydration.get("reason") == "limit_reached",
+        "scan_exhausted": markdown_hydration.get("reason") == "scan_exhausted",
+    }
+    if "remaining_files" in markdown_hydration:
+        progress["remaining_files"] = markdown_hydration.get("remaining_files")
+    return progress
 
 
 def attach_markdown_partial_context(
