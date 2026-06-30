@@ -474,6 +474,110 @@ def build_comparison(results: list[dict[str, Any]]) -> dict[str, Any] | None:
     }
 
 
+def gate_thresholds(args: argparse.Namespace) -> dict[str, float | None]:
+    return {
+        "min_surviving_throughput_ratio": args.min_surviving_throughput_ratio,
+        "max_p95_claim_wait_seconds": args.max_p95_claim_wait_seconds,
+    }
+
+
+def gate_enabled(thresholds: dict[str, float | None]) -> bool:
+    return any(value is not None for value in thresholds.values())
+
+
+def evaluate_scenario_gate(
+    *,
+    results: list[dict[str, Any]],
+    comparison: dict[str, Any] | None,
+    thresholds: dict[str, float | None],
+) -> dict[str, Any]:
+    enabled = gate_enabled(thresholds)
+    if not enabled:
+        return {
+            "enabled": False,
+            "ok": None,
+            "failures": [],
+            "reason": "thresholds_not_set",
+        }
+    failures: list[dict[str, Any]] = []
+    claim_retry = next((result for result in results if result.get("mode") == "claim_retry"), None)
+    if claim_retry is None:
+        failures.append({"type": "missing_claim_retry_result"})
+    else:
+        if claim_retry.get("lost_markers"):
+            failures.append({"type": "lost_markers", "actual": claim_retry.get("lost_markers"), "expected": 0})
+        if claim_retry.get("lost_log_markers"):
+            failures.append({"type": "lost_log_markers", "actual": claim_retry.get("lost_log_markers"), "expected": 0})
+        if not claim_retry.get("strict_ok"):
+            failures.append({"type": "strict_not_green", "strict_failures": claim_retry.get("strict_failures")})
+        if claim_retry.get("active_claim_overlap_count"):
+            failures.append(
+                {
+                    "type": "active_claim_overlap",
+                    "actual": claim_retry.get("active_claim_overlap_count"),
+                    "expected": 0,
+                }
+            )
+    min_surviving = thresholds.get("min_surviving_throughput_ratio")
+    if min_surviving is not None:
+        actual = None if comparison is None else comparison.get("claim_retry_surviving_markers_per_second_ratio")
+        if actual is None:
+            failures.append({"type": "missing_surviving_throughput_ratio", "threshold": min_surviving})
+        elif float(actual) < float(min_surviving):
+            failures.append(
+                {
+                    "type": "surviving_throughput_ratio_below_threshold",
+                    "actual": actual,
+                    "threshold": min_surviving,
+                }
+            )
+    max_p95 = thresholds.get("max_p95_claim_wait_seconds")
+    if max_p95 is not None:
+        actual = None if comparison is None else comparison.get("claim_retry_p95_claim_wait_seconds")
+        if actual is None:
+            failures.append({"type": "missing_p95_claim_wait_seconds", "threshold": max_p95})
+        elif float(actual) > float(max_p95):
+            failures.append(
+                {
+                    "type": "p95_claim_wait_above_threshold",
+                    "actual": actual,
+                    "threshold": max_p95,
+                }
+            )
+    return {
+        "enabled": True,
+        "ok": not failures,
+        "failures": failures,
+    }
+
+
+def summarize_gate(scenarios: list[dict[str, Any]], thresholds: dict[str, float | None]) -> dict[str, Any]:
+    enabled = gate_enabled(thresholds)
+    if not enabled:
+        return {
+            "enabled": False,
+            "ok": None,
+            "thresholds": thresholds,
+            "failures": [],
+            "reason": "thresholds_not_set",
+        }
+    failures = [
+        {
+            "workload": scenario.get("workload"),
+            "think_seconds": scenario.get("think_seconds"),
+            "failures": list((scenario.get("gate") or {}).get("failures") or []),
+        }
+        for scenario in scenarios
+        if (scenario.get("gate") or {}).get("failures")
+    ]
+    return {
+        "enabled": True,
+        "ok": not failures,
+        "thresholds": thresholds,
+        "failures": failures,
+    }
+
+
 def format_cell(value: Any) -> str:
     if value is None:
         return "n/a"
@@ -497,6 +601,7 @@ def markdown_table(headers: list[str], rows: list[list[Any]]) -> str:
 def render_tables(output: dict[str, Any]) -> str:
     result_rows: list[list[Any]] = []
     comparison_rows: list[list[Any]] = []
+    gate_rows: list[list[Any]] = []
     for scenario in output["scenarios"]:
         workload = scenario["workload"]
         think_seconds = scenario["think_seconds"]
@@ -573,6 +678,26 @@ def render_tables(output: dict[str, Any]) -> str:
                 ),
             ]
         )
+    gate = output.get("gate") or {}
+    if gate.get("enabled"):
+        for scenario in output["scenarios"]:
+            scenario_gate = scenario.get("gate") or {}
+            failures = scenario_gate.get("failures") or []
+            gate_rows.append(
+                [
+                    scenario.get("workload"),
+                    scenario.get("think_seconds"),
+                    "pass" if scenario_gate.get("ok") else "fail",
+                    "; ".join(str(failure.get("type")) for failure in failures) if failures else "",
+                ]
+            )
+        sections.extend(
+            [
+                "",
+                "## Optional Cutover Threshold Gate",
+                markdown_table(["workload", "think_s", "gate", "failures"], gate_rows),
+            ]
+        )
     return "\n".join(sections)
 
 
@@ -610,6 +735,18 @@ def main(argv: list[str] | None = None) -> int:
         default="json",
         help="Output format. The table format is a Markdown gate summary.",
     )
+    parser.add_argument(
+        "--min-surviving-throughput-ratio",
+        type=float,
+        default=None,
+        help="Optional owner cutover threshold. Fail if claim_retry surviving/s divided by uncoordinated surviving/s is below this value.",
+    )
+    parser.add_argument(
+        "--max-p95-claim-wait-seconds",
+        type=float,
+        default=None,
+        help="Optional owner cutover threshold. Fail if claim_retry p95 claim wait exceeds this many seconds.",
+    )
     args = parser.parse_args(argv)
     if args.workers < 1:
         parser.error("--workers must be >= 1")
@@ -622,9 +759,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--wait-seconds must be >= 0")
     if args.retry_interval_seconds <= 0:
         parser.error("--retry-interval-seconds must be > 0")
+    if args.min_surviving_throughput_ratio is not None and args.min_surviving_throughput_ratio < 0:
+        parser.error("--min-surviving-throughput-ratio must be >= 0")
+    if args.max_p95_claim_wait_seconds is not None and args.max_p95_claim_wait_seconds < 0:
+        parser.error("--max-p95-claim-wait-seconds must be >= 0")
 
     modes = args.mode or list(MODES)
     workloads = args.workload or ["hot-page"]
+    thresholds = gate_thresholds(args)
     started = time.perf_counter()
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
@@ -644,14 +786,21 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     for mode in modes
                 ]
+                comparison = build_comparison(results)
                 scenarios.append(
                     {
                         "workload": workload,
                         "think_seconds": think_seconds,
-                        "comparison": build_comparison(results),
+                        "comparison": comparison,
                         "results": results,
+                        "gate": evaluate_scenario_gate(
+                            results=results,
+                            comparison=comparison,
+                            thresholds=thresholds,
+                        ),
                     }
                 )
+    gate = summarize_gate(scenarios, thresholds)
     output = {
         "benchmark": "claim_retry_throughput_gate",
         "workers": args.workers,
@@ -661,6 +810,8 @@ def main(argv: list[str] | None = None) -> int:
         "wait_seconds": args.wait_seconds,
         "retry_interval_seconds": args.retry_interval_seconds,
         "elapsed_seconds": round(time.perf_counter() - started, 3),
+        "gate": gate,
+        "thresholds": thresholds,
         "scenarios": scenarios,
     }
     if args.format in ("table", "both"):
@@ -683,6 +834,8 @@ def main(argv: list[str] | None = None) -> int:
         or result.get("export_returncode")
         for result in claim_retry_results
     ):
+        return 1
+    if gate.get("enabled") and not gate.get("ok"):
         return 1
     return 0
 
