@@ -4093,6 +4093,154 @@ class CliHelpTests(unittest.TestCase):
             ["log_append", "page_update", "page_update", "log_append"],
         )
 
+    def test_revert_plan_session_reviews_file_back_work_unit_without_markdown_diff(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nold A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nold B\n", encoding="utf-8")
+            (root / "Log.md").write_text("# Log\n", encoding="utf-8")
+            a_source = Path(tmpdir) / "A-new.md"
+            b_source = Path(tmpdir) / "B-new.md"
+            a_source.write_text("# A\nnew A\n", encoding="utf-8")
+            b_source.write_text("# B\nnew B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            session_id = "file-back-session-review-test"
+
+            def run_json(*args):
+                completed = subprocess.run(
+                    [sys.executable, "-m", "grasp", "--json", "--store", str(store_path), "--project", "wiki", *args],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            a_update = run_json(
+                "--actor",
+                "codex",
+                "--session-id",
+                session_id,
+                "write-page",
+                "A",
+                "--from-file",
+                str(a_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            unrelated_update = run_json(
+                "--actor",
+                "codex",
+                "--session-id",
+                "other-session",
+                "write-page",
+                "B",
+                "--from-file",
+                str(b_source),
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            closing_log = run_json(
+                "--actor",
+                "codex",
+                "--session-id",
+                session_id,
+                "append-log",
+                "--timestamp",
+                "2026-07-01 10:30",
+                "--op",
+                "file-back",
+                "--summary",
+                "session review regression",
+                "--line",
+                "- updated [[A]] without relying on a Markdown git diff",
+                "--output",
+                str(root),
+                "--no-journal",
+            )
+            plan = run_json(
+                "revert-plan",
+                a_update["event_id"],
+                "--scope",
+                "session",
+                "--output",
+                str(root),
+            )
+            a_text_after_plan = (root / "A.md").read_text(encoding="utf-8")
+            b_text_after_plan = (root / "B.md").read_text(encoding="utf-8")
+            log_text_after_plan = (root / "Log.md").read_text(encoding="utf-8")
+            connection = sqlite3.connect(store_path)
+            try:
+                sqlite_event_rows_after_plan = connection.execute(
+                    """
+                    SELECT event_id, event_type, session_id
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+
+        self.assertEqual(plan["scope"], "session")
+        self.assertTrue(plan["complete"])
+        self.assertTrue(plan["revertible"])
+        self.assertEqual(plan["session_id"], session_id)
+        self.assertEqual(plan["session_actor"], "codex")
+        self.assertEqual(plan["previous_log_event"], None)
+        self.assertEqual(plan["closing_log_event"], None)
+        self.assertEqual(plan["session_event_ids"], [a_update["event_id"], closing_log["event_id"]])
+        self.assertEqual(plan["candidate_event_ids"], [a_update["event_id"], closing_log["event_id"]])
+        self.assertNotIn(unrelated_update["event_id"], plan["candidate_event_ids"])
+        self.assertEqual(plan["revert_order_event_ids"], [closing_log["event_id"], a_update["event_id"]])
+        self.assertEqual(
+            [event["event_type"] for event in plan["candidate_events"]],
+            ["page_update", "log_append"],
+        )
+        self.assertEqual(
+            [event["target_event_id"] for event in plan["reverted_events"]],
+            [closing_log["event_id"], a_update["event_id"]],
+        )
+        self.assertEqual(
+            plan["suggested_revert_events_args"],
+            [
+                "revert-events",
+                a_update["event_id"],
+                closing_log["event_id"],
+                "--output",
+                str(root),
+            ],
+        )
+        self.assertEqual(a_text_after_plan, "# A\nnew A\n")
+        self.assertEqual(b_text_after_plan, "# B\nnew B\n")
+        self.assertIn("session review regression", log_text_after_plan)
+        self.assertEqual(
+            [row[1] for row in sqlite_event_rows_after_plan],
+            ["page_update", "page_update", "log_append"],
+        )
+        self.assertEqual(
+            [row[2] for row in sqlite_event_rows_after_plan],
+            [session_id, "other-session", session_id],
+        )
+
     def test_revert_plan_subject_log_filters_mixed_log_batch_by_closing_log_subjects(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
