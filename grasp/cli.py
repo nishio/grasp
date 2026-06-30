@@ -179,7 +179,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Build or replace one SQLite graph project from a Cosense JSON export or read-only Markdown folder mirror.",
         returns=(
             "store, project, project_count, projects[], schema_version, current_schema_version, schema_ok, "
-            "source_export, imported_at, pages, lines, edges, unresolved_targets, markdown_import|null"
+            "source_export, imported_at, pages, lines, edges, unresolved_targets, markdown_graph|null, markdown_import|null"
         ),
         examples=[
             "grasp import --cosense raw/nishio.json",
@@ -192,6 +192,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Project name defaults to the export's name field or folder name. Use --project to override.",
             "Markdown mirror uses frontmatter title/id/aliases/tags when present, falls back to first H1 then file stem, and parses [[wikilinks]] plus #tags as internal edges.",
             "Use --markdown-exclude-dir to skip heavy raw/generated directories. source/ is kept as source-backed digest content.",
+            "--catalog-only with --markdown imports a path-derived page catalog only and marks markdown_graph.complete=false; run normal import --markdown later to hydrate titles, lines, and edges.",
             "Markdown re-import uses a manifest: content-only file changes update incrementally; title/alias/id/graph-role/exclude-dir/file-set changes trigger a safe full rebuild.",
             "A cached copy of each imported Cosense JSON is kept beside the store for automatic schema recovery.",
         ],
@@ -221,6 +222,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="NAME",
         help="Directory basename to skip when importing a Markdown mirror. Repeat for multiple names, e.g. --markdown-exclude-dir raw.",
+    )
+    import_parser.add_argument(
+        "--catalog-only",
+        action="store_true",
+        help="For --markdown, import only a path-derived page catalog and mark the Markdown graph incomplete; run normal import later to hydrate titles, lines, and edges.",
     )
 
     adopt_parser = add_command_parser(
@@ -7448,6 +7454,8 @@ def main(argv: list[str] | None = None) -> int:
         project = args.import_project or args.project
         try:
             if args.cosense_export is not None:
+                if args.catalog_only:
+                    parser.error("--catalog-only is only valid with import --markdown")
                 export_path = args.cosense_export
                 if not export_path.exists():
                     parser.error(f"export path does not exist: {export_path}")
@@ -7468,6 +7476,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.store,
                     project_name=project,
                     exclude_dirs=tuple(args.markdown_exclude_dir),
+                    catalog_only=args.catalog_only,
                 )
         except MarkdownCollisionError as error:
             if args.json:
@@ -9013,6 +9022,21 @@ def format_stats(result: dict[str, Any]) -> str:
             f"{range_line}"
             "note: backlinks/related/unresolved are within the acquired corpus.\n"
         )
+    markdown_graph = result.get("markdown_graph")
+    markdown_graph_section = ""
+    if markdown_graph:
+        markdown_graph_section = (
+            "\n## Markdown Graph\n"
+            f"status: {markdown_graph.get('status')}\n"
+            f"mode: {markdown_graph.get('mode')}\n"
+            f"complete: {markdown_graph.get('complete')}\n"
+            f"hydrated_files: {markdown_graph.get('hydrated_files')} / {markdown_graph.get('total_files')}\n"
+        )
+        if markdown_graph.get("complete") is False:
+            markdown_graph_section += (
+                f"incomplete_reason: {markdown_graph.get('incomplete_reason')}\n"
+                "note: lines, backlinks, related, and unresolved targets may be incomplete until normal import --markdown hydrates the graph.\n"
+            )
     return (
         f"store: {result['store']}\n"
         f"project: {result['project']}\n"
@@ -9028,6 +9052,7 @@ def format_stats(result: dict[str, Any]) -> str:
         f"unresolved_targets: {result['unresolved_targets']}\n"
         f"\n## Projects\n{project_section}"
         f"{acquisition_section}"
+        f"{markdown_graph_section}"
         f"{diagnostic}"
     )
 
@@ -9088,6 +9113,13 @@ def format_read(result: dict[str, Any], aliases: LineIdAliases | None = None) ->
         parts.append(
             f"id: {page['id']}\nviews: {page['views']}\nlines: {page['line_count']}\n"
         )
+        markdown_graph = result.get("markdown_graph")
+        if markdown_graph and markdown_graph.get("complete") is False:
+            parts.append(
+                f"graph: incomplete ({markdown_graph.get('mode')}, "
+                f"{markdown_graph.get('hydrated_files')}/{markdown_graph.get('total_files')} files hydrated)\n"
+            )
+            parts.append("note: page lines and graph neighborhoods may be incomplete until normal import --markdown hydrates this project.\n")
         parts.append(format_link_stats_summary(result.get("link_stats", {})))
         line_window = result.get("line_window")
         if line_window:
