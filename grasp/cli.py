@@ -700,7 +700,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "scope, project|null, project_count, projects[], handle_count, handles_returned, "
-            "limit, offset, candidate_limit, ambiguities[]"
+            "limit, offset, candidate_limit, ambiguities[], markdown_graph|null, markdown_query_contract|null"
         ),
         examples=[
             "grasp ambiguities --limit 20",
@@ -711,6 +711,7 @@ def build_parser() -> argparse.ArgumentParser:
             "ambiguities[] items include project, handle, handle_norm, candidate_count, candidates[], "
             "ambiguous_link_count, ambiguous_source_page_count, and graph_role_counts.",
             "ambiguous_link_count counts incoming links whose target handle is ambiguous; candidates[] is bounded by --candidate-limit.",
+            "On incomplete Markdown graphs, markdown_query_contract marks ambiguity diagnostics as partial because unhydrated files may add titles, aliases, or links.",
         ],
     )
     ambiguities_parser.add_argument("--limit", type=int, default=50, help="Maximum ambiguous handles to return.")
@@ -727,7 +728,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "query, handle_norm, scope, project|null, project_count, signal_project_count, projects_returned, "
-            "connection_strength, totals, top_source_projects[], projects[]"
+            "connection_strength, totals, top_source_projects[], projects[], markdown_graph|null, markdown_query_contract|null"
         ),
         examples=[
             "grasp cross-project-spread KJ法 --limit 20",
@@ -738,6 +739,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Without --project, scans all projects in the store; with --project, scans only that namespace.",
             "projects[] items include materialized candidate pages, unresolved target stats, and incoming link resolution counts.",
             "connection_strength=weak-normalized-title means the command reports a retrieval hint, not an authored merge.",
+            "On incomplete selected Markdown graphs, markdown_query_contract marks spread counts as partial.",
         ],
     )
     cross_project_spread_parser.add_argument("title", help="Title or visible link handle to scan across projects.")
@@ -755,7 +757,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "scope, project|null, project_count, total_handle_count, handle_count, handles_returned, "
-            "connection_strength, rank_basis, spreads[]"
+            "connection_strength, rank_basis, spreads[], markdown_graph|null, markdown_query_contract|null"
         ),
         examples=[
             "grasp cross-project-spreads --limit 20",
@@ -766,6 +768,7 @@ def build_parser() -> argparse.ArgumentParser:
             "spreads[] items include title, handle_norm, project_spread, materialized/unresolved/incoming counts, rank_band, and project_samples[].",
             "Concept-like handles rank before structural-name, numeric-only, and artifact-only handles; lower bands are still reported when they enter the bounded result set.",
             "Use cross-project-spread <title> to inspect one returned handle in detail.",
+            "On incomplete selected Markdown graphs, markdown_query_contract marks ranked spread counts as partial.",
         ],
     )
     cross_project_spreads_parser.add_argument("--limit", type=int, default=50, help="Maximum handle rows to return.")
@@ -845,14 +848,17 @@ def build_parser() -> argparse.ArgumentParser:
         description="Classify a title as existing/missing and report incoming link multiplicity.",
         returns=(
             "query, title, normalized_title, page_exists, page|null, "
-            "link_count, source_page_count, link_multiplicity, recovery_hints|null"
+            "link_count, source_page_count, link_multiplicity, recovery_hints|null, markdown_graph|null, markdown_query_contract|null"
         ),
         examples=[
             "grasp link-stats 盲点カード",
             "grasp link-stats 民主主義",
             "grasp --json link-stats 民主主義",
         ],
-        notes=["link_multiplicity is one of: none, single, multi."],
+        notes=[
+            "link_multiplicity is one of: none, single, multi.",
+            "On incomplete Markdown graphs, incoming link counts and recovery hints are partial.",
+        ],
     )
     link_stats_parser.add_argument("title", help="Existing page title or missing linked target.")
 
@@ -861,7 +867,10 @@ def build_parser() -> argparse.ArgumentParser:
         "peek",
         help="Show page lines only.",
         description="Preview the body lines of an existing page without backlinks or related context.",
-        returns="query, page|null, line_offset, lines[], lines_truncated, lines_truncated_before, lines_truncated_after",
+        returns=(
+            "query, page|null, line_offset, lines[], lines_truncated, lines_truncated_before, "
+            "lines_truncated_after, markdown_graph|null, markdown_query_contract|null"
+        ),
         examples=[
             "grasp peek 盲点カード --line-limit 12",
             "grasp peek 盲点カード --line-offset 120 --line-limit 20",
@@ -870,6 +879,7 @@ def build_parser() -> argparse.ArgumentParser:
         notes=[
             "For missing pages, page is null and lines[] is empty.",
             "lines_truncated is kept for compatibility and has the same value as lines_truncated_after.",
+            "On incomplete Markdown graphs, page lines may be empty only because the source file has not been hydrated.",
         ],
     )
     peek_parser.add_argument("title", help="Existing page title to preview.")
@@ -884,7 +894,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Search normalized page titles. The default fuzzy mode keeps exact/substring matches first, "
             "then also matches separated terms and compact character-subsequence queries for long sentence titles."
         ),
-        returns="query, mode, suggestions[]",
+        returns="query, mode, suggestions[], markdown_graph|null, markdown_query_contract|null",
         examples=[
             "grasp suggest 盲点 --limit 10",
             "grasp suggest '書字 副産物' --limit 10",
@@ -895,6 +905,7 @@ def build_parser() -> argparse.ArgumentParser:
             "suggestions[] items are page summaries plus match_mode, match_score, and matched_terms.",
             "--mode substring restores strict normalized substring matching.",
             "Fuzzy mode is lexical and asearch-style; semantic embedding search is a later retrieval layer.",
+            "On incomplete Markdown graphs, title suggestions are partial because unhydrated frontmatter titles and aliases are not materialized yet.",
         ],
     )
     suggest_parser.add_argument("partial", help="Partial page title text.")
@@ -8121,22 +8132,46 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         )
         return result
     if args.command == "ambiguities":
-        return store.ambiguities(limit=args.limit, offset=args.offset, candidate_limit=args.candidate_limit)
+        result = store.ambiguities(limit=args.limit, offset=args.offset, candidate_limit=args.candidate_limit)
+        attach_markdown_partial_context(
+            result,
+            store,
+            empty_result=not bool(result.get("ambiguities")),
+            hydrate_hint="Run `hydrate-markdown --limit N` or normal `import --markdown` before retrying ambiguities.",
+            partial_fields=["projects", "ambiguities", "handle_count", "handles_returned"],
+        )
+        return result
     if args.command == "cross-project-spread":
-        return store.cross_project_spread(
+        result = store.cross_project_spread(
             args.title,
             limit=args.limit,
             offset=args.offset,
             candidate_limit=args.candidate_limit,
         )
+        attach_markdown_partial_context(
+            result,
+            store,
+            empty_result=not bool(result.get("projects")),
+            hydrate_hint=f"Run `hydrate-markdown --limit N` or normal `import --markdown` before retrying cross-project-spread {shlex.quote(args.title)}.",
+            partial_fields=["totals", "top_source_projects", "projects", "signal_project_count"],
+        )
+        return result
     if args.command == "cross-project-spreads":
-        return store.cross_project_spreads(
+        result = store.cross_project_spreads(
             limit=args.limit,
             offset=args.offset,
             min_projects=args.min_projects,
             project_limit=args.project_limit,
             candidate_limit=args.candidate_limit,
         )
+        attach_markdown_partial_context(
+            result,
+            store,
+            empty_result=not bool(result.get("spreads")),
+            hydrate_hint="Run `hydrate-markdown --limit N` or normal `import --markdown` before retrying cross-project-spreads.",
+            partial_fields=["spreads", "handle_count", "handles_returned"],
+        )
+        return result
     if args.command == "related":
         markdown_hydration = hydrate_query_sources_for_args(store, args, args.title)
         result = store.related_report(args.title, limit=args.limit)
@@ -8167,12 +8202,20 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         )
         return result
     if args.command == "link-stats":
-        return store.link_stats(args.title)
+        result = store.link_stats(args.title)
+        attach_markdown_partial_context(
+            result,
+            store,
+            empty_result=int(result.get("link_count") or 0) == 0,
+            hydrate_hint=f"Run `hydrate-markdown --limit N` or normal `import --markdown` before retrying link-stats {shlex.quote(args.title)}.",
+            partial_fields=["page", "link_count", "source_page_count", "link_multiplicity", "recovery_hints"],
+        )
+        return result
     if args.command == "peek":
         page = store.resolve_page(args.title)
         line_offset = max(0, args.line_offset)
         if page is None:
-            return {
+            result = {
                 "query": args.title,
                 "page": None,
                 "line_offset": line_offset,
@@ -8181,9 +8224,17 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
                 "lines_truncated_before": False,
                 "lines_truncated_after": False,
             }
+            attach_markdown_partial_context(
+                result,
+                store,
+                empty_result=True,
+                hydrate_hint=f"Retry with `read {shlex.quote(args.title)} --hydrate`, run `hydrate-markdown --limit N`, or normal `import --markdown`.",
+                partial_fields=["page", "lines", "lines_truncated", "lines_truncated_before", "lines_truncated_after"],
+            )
+            return result
         lines, truncated_after = store.page_lines(page, args.line_limit, offset=line_offset)
         truncated_before = line_offset > 0
-        return {
+        result = {
             "query": args.title,
             "page": page.to_summary(),
             "line_offset": line_offset,
@@ -8192,12 +8243,28 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             "lines_truncated_before": truncated_before,
             "lines_truncated_after": truncated_after,
         }
+        attach_markdown_partial_context(
+            result,
+            store,
+            empty_result=not bool(result.get("lines")),
+            hydrate_hint=f"Retry with `read {shlex.quote(args.title)} --hydrate`, run `hydrate-markdown --limit N`, or normal `import --markdown`.",
+            partial_fields=["page", "lines", "lines_truncated", "lines_truncated_before", "lines_truncated_after"],
+        )
+        return result
     if args.command == "suggest":
-        return {
+        result = {
             "query": args.partial,
             "mode": args.mode,
             "suggestions": store.suggest(args.partial, limit=args.limit, mode=args.mode),
         }
+        attach_markdown_partial_context(
+            result,
+            store,
+            empty_result=not bool(result.get("suggestions")),
+            hydrate_hint="Run `hydrate-markdown --limit N` or normal `import --markdown` before retrying suggest.",
+            partial_fields=["suggestions"],
+        )
+        return result
     if args.command == "search":
         if args.mode != "literal" and getattr(args, "hydrate_limit", 0) > 0:
             raise ValueError("search --hydrate-limit is only supported with --mode literal")
@@ -8838,7 +8905,13 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
     if command == "peek":
         return format_peek(result, aliases=aliases)
     if command == "suggest":
-        return format_suggest(result["query"], result["suggestions"], mode=result.get("mode"))
+        return format_suggest(
+            result["query"],
+            result["suggestions"],
+            mode=result.get("mode"),
+            markdown_graph=result.get("markdown_graph"),
+            markdown_query_contract=result.get("markdown_query_contract"),
+        )
     if command == "search":
         return format_search(
             result["query"],
@@ -9850,6 +9923,7 @@ def format_ambiguities(result: dict[str, Any]) -> str:
         f"offset: {result['offset']}\n",
         f"candidate_limit: {result['candidate_limit']}\n",
     ]
+    parts.append(format_markdown_hydration_summary(result))
     projects = result.get("projects", [])
     if projects:
         parts.append("\n## Projects\n")
@@ -9907,6 +9981,7 @@ def format_cross_project_spread(result: dict[str, Any]) -> str:
         ),
         f"note: {result['note']}\n",
     ]
+    parts.append(format_markdown_hydration_summary(result))
     top_sources = result.get("top_source_projects") or []
     if top_sources:
         parts.append("\n## Top Source Projects\n")
@@ -9954,8 +10029,9 @@ def format_cross_project_spreads(result: dict[str, Any]) -> str:
         f" (total scanned: {result['total_handle_count']}, min_projects={result['min_projects']})\n",
         f"rank_basis: {result['rank_basis']}\n",
         f"note: {result['note']}\n",
-        "\n## Spreads\n",
     ]
+    parts.append(format_markdown_hydration_summary(result))
+    parts.append("\n## Spreads\n")
     spreads = result.get("spreads") or []
     if not spreads:
         parts.append("(none)\n")
@@ -10221,8 +10297,9 @@ def format_link_stats(result: dict[str, Any], aliases: LineIdAliases | None = No
         f"query: {result['query']}\n",
         f"normalized: {result['normalized_title']}\n",
         f"page: {page_status}\n",
-        format_link_stats_summary(result),
     ]
+    parts.append(format_markdown_hydration_summary(result))
+    parts.append(format_link_stats_summary(result))
     page = result.get("page")
     if page is not None:
         parts.append(f"id: {page['id']}\nviews: {page['views']}\nlines: {page['line_count']}\n")
@@ -10294,9 +10371,12 @@ def format_peek(result: dict[str, Any], aliases: LineIdAliases | None = None) ->
     aliases = aliases or LineIdAliases(enabled=False)
     page = result["page"]
     if page is None:
-        return f"# {result['query']}\npage: missing\n"
+        parts = [f"# {result['query']}\npage: missing\n"]
+        parts.append(format_markdown_hydration_summary(result))
+        return "".join(parts)
 
     parts = [f"# {page['title']}\n", f"id: {page['id']}\nviews: {page['views']}\nlines: {page['line_count']}\n"]
+    parts.append(format_markdown_hydration_summary(result))
     line_offset = result.get("line_offset", 0)
     if line_offset:
         parts.append(f"line_offset: {line_offset}\n")
@@ -10310,10 +10390,21 @@ def format_peek(result: dict[str, Any], aliases: LineIdAliases | None = None) ->
     return with_alias_legend("".join(parts), aliases)
 
 
-def format_suggest(query: str, suggestions: list[dict[str, Any]], *, mode: str | None = None) -> str:
+def format_suggest(
+    query: str,
+    suggestions: list[dict[str, Any]],
+    *,
+    mode: str | None = None,
+    markdown_graph: dict[str, Any] | None = None,
+    markdown_query_contract: dict[str, Any] | None = None,
+) -> str:
     parts = [f"# Suggestions: {query}\n"]
     if mode:
         parts.append(f"mode: {mode}\n")
+    parts.append(format_markdown_hydration_summary({
+        "markdown_graph": markdown_graph,
+        "markdown_query_contract": markdown_query_contract,
+    }))
     if not suggestions:
         parts.append("(none)\n")
     else:
