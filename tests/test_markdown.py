@@ -145,6 +145,29 @@ class MarkdownParsingTests(unittest.TestCase):
         self.assertEqual(backlinks["backlinks"][0]["target_fragment"], "Section")
         self.assertEqual(backlinks["backlinks"][0]["target_line_id"], f"{markdown_page_id(Path('B.md'))}:2")
 
+    def test_markdown_heading_anchors_match_github_style_slugs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "A.md").write_text(
+                "# A\n"
+                "[slug](B.md#api-overview)\n"
+                "[duplicate](B.md#repeat-heading-1)\n",
+                encoding="utf-8",
+            )
+            (root / "B.md").write_text(
+                "# B\n"
+                "## API: Overview!\n"
+                "## Repeat Heading?\n"
+                "## Repeat Heading?\n",
+                encoding="utf-8",
+            )
+
+            mirror = MarkdownMirror.from_folder(root)
+
+        edges_by_fragment = {edge.target_fragment: edge for edge in mirror.edges}
+        self.assertEqual(edges_by_fragment["api-overview"].target_line_id, f"{markdown_page_id(Path('B.md'))}:1")
+        self.assertEqual(edges_by_fragment["repeat-heading-1"].target_line_id, f"{markdown_page_id(Path('B.md'))}:3")
+
     def test_parse_frontmatter_reads_title_id_aliases_and_tags(self):
         metadata = parse_frontmatter(
             [

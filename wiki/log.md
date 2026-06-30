@@ -1891,3 +1891,8 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 `import --markdown` now stores `edges.target_fragment` and resolves Markdown heading/block fragments to `edges.target_line_id` when the unique target page contains the heading or block id; resolved local-only anchors become self-page line edges.
 Schema bumped to `10`; `refresh_edge_resolutions` recomputes `target_line_id` from `target_fragment` so incoming edges survive target-only incremental re-imports.
 Regression: `tests.test_markdown.MarkdownParsingTests` covers mirror edge line targets, persisted backlinks output, local anchors, and target-only incremental refresh.
+
+## [2026-06-30 19:29] implementation+file-back | Markdown heading slug anchors
+`import --markdown` now resolves heading fragments through GitHub-style slugs, so links such as `[x](Page.md#api-overview)` can target `## API: Overview!`.
+Duplicate headings use the same `-1`, `-2` suffix convention during `target_line_id` resolution; schema bumped to `11` because materialized line-target semantics changed.
+Regression: `tests.test_markdown.MarkdownParsingTests.test_markdown_heading_anchors_match_github_style_slugs` covers punctuation stripping and duplicate heading suffixes.
