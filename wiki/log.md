@@ -1906,3 +1906,6 @@ compat: bumped public version to 1.12.0 and internal schema to 12 because materi
 [[grasp-backlog]] and [[adoption-trust-gradient]] now distinguish the already-fixed lost-update correctness gate from the still-open mode2 cutover policy gate.
 Next measurement should broaden scripts/benchmark_claim_retry_throughput.py to larger N, multiple think times, and file-back-like read/write/log/projection workload, then report lost=0, strict green, active claim overlap 0, throughput ratios, and p95 claim wait.
 Mode2 cutover remains a policy decision until owner chooses acceptable overhead thresholds from that measurement.
+
+## [2026-06-30 23:17] file-back | SQLite authority の読み取り優先を明文化
+- [[native-authority-markdown-projection]] / [[sqlite-ssot-write-plan]] に、current knowledge 確認は SQLite-backed read surface first、Markdown は strict projection clean 時だけ readable cache とする運用を追記。AGENTS/CLAUDE も同趣旨に更新する。
