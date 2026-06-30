@@ -524,7 +524,7 @@ def build_parser() -> argparse.ArgumentParser:
         returns=(
             "query, page|null, link_stats, lines, lines_truncated, backlinks, "
             "line_window|null, backlink_count_returned, backlink_count_total, related, "
-            "unresolved_targets, recovery_hints|null, ambiguity|null; with --around-line, lines[] is the bounded "
+            "unresolved_targets, recovery_hints|null, ambiguity|null, markdown_hydration|null; with --around-line, lines[] is the bounded "
             "window around that line; with --related-snippets, related[] items also include "
             "snippet_lines[], snippet_truncated, and snippet_mode"
         ),
@@ -543,6 +543,7 @@ def build_parser() -> argparse.ArgumentParser:
             "unresolved_targets[] is populated only for existing pages.",
             "--around-line accepts a full line_id from JSON or --full-ids text output. Local aliases like P1:12 are per-output only.",
             "--page-id and --path select a page identity directly when a visible handle is ambiguous.",
+            "--hydrate on a catalog-only Markdown graph parses the selected source file before reading it.",
             "--related-snippets includes the first N lines of each related/source page, matching the Cosense related-pane reading pattern.",
             "--related-snippet-mode edge centers snippets on the link line that explains each related/source item.",
         ],
@@ -551,6 +552,7 @@ def build_parser() -> argparse.ArgumentParser:
     read_parser.add_argument("--around-line", default=None, help="Open the page containing this full line_id and return a bounded line window around it.")
     read_parser.add_argument("--page-id", default=None, help="Open a materialized page by stable page id instead of visible title/alias.")
     read_parser.add_argument("--path", dest="source_path", default=None, help="Open a Markdown mirror page by source path relative to the imported folder.")
+    read_parser.add_argument("--hydrate", action="store_true", help="For incomplete Markdown graphs, parse the selected source file before reading it.")
     read_parser.add_argument("--line-context", type=int, default=5, help="Number of lines before and after --around-line to return.")
     read_parser.add_argument("--line-limit", type=int, default=None, help="Maximum page lines to return; omit for all lines.")
     read_parser.add_argument("--backlinks-limit", type=int, default=20, help="Maximum backlink lines to return.")
@@ -7569,7 +7571,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         parser.error(store_missing_error(args.store))
 
-    store_for_write = args.command in STORE_WRITE_COMMANDS
+    store_for_write = args.command in STORE_WRITE_COMMANDS or (args.command == "read" and getattr(args, "hydrate", False))
     store: SQLiteStore | None = SQLiteStore(args.store, project=args.project, for_write=store_for_write)
     try:
         if args.command != "stats" and not store.schema_ok():
@@ -7679,6 +7681,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return store.stats()
     if args.command == "read":
         if args.around_line:
+            if args.hydrate:
+                raise ValueError("--hydrate cannot be combined with --around-line")
             if args.page_id or args.source_path:
                 raise ValueError("--around-line cannot be combined with --page-id or --path")
             if args.line_limit is not None:
@@ -7709,6 +7713,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             related_snippets=args.related_snippets,
             related_snippet_lines=args.related_snippet_lines,
             related_snippet_mode=args.related_snippet_mode,
+            hydrate=args.hydrate,
         )
     if args.command == "backlinks":
         return store.backlinks_report(args.title, limit=args.limit, offset=args.offset)
@@ -9113,6 +9118,15 @@ def format_read(result: dict[str, Any], aliases: LineIdAliases | None = None) ->
         parts.append(
             f"id: {page['id']}\nviews: {page['views']}\nlines: {page['line_count']}\n"
         )
+        markdown_hydration = result.get("markdown_hydration")
+        if markdown_hydration and markdown_hydration.get("hydrated"):
+            graph = markdown_hydration.get("markdown_graph") or {}
+            parts.append(
+                f"hydrated: {markdown_hydration.get('source_path')} "
+                f"({markdown_hydration.get('line_count')} lines, "
+                f"{markdown_hydration.get('edge_count')} edges, "
+                f"{graph.get('hydrated_files')}/{graph.get('total_files')} files)\n"
+            )
         markdown_graph = result.get("markdown_graph")
         if markdown_graph and markdown_graph.get("complete") is False:
             parts.append(
