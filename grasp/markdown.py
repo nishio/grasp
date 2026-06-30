@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import hashlib
 from pathlib import Path
 import re
+import unicodedata
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
@@ -962,9 +963,19 @@ def markdown_fragment_line_id(lines: tuple[Line, ...] | list[Line], fragment: st
         return None
 
     target_norms = markdown_heading_anchor_norms(fragment)
+    slug_counts: dict[str, int] = {}
     for line in markdown_visible_lines(lines):
         heading = parse_markdown_heading_title(line.text)
-        if heading is not None and markdown_heading_anchor_norms(heading) & target_norms:
+        if heading is None:
+            continue
+        heading_norms = markdown_heading_anchor_norms(heading)
+        slug = markdown_github_heading_slug(heading)
+        if slug:
+            slug_index = slug_counts.get(slug, 0)
+            slug_counts[slug] = slug_index + 1
+            if slug_index:
+                heading_norms.add(normalize_title(f"{slug}-{slug_index}"))
+        if heading_norms & target_norms:
             return line.line_id
     return None
 
@@ -993,7 +1004,24 @@ def markdown_visible_lines(lines: tuple[Line, ...] | list[Line]) -> list[Line]:
 def markdown_heading_anchor_norms(text: str) -> set[str]:
     text = unquote(text).strip()
     variants = {text, text.replace("-", " ")}
+    slug = markdown_github_heading_slug(text)
+    if slug:
+        variants.add(slug)
     return {norm for variant in variants if (norm := normalize_title(variant))}
+
+
+def markdown_github_heading_slug(text: str) -> str | None:
+    parts: list[str] = []
+    for char in unquote(text).strip().casefold():
+        category = unicodedata.category(char)
+        if char.isspace() or char == "-":
+            if parts and parts[-1] != "-":
+                parts.append("-")
+            continue
+        if char.isalnum() or category[0] in {"L", "N"}:
+            parts.append(char)
+    slug = "".join(parts).strip("-")
+    return slug or None
 
 
 def markdown_line_has_block_id(text: str, block_id: str) -> bool:
