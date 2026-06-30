@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.13.1`（更新: 2026-07-01 01:23、store: schema `13`、compat: schema `13` compatible）: `write-lines <start-line-id> <end-line-id>` を追加した。Markdown-backed page の同一 page 上の inclusive line-id range を置換し、範囲外の line_id と範囲内の exact unchanged line_id を維持し、挿入 line には opaque id を mint し、削除された範囲 line_id は `line_tombstones` に残す。event は `page_update` として `target_start_line_id` / `target_end_line_id` / `previous_range_lines` / `range_lines` / full before/after lines を持つ。active claim、dirty projection guard、`--no-journal`、`--defer-projection`、projection rollback に対応する。schema は不変
 - `1.13.0`（更新: 2026-07-01 01:03、store: schema `13`、compat: schema `13`）: stable line identity の削除側 memory として `line_tombstones` table を追加した。Markdown-backed page replacement / append revert で live `lines` から消える `line_id` は tombstone に入り、同じ `line_id` が revert などで live に戻る時は tombstone から外れる。`read --around-line` / `write-line` / line-id source path lookup は tombstoned line id を通常の not-found ではなく tombstone diagnostic として返す。schema は `13`
 - `1.12.0`（更新: 2026-06-30 20:30、store: schema `12`、compat: schema `12`）: Markdown write-alpha 由来 edge でも anchor fragment を import path と同じ materialized edge semantics で保持するようにした。`write-page` 既存置換 / `write-page --create` / legacy-compatible append path は `[label](Page.md#Heading)` / `[label](Page.md#^block-id)` / local-only `[label](#Heading)` から `target_fragment` を保存し、unique target page で解決できる時は `target_line_id` も更新する。missing local anchor は import path と同じく edge 化しない。schema table shape は `11` と同じだが write path の materialized edge semantics が変わるため schema `12` として再構築対象にする。
 - `1.11.0`（更新: 2026-06-30 19:27、store: schema `11`、compat: schema `11`）: Markdown heading anchor matching を GitHub-style slug に寄せた。`target_line_id` 解決は exact / hyphen-to-space に加え、heading text から punctuation を落とし、space / hyphen を collapsed hyphen にした slug（例: `## API: Overview!` → `api-overview`）でも照合する。同一 slug の重複 heading は GitHub と同じく2件目以降を `-1`, `-2` suffix で照合する。schema table shape は `10` と同じだが materialized `target_line_id` semantics が変わるため schema `11` として再構築対象にする。
@@ -227,6 +228,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.13.0`
+- Current public compatibility version: `1.13.1`
 - Current internal `SCHEMA_VERSION`: `13`
-- Current package metadata should match `1.13.0`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.13.1`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
