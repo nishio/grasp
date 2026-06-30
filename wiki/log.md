@@ -1858,3 +1858,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 17:25] implementation | hot-page claim retry regression for cutover gate
 - Added a subprocess hot-page regression where two workers claim/read/write/release the same page with claim retry and deferred projection; all markers must survive.
 - The regression exports the projection and requires write-status --no-journal --strict to stay green, fixing the first lost-update cutover gate in tests.
+
+## [2026-06-30 17:36] implementation | claim retry throughput benchmark harness
+- Added scripts/benchmark_claim_retry_throughput.py to rerun uncoordinated vs claim_retry hot-page contention with real grasp CLI subprocesses.
+- Small run (2 workers x 4, think 0.02s): uncoordinated lost 4/8 and strict failed; claim_retry kept 8/8, strict green, completed throughput 0.322x and surviving-marker throughput 0.645x of uncoordinated.
