@@ -3358,6 +3358,7 @@ class SQLiteStore:
         output_folder: str | Path,
         *,
         check: bool = False,
+        allow_incomplete_graph_export: bool = False,
         regenerate_index: bool = False,
         log_events: list[dict[str, Any]] | None = None,
         log_event_source: str | None = None,
@@ -3369,6 +3370,8 @@ class SQLiteStore:
         files = manifest.get("files")
         if not isinstance(files, dict) or not files:
             raise ValueError(f"project is not a Markdown mirror project or has no Markdown manifest: {project}")
+        markdown_graph = self.project_markdown_graph_status_by_name(project)
+        graph_incomplete = bool(markdown_graph and markdown_graph.get("complete") is False)
 
         projections = self._markdown_projection_files(project, files)
         regenerated_files: list[str] = []
@@ -3409,6 +3412,14 @@ class SQLiteStore:
                 if not check:
                     files_to_write.append(relative_path)
 
+        if graph_incomplete and not check and not allow_incomplete_graph_export:
+            raise ValueError(
+                "Markdown graph is incomplete; refusing export because unhydrated Markdown source files have "
+                "no stored lines and a partial projection can overwrite source content. Run "
+                "`hydrate-markdown --until-complete --max-seconds S`, run normal `import --markdown <folder>`, "
+                "or rerun with --allow-incomplete-markdown-export if this partial projection write is intentional."
+            )
+
         if not check:
             _preflight_markdown_projection_write_targets(output, files_to_write)
             for relative_path in files_to_write:
@@ -3428,12 +3439,49 @@ class SQLiteStore:
             for path in iter_markdown_files(output, exclude_dirs=exclude_dirs)
         } if output.exists() else set()
         extra_files = sorted(existing_files - set(projections))
-        ok = not changed_files and not missing_files and not extra_files
+        projection_complete = not graph_incomplete
+        ok = not changed_files and not missing_files and not extra_files and projection_complete
+        markdown_projection_contract = None
+        if graph_incomplete:
+            partial_fields = [
+                "ok",
+                "projection_complete",
+                "changed_files",
+                "missing_files",
+                "written_files",
+                "written_count",
+            ]
+            markdown_projection_contract = {
+                "result_scope": "partial_markdown_graph",
+                "graph_complete": False,
+                "projection_complete": False,
+                "safe_to_write": bool(allow_incomplete_graph_export),
+                "write_requires": "--allow-incomplete-markdown-export",
+                "clobber_risk": "unhydrated_markdown_sources_have_no_stored_lines",
+                "hydrated_files": markdown_graph.get("hydrated_files") if markdown_graph else None,
+                "total_files": markdown_graph.get("total_files") if markdown_graph else None,
+                "incomplete_reason": markdown_graph.get("incomplete_reason") if markdown_graph else None,
+                "hydrate_hint": (
+                    "Run `hydrate-markdown --until-complete --max-seconds S` or normal "
+                    "`import --markdown <folder>` before exporting a complete projection."
+                ),
+                "partial_fields": partial_fields,
+                "result_field_states": {
+                    field: {
+                        "state": "partial",
+                        "reason": "unhydrated_markdown_sources",
+                    }
+                    for field in partial_fields
+                },
+            }
         return {
             "project": project,
             "output": str(output),
             "check": check,
             "ok": ok,
+            "projection_complete": projection_complete,
+            "markdown_graph": markdown_graph,
+            "markdown_projection_contract": markdown_projection_contract,
             "file_count": len(projections),
             "checked_files": len(projections) if check else 0,
             "written_files": written_files,
