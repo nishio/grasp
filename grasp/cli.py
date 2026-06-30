@@ -59,6 +59,7 @@ STORE_WRITE_COMMANDS = {
     "revert-event",
     "revert-events",
     "sync",
+    "write-line",
     "write-page",
 }
 IDLE_HYDRATE_COMMANDS = {
@@ -1311,6 +1312,43 @@ def build_parser() -> argparse.ArgumentParser:
     write_page_parser.add_argument("--output", type=Path, default=None, help="Markdown projection output folder to update. Required unless --defer-projection is used.")
     write_page_parser.add_argument("--defer-projection", action="store_true", help="Do not export Markdown projection after the SQLite write; update it later with export-markdown.")
     add_optional_write_journal_arguments(write_page_parser)
+
+    write_line_parser = add_command_parser(
+        subparsers,
+        "write-line",
+        help="Replace one Markdown-backed line by stable line_id.",
+        description=(
+            "Replace the text of one existing stored line identified by full line_id. "
+            "The command preserves that line_id, records a page_update SQLite event, updates derived edges, "
+            "optionally appends the compatibility JSONL journal, and exports the Markdown projection unless --defer-projection is used."
+        ),
+        returns=(
+            "project, page, journal|null, journal_written, output|null, event_id, event_type, source_path, "
+            "line_id, line_index, previous_text, text, previous_line, line, previous_lines[], lines[], "
+            "previous_line_count, line_count, edge_count, projection_deferred, projection|null"
+        ),
+        examples=[
+            "grasp --project grasp-wiki --json read A --full-ids",
+            "grasp --project grasp-wiki write-line 5928725cba093700118fa5b2:12 --text '- updated [[B]]' --output wiki",
+            "grasp --project grasp-wiki --json write-line 5928725cba093700118fa5b2:12 --text '- updated' --defer-projection --no-journal",
+        ],
+        notes=[
+            "Alpha write surface for Markdown-backed projects.",
+            "The line_id must be a full stored line_id from JSON or --full-ids output; local aliases such as P1:12 are per-output only.",
+            "--text is a single stored line and cannot contain newline characters.",
+            "The target line_id is preserved even when the text changes; line_index remains the current ordering position.",
+            "Writes are refused while another session has an active claim for the target page.",
+            "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
+            "--defer-projection writes only SQLite state/events and optional journal; run export-markdown later to update Markdown.",
+            "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
+        ],
+    )
+    write_line_parser.add_argument("line_id", help="Full stored line_id to replace.")
+    write_line_parser.add_argument("--text", required=True, help="Replacement text for the single line.")
+    write_line_parser.add_argument("--message", default="", help="Optional update message stored in the journal payload.")
+    write_line_parser.add_argument("--output", type=Path, default=None, help="Markdown projection output folder to update. Required unless --defer-projection is used.")
+    write_line_parser.add_argument("--defer-projection", action="store_true", help="Do not export Markdown projection after the SQLite write; update it later with export-markdown.")
+    add_optional_write_journal_arguments(write_line_parser)
 
     rename_page_parser = add_command_parser(
         subparsers,
@@ -3476,6 +3514,53 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
         create=args.create,
         target_kind=args.target_kind,
         source_path=args.source_path,
+        message=args.message,
+        enforce_active_claim_session_id=event_metadata(args)["session_id"],
+        **event_metadata(args),
+    )
+    projection = append_event_and_maybe_export_projection(
+        store,
+        journal,
+        event,
+        lambda: export_markdown_after_dirty_projection_guard(
+            store,
+            args.output,
+            allowed_source_paths={update_result["source_path"]},
+        ),
+        defer_projection=args.defer_projection,
+        **event_metadata(args),
+    )
+    result = dict(update_result)
+    result.update(
+        {
+            "journal": str(journal) if journal is not None else None,
+            "journal_written": journal is not None,
+            "output": str(args.output) if args.output is not None else None,
+            "event_id": event["event_id"],
+            "event_type": event["event_type"],
+            "projection_deferred": bool(args.defer_projection),
+            "projection": projection,
+        }
+    )
+    return result
+
+
+def run_write_line(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    journal = optional_journal_path_for_output(args)
+    preflight_journal_appendable(journal)
+    if "\n" in args.text or "\r" in args.text:
+        raise ValueError("write-line --text must be a single line")
+    target_source_path = store.markdown_source_path_for_line_id(args.line_id)
+    if not args.defer_projection:
+        require_projection_output(args)
+        guard_dirty_write_target_paths_before_mutation(
+            store,
+            args.output,
+            target_source_paths={target_source_path},
+        )
+    update_result, event = store.write_markdown_line_with_event(
+        args.line_id,
+        text=args.text,
         message=args.message,
         enforce_active_claim_session_id=event_metadata(args)["session_id"],
         **event_metadata(args),
@@ -8485,6 +8570,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         return run_append_log(store, args)
     if args.command == "write-page":
         return run_write_page(store, args)
+    if args.command == "write-line":
+        return run_write_line(store, args)
     if args.command in {"rename-page", "rename"}:
         return run_rename_page(store, args)
     if args.command == "reconcile-markdown":
@@ -9008,6 +9095,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_append_result(result)
     if command == "write-page":
         return format_write_page_result(result)
+    if command == "write-line":
+        return format_write_line_result(result)
     if command in {"rename-page", "rename"}:
         return format_rename_page_result(result)
     if command == "reconcile-markdown":
@@ -9407,6 +9496,28 @@ def format_write_page_result(result: dict[str, Any]) -> str:
         f"source_path: {result.get('source_path', '')}\n"
         f"previous_lines: {result['previous_line_count']}\n"
         f"lines: {result['line_count']}\n"
+        f"edges: {result['edge_count']}\n"
+        f"projection_deferred: {str(result.get('projection_deferred', False)).lower()}\n"
+        f"projection_written: {projection.get('written_count', 0)}\n"
+    )
+
+
+def format_write_line_result(result: dict[str, Any]) -> str:
+    projection = result.get("projection") or {}
+    journal = result.get("journal") or "(none)"
+    return (
+        "# Write Line\n"
+        f"project: {result['project']}\n"
+        f"page: {result['page']['title']}\n"
+        f"journal: {journal}\n"
+        f"journal_written: {str(result.get('journal_written', True)).lower()}\n"
+        f"event_id: {result['event_id']}\n"
+        f"event_type: {result.get('event_type', '')}\n"
+        f"source_path: {result.get('source_path', '')}\n"
+        f"line_id: {result.get('line_id', '')}\n"
+        f"line_index: {result.get('line_index', '')}\n"
+        f"previous_text: {result.get('previous_text', '')}\n"
+        f"text: {result.get('text', '')}\n"
         f"edges: {result['edge_count']}\n"
         f"projection_deferred: {str(result.get('projection_deferred', False)).lower()}\n"
         f"projection_written: {projection.get('written_count', 0)}\n"

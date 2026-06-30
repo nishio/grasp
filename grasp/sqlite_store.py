@@ -4875,6 +4875,127 @@ class SQLiteStore:
             insert_store_event(self.connection, event, actor=actor, session_id=session_id)
         return update_result, event
 
+    def _replace_markdown_line_uncommitted(
+        self,
+        line_id: str,
+        text: str,
+        *,
+        enforce_active_claim_session_id: str | None = None,
+    ) -> dict[str, Any]:
+        if "\n" in text or "\r" in text:
+            raise ValueError("write-line --text must be a single line")
+
+        project = self._require_project()
+        manifest = self._markdown_manifest_for_project(project)
+        if not manifest:
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+
+        line_page = self._line_and_page_by_id(line_id)
+        if line_page is None:
+            raise ValueError(
+                f"line-id not found in selected project: {line_id}; "
+                "use a full line_id from --json or --full-ids output"
+            )
+        page, target_line = line_page
+        source_path, _ = self._markdown_manifest_entry_for_page(manifest, page.id)
+        graph_role = self._markdown_graph_role_for_page(project, page.id)
+        if enforce_active_claim_session_id is not None:
+            conflict = active_page_claim_conflict(
+                self.connection,
+                project=project,
+                page_id=page.id,
+                session_id=enforce_active_claim_session_id,
+            )
+            if conflict is not None:
+                raise ValueError(
+                    "page has an active claim by another session; refusing write-line: "
+                    f"{page.title} "
+                    f"session_id={conflict['session_id']!r} actor={conflict['actor']!r} "
+                    f"claim_event_id={conflict['claim_event_id']}"
+                )
+
+        previous_lines = self._markdown_line_payloads(project, page.id)
+        previous_line: dict[str, Any] | None = None
+        next_lines: list[dict[str, Any]] = []
+        now = int(time.time())
+        for line in previous_lines:
+            line_payload = dict(line)
+            if str(line_payload.get("line_id") or "") == line_id:
+                previous_line = dict(line_payload)
+                line_payload["text"] = text
+                line_payload["updated"] = now
+            next_lines.append(line_payload)
+        if previous_line is None:
+            raise ValueError(
+                f"line-id not found in selected project: {line_id}; "
+                "use a full line_id from --json or --full-ids output"
+            )
+
+        edge_count = self._replace_markdown_page_line_payloads_uncommitted(
+            project,
+            page.id,
+            next_lines,
+            graph_role=graph_role,
+            updated=now,
+        )
+        page = self._page_by_id(page.id) or page
+        current_lines = self._markdown_line_payloads(project, page.id)
+        current_line = next(line for line in current_lines if line["line_id"] == line_id)
+        return {
+            "project": project,
+            "page": page.to_summary(),
+            "source_path": source_path,
+            "graph_role": graph_role,
+            "line_id": line_id,
+            "line_index": target_line.index,
+            "previous_text": previous_line["text"],
+            "text": text,
+            "previous_line": previous_line,
+            "line": current_line,
+            "previous_lines": previous_lines,
+            "lines": current_lines,
+            "previous_line_count": len(previous_lines),
+            "line_count": len(next_lines),
+            "edge_count": edge_count,
+        }
+
+    def write_markdown_line_with_event(
+        self,
+        line_id: str,
+        *,
+        text: str,
+        message: str = "",
+        actor: str = "",
+        session_id: str = "",
+        enforce_active_claim_session_id: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        with self.write_transaction():
+            update_result = self._replace_markdown_line_uncommitted(
+                line_id,
+                text,
+                enforce_active_claim_session_id=enforce_active_claim_session_id,
+            )
+            event = make_journal_event(
+                "page_update",
+                project=update_result["project"],
+                payload={
+                    "page_id": update_result["page"]["id"],
+                    "title": update_result["page"]["title"],
+                    "source_path": update_result["source_path"],
+                    "graph_role": update_result["graph_role"],
+                    "message": message,
+                    "target_line_id": update_result["line_id"],
+                    "previous_text": update_result["previous_text"],
+                    "text": update_result["text"],
+                    "previous_line": update_result["previous_line"],
+                    "line": update_result["line"],
+                    "previous_lines": update_result["previous_lines"],
+                    "lines": update_result["lines"],
+                },
+            )
+            insert_store_event(self.connection, event, actor=actor, session_id=session_id)
+        return update_result, event
+
     def markdown_source_paths_for_rename_target(
         self,
         target: str,
@@ -4908,6 +5029,21 @@ class SQLiteStore:
         page = self._resolve_markdown_write_target(target, target_kind, command="write-page")
         if page is None:
             raise ValueError(f"page not found: {target}")
+        source_path, _ = self._markdown_manifest_entry_for_page(manifest, page.id)
+        return source_path
+
+    def markdown_source_path_for_line_id(self, line_id: str) -> str:
+        project = self._require_project()
+        manifest = self._markdown_manifest_for_project(project)
+        if not manifest:
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+        line_page = self._line_and_page_by_id(line_id)
+        if line_page is None:
+            raise ValueError(
+                f"line-id not found in selected project: {line_id}; "
+                "use a full line_id from --json or --full-ids output"
+            )
+        page, _line = line_page
         source_path, _ = self._markdown_manifest_entry_for_page(manifest, page.id)
         return source_path
 
