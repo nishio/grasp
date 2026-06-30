@@ -1281,7 +1281,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "project, page, journal|null, journal_written, output|null, event_id, event_type, source_path, previous_lines[], lines[], "
-            "previous_line_count, line_count, edge_count, projection_deferred, projection|null"
+            "line_identity, previous_line_count, line_count, edge_count, projection_deferred, projection|null"
         ),
         examples=[
             "grasp --project grasp-wiki write-page 'New page' --create --path new-page.md --from-file /tmp/new-page.md --output wiki",
@@ -1296,6 +1296,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Rename and source-path changes for existing pages are handled by rename-page.",
             "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
             "Existing-page writes are refused while another session has an active claim for the target page.",
+            "Existing-page replacement inherits only unambiguous exact matching line_ids; split, merge, and large-edit rewrites are not inferred as the same line.",
             "--from-file may intentionally use the target projection file itself as the replacement input.",
             "Dirty projection paths outside the target page are refused before export.",
             "--defer-projection writes only SQLite state/events and optional journal; run export-markdown later to update Markdown.",
@@ -1363,7 +1364,7 @@ def build_parser() -> argparse.ArgumentParser:
         returns=(
             "project, page, journal|null, journal_written, output|null, event_id, event_type, source_path, "
             "start_line_id, end_line_id, start_line_index, end_line_index, previous_range_lines[], range_lines[], "
-            "previous_range_line_count, range_line_count, previous_lines[], lines[], previous_line_count, line_count, edge_count, projection_deferred, projection|null"
+            "line_identity, previous_range_line_count, range_line_count, previous_lines[], lines[], previous_line_count, line_count, edge_count, projection_deferred, projection|null"
         ),
         examples=[
             "grasp --project grasp-wiki --json read A --full-ids",
@@ -1374,7 +1375,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Alpha write surface for Markdown-backed projects.",
             "Both anchors must be full stored line_ids from the same current page, and start must appear before or equal to end.",
             "--line values are stored lines and cannot contain newline characters; use --from-file for multi-line text.",
-            "Only unambiguous exact matching replacement lines inherit line_ids; duplicate text lines receive new opaque line_ids, and removed line_ids are tombstoned.",
+            "Only unambiguous exact matching replacement lines inherit line_ids; duplicate text lines and split, merge, or large-edit rewrites receive new opaque line_ids, and removed line_ids are tombstoned.",
             "Writes are refused while another session has an active claim for the target page.",
             "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
             "--defer-projection writes only SQLite state/events and optional journal; run export-markdown later to update Markdown.",
