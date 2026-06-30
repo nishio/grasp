@@ -1896,3 +1896,13 @@ Regression: `tests.test_markdown.MarkdownParsingTests` covers mirror edge line t
 `import --markdown` now resolves heading fragments through GitHub-style slugs, so links such as `[x](Page.md#api-overview)` can target `## API: Overview!`.
 Duplicate headings use the same `-1`, `-2` suffix convention during `target_line_id` resolution; schema bumped to `11` because materialized line-target semantics changed.
 Regression: `tests.test_markdown.MarkdownParsingTests.test_markdown_heading_anchors_match_github_style_slugs` covers punctuation stripping and duplicate heading suffixes.
+
+## [2026-06-30 19:46] implementation+file-back | materialize Markdown write-alpha anchor fragments
+code: Markdown write-alpha edge rows now keep target_fragment for write-page replacement, write-page --create, and append path; refresh resolves target_line_id after page handles are materialized.
+tests: added regressions for external Markdown heading fragments, GitHub-style duplicate slug fragments, resolved local-only anchors, and missing local anchors on write/create/append paths.
+compat: bumped public version to 1.12.0 and internal schema to 12 because materialized edge semantics changed while table shape stayed the same.
+
+## [2026-06-30 23:07] file-back | make cutover throughput gate explicit
+[[grasp-backlog]] and [[adoption-trust-gradient]] now distinguish the already-fixed lost-update correctness gate from the still-open mode2 cutover policy gate.
+Next measurement should broaden scripts/benchmark_claim_retry_throughput.py to larger N, multiple think times, and file-back-like read/write/log/projection workload, then report lost=0, strict green, active claim overlap 0, throughput ratios, and p95 claim wait.
+Mode2 cutover remains a policy decision until owner chooses acceptable overhead thresholds from that measurement.

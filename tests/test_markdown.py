@@ -145,6 +145,114 @@ class MarkdownParsingTests(unittest.TestCase):
         self.assertEqual(backlinks["backlinks"][0]["target_fragment"], "Section")
         self.assertEqual(backlinks["backlinks"][0]["target_line_id"], f"{markdown_page_id(Path('B.md'))}:2")
 
+    def test_markdown_write_page_persists_target_fragments_for_anchor_edges(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            store_path = root / "store.sqlite"
+            source = root / "wiki"
+            source.mkdir()
+            (source / "A.md").write_text("# A\nold\n", encoding="utf-8")
+            (source / "B.md").write_text(
+                "# B\n## API: Overview!\n## Repeat Heading?\n## Repeat Heading?\n",
+                encoding="utf-8",
+            )
+
+            import_markdown_folder_to_sqlite(source, store_path)
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                update_result, _ = store.write_markdown_page_with_event(
+                    "A",
+                    lines=[
+                        "# A",
+                        "[slug](B.md#api-overview)",
+                        "[duplicate](B.md#repeat-heading-1)",
+                        "[local](#Section)",
+                        "[missing](#Missing)",
+                        "## Section",
+                    ],
+                )
+                b_backlinks = store.backlinks_report("B")
+                a_backlinks = store.backlinks_report("A")
+            finally:
+                store.close()
+
+        edges_by_fragment = {edge["target_fragment"]: edge for edge in b_backlinks["backlinks"]}
+        self.assertEqual(edges_by_fragment["api-overview"]["target_line_id"], f"{markdown_page_id(Path('B.md'))}:1")
+        self.assertEqual(edges_by_fragment["repeat-heading-1"]["target_line_id"], f"{markdown_page_id(Path('B.md'))}:3")
+        section_line = next(line for line in update_result["lines"] if line["text"] == "## Section")
+        local_edges = [edge for edge in a_backlinks["backlinks"] if edge.get("target_fragment") == "Section"]
+        self.assertEqual(len(local_edges), 1)
+        self.assertEqual(local_edges[0]["target_line_id"], section_line["line_id"])
+        self.assertNotIn("Missing", {edge.get("target_fragment") for edge in a_backlinks["backlinks"]})
+
+    def test_markdown_write_page_create_persists_target_fragments_for_anchor_edges(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            store_path = root / "store.sqlite"
+            source = root / "wiki"
+            source.mkdir()
+            (source / "B.md").write_text("# B\n## Section\n", encoding="utf-8")
+
+            import_markdown_folder_to_sqlite(source, store_path)
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                create_result, _ = store.write_markdown_page_with_event(
+                    "New",
+                    create=True,
+                    source_path="New.md",
+                    lines=[
+                        "# New",
+                        "[heading](B.md#Section)",
+                        "## Local",
+                        "[local](#Local)",
+                        "[missing](#Missing)",
+                    ],
+                )
+                b_backlinks = store.backlinks_report("B")
+                new_backlinks = store.backlinks_report("New")
+            finally:
+                store.close()
+
+        self.assertEqual(b_backlinks["backlinks"][0]["target_fragment"], "Section")
+        self.assertEqual(b_backlinks["backlinks"][0]["target_line_id"], f"{markdown_page_id(Path('B.md'))}:1")
+        local_line = next(line for line in create_result["lines"] if line["text"] == "## Local")
+        local_edges = [edge for edge in new_backlinks["backlinks"] if edge.get("target_fragment") == "Local"]
+        self.assertEqual(len(local_edges), 1)
+        self.assertEqual(local_edges[0]["target_line_id"], local_line["line_id"])
+        self.assertNotIn("Missing", {edge.get("target_fragment") for edge in new_backlinks["backlinks"]})
+
+    def test_markdown_append_persists_target_fragments_for_anchor_edges(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            store_path = root / "store.sqlite"
+            source = root / "wiki"
+            source.mkdir()
+            (source / "A.md").write_text("# A\n## Existing\n", encoding="utf-8")
+            (source / "B.md").write_text("# B\n## Section\n", encoding="utf-8")
+
+            import_markdown_folder_to_sqlite(source, store_path)
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                store.append_markdown_lines(
+                    "A",
+                    [
+                        "[heading](B.md#Section)",
+                        "[local](#Existing)",
+                        "[missing](#Missing)",
+                    ],
+                )
+                b_backlinks = store.backlinks_report("B")
+                a_backlinks = store.backlinks_report("A")
+            finally:
+                store.close()
+
+        self.assertEqual(b_backlinks["backlinks"][0]["target_fragment"], "Section")
+        self.assertEqual(b_backlinks["backlinks"][0]["target_line_id"], f"{markdown_page_id(Path('B.md'))}:1")
+        local_edges = [edge for edge in a_backlinks["backlinks"] if edge.get("target_fragment") == "Existing"]
+        self.assertEqual(len(local_edges), 1)
+        self.assertEqual(local_edges[0]["target_line_id"], f"{markdown_page_id(Path('A.md'))}:1")
+        self.assertNotIn("Missing", {edge.get("target_fragment") for edge in a_backlinks["backlinks"]})
+
     def test_markdown_heading_anchors_match_github_style_slugs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
