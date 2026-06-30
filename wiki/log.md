@@ -1965,3 +1965,8 @@ stable line identity と Markdown direct edit policy、git-diff-of-md に依存�
 ## [2026-07-01 01:15] file-back | stable milestone current state
 [[grasp-backlog]] now records the 2026-07-01 state: lost-update correctness gates and broader synthetic evidence are green; the remaining mode2 cutover gate is owner-defined throughput/wait thresholds, not more generic queue work.
 [[adoption-trust-gradient]] now treats the open cutover question as owner policy for `--min-surviving-throughput-ratio` and `--max-p95-claim-wait-seconds`; Codex-actionable work without that decision should stay on stable line identity edit surfaces and concrete dogfood gaps.
+
+## [2026-07-01 01:25] implementation+file-back | line-id anchored range edit surface
+code: added `write-lines <start-line-id> <end-line-id>` for Markdown-backed pages. It replaces an inclusive same-page line-id range, preserves exact unchanged line_ids inside the range, keeps outside line_ids, tombstones removed range line_ids, and records a `page_update` event with range anchors plus before/after range payloads.
+coverage: added regressions for range replacement, tombstones, strict projection status, cross-page/reverse-anchor rejection, active-claim refusal, help surface, and version ledger updates. Public version is `1.13.1`; schema remains `13`.
+milestone: this removes the stable line identity backlog item for multi-line/range edit surface. Remaining identity gaps are split/merge/move/duplicate/large-edit policy and Cosense/hosted sync external line id.

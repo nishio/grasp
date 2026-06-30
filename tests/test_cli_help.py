@@ -43,6 +43,7 @@ COMMANDS = [
     "append-log",
     "write-page",
     "write-line",
+    "write-lines",
     "rename-page",
     "reconcile-markdown",
     "write-status",
@@ -8206,6 +8207,279 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(event_payload["text"], "- new [[B]] and [[C]]")
         self.assertTrue(status_result["strict_ok"])
 
+    def test_write_lines_replaces_range_by_stable_line_ids(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text(
+                "# A\n"
+                "- keep before\n"
+                "- remove one\n"
+                "- keep same [[B]]\n"
+                "- remove three\n"
+                "- keep after [[C]]\n",
+                encoding="utf-8",
+            )
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            (root / "C.md").write_text("# C\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            read_result = json.loads(subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "read",
+                    "A",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout)
+            before_id = read_result["lines"][1]["line_id"]
+            start_id = read_result["lines"][2]["line_id"]
+            kept_range_id = read_result["lines"][3]["line_id"]
+            end_id = read_result["lines"][4]["line_id"]
+            after_id = read_result["lines"][5]["line_id"]
+            write_result = json.loads(subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "test",
+                    "--session-id",
+                    "write-lines-test",
+                    "write-lines",
+                    start_id,
+                    end_id,
+                    "--line",
+                    "- inserted [[D]]",
+                    "--line",
+                    "- keep same [[B]]",
+                    "--line",
+                    "- inserted tail",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout)
+            status_result = json.loads(subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                    "--strict",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout)
+            connection = sqlite3.connect(store_path)
+            try:
+                line_rows = connection.execute(
+                    """
+                    SELECT line_id, line_index, text
+                    FROM lines
+                    WHERE page_id = ?
+                    ORDER BY line_index
+                    """,
+                    (read_result["page"]["id"],),
+                ).fetchall()
+                tombstone_rows = connection.execute(
+                    """
+                    SELECT line_id, line_index, text, tombstone_reason
+                    FROM line_tombstones
+                    WHERE project = 'wiki'
+                    ORDER BY line_index
+                    """
+                ).fetchall()
+                sqlite_events = connection.execute(
+                    """
+                    SELECT event_type, actor, session_id, payload_json
+                    FROM events
+                    ORDER BY event_sequence
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+            page_text = (root / "A.md").read_text(encoding="utf-8")
+
+        self.assertEqual(write_result["event_type"], "page_update")
+        self.assertEqual(write_result["source_path"], "A.md")
+        self.assertEqual(write_result["start_line_id"], start_id)
+        self.assertEqual(write_result["end_line_id"], end_id)
+        self.assertEqual(write_result["start_line_index"], 2)
+        self.assertEqual(write_result["end_line_index"], 4)
+        self.assertEqual(write_result["previous_range_line_count"], 3)
+        self.assertEqual(write_result["range_line_count"], 3)
+        self.assertEqual(write_result["range_lines"][1]["line_id"], kept_range_id)
+        self.assertEqual(write_result["projection"]["written_files"], ["A.md"])
+        self.assertEqual(
+            page_text,
+            "# A\n"
+            "- keep before\n"
+            "- inserted [[D]]\n"
+            "- keep same [[B]]\n"
+            "- inserted tail\n"
+            "- keep after [[C]]\n",
+        )
+        self.assertEqual(line_rows[1], (before_id, 1, "- keep before"))
+        self.assertEqual(line_rows[3], (kept_range_id, 3, "- keep same [[B]]"))
+        self.assertEqual(line_rows[5], (after_id, 5, "- keep after [[C]]"))
+        self.assertNotEqual(line_rows[2][0], start_id)
+        self.assertNotEqual(line_rows[4][0], end_id)
+        self.assertEqual(
+            tombstone_rows,
+            [
+                (start_id, 2, "- remove one", "page_line_replaced"),
+                (end_id, 4, "- remove three", "page_line_replaced"),
+            ],
+        )
+        self.assertEqual([row[0] for row in sqlite_events], ["page_update"])
+        self.assertEqual(sqlite_events[0][1], "test")
+        self.assertEqual(sqlite_events[0][2], "write-lines-test")
+        event_payload = json.loads(sqlite_events[0][3])
+        self.assertEqual(event_payload["target_start_line_id"], start_id)
+        self.assertEqual(event_payload["target_end_line_id"], end_id)
+        self.assertEqual(event_payload["previous_range_lines"][1]["line_id"], kept_range_id)
+        self.assertEqual(event_payload["range_lines"][1]["line_id"], kept_range_id)
+        self.assertTrue(status_result["strict_ok"])
+
+    def test_write_lines_refuses_cross_page_and_reverse_range(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- one\n- two\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n- other\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "import",
+                    "--markdown",
+                    str(root),
+                    "--project",
+                    "wiki",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+            def read_page(title):
+                return json.loads(subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "read",
+                        title,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                ).stdout)
+
+            a_lines = read_page("A")["lines"]
+            b_lines = read_page("B")["lines"]
+            cross_page = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-lines",
+                    a_lines[1]["line_id"],
+                    b_lines[1]["line_id"],
+                    "--line",
+                    "- replacement",
+                    "--no-journal",
+                    "--defer-projection",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            reverse = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-lines",
+                    a_lines[2]["line_id"],
+                    a_lines[1]["line_id"],
+                    "--line",
+                    "- replacement",
+                    "--no-journal",
+                    "--defer-projection",
+                ],
+                text=True,
+                capture_output=True,
+            )
+
+        self.assertEqual(cross_page.returncode, 2)
+        self.assertIn("write-lines anchors must be on the same page", cross_page.stderr)
+        self.assertEqual(reverse.returncode, 2)
+        self.assertIn("write-lines start_line_id must not appear after end_line_id", reverse.stderr)
+
     def test_no_journal_writes_update_store_and_projection_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
@@ -10088,6 +10362,96 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual([line["text"] for line in read_after_blocked["lines"]], ["# A", "- old A"])
         self.assertTrue(owner_write["projection_deferred"])
         self.assertEqual(owner_write["line_id"], line_id)
+        self.assertEqual([line["text"] for line in read_after_owner["lines"]], ["# A", "- agent A owns claim"])
+
+    def test_write_lines_refuses_other_session_active_claim(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n- old B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "authority.sqlite"
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+            lines = run_json("read", "A")["lines"]
+            start_line_id = lines[1]["line_id"]
+            end_line_id = lines[2]["line_id"]
+            claim_a = run_json(
+                "claim-page",
+                "A",
+                "--ttl-seconds",
+                "600",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            blocked_write = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-b",
+                    "--session-id",
+                    "session-b",
+                    "write-lines",
+                    start_line_id,
+                    end_line_id,
+                    "--line",
+                    "- agent B ignored claim",
+                    "--no-journal",
+                    "--defer-projection",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            read_after_blocked = run_json("read", "A")
+            owner_write = run_json(
+                "write-lines",
+                start_line_id,
+                end_line_id,
+                "--line",
+                "- agent A owns claim",
+                "--no-journal",
+                "--defer-projection",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            read_after_owner = run_json("read", "A")
+
+        self.assertEqual(blocked_write.returncode, 2)
+        self.assertIn("page has an active claim by another session", blocked_write.stderr)
+        self.assertIn(claim_a["claim"]["claim_event_id"], blocked_write.stderr)
+        self.assertEqual([line["text"] for line in read_after_blocked["lines"]], ["# A", "- old A", "- old B"])
+        self.assertTrue(owner_write["projection_deferred"])
+        self.assertEqual(owner_write["start_line_id"], start_line_id)
+        self.assertEqual(owner_write["end_line_id"], end_line_id)
         self.assertEqual([line["text"] for line in read_after_owner["lines"]], ["# A", "- agent A owns claim"])
 
     def test_concurrent_release_claim_rechecks_claim_state_inside_write_lock(self):

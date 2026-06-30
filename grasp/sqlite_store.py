@@ -5117,6 +5117,169 @@ class SQLiteStore:
             insert_store_event(self.connection, event, actor=actor, session_id=session_id)
         return update_result, event
 
+    def _replace_markdown_line_range_uncommitted(
+        self,
+        start_line_id: str,
+        end_line_id: str,
+        lines: list[str],
+        *,
+        enforce_active_claim_session_id: str | None = None,
+    ) -> dict[str, Any]:
+        for text in lines:
+            if "\n" in text or "\r" in text:
+                raise ValueError("write-lines replacement lines must be single lines")
+
+        project = self._require_project()
+        manifest = self._markdown_manifest_for_project(project)
+        if not manifest:
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+
+        start_page, start_line = self._require_line_and_page_by_id(start_line_id, command="write-lines")
+        end_page, end_line = self._require_line_and_page_by_id(end_line_id, command="write-lines")
+        if start_page.id != end_page.id:
+            raise ValueError(
+                "write-lines anchors must be on the same page: "
+                f"start page={start_page.title!r} end page={end_page.title!r}"
+            )
+        if start_line.index > end_line.index:
+            raise ValueError(
+                "write-lines start_line_id must not appear after end_line_id: "
+                f"start_index={start_line.index} end_index={end_line.index}"
+            )
+
+        page = start_page
+        page_id = page.id
+        source_path, _ = self._markdown_manifest_entry_for_page(manifest, page_id)
+        graph_role = self._markdown_graph_role_for_page(project, page_id)
+        if enforce_active_claim_session_id is not None:
+            conflict = active_page_claim_conflict(
+                self.connection,
+                project=project,
+                page_id=page_id,
+                session_id=enforce_active_claim_session_id,
+            )
+            if conflict is not None:
+                raise ValueError(
+                    "page has an active claim by another session; refusing write-lines: "
+                    f"{page.title} "
+                    f"session_id={conflict['session_id']!r} actor={conflict['actor']!r} "
+                    f"claim_event_id={conflict['claim_event_id']}"
+                )
+
+        previous_lines = self._markdown_line_payloads(project, page_id)
+        start_index = start_line.index
+        end_index = end_line.index
+        if start_index >= len(previous_lines) or previous_lines[start_index]["line_id"] != start_line_id:
+            raise ValueError("write-lines start line is no longer at the expected index")
+        if end_index >= len(previous_lines) or previous_lines[end_index]["line_id"] != end_line_id:
+            raise ValueError("write-lines end line is no longer at the expected index")
+
+        previous_range_lines = previous_lines[start_index : end_index + 1]
+        inherited_by_index = _inherited_line_payloads_by_new_index(previous_range_lines, lines)
+        now = int(time.time())
+        replacement_payloads: list[dict[str, Any]] = []
+        assigned_range_line_ids: set[str] = set()
+        for range_index, text in enumerate(lines):
+            inherited = inherited_by_index.get(range_index)
+            if inherited is not None:
+                line_payload = dict(inherited)
+                line_payload["text"] = text
+                line_id = str(line_payload.get("line_id") or "")
+                if line_id and line_id not in assigned_range_line_ids:
+                    assigned_range_line_ids.add(line_id)
+                    replacement_payloads.append(line_payload)
+                    continue
+            line_id = f"line-{uuid4().hex}"
+            while line_id in assigned_range_line_ids:
+                line_id = f"line-{uuid4().hex}"
+            assigned_range_line_ids.add(line_id)
+            replacement_payloads.append(
+                {
+                    "line_id": line_id,
+                    "line_index": start_index + range_index,
+                    "text": text,
+                    "created": now,
+                    "updated": now,
+                    "user_id": "grasp",
+                }
+            )
+
+        next_lines = [
+            *previous_lines[:start_index],
+            *replacement_payloads,
+            *previous_lines[end_index + 1 :],
+        ]
+        edge_count = self._replace_markdown_page_line_payloads_uncommitted(
+            project,
+            page_id,
+            next_lines,
+            graph_role=graph_role,
+            updated=now,
+        )
+        page = self._page_by_id(page_id) or page
+        current_lines = self._markdown_line_payloads(project, page_id)
+        range_end_index = start_index + len(replacement_payloads)
+        range_lines = current_lines[start_index:range_end_index]
+        return {
+            "project": project,
+            "page": page.to_summary(),
+            "source_path": source_path,
+            "graph_role": graph_role,
+            "start_line_id": start_line_id,
+            "end_line_id": end_line_id,
+            "start_line_index": start_index,
+            "end_line_index": end_index,
+            "previous_range_lines": previous_range_lines,
+            "range_lines": range_lines,
+            "previous_range_line_count": len(previous_range_lines),
+            "range_line_count": len(range_lines),
+            "previous_lines": previous_lines,
+            "lines": current_lines,
+            "previous_line_count": len(previous_lines),
+            "line_count": len(current_lines),
+            "edge_count": edge_count,
+        }
+
+    def write_markdown_line_range_with_event(
+        self,
+        start_line_id: str,
+        end_line_id: str,
+        *,
+        lines: list[str],
+        message: str = "",
+        actor: str = "",
+        session_id: str = "",
+        enforce_active_claim_session_id: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        with self.write_transaction():
+            update_result = self._replace_markdown_line_range_uncommitted(
+                start_line_id,
+                end_line_id,
+                lines,
+                enforce_active_claim_session_id=enforce_active_claim_session_id,
+            )
+            event = make_journal_event(
+                "page_update",
+                project=update_result["project"],
+                payload={
+                    "page_id": update_result["page"]["id"],
+                    "title": update_result["page"]["title"],
+                    "source_path": update_result["source_path"],
+                    "graph_role": update_result["graph_role"],
+                    "message": message,
+                    "target_start_line_id": update_result["start_line_id"],
+                    "target_end_line_id": update_result["end_line_id"],
+                    "start_line_index": update_result["start_line_index"],
+                    "end_line_index": update_result["end_line_index"],
+                    "previous_range_lines": update_result["previous_range_lines"],
+                    "range_lines": update_result["range_lines"],
+                    "previous_lines": update_result["previous_lines"],
+                    "lines": update_result["lines"],
+                },
+            )
+            insert_store_event(self.connection, event, actor=actor, session_id=session_id)
+        return update_result, event
+
     def markdown_source_paths_for_rename_target(
         self,
         target: str,
@@ -5158,22 +5321,28 @@ class SQLiteStore:
         manifest = self._markdown_manifest_for_project(project)
         if not manifest:
             raise ValueError(f"project is not a Markdown-backed project: {project}")
-        line_page = self._line_and_page_by_id(line_id)
-        if line_page is None:
-            tombstone = self._line_tombstone_by_id(line_id)
-            if tombstone is not None:
-                page_title = str(tombstone.get("page_title") or tombstone.get("page_id") or "")
-                raise ValueError(
-                    f"line-id is tombstoned in selected project: {line_id}; "
-                    f"last page={page_title!r} last_line_index={tombstone['line_index']} "
-                    f"reason={tombstone['tombstone_reason']!r}"
-                )
-            raise ValueError(
-                f"line-id not found in selected project: {line_id}; "
-                "use a full line_id from --json or --full-ids output"
-            )
-        page, _line = line_page
+        page, _line = self._require_line_and_page_by_id(line_id, command="write-line")
         source_path, _ = self._markdown_manifest_entry_for_page(manifest, page.id)
+        return source_path
+
+    def markdown_source_path_for_line_range(self, start_line_id: str, end_line_id: str) -> str:
+        project = self._require_project()
+        manifest = self._markdown_manifest_for_project(project)
+        if not manifest:
+            raise ValueError(f"project is not a Markdown-backed project: {project}")
+        start_page, start_line = self._require_line_and_page_by_id(start_line_id, command="write-lines")
+        end_page, end_line = self._require_line_and_page_by_id(end_line_id, command="write-lines")
+        if start_page.id != end_page.id:
+            raise ValueError(
+                "write-lines anchors must be on the same page: "
+                f"start page={start_page.title!r} end page={end_page.title!r}"
+            )
+        if start_line.index > end_line.index:
+            raise ValueError(
+                "write-lines start_line_id must not appear after end_line_id: "
+                f"start_index={start_line.index} end_index={end_line.index}"
+            )
+        source_path, _ = self._markdown_manifest_entry_for_page(manifest, start_page.id)
         return source_path
 
     def markdown_page_target_summary(
@@ -8951,6 +9120,23 @@ class SQLiteStore:
         if page is None:
             return None
         return page, self._line_from_row(line_row)
+
+    def _require_line_and_page_by_id(self, line_id: str, *, command: str = "line command") -> tuple[Page, Line]:
+        line_page = self._line_and_page_by_id(line_id)
+        if line_page is not None:
+            return line_page
+        tombstone = self._line_tombstone_by_id(line_id)
+        if tombstone is not None:
+            page_title = str(tombstone.get("page_title") or tombstone.get("page_id") or "")
+            raise ValueError(
+                f"line-id is tombstoned in selected project: {line_id}; "
+                f"last page={page_title!r} last_line_index={tombstone['line_index']} "
+                f"reason={tombstone['tombstone_reason']!r}"
+            )
+        raise ValueError(
+            f"line-id not found in selected project: {line_id}; "
+            f"use a full line_id from --json or --full-ids output for {command}"
+        )
 
     def _line_tombstone_by_id(self, line_id: str) -> dict[str, Any] | None:
         scope_filter, scope_params = self._scope_filter("tombstone.project")
