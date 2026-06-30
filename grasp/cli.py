@@ -7954,6 +7954,8 @@ def attach_markdown_query_context(
     else:
         result["markdown_hydration"] = None
         markdown_graph = store.selected_project_markdown_graph_status()
+        if markdown_graph is None:
+            markdown_graph = all_projects_incomplete_markdown_graph_status(store)
     if not markdown_graph:
         result.pop("markdown_hydration", None)
         return
@@ -7969,6 +7971,7 @@ def attach_markdown_query_context(
             "hydrated_files": markdown_graph.get("hydrated_files"),
             "total_files": markdown_graph.get("total_files"),
             "incomplete_reason": markdown_graph.get("incomplete_reason"),
+            "incomplete_markdown_projects": markdown_graph.get("incomplete_projects", []),
             "hydrate_hint": hydrate_hint,
             "hydration_progress": markdown_hydration_progress(markdown_hydration),
             "partial_fields": partial_field_list,
@@ -7982,6 +7985,43 @@ def attach_markdown_query_context(
         }
     else:
         result["markdown_query_contract"] = None
+
+
+def all_projects_incomplete_markdown_graph_status(store: SQLiteStore) -> dict[str, Any] | None:
+    statuses: list[dict[str, Any]] = []
+    for project in store.project_names():
+        status = store.project_markdown_graph_status_by_name(project)
+        if status is None:
+            continue
+        statuses.append({"project": project, **status})
+    incomplete = [status for status in statuses if status.get("complete") is False]
+    if not incomplete:
+        return None
+
+    total_files = sum_int_field(statuses, "total_files")
+    hydrated_files = sum_int_field(statuses, "hydrated_files")
+    return {
+        "complete": False,
+        "status": "incomplete",
+        "mode": "all-projects",
+        "total_files": total_files,
+        "hydrated_files": hydrated_files,
+        "incomplete_reason": "one_or_more_projects_incomplete",
+        "project_count": len(store.project_names()),
+        "markdown_project_count": len(statuses),
+        "incomplete_project_count": len(incomplete),
+        "incomplete_projects": incomplete,
+    }
+
+
+def sum_int_field(items: list[dict[str, Any]], field: str) -> int | None:
+    total = 0
+    for item in items:
+        value = item.get(field)
+        if not isinstance(value, int):
+            return None
+        total += value
+    return total
 
 
 def markdown_hydration_progress(markdown_hydration: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -9873,6 +9913,12 @@ def format_markdown_hydration_summary(result: dict[str, Any]) -> str:
                 "note: retrieval results are limited to hydrated Markdown source files until "
                 "more files are hydrated or normal import --markdown completes the graph.\n"
             )
+        incomplete_projects = contract.get("incomplete_markdown_projects") or []
+        if incomplete_projects:
+            project_names = ", ".join(str(item.get("project")) for item in incomplete_projects[:10])
+            remaining = len(incomplete_projects) - min(len(incomplete_projects), 10)
+            suffix = f" (+{remaining} more)" if remaining else ""
+            parts.append(f"incomplete projects: {project_names}{suffix}\n")
         parts.append(format_partial_fields_note(result))
     return "".join(parts)
 
