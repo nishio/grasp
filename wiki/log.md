@@ -1793,3 +1793,8 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 - code: `import --markdown` now checks stored Markdown manifest source type / exclude dirs / file set / content hashes before building `MarkdownMirror`; exact no-op re-import returns `markdown_import.fast_path=manifest_hash_noop`.
 - concurrency: fast path still rechecks selected-project latest `event_sequence` inside the write transaction, so writer events landing during manifest scan abort instead of being silently overwritten.
 - benchmark: 3000p/54000 edges synthetic corpus measured full 14.2s, no-op 0.82s, 1-file 1.85s on this checkout. [[grasp-v1-implemented]] and [[grasp-backlog]] updated; remaining progressive/lazy import work is initial catalog / page-on-demand hydration / incomplete graph status.
+
+## [2026-06-30 13:57] implementation+file-back | manifest-first changed-file Markdown import fast path
+- code: `MarkdownMirror.from_folder` now shares single-file record/edge helpers; `import --markdown` uses stored manifest hashes to parse only changed Markdown files when page id / title / aliases / graph_role are unchanged.
+- safety: identity-affecting changes still fall back to the existing full parse/rebuild path, and the fast path rechecks selected-project `event_sequence` inside the write transaction.
+- benchmark: 3000p/54000 edges synthetic corpus measured full 13.1s, no-op 1.23s, 1-file 1.49s with `manifest_hash_changed_files` and parsed_files=1. Remaining progressive/lazy work is initial catalog / on-demand hydration / incomplete graph status.
