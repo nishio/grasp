@@ -134,6 +134,26 @@ def default_session_id() -> str:
     return os.environ.get("GRASP_SESSION_ID", "")
 
 
+def default_idle_hydrate_seconds() -> float:
+    value = os.environ.get("GRASP_IDLE_HYDRATE_SECONDS")
+    if value is None or value.strip() == "":
+        return 0.0
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        return 0.0
+
+
+def default_idle_hydrate_limit() -> int:
+    value = os.environ.get("GRASP_IDLE_HYDRATE_LIMIT")
+    if value is None or value.strip() == "":
+        return 1
+    try:
+        return max(0, int(value))
+    except ValueError:
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="grasp",
@@ -151,6 +171,8 @@ def build_parser() -> argparse.ArgumentParser:
             --idle-hydrate-seconds S can append markdown_idle_hydration to
             supported read/retrieval command results after the displayed result
             is computed, improving future incomplete Markdown graph queries.
+            Set GRASP_IDLE_HYDRATE_SECONDS and GRASP_IDLE_HYDRATE_LIMIT to make
+            this bounded background hydration policy persistent across commands.
             """
         ).strip(),
         epilog=dedent(
@@ -190,17 +212,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--idle-hydrate-seconds",
         type=float,
-        default=0.0,
+        default=default_idle_hydrate_seconds(),
         help=(
             "After supported read/retrieval commands, spend up to this many seconds hydrating incomplete "
-            "Markdown graph files for future commands. Default: 0 (disabled)."
+            "Markdown graph files for future commands. Defaults to $GRASP_IDLE_HYDRATE_SECONDS or 0 (disabled)."
         ),
     )
     parser.add_argument(
         "--idle-hydrate-limit",
         type=int,
-        default=1,
-        help="Maximum Markdown source files to parse after one supported command when idle hydration is enabled. Default: 1.",
+        default=default_idle_hydrate_limit(),
+        help="Maximum Markdown source files to parse after one supported command when idle hydration is enabled. Defaults to $GRASP_IDLE_HYDRATE_LIMIT or 1.",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="command")
