@@ -345,12 +345,105 @@ def store_event_from_row(row: sqlite3.Row) -> dict[str, Any]:
     return event
 
 
+def active_page_claim_conflict(
+    connection: sqlite3.Connection,
+    *,
+    project: str,
+    page_id: str,
+    session_id: str,
+) -> dict[str, str] | None:
+    claims: dict[str, dict[str, str]] = {}
+    releases: set[str] = set()
+    rows = connection.execute(
+        """
+        SELECT event_id, event_type, actor, session_id, payload_json
+        FROM events
+        WHERE project = ?
+          AND event_type IN ('page_claim', 'page_claim_release')
+        ORDER BY event_sequence
+        """,
+        (normalize_project_name(project),),
+    ).fetchall()
+    now = datetime.now(timezone.utc).timestamp()
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"])
+        except json.JSONDecodeError:
+            payload = {}
+        event_type = str(row["event_type"] or "")
+        if event_type == "page_claim":
+            if str(payload.get("page_id") or "") != page_id:
+                continue
+            claims[str(row["event_id"] or "")] = {
+                "claim_event_id": str(row["event_id"] or ""),
+                "actor": str(row["actor"] or ""),
+                "session_id": str(row["session_id"] or ""),
+                "title": str(payload.get("title") or ""),
+                "source_path": str(payload.get("source_path") or ""),
+                "expires_at": str(payload.get("expires_at") or ""),
+            }
+        elif event_type == "page_claim_release":
+            claim_event_id = str(payload.get("claim_event_id") or "")
+            if claim_event_id:
+                releases.add(claim_event_id)
+    for claim_id, claim in reversed(list(claims.items())):
+        if claim_id in releases:
+            continue
+        expires_timestamp = iso_timestamp_or_none(claim.get("expires_at") or "")
+        if expires_timestamp is not None and expires_timestamp < now:
+            continue
+        if session_id and claim.get("session_id", "") == session_id:
+            continue
+        return claim
+    return None
+
+
+def iso_timestamp_or_none(value: str) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).timestamp()
+
+
 def _store_event_exists(connection: sqlite3.Connection, event_id: str) -> bool:
     row = connection.execute(
         "SELECT 1 FROM events WHERE event_id = ?",
         (event_id,),
     ).fetchone()
     return row is not None
+
+
+def latest_project_event_sequence(connection: sqlite3.Connection, project: str) -> int:
+    row = connection.execute(
+        "SELECT COALESCE(MAX(event_sequence), 0) FROM events WHERE project = ?",
+        (normalize_project_name(project),),
+    ).fetchone()
+    return int(row[0] or 0)
+
+
+def require_project_events_unchanged(
+    connection: sqlite3.Connection,
+    project: str,
+    expected_event_sequence: int,
+    *,
+    operation: str,
+) -> None:
+    current_event_sequence = latest_project_event_sequence(connection, project)
+    if current_event_sequence == expected_event_sequence:
+        return
+    raise ValueError(
+        f"{operation} aborted: project events changed during import "
+        f"(expected latest event_sequence {expected_event_sequence}, found {current_event_sequence}); "
+        "retry after reconciling the concurrent writer events"
+    )
 
 
 def import_export_to_sqlite(
@@ -369,7 +462,14 @@ def import_export_to_sqlite(
     ensure_store_schema(store_path)
     connection = connect_sqlite_store(store_path, for_write=True)
     try:
-        with connection:
+        expected_event_sequence = latest_project_event_sequence(connection, project)
+        with sqlite_write_transaction(connection):
+            require_project_events_unchanged(
+                connection,
+                project,
+                expected_event_sequence,
+                operation="Cosense import",
+            )
             _delete_project(connection, project)
             connection.execute(
                 """
@@ -485,16 +585,28 @@ def import_markdown_folder_to_sqlite(
 ) -> dict[str, Any]:
     folder_path = Path(folder_path)
     store_path = Path(store_path)
-    source = MarkdownMirror.from_folder(folder_path, exclude_dirs=exclude_dirs)
-    project = normalize_project_name(project_name or source.project_name or folder_path.name)
+    project = normalize_project_name(project_name or folder_path.name)
     if not project:
         raise ValueError(f"could not determine project name for Markdown folder: {folder_path}")
-
     ensure_store_schema(store_path)
+    snapshot_connection = connect_sqlite_store(store_path)
+    try:
+        expected_event_sequence = latest_project_event_sequence(snapshot_connection, project)
+    finally:
+        snapshot_connection.close()
+
+    source = MarkdownMirror.from_folder(folder_path, exclude_dirs=exclude_dirs)
+
     connection = connect_sqlite_store(store_path, for_write=True)
     import_summary: dict[str, Any] = {}
     try:
-        with connection:
+        with sqlite_write_transaction(connection):
+            require_project_events_unchanged(
+                connection,
+                project,
+                expected_event_sequence,
+                operation="Markdown import",
+            )
             now = int(time.time())
             metadata = _connection_metadata(connection)
             old_manifest = _json_metadata(metadata, f"project.{project}.markdown_manifest")
@@ -984,35 +1096,71 @@ def refresh_edge_resolutions(connection: sqlite3.Connection, project: str, *, re
     )
     connection.execute(
         """
-        WITH handle_counts AS (
-          SELECT project, handle_norm, COUNT(DISTINCT page_id) AS page_count, MIN(page_id) AS page_id
-          FROM page_handles
-          GROUP BY project, handle_norm
-        )
-        UPDATE edges
+        DROP TABLE IF EXISTS temp.grasp_refresh_handle_counts
+        """,
+    )
+    connection.execute(
+        """
+        CREATE TEMP TABLE grasp_refresh_handle_counts AS
+        SELECT
+          project,
+          handle_norm,
+          COUNT(DISTINCT page_id) AS page_count,
+          MIN(page_id) AS page_id
+        FROM page_handles
+        GROUP BY project, handle_norm
+        """,
+    )
+    connection.execute(
+        """
+        CREATE INDEX grasp_refresh_handle_counts_lookup
+        ON grasp_refresh_handle_counts(project, handle_norm)
+        """,
+    )
+    connection.execute(
+        """
+        UPDATE edges AS e
         SET
           resolution_status = CASE
-            WHEN COALESCE((SELECT page_count FROM handle_counts WHERE handle_counts.project = edges.target_project AND handle_counts.handle_norm = edges.target_handle_norm), 0) = 0
-              THEN 'unresolved'
-            WHEN (SELECT page_count FROM handle_counts WHERE handle_counts.project = edges.target_project AND handle_counts.handle_norm = edges.target_handle_norm) = 1
-              THEN 'resolved_unique'
+            WHEN handle_counts.page_count = 1 THEN 'resolved_unique'
             ELSE 'ambiguous'
           END,
           target_page_id = CASE
-            WHEN (SELECT page_count FROM handle_counts WHERE handle_counts.project = edges.target_project AND handle_counts.handle_norm = edges.target_handle_norm) = 1
-              THEN (SELECT page_id FROM handle_counts WHERE handle_counts.project = edges.target_project AND handle_counts.handle_norm = edges.target_handle_norm)
+            WHEN handle_counts.page_count = 1 THEN handle_counts.page_id
             ELSE NULL
           END
-        WHERE connection_strength = 'strong'
+        FROM grasp_refresh_handle_counts AS handle_counts
+        WHERE e.connection_strength = 'strong'
+          AND handle_counts.project = e.target_project
+          AND handle_counts.handle_norm = e.target_handle_norm
         """,
     )
     connection.execute(
         """
         UPDATE edges
         SET
-          target_title = COALESCE((SELECT title FROM pages WHERE pages.project = edges.target_project AND pages.id = edges.target_page_id), target_title),
-          target_norm = COALESCE((SELECT norm_title FROM pages WHERE pages.project = edges.target_project AND pages.id = edges.target_page_id), target_norm)
+          resolution_status = 'unresolved',
+          target_page_id = NULL
         WHERE connection_strength = 'strong'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM grasp_refresh_handle_counts AS handle_counts
+            WHERE handle_counts.project = edges.target_project
+              AND handle_counts.handle_norm = edges.target_handle_norm
+          )
+        """,
+    )
+    connection.execute(
+        """
+        UPDATE edges AS e
+        SET
+          target_title = pages.title,
+          target_norm = pages.norm_title
+        FROM pages
+        WHERE e.connection_strength = 'strong'
+          AND e.target_page_id IS NOT NULL
+          AND pages.project = e.target_project
+          AND pages.id = e.target_page_id
         """,
     )
     if rebuild_weak:
@@ -3331,6 +3479,7 @@ class SQLiteStore:
         message: str = "",
         actor: str = "",
         session_id: str = "",
+        enforce_active_claim_session_id: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         if create and not source_path:
             raise ValueError("write-page --create requires --path")
@@ -3360,6 +3509,20 @@ class SQLiteStore:
                     lines,
                     target_kind=target_kind,
                 )
+                if enforce_active_claim_session_id is not None:
+                    conflict = active_page_claim_conflict(
+                        self.connection,
+                        project=update_result["project"],
+                        page_id=update_result["page"]["id"],
+                        session_id=enforce_active_claim_session_id,
+                    )
+                    if conflict is not None:
+                        raise ValueError(
+                            "page has an active claim by another session; refusing write-page: "
+                            f"{update_result['page']['title']} "
+                            f"session_id={conflict['session_id']!r} actor={conflict['actor']!r} "
+                            f"claim_event_id={conflict['claim_event_id']}"
+                        )
                 event_type = "page_update"
                 payload = {
                     "page_id": update_result["page"]["id"],

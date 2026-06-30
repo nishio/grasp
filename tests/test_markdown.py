@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from grasp.cli import (
     format_ambiguities,
@@ -730,6 +731,43 @@ class MarkdownImportTests(unittest.TestCase):
             try:
                 read = store.read("A", backlink_limit=10, related_limit=10, unresolved_limit=10)
                 self.assertEqual({item["title"] for item in read["unresolved_targets"]}, {"Missing"})
+            finally:
+                store.close()
+
+    def test_reimport_aborts_when_writer_event_lands_during_parse(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text("# A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            original_from_folder = MarkdownMirror.from_folder
+
+            def from_folder_with_concurrent_write(*args, **kwargs):
+                mirror = original_from_folder(*args, **kwargs)
+                store = SQLiteStore(store_path, project="wiki", for_write=True)
+                try:
+                    store.write_markdown_page_with_event(
+                        "A",
+                        lines=["# A", "- concurrent writer marker"],
+                        actor="test",
+                        session_id="writer",
+                    )
+                finally:
+                    store.close()
+                return mirror
+
+            with patch("grasp.sqlite_store.MarkdownMirror.from_folder", side_effect=from_folder_with_concurrent_write):
+                with self.assertRaisesRegex(ValueError, "Markdown import aborted: project events changed"):
+                    import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                page = store.resolve_page("A")
+                lines, _aliases = store.page_lines(page)
+                self.assertEqual([line.text for line in lines], ["# A", "- concurrent writer marker"])
+                self.assertEqual(store.event_count(), 1)
             finally:
                 store.close()
 
