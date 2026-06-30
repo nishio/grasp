@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.11.0`（更新: 2026-06-30 19:27、store: schema `11`、compat: schema `11`）: Markdown heading anchor matching を GitHub-style slug に寄せた。`target_line_id` 解決は exact / hyphen-to-space に加え、heading text から punctuation を落とし、space / hyphen を collapsed hyphen にした slug（例: `## API: Overview!` → `api-overview`）でも照合する。同一 slug の重複 heading は GitHub と同じく2件目以降を `-1`, `-2` suffix で照合する。schema table shape は `10` と同じだが materialized `target_line_id` semantics が変わるため schema `11` として再構築対象にする。
 - `1.10.0`（更新: 2026-06-30 19:16、store: schema `10`、compat: schema `10`）: Markdown heading / block anchor の target line を materialized edge semantics に追加した。`edges` は `target_fragment` / `target_line_id` を持ち、`import --markdown` は `[[Page#Heading]]` / `[[Page#^block-id]]` / `[label](Page.md#Heading)` / `[label](Page.md#^block-id)` を page edge にした上で、unique target page 内の heading / block id が見つかる時は `target_line_id` を保存する。resolved local-only anchor `[label](#Heading)` / `[[#Heading]]` は self-page line edge になるが、missing local anchor は edge 化しない。`target_fragment` は incremental re-import の refresh で incoming edge の `target_line_id` を再計算するために保持する。weak cross-project inferred edge は page-level のまま。schema は `10`
 - `1.9.0`（更新: 2026-06-29 00:57、store: schema `9`、compat: schema `9`）: whole-store cross-project retrieval を materialized graph semantics として入れた。`edges` は source project に加えて `target_project` / `link_kind` / `connection_strength` を持ち、Cosense `[/project/title]` は import 時に `cross-*` strong edge になる。bare unresolved link が他 project の materialized page と normalized title で一致する場合は `inferred-normalized-title` weak edge を再生成する。`read` / `search` / `backlinks` / `related` / `path` / `unresolved` は `--project` 未指定で store 全体を source scope とし、結果に project / strength / link_kind を返す。`unresolved` は whole-store で同じ normalized missing target を project 横断集計し、`projects[]` / `project_count` を返す。schema は `9`
 - `1.8.82`（更新: 2026-06-29 00:43、store: schema `8`、compat: schema `8` compatible）: `sync --full-reconcile` を追加し、hosted `listPages` manifest 全体を local page id set と比較できるようにした。remote にあるが local に無い page / same id の rename / updated or `linesCount` mismatch は fetch candidate になり、remote manifest から消えた local page は active graph から削除して `project.<project>.sync_tombstones` metadata に tombstone を残す。rename は旧 title を `hosted-rename-alias` handle として残す。partial acquisition namespace の `sync` は mutation せず `partial_acquisition_not_syncable` diagnostic を返し、hosted `lines[].id` は observed-only で local `lines.line_id` へは保存しない。schema は不変
@@ -224,6 +225,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.10.0`
-- Current internal `SCHEMA_VERSION`: `10`
-- Current package metadata should match `1.10.0`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current public compatibility version: `1.11.0`
+- Current internal `SCHEMA_VERSION`: `11`
+- Current package metadata should match `1.11.0`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
