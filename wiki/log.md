@@ -1961,3 +1961,7 @@ stable line identity と Markdown direct edit policy、git-diff-of-md に依存�
 - code: schema v13 adds line_tombstones and records live line_ids removed by Markdown-backed page replacement or append revert; reintroduced line_ids are removed from tombstones when revert restores them.
 - behavior: read --around-line, write-line, and line-id source path lookup now return a tombstone diagnostic for deleted line ids instead of plain not-found.
 - coverage: tests cover schema/table shape plus write-page deletion tombstone, tombstone diagnostic, and revert revival. Full unittest discover ran 340 tests OK; mode2 markdown readonly, file-back runbook, wiki lint, version ledger, and diff check were green.
+
+## [2026-07-01 01:15] file-back | stable milestone current state
+[[grasp-backlog]] now records the 2026-07-01 state: lost-update correctness gates and broader synthetic evidence are green; the remaining mode2 cutover gate is owner-defined throughput/wait thresholds, not more generic queue work.
+[[adoption-trust-gradient]] now treats the open cutover question as owner policy for `--min-surviving-throughput-ratio` and `--max-p95-claim-wait-seconds`; Codex-actionable work without that decision should stay on stable line identity edit surfaces and concrete dogfood gaps.
