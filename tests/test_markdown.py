@@ -1232,6 +1232,69 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertIn("graph: incomplete", text)
             self.assertIn("empty results may be caused by unhydrated Markdown source files", text)
 
+    def test_cli_idle_hydration_runs_after_result_for_future_commands(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nneedle links to [[B]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki", catalog_only=True)
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--idle-hydrate-seconds",
+                    "10",
+                    "--idle-hydrate-limit",
+                    "1",
+                    "search",
+                    "needle",
+                    "--limit",
+                    "10",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            result = json.loads(completed.stdout)
+            self.assertEqual(result["hits"], [])
+            self.assertEqual(result["markdown_graph"]["hydrated_files"], 0)
+            idle = result["markdown_idle_hydration"]
+            self.assertEqual(idle["applied_after_result"], True)
+            self.assertEqual(idle["hydrated_count"], 1)
+            self.assertEqual(idle["hydrated"][0]["source_path"], "A.md")
+            self.assertEqual(idle["markdown_graph"]["hydrated_files"], 1)
+
+            followup = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "search",
+                    "needle",
+                    "--limit",
+                    "10",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            followup_result = json.loads(followup.stdout)
+            self.assertEqual([hit["source_title"] for hit in followup_result["hits"]], ["A"])
+
     def test_noop_reimport_uses_manifest_hash_fast_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
