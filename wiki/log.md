@@ -1766,3 +1766,10 @@ fallback: `GRASP_SESSION_ID=file-back-20260629T2315-authority-modes python3 scri
 
 ## [2026-06-30 04:46] file-back | Open Q #1/#2 は cutover decision の下流（合成を entity に追記）
 [[parallel-session-file-back-contention-2026-06-28]] に Update。未決 Open Q #1(pairing guard / projection defer)と #2(direct-patch+remote-merge 正規化 / append-only merge)は独立でなく [[adoption-trust-gradient]] の mode1↔mode2 cutover の下流。mode2 に倒せば Q#1=defer-projection(半実装済) / Q#2=store から regenerate で解ける。leverage は Q#1(ii) を先に。decision でなく分析(cutover 判断は owner)。
+
+## [2026-06-30 11:30] experiment+file-back | mode2 並行編集 stress run → Codex handoff
+owner 判断「dogfood を mode2 に倒すか」の go/no-go 材料として、throwaway mode2 store（~/llm-wiki 743p adopt）を2プロセスで並行 loop 編集する stress を実走。新規 entity [[mode2-parallel-edit-stress-2026-06-30]] を追加し index 行を追記。
+結果: (A) 無協調は 50 write 中 24 を silent lost（last-writer-wins、エラー0、なお `write-status --strict` は GREEN＝整合≠正しさ）。(B) `claim-page` soft lease + `--defer-projection` で lost 0、staleness は strict が exit 1 で検出、ただし ~50% skip（throughput 半減＋dropped-work）。
+実装ブロッカー finding: grasp-wiki 等の高密度グラフで projection/graph compute が病的に遅く（read-only `export-markdown --check` も 25s timeout、link 密度に superlinear 疑い、Python 3.14.5 環境）、grasp-write file-back 自体が踏んだ。
+次の実験/修正は owner 指示により**自分で回さず Codex に handoff**: [[grasp-backlog]] の Local write 層に P0a(projection 性能 profile+bisect) / P0b(content-level lost-update guard) / P1a(claim 実効直列化) / P1b(skip retry/merge) と受け入れ条件（lost-update 0 回帰を cutover gate に）を起票。[[adoption-trust-gradient]] の「信頼を測る指標」にも gate 案を追記。
+fallback: 上記 projection 性能病で `write-page` が未完 spin したため、本 file-back は grasp write-first を断念し direct Markdown patch で着地。store/projection は divergent（projection ahead）のまま — Codex 側で P0a 修正後に store へ再取り込みが必要。
