@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -1361,6 +1362,74 @@ class MarkdownImportTests(unittest.TestCase):
             )
             followup_result = json.loads(followup.stdout)
             self.assertEqual([hit["source_title"] for hit in followup_result["hits"]], ["A"])
+
+    def test_cli_idle_hydration_policy_can_be_set_by_environment(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\nneedle links to [[B]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+
+            def make_store(name: str) -> Path:
+                store_path = Path(tmpdir) / f"{name}.sqlite"
+                import_markdown_folder_to_sqlite(root, store_path, project_name="wiki", catalog_only=True)
+                return store_path
+
+            base_cmd = [
+                sys.executable,
+                "-m",
+                "grasp",
+                "--json",
+                "--project",
+                "wiki",
+            ]
+            env = {
+                **os.environ,
+                "GRASP_IDLE_HYDRATE_SECONDS": "10",
+                "GRASP_IDLE_HYDRATE_LIMIT": "1",
+            }
+
+            env_store = make_store("env")
+            completed = subprocess.run(
+                [
+                    *base_cmd,
+                    "--store",
+                    str(env_store),
+                    "search",
+                    "needle",
+                    "--limit",
+                    "10",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+                env=env,
+            )
+            result = json.loads(completed.stdout)
+            self.assertEqual(result["hits"], [])
+            self.assertEqual(result["markdown_idle_hydration"]["hydrated_count"], 1)
+
+            disabled_store = make_store("disabled")
+            disabled = subprocess.run(
+                [
+                    *base_cmd,
+                    "--store",
+                    str(disabled_store),
+                    "--idle-hydrate-seconds",
+                    "0",
+                    "search",
+                    "needle",
+                    "--limit",
+                    "10",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+                env=env,
+            )
+            disabled_result = json.loads(disabled.stdout)
+            self.assertNotIn("markdown_idle_hydration", disabled_result)
+            self.assertEqual(disabled_result["markdown_graph"]["hydrated_files"], 0)
 
     def test_noop_reimport_uses_manifest_hash_fast_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
