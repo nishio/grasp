@@ -1974,3 +1974,8 @@ milestone: this removes the stable line identity backlog item for multi-line/ran
 ## [2026-07-01 01:33] file-back | stable line identity duplicate ambiguity handoff
 [[grasp-backlog]] stable line identity 節に、次の Codex-actionable slice を「重複した同一 text line を exact unchanged としても自動で同一 `line_id` に寄せない保守 policy」として追記。
 owner 閾値なしで進められる作業は duplicate ambiguity regression に絞り、split / merge / move / 大幅編集の意味的同一視や汎用 merge / queue は real dogfood gap が出てから目的名付きで足す。
+
+## [2026-07-01 01:41] implementation+file-back | duplicate line identity policy
+code: Markdown line-id inheritance now requires unambiguous exact text matches. If old or new lines contain duplicate text, `import --markdown`, `write-page`, and `write-lines` do not auto-reuse the old `line_id`; write-page/write-lines mint new ids and tombstone removed duplicate ids.
+coverage: added regressions for content-only re-import, write-page old-duplicate removal, write-page new duplicate insertion, and write-lines duplicate range replacement. Public version is `1.13.2`; schema remains `13`.
+milestone: duplicate text line policy is no longer a stable line identity residual. Remaining identity gaps are split/merge/move/large-edit policy and Cosense/hosted sync external line id; owner cutover throughput/wait thresholds remain a policy decision.
