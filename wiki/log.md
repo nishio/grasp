@@ -1970,3 +1970,7 @@ stable line identity と Markdown direct edit policy、git-diff-of-md に依存�
 code: added `write-lines <start-line-id> <end-line-id>` for Markdown-backed pages. It replaces an inclusive same-page line-id range, preserves exact unchanged line_ids inside the range, keeps outside line_ids, tombstones removed range line_ids, and records a `page_update` event with range anchors plus before/after range payloads.
 coverage: added regressions for range replacement, tombstones, strict projection status, cross-page/reverse-anchor rejection, active-claim refusal, help surface, and version ledger updates. Public version is `1.13.1`; schema remains `13`.
 milestone: this removes the stable line identity backlog item for multi-line/range edit surface. Remaining identity gaps are split/merge/move/duplicate/large-edit policy and Cosense/hosted sync external line id.
+
+## [2026-07-01 01:33] file-back | stable line identity duplicate ambiguity handoff
+[[grasp-backlog]] stable line identity 節に、次の Codex-actionable slice を「重複した同一 text line を exact unchanged としても自動で同一 `line_id` に寄せない保守 policy」として追記。
+owner 閾値なしで進められる作業は duplicate ambiguity regression に絞り、split / merge / move / 大幅編集の意味的同一視や汎用 merge / queue は real dogfood gap が出てから目的名付きで足す。

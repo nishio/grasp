@@ -169,6 +169,7 @@ v1 stable surface は read line。Markdown-backed `append-log` / `write-page` / 
 - local write は moved exact-same line の id 維持、既存1行を full `line_id` で置換する `write-line` command surface、同一 page 上の full `line_id` 2つで inclusive range を置換する `write-lines` command surface、live `lines` から消えた `line_id` を `line_tombstones` に残す削除側 memory まで実装済み。残る未実装は、split / merge / move / 重複行 / 大幅編集の曖昧一致を自動同一視しない policy surface と、Cosense/hosted sync external line id。
 - 外部 source（Cosense export / Markdown mirror）に line id が無ければ初回 import 時に grasp が mint し、identity journal に保持する。
 - sync / reimport は旧新 lines を diff し、同一と判定できる line だけ id を引き継ぐ。Markdown content-only re-import と `write-page` replacement の exact unchanged line 引き継ぎ、`write-lines` range replacement の範囲内 exact unchanged line 引き継ぎ、Markdown-backed replacement / range replacement / append revert の line tombstone は実装済み。残る未実装は Cosense / hosted sync 側、split / merge / move / 重複行 / 大幅編集の曖昧一致を自動同一視しない policy surface。
+- 次の Codex-actionable slice は、重複した同一 text line を exact unchanged としても自動で同一 `line_id` に寄せない保守 policy を先に固定すること。duplicate がある時は identity が曖昧なので新 `line_id` を mint し、旧 duplicate `line_id` は tombstone に残す regression を作る。split / merge / move / 大幅編集の意味的同一視や汎用 merge / queue は、その後の実 dogfood gap が出てから目的名付きで足す。
 
 schema 方向:
 
