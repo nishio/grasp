@@ -1830,3 +1830,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 16:02] implementation+file-back | bounded Markdown hydration loop
 - code: `hydrate-markdown` now supports `--until-complete --max-seconds S`, repeating source-order chunks until graph complete, no progress, or time budget exhaustion; output includes iterations, elapsed_seconds, stopped_by, and the before/after graph.
 - test: regression covers `max_seconds=0` no-start behavior, `--until-complete --max-seconds 10 --limit 1` completing a 3-page catalog in 3 iterations, and CLI rejection of unbounded `--until-complete` without `--max-seconds`.
+
+## [2026-06-30 16:15] implementation | opt-in idle Markdown hydration
+- Added global --idle-hydrate-seconds S / --idle-hydrate-limit N for supported read/retrieval commands; results keep their pre-idle partial graph contract and report markdown_idle_hydration for future-command progress.
+- Updated progressive/lazy import backlog: explicit opt-in idle hydration is implemented; remaining work is default policy/env policy, derivative stale flags, and finer contracts for mentions/co-links/path/unresolved.
