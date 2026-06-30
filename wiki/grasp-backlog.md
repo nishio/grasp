@@ -165,9 +165,9 @@ v1 stable surface は read line。Markdown-backed `append-log` / `write-page` / 
 `page.id:line-index` は **安定 line ID でなく positional locator**（行挿入で後続 locator が変わる）。content hash は本文編集で、line index は挿入で identity が変わるため不可＝**stable ID requires memory**。identity 層では `line.id`（opaque stable）と `line_index`（current order）を別列にする。要件:
 
 - 2026-06-26 の前処理として、`line_window.around_line_id` / search context window は `page.id:line-index` を再合成せず stored `lines.line_id` を返すようにした（`1.7.8`）。2026-07-01 に Markdown content-only re-import と `write-page` replacement は exact unchanged line の `line_id` を引き継ぐ第一 slice を実装した。初回 mint はまだ source page id + line index 由来で、挿入時に既存 id と衝突する re-import 新規 line だけ opaque suffix を mint する。`write-page` の新規 inserted line は opaque `line-<uuid>` を mint する。
-- local write は moved exact-same line の id 維持まで実装済み。残る未実装は、既存 line を `line_id` で指定して編集する command surface と、split / merge / move / 重複行 / 大幅編集の曖昧一致を自動同一視しない policy surface。
+- local write は moved exact-same line の id 維持と、既存1行を full `line_id` で置換する `write-line` command surface まで実装済み。残る未実装は、複数行 / 範囲編集、split / merge / move / 重複行 / 大幅編集の曖昧一致を自動同一視しない policy surface。
 - 外部 source（Cosense export / Markdown mirror）に line id が無ければ初回 import 時に grasp が mint し、identity journal に保持する。
-- sync / reimport は旧新 lines を diff し、同一と判定できる line だけ id を引き継ぐ。Markdown content-only re-import と `write-page` replacement の exact unchanged line 引き継ぎは実装済み。残る未実装は Cosense / hosted sync 側、line tombstone、line-id 指定 write、split / merge / move / 重複行 / 大幅編集の曖昧一致を自動同一視しない policy surface。
+- sync / reimport は旧新 lines を diff し、同一と判定できる line だけ id を引き継ぐ。Markdown content-only re-import と `write-page` replacement の exact unchanged line 引き継ぎは実装済み。残る未実装は Cosense / hosted sync 側、line tombstone、複数行 / 範囲 edit surface、split / merge / move / 重複行 / 大幅編集の曖昧一致を自動同一視しない policy surface。
 
 schema 方向:
 

@@ -1946,3 +1946,8 @@ stable line identity と Markdown direct edit policy、git-diff-of-md に依存�
 - code: write-page replacement now uses exact line diff inheritance instead of same-index-only reuse, so inserted lines no longer force unchanged following lines to get new line_id values.
 - coverage: tests.test_markdown.MarkdownImportTests.test_write_page_inherits_line_ids_across_inserted_lines verifies moved heading/link line_ids and self-anchor target_line_id survive a write-page insertion. Full unittest discover ran 332 tests OK.
 - caveat: stable line identity is still not complete; remaining gaps are line-id addressed edit surface, Cosense/hosted sync, tombstones, and split/merge/move/duplicate-line policy.
+
+## [2026-07-01 01:25] implementation+file-back | line-id addressed write surface
+- code: added write-line <line-id> --text to replace one Markdown-backed stored line while preserving that line_id, recording a page_update event, refreshing derived edges, and supporting no-journal/defer-projection/projection rollback.
+- coverage: tests.test_cli_help.CliHelpTests.test_write_line_updates_single_line_by_stable_line_id verifies full-line-id edit, event payload, projection, edge refresh, and strict status; test_write_line_refuses_other_session_active_claim keeps claim enforcement aligned with write-page. Full unittest discover ran 334 tests OK.
+- caveat: stable line identity still needs Cosense/hosted sync, line tombstones, multi-line/range edit surface, and split/merge/move/duplicate-line policy.
