@@ -55,13 +55,13 @@ from .markdown import (
     markdown_wikilink_target,
     parse_frontmatter,
     parse_markdown_line_links,
-    parse_markdown_links,
+    parse_markdown_line_link_targets,
     parse_markdown_h1_title,
     normalize_exclude_dirs,
 )
 
 
-SCHEMA_VERSION = "11"
+SCHEMA_VERSION = "12"
 IMPORT_CACHE_MANIFEST_VERSION = 1
 CANONICAL_STORE_ENV = "GRASP_CANONICAL_STORE"
 SQLITE_BUSY_TIMEOUT_MS = 30_000
@@ -1327,6 +1327,7 @@ def _insert_edge_rows(connection: sqlite3.Connection, rows: list[tuple[Any, ...]
             target_project = normalize_project_name(str(rest[0])) if len(rest) >= 1 and rest[0] else project
             target_handle = str(rest[1]) if len(rest) >= 2 and rest[1] else target_title
             link_kind = str(rest[2]) if len(rest) >= 3 and rest[2] else "internal"
+            target_fragment = str(rest[3]) if len(rest) >= 4 and rest[3] else None
             target_norm = normalize_title(str(target_title))
             prepared.append(
                 (
@@ -1338,6 +1339,7 @@ def _insert_edge_rows(connection: sqlite3.Connection, rows: list[tuple[Any, ...]
                     target_norm,
                     target_handle,
                     normalize_title(str(target_title)),
+                    target_fragment,
                     link_kind,
                 )
             )
@@ -1361,10 +1363,65 @@ def _insert_edge_rows(connection: sqlite3.Connection, rows: list[tuple[Any, ...]
           link_kind,
           connection_strength
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 'unresolved', ?, 'strong')
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, 'unresolved', ?, 'strong')
         """,
         values(),
     )
+
+
+def _line_from_payload(item: dict[str, Any]) -> Line:
+    return Line(
+        line_id=str(item.get("line_id") or ""),
+        index=int(item.get("line_index") or 0),
+        text=str(item.get("text", "")),
+        created=item.get("created"),
+        updated=item.get("updated"),
+        user_id=item.get("user_id"),
+    )
+
+
+def _markdown_code_fence_state_after_payloads(line_payloads: list[dict[str, Any]]) -> bool:
+    in_code_fence = False
+    for item in line_payloads:
+        if is_code_fence(str(item.get("text", "")).lstrip()):
+            in_code_fence = not in_code_fence
+    return in_code_fence
+
+
+def _markdown_edge_rows_for_line_payloads(
+    *,
+    project: str,
+    page_id: str,
+    page_title: str,
+    line_payloads: list[dict[str, Any]],
+    fragment_line_payloads: list[dict[str, Any]] | None = None,
+    in_code_fence: bool = False,
+) -> list[tuple[Any, ...]]:
+    source_lines = [_line_from_payload(item) for item in (fragment_line_payloads or line_payloads)]
+    edge_rows: list[tuple[Any, ...]] = []
+    for item in line_payloads:
+        line = _line_from_payload(item)
+        targets, in_code_fence = parse_markdown_line_link_targets(line.text, in_code_fence=in_code_fence)
+        for target in targets:
+            target_title = target.title or page_title
+            if not target_title:
+                continue
+            if not target.title and target.fragment and markdown_fragment_line_id(source_lines, target.fragment) is None:
+                continue
+            edge_rows.append(
+                (
+                    project,
+                    page_id,
+                    line.line_id,
+                    target_title,
+                    normalize_title(target_title),
+                    None,
+                    None,
+                    None,
+                    target.fragment,
+                )
+            )
+    return edge_rows
 
 
 def refresh_edge_resolutions(connection: sqlite3.Connection, project: str, *, rebuild_weak: bool = True) -> None:
@@ -4249,10 +4306,30 @@ class SQLiteStore:
         if len(candidates) > 1:
             raise ValueError(f"page handle is ambiguous: {title}; use a unique title for append alpha")
         page_id = str(candidates[0]["page_id"])
+        page_title = str(candidates[0].get("title") or title)
         source_path = str(candidates[0].get("path") or "")
         if not source_path:
             raise ValueError(f"Markdown manifest has no source path for page_id: {page_id}")
         now = int(time.time())
+        existing_line_payloads = [
+            {
+                "line_id": str(row["line_id"]),
+                "line_index": int(row["line_index"]),
+                "text": str(row["text"]),
+                "created": row["created"],
+                "updated": row["updated"],
+                "user_id": row["user_id"],
+            }
+            for row in self.connection.execute(
+                """
+                SELECT line_id, line_index, text, created, updated, user_id
+                FROM lines
+                WHERE project = ? AND page_id = ?
+                ORDER BY line_index
+                """,
+                (project, page_id),
+            ).fetchall()
+        ]
         start_row = self.connection.execute(
             """
             SELECT COALESCE(MAX(line_index) + 1, 0) AS start_index
@@ -4263,7 +4340,6 @@ class SQLiteStore:
         ).fetchone()
         start_index = int(start_row["start_index"])
         appended = []
-        edge_rows = []
         for offset, text in enumerate(lines):
             line_index = start_index + offset
             line_id = f"line-{uuid4().hex}"
@@ -4284,8 +4360,14 @@ class SQLiteStore:
                 """,
                 (project, line_id, page_id, line_index, text, now, now, "grasp"),
             )
-            for target_title in parse_markdown_links(text):
-                edge_rows.append((project, page_id, line_id, target_title, normalize_title(target_title)))
+        edge_rows = _markdown_edge_rows_for_line_payloads(
+            project=project,
+            page_id=page_id,
+            page_title=page_title,
+            line_payloads=appended,
+            fragment_line_payloads=[*existing_line_payloads, *appended],
+            in_code_fence=_markdown_code_fence_state_after_payloads(existing_line_payloads),
+        )
         _insert_edge_rows(self.connection, edge_rows)
         refresh_edge_resolutions(self.connection, project)
         rebuild_unresolved_targets(self.connection, project)
@@ -4434,15 +4516,13 @@ class SQLiteStore:
         ]
         edge_rows = []
         emits_edges = markdown_graph_role_emits_edges(graph_role)
-        in_code_fence = False
         if emits_edges:
-            for line in line_payloads:
-                targets, in_code_fence = parse_markdown_line_links(
-                    str(line["text"]),
-                    in_code_fence=in_code_fence,
-                )
-                for target_title in targets:
-                    edge_rows.append((project, page_id, line["line_id"], target_title, normalize_title(target_title)))
+            edge_rows = _markdown_edge_rows_for_line_payloads(
+                project=project,
+                page_id=page_id,
+                page_title=title,
+                line_payloads=line_payloads,
+            )
 
         new_files = {str(path): dict(item) for path, item in files.items() if isinstance(item, dict)}
         new_files[source_path] = {
@@ -5317,7 +5397,16 @@ class SQLiteStore:
     ) -> int:
         edge_rows = []
         emits_edges = markdown_graph_role_emits_edges(graph_role)
-        in_code_fence = False
+        page_row = self.connection.execute(
+            """
+            SELECT title
+            FROM pages
+            WHERE project = ? AND id = ?
+            """,
+            (project, page_id),
+        ).fetchone()
+        page_title = str(page_row["title"]) if page_row is not None else ""
+        line_payloads: list[dict[str, Any]] = []
         self.connection.execute(
             "DELETE FROM edges WHERE project = ? AND source_page_id = ?",
             (project, page_id),
@@ -5332,6 +5421,15 @@ class SQLiteStore:
             created = item.get("created")
             line_updated = item.get("updated")
             user_id = item.get("user_id")
+            line_payload = {
+                "line_id": line_id,
+                "line_index": line_index,
+                "text": text,
+                "created": created,
+                "updated": line_updated,
+                "user_id": user_id,
+            }
+            line_payloads.append(line_payload)
             self.connection.execute(
                 """
                 INSERT INTO lines (project, line_id, page_id, line_index, text, created, updated, user_id)
@@ -5339,11 +5437,13 @@ class SQLiteStore:
                 """,
                 (project, line_id, page_id, line_index, text, created, line_updated, user_id),
             )
-            if not emits_edges:
-                continue
-            targets, in_code_fence = parse_markdown_line_links(text, in_code_fence=in_code_fence)
-            for target_title in targets:
-                edge_rows.append((project, page_id, line_id, target_title, normalize_title(target_title)))
+        if emits_edges:
+            edge_rows = _markdown_edge_rows_for_line_payloads(
+                project=project,
+                page_id=page_id,
+                page_title=page_title,
+                line_payloads=line_payloads,
+            )
         _insert_edge_rows(self.connection, edge_rows)
         refresh_edge_resolutions(self.connection, project)
         rebuild_unresolved_targets(self.connection, project)
