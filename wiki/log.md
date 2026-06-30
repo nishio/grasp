@@ -1874,3 +1874,7 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 ## [2026-06-30 18:17] implementation | incomplete graph contract coverage
 - Added markdown_query_contract coverage for selected-project link-stats, peek, suggest, ambiguities, cross-project-spread, and cross-project-spreads so catalog-only results are not read as complete corpus facts.
 - Text output for those commands now prints the same incomplete graph warning and partial fields note used by retrieval commands.
+
+## [2026-06-30 18:29] implementation | all-project incomplete graph contract
+- Added an all-project aggregate markdown_graph for mixed complete/incomplete Markdown stores, including incomplete_projects and contract incomplete_markdown_projects.
+- Commands that can run without --project now keep incomplete Markdown projects visible instead of presenting aggregate counts as complete.
