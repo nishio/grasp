@@ -735,6 +735,38 @@ class MarkdownImportTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_reimport_content_only_change_uses_changed_file_fast_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text("# A\nlinks to [[B]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            page_a.write_text("# A\nlinks to [[B]] and [[Missing]]\n", encoding="utf-8")
+
+            with patch(
+                "grasp.sqlite_store.MarkdownMirror.from_folder",
+                side_effect=AssertionError("content-only reimport should not build a full MarkdownMirror"),
+            ):
+                result = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            self.assertEqual(result["markdown_import"]["mode"], "incremental")
+            self.assertEqual(result["markdown_import"]["changed_files"], 1)
+            self.assertEqual(result["markdown_import"]["fast_path"], "manifest_hash_changed_files")
+            self.assertEqual(result["markdown_import"]["scanned_files"], 2)
+            self.assertEqual(result["markdown_import"]["parsed_files"], 1)
+            self.assertEqual(result["edges"], 2)
+            self.assertEqual(result["unresolved_targets"], 1)
+
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                read = store.read("A", backlink_limit=10, related_limit=10, unresolved_limit=10)
+                self.assertEqual({item["title"] for item in read["unresolved_targets"]}, {"Missing"})
+            finally:
+                store.close()
+
     def test_noop_reimport_uses_manifest_hash_fast_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -765,7 +797,7 @@ class MarkdownImportTests(unittest.TestCase):
             store_path = Path(tmpdir) / "store.sqlite"
 
             import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
-            page_a.write_text("# A\nlocal Markdown edit\n", encoding="utf-8")
+            page_a.write_text("# Renamed A\nlocal Markdown edit\n", encoding="utf-8")
             original_from_folder = MarkdownMirror.from_folder
 
             def from_folder_with_concurrent_write(*args, **kwargs):
@@ -822,6 +854,48 @@ class MarkdownImportTests(unittest.TestCase):
             with patch(
                 "grasp.sqlite_store._fast_noop_markdown_import_summary",
                 side_effect=fast_summary_with_concurrent_write,
+            ):
+                with self.assertRaisesRegex(ValueError, "Markdown import aborted: project events changed"):
+                    import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                page = store.resolve_page("A")
+                lines, _aliases = store.page_lines(page)
+                self.assertEqual([line.text for line in lines], ["# A", "- concurrent writer marker"])
+                self.assertEqual(store.event_count(), 1)
+            finally:
+                store.close()
+
+    def test_changed_file_fast_reimport_aborts_when_writer_event_lands_during_manifest_scan(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text("# A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            page_a.write_text("# A\ncontent-only edit\n", encoding="utf-8")
+            original_change_scan = sqlite_store._markdown_manifest_change_scan
+
+            def change_scan_with_concurrent_write(*args, **kwargs):
+                scan = original_change_scan(*args, **kwargs)
+                store = SQLiteStore(store_path, project="wiki", for_write=True)
+                try:
+                    store.write_markdown_page_with_event(
+                        "A",
+                        lines=["# A", "- concurrent writer marker"],
+                        actor="test",
+                        session_id="writer",
+                    )
+                finally:
+                    store.close()
+                return scan
+
+            with patch(
+                "grasp.sqlite_store._markdown_manifest_change_scan",
+                side_effect=change_scan_with_concurrent_write,
             ):
                 with self.assertRaisesRegex(ValueError, "Markdown import aborted: project events changed"):
                     import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")

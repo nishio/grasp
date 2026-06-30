@@ -39,8 +39,10 @@ from .markdown import (
     first_markdown_h1_title,
     is_code_fence,
     iter_markdown_files,
+    markdown_edges_for_record,
     markdown_graph_role,
     markdown_graph_role_emits_edges,
+    markdown_page_record_from_file,
     markdown_page_id,
     markdown_projection_text,
     markdown_title,
@@ -641,6 +643,18 @@ def import_markdown_folder_to_sqlite(
             return stats
         finally:
             store.close()
+
+    fast_changed_stats = _try_fast_changed_markdown_import(
+        folder_path,
+        store_path,
+        project,
+        exclude_dirs=exclude_dirs,
+        defer_weak_edges=defer_weak_edges,
+        expected_event_sequence=expected_event_sequence,
+    )
+    if fast_changed_stats is not None:
+        _cache_import_source(folder_path, store_path, project, source_type="markdown", exclude_dirs=exclude_dirs)
+        return fast_changed_stats
 
     source = MarkdownMirror.from_folder(folder_path, exclude_dirs=exclude_dirs)
 
@@ -1434,6 +1448,221 @@ def _fast_noop_markdown_import_summary(
         "full_rebuild_reason": None,
         "fast_path": "manifest_hash_noop",
         "scanned_files": len(markdown_paths),
+    }
+
+
+def _try_fast_changed_markdown_import(
+    folder_path: Path,
+    store_path: Path,
+    project: str,
+    *,
+    exclude_dirs: tuple[str, ...],
+    defer_weak_edges: bool,
+    expected_event_sequence: int,
+) -> dict[str, Any] | None:
+    scan_connection = connect_sqlite_store(store_path)
+    try:
+        scan = _markdown_manifest_change_scan(scan_connection, project, folder_path, exclude_dirs)
+    finally:
+        scan_connection.close()
+    if scan is None:
+        return None
+
+    changed_paths = scan["changed_paths"]
+    if not changed_paths:
+        return None
+
+    old_manifest = scan["old_manifest"]
+    old_files = old_manifest.get("files") if isinstance(old_manifest.get("files"), dict) else {}
+    changed_records: list[MarkdownPageRecord] = []
+    changed_items: dict[str, dict[str, Any]] = {}
+    for relative_path in changed_paths:
+        record = markdown_page_record_from_file(folder_path, folder_path / relative_path)
+        old_item = old_files.get(relative_path)
+        new_item = _markdown_manifest_item_from_record(record)
+        if not isinstance(old_item, dict):
+            return None
+        if _markdown_manifest_item_identity(old_item) != _markdown_manifest_item_identity(new_item):
+            return None
+        changed_records.append(record)
+        changed_items[relative_path] = new_item
+
+    connection = connect_sqlite_store(store_path, for_write=True)
+    import_summary: dict[str, Any] | None = None
+    try:
+        with sqlite_write_transaction(connection):
+            require_project_events_unchanged(
+                connection,
+                project,
+                expected_event_sequence,
+                operation="Markdown import",
+            )
+            metadata = _connection_metadata(connection)
+            current_manifest = _json_metadata(metadata, f"project.{project}.markdown_manifest")
+            current_aliases = _json_metadata(metadata, f"project.{project}.title_aliases")
+            if (
+                metadata.get(f"project.{project}.source_type") != "markdown"
+                or current_manifest != old_manifest
+                or current_aliases != scan["old_aliases"]
+            ):
+                return None
+
+            now = int(time.time())
+            new_manifest = dict(old_manifest)
+            new_files = {
+                str(relative_path): dict(item)
+                for relative_path, item in old_files.items()
+                if isinstance(item, dict)
+            }
+            for record in changed_records:
+                relative_path = record.relative_path.as_posix()
+                _replace_markdown_record(
+                    connection,
+                    project,
+                    record,
+                    markdown_edges_for_record(record),
+                )
+                new_files[relative_path] = changed_items[relative_path]
+            new_manifest["files"] = new_files
+
+            refresh_edge_resolutions(connection, project, rebuild_weak=not defer_weak_edges)
+            rebuild_unresolved_targets(connection, project)
+            _refresh_project_counts_sql(connection, project)
+            connection.execute(
+                """
+                UPDATE projects
+                SET display_name = ?, source_export = ?, imported_at = ?
+                WHERE name = ?
+                """,
+                (folder_path.name or project, str(folder_path), now, project),
+            )
+            import_summary = {
+                "mode": "incremental",
+                "changed_files": len(changed_records),
+                "full_rebuild_reason": None,
+                "fast_path": "manifest_hash_changed_files",
+                "scanned_files": scan["scanned_files"],
+                "parsed_files": len(changed_records),
+            }
+            _write_metadata(
+                connection,
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "last_imported_project": project,
+                    "last_source_export": str(folder_path),
+                    "last_source_type": "markdown",
+                    "last_imported_at": str(now),
+                    f"project.{project}.source_type": "markdown",
+                    f"project.{project}.title_aliases": json.dumps(
+                        scan["old_aliases"],
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    f"project.{project}.markdown_manifest": json.dumps(
+                        new_manifest,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    f"project.{project}.markdown_last_import": json.dumps(
+                        import_summary,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                },
+            )
+    finally:
+        connection.close()
+
+    if import_summary is None:
+        return None
+    store = SQLiteStore(store_path, project=project)
+    try:
+        stats = store.stats()
+        stats["markdown_import"] = import_summary
+        return stats
+    finally:
+        store.close()
+
+
+def _markdown_manifest_change_scan(
+    connection: sqlite3.Connection,
+    project: str,
+    folder_path: Path,
+    exclude_dirs: tuple[str, ...],
+) -> dict[str, Any] | None:
+    if not folder_path.exists():
+        raise ValueError(f"Markdown folder does not exist: {folder_path}")
+    if not folder_path.is_dir():
+        raise ValueError(f"Markdown source must be a folder: {folder_path}")
+
+    metadata = _connection_metadata(connection)
+    old_manifest = _json_metadata(metadata, f"project.{project}.markdown_manifest")
+    old_aliases = _json_metadata(metadata, f"project.{project}.title_aliases")
+    if (
+        not _project_exists(connection, project)
+        or metadata.get(f"project.{project}.source_type") != "markdown"
+        or old_manifest is None
+        or old_manifest.get("version") != 3
+        or old_aliases is None
+    ):
+        return None
+
+    normalized_exclude_dirs = normalize_exclude_dirs(exclude_dirs)
+    if sorted(str(item) for item in old_manifest.get("exclude_dirs") or []) != list(normalized_exclude_dirs):
+        return None
+
+    old_files = old_manifest.get("files")
+    if not isinstance(old_files, dict) or not old_files:
+        return None
+
+    markdown_paths = list(iter_markdown_files(folder_path, exclude_dirs=normalized_exclude_dirs))
+    if not markdown_paths:
+        return None
+
+    current_paths = {path.relative_to(folder_path).as_posix() for path in markdown_paths}
+    old_paths = {str(path) for path in old_files}
+    if current_paths != old_paths:
+        return None
+
+    changed_paths: list[str] = []
+    for path in markdown_paths:
+        relative_path = path.relative_to(folder_path).as_posix()
+        old_item = old_files.get(relative_path)
+        if not isinstance(old_item, dict):
+            return None
+        old_hash = old_item.get("hash")
+        if not isinstance(old_hash, str) or not old_hash:
+            return None
+        if hashlib.sha1(path.read_bytes()).hexdigest() != old_hash:
+            changed_paths.append(relative_path)
+
+    return {
+        "old_manifest": old_manifest,
+        "old_aliases": old_aliases,
+        "changed_paths": sorted(changed_paths),
+        "scanned_files": len(markdown_paths),
+    }
+
+
+def _markdown_manifest_item_from_record(record: MarkdownPageRecord) -> dict[str, Any]:
+    return {
+        "page_id": record.page.id,
+        "title": record.page.title,
+        "norm_title": record.page.norm_title,
+        "aliases": record.aliases,
+        "graph_role": record.graph_role,
+        "hash": record.source_hash,
+        "mtime_ns": record.mtime_ns,
+    }
+
+
+def _markdown_manifest_item_identity(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "page_id": item.get("page_id"),
+        "title": item.get("title"),
+        "norm_title": item.get("norm_title"),
+        "aliases": item.get("aliases") or [],
+        "graph_role": item.get("graph_role") or "content",
     }
 
 
