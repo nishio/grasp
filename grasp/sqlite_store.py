@@ -3656,6 +3656,99 @@ class SQLiteStore:
                 "markdown_graph": graph_status,
             }
 
+    def hydrate_markdown_query_sources(self, query: str, *, limit: int = 1) -> dict[str, Any]:
+        project = self._require_project()
+        limit = max(0, limit)
+        manifest = self._markdown_manifest_for_project(project)
+        files = manifest.get("files")
+        graph_status_before = self.project_markdown_graph_status_by_name(project)
+        result: dict[str, Any] = {
+            "query": query,
+            "project": project,
+            "requested_limit": limit,
+            "scan": "markdown-source-query",
+            "hydrated": [],
+            "hydrated_count": 0,
+            "skipped": [],
+            "scanned_files": 0,
+            "matched_files": 0,
+            "markdown_graph_before": graph_status_before,
+            "markdown_graph": graph_status_before,
+        }
+        if limit <= 0:
+            result["reason"] = "limit_zero"
+            return result
+        if not isinstance(files, dict) or not files:
+            result["reason"] = "not_markdown_project"
+            return result
+        if graph_status_before and graph_status_before.get("complete"):
+            result["reason"] = "graph_complete"
+            return result
+
+        project_row = self.project_metadata(project)
+        if project_row is None:
+            raise ValueError(f"project does not exist: {project}")
+        folder_path = Path(str(project_row.get("source_export") or ""))
+        if not folder_path.exists() or not folder_path.is_dir():
+            raise ValueError(f"Markdown folder does not exist: {folder_path}")
+
+        query_norm = normalize_title(query)
+        for source_path in sorted(str(path) for path in files):
+            if result["matched_files"] >= limit:
+                break
+            item = files.get(source_path)
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("hash") or ""):
+                continue
+            markdown_path = folder_path / source_path
+            if not markdown_path.exists() or not markdown_path.is_file():
+                result["skipped"].append({"source_path": source_path, "reason": "source_missing"})
+                continue
+            result["scanned_files"] += 1
+            text = markdown_path.read_text(encoding="utf-8")
+            reasons = self._markdown_query_match_reasons(query, query_norm, text, manifest_item=item)
+            if not reasons:
+                continue
+            page_id = str(item.get("page_id") or "")
+            page = self._page_by_id(page_id, project=project) if page_id else None
+            if page is None:
+                result["skipped"].append({"source_path": source_path, "reason": "page_missing"})
+                continue
+            result["matched_files"] += 1
+            hydration = self.hydrate_markdown_page(page)
+            hydration["match_reasons"] = reasons
+            result["hydrated"].append(hydration)
+
+        result["hydrated_count"] = sum(1 for item in result["hydrated"] if item.get("hydrated"))
+        result["markdown_graph"] = self.project_markdown_graph_status_by_name(project)
+        if "reason" not in result:
+            result["reason"] = "limit_reached" if result["matched_files"] >= limit else "scan_exhausted"
+        return result
+
+    def _markdown_query_match_reasons(
+        self,
+        query: str,
+        query_norm: str,
+        text: str,
+        *,
+        manifest_item: dict[str, Any],
+    ) -> list[str]:
+        reasons: list[str] = []
+        handles = [str(manifest_item.get("title") or "")]
+        handles.extend(str(alias) for alias in manifest_item.get("aliases") or [])
+        if any(handle and normalize_title(handle) == query_norm for handle in handles):
+            reasons.append("handle")
+        if query and query.casefold() in text.casefold():
+            reasons.append("literal")
+        in_code_fence = False
+        for line in text.splitlines():
+            links, in_code_fence = parse_markdown_line_links(line, in_code_fence=in_code_fence)
+            if any(normalize_title(link) == query_norm for link in links):
+                reasons.append("link")
+                break
+        return sorted(set(reasons))
+
     def _markdown_index_projection_text(self, project: str, files: dict[str, Any]) -> str:
         groups: dict[str, list[tuple[str, str, str]]] = {}
         for relative_path in sorted(str(path) for path in files):
@@ -6628,6 +6721,7 @@ class SQLiteStore:
         backlink_limit: int | None = None,
         mention_limit: int | None = None,
         co_link_limit: int | None = None,
+        hydrate_limit: int = 0,
     ) -> dict[str, Any]:
         if not query:
             raise ValueError("gather query is empty")
@@ -6637,6 +6731,11 @@ class SQLiteStore:
         backlink_limit = default_limit if backlink_limit is None else max(0, backlink_limit)
         mention_limit = default_limit if mention_limit is None else max(0, mention_limit)
         co_link_limit = default_limit if co_link_limit is None else max(0, co_link_limit)
+        hydrate_limit = max(0, hydrate_limit)
+
+        markdown_hydration = None
+        if hydrate_limit:
+            markdown_hydration = self.hydrate_markdown_query_sources(query, limit=hydrate_limit)
 
         link_stats = self.link_stats(query)
         mention_result = self.mentions(query, limit=mention_limit, include_linked=False)
@@ -6705,7 +6804,10 @@ class SQLiteStore:
                 "backlinks": backlink_limit,
                 "mentions": mention_limit,
                 "co_links": co_link_limit,
+                "hydrate": hydrate_limit,
             },
+            "markdown_graph": self.project_markdown_graph_status_by_name(self._selected_project_or_none()),
+            "markdown_hydration": markdown_hydration,
             "co_link_rank_mode": "slice",
             "row_count_basis": {
                 "mentions": "bare mention lines",
