@@ -11,6 +11,7 @@ from pathlib import Path
 
 COMMANDS = [
     "import",
+    "hydrate-markdown",
     "adopt-markdown",
     "import-forest",
     "stats",

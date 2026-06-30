@@ -50,6 +50,7 @@ STORE_WRITE_COMMANDS = {
     "acquire",
     "append-log",
     "claim-page",
+    "hydrate-markdown",
     "import-log-records",
     "release-claim",
     "reconcile-markdown",
@@ -227,6 +228,36 @@ def build_parser() -> argparse.ArgumentParser:
         "--catalog-only",
         action="store_true",
         help="For --markdown, import only a path-derived page catalog and mark the Markdown graph incomplete; run normal import later to hydrate titles, lines, and edges.",
+    )
+
+    hydrate_markdown_parser = add_command_parser(
+        subparsers,
+        "hydrate-markdown",
+        help="Hydrate a chunk of an incomplete Markdown graph.",
+        description=(
+            "Parse up to N unhydrated Markdown source files from the selected catalog/partial project, "
+            "updating lines, edges, handles, manifest hashes, and markdown_graph progress."
+        ),
+        returns=(
+            "project, requested_limit, scan, hydrated[], hydrated_count, skipped[], skipped_count, "
+            "scanned_files, remaining_files, reason, markdown_graph_before, markdown_graph"
+        ),
+        examples=[
+            "grasp --project notes hydrate-markdown --limit 25",
+            "grasp --json --project notes hydrate-markdown --limit 100",
+        ],
+        notes=[
+            "This is the manual chunk worker for progressive/lazy Markdown import after import --markdown --catalog-only.",
+            "Files are selected in stable source-path order and only unhydrated manifest entries are parsed.",
+            "Repeat the command until markdown_graph.complete=true, or run normal import --markdown for a full hydrate.",
+            "Missing source files are reported in skipped[] and do not block later files in the same chunk.",
+        ],
+    )
+    hydrate_markdown_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Maximum number of unhydrated Markdown source files to parse in this chunk. Default: 10.",
     )
 
     adopt_parser = add_command_parser(
@@ -7792,6 +7823,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             related_snippet_mode=args.related_snippet_mode,
             hydrate=args.hydrate,
         )
+    if args.command == "hydrate-markdown":
+        return store.hydrate_markdown_chunk(limit=args.limit)
     if args.command == "backlinks":
         markdown_hydration = hydrate_query_sources_for_args(store, args, args.title)
         result = store.backlinks_report(args.title, limit=args.limit, offset=args.offset)
@@ -8408,6 +8441,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
     aliases = aliases or LineIdAliases(enabled=False)
     if command == "import":
         return format_import(result)
+    if command == "hydrate-markdown":
+        return format_hydrate_markdown(result)
     if command == "adopt-markdown":
         return format_adopt_markdown(result)
     if command == "import-forest":
@@ -8521,6 +8556,53 @@ def format_import(result: dict[str, Any]) -> str:
         f"unresolved_targets: {result['unresolved_targets']}\n"
         f"{markdown_section}"
     )
+
+
+def format_hydrate_markdown(result: dict[str, Any]) -> str:
+    graph = result.get("markdown_graph") or {}
+    graph_before = result.get("markdown_graph_before") or {}
+    parts = [
+        "# Hydrate Markdown\n",
+        f"project: {result.get('project')}\n",
+        f"requested_limit: {result.get('requested_limit')}\n",
+        f"hydrated: {result.get('hydrated_count', 0)}\n",
+        f"skipped: {result.get('skipped_count', 0)}\n",
+        f"scanned_files: {result.get('scanned_files', 0)}\n",
+        f"reason: {result.get('reason')}\n",
+    ]
+    if graph:
+        parts.append(
+            "graph: "
+            f"{graph.get('status')} ({graph.get('mode')}, "
+            f"{graph.get('hydrated_files')}/{graph.get('total_files')} files hydrated"
+        )
+        remaining = result.get("remaining_files")
+        if remaining is not None:
+            parts.append(f", {remaining} remaining")
+        parts.append(")\n")
+    if graph_before:
+        parts.append(
+            "before: "
+            f"{graph_before.get('hydrated_files')}/{graph_before.get('total_files')} files hydrated\n"
+        )
+    hydrated = result.get("hydrated") or []
+    if hydrated:
+        parts.append("## Hydrated\n")
+        for item in hydrated:
+            parts.append(
+                f"- {item.get('source_path')}: "
+                f"lines={item.get('line_count', 0)} edges={item.get('edge_count', 0)}"
+            )
+            page = item.get("page") or {}
+            if page.get("title"):
+                parts.append(f" title={page.get('title')}")
+            parts.append("\n")
+    skipped = result.get("skipped") or []
+    if skipped:
+        parts.append("## Skipped\n")
+        for item in skipped:
+            parts.append(f"- {item.get('source_path')}: {item.get('reason')}\n")
+    return "".join(parts)
 
 
 def format_adopt_markdown(result: dict[str, Any]) -> str:
