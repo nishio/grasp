@@ -916,6 +916,55 @@ class MarkdownImportTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_hydrate_markdown_until_complete_is_time_bounded(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "A.md").write_text("# A\nlinks to [[B]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\nlinks to [[C]]\n", encoding="utf-8")
+            (root / "C.md").write_text("# C\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki", catalog_only=True)
+            original_record_from_file = sqlite_store.markdown_page_record_from_file
+            parsed_paths: list[str] = []
+
+            def record_from_file(root_arg, path_arg):
+                parsed_paths.append(Path(path_arg).relative_to(root_arg).as_posix())
+                return original_record_from_file(root_arg, path_arg)
+
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                with patch("grasp.sqlite_store.markdown_page_record_from_file", side_effect=record_from_file):
+                    timed_out = store.hydrate_markdown_chunk(
+                        limit=10,
+                        until_complete=True,
+                        max_seconds=0,
+                    )
+
+                self.assertEqual(parsed_paths, [])
+                self.assertEqual(timed_out["hydrated_count"], 0)
+                self.assertEqual(timed_out["iterations"], 0)
+                self.assertEqual(timed_out["reason"], "time_budget_exhausted")
+                self.assertEqual(timed_out["stopped_by"], "max_seconds")
+                self.assertEqual(timed_out["markdown_graph"]["hydrated_files"], 0)
+
+                with patch("grasp.sqlite_store.markdown_page_record_from_file", side_effect=record_from_file):
+                    completed = store.hydrate_markdown_chunk(
+                        limit=1,
+                        until_complete=True,
+                        max_seconds=10,
+                    )
+
+                self.assertEqual(parsed_paths, ["A.md", "B.md", "C.md"])
+                self.assertEqual(completed["hydrated_count"], 3)
+                self.assertEqual(completed["iterations"], 3)
+                self.assertEqual(completed["reason"], "graph_complete")
+                self.assertEqual(completed["stopped_by"], "graph_complete")
+                self.assertEqual(completed["markdown_graph"]["complete"], True)
+                self.assertEqual(completed["remaining_files"], 0)
+            finally:
+                store.close()
+
     def test_cli_hydrate_markdown_reports_chunk_progress(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -971,6 +1020,61 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertIn("hydrated: 1", text)
             self.assertIn("reason: graph_complete", text)
             self.assertIn("graph: complete", text)
+
+    def test_cli_hydrate_markdown_until_complete_requires_time_budget(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "A.md").write_text("# A\nlinks to [[B]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki", catalog_only=True)
+
+            missing_budget = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "hydrate-markdown",
+                    "--until-complete",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(missing_budget.returncode, 2)
+            self.assertIn("--until-complete requires --max-seconds", missing_budget.stderr)
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "hydrate-markdown",
+                    "--limit",
+                    "1",
+                    "--until-complete",
+                    "--max-seconds",
+                    "10",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            result = json.loads(completed.stdout)
+            self.assertEqual(result["hydrated_count"], 2)
+            self.assertEqual(result["iterations"], 2)
+            self.assertEqual(result["reason"], "graph_complete")
+            self.assertEqual(result["stopped_by"], "graph_complete")
+            self.assertEqual(result["markdown_graph"]["complete"], True)
 
     def test_gather_hydrate_limit_parses_query_matching_sources_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -240,16 +240,20 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "project, requested_limit, scan, hydrated[], hydrated_count, skipped[], skipped_count, "
-            "scanned_files, remaining_files, reason, markdown_graph_before, markdown_graph"
+            "scanned_files, iterations, elapsed_seconds, stopped_by, remaining_files, reason, "
+            "markdown_graph_before, markdown_graph"
         ),
         examples=[
             "grasp --project notes hydrate-markdown --limit 25",
             "grasp --json --project notes hydrate-markdown --limit 100",
+            "grasp --project notes hydrate-markdown --limit 25 --until-complete --max-seconds 5",
         ],
         notes=[
             "This is the manual chunk worker for progressive/lazy Markdown import after import --markdown --catalog-only.",
             "Files are selected in stable source-path order and only unhydrated manifest entries are parsed.",
-            "Repeat the command until markdown_graph.complete=true, or run normal import --markdown for a full hydrate.",
+            "--until-complete repeats chunks until markdown_graph.complete=true, no progress is possible, or --max-seconds is exhausted.",
+            "--until-complete requires --max-seconds so the command stays bounded.",
+            "Without --until-complete, --max-seconds still prevents starting another source file after the time budget is exhausted.",
             "Missing source files are reported in skipped[] and do not block later files in the same chunk.",
         ],
     )
@@ -258,6 +262,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=10,
         help="Maximum number of unhydrated Markdown source files to parse in this chunk. Default: 10.",
+    )
+    hydrate_markdown_parser.add_argument(
+        "--until-complete",
+        action="store_true",
+        help="Repeat chunks until the Markdown graph is complete, no progress is possible, or --max-seconds is exhausted.",
+    )
+    hydrate_markdown_parser.add_argument(
+        "--max-seconds",
+        type=float,
+        default=None,
+        help="Time budget for this command. Required with --until-complete. Checked before starting each source file.",
     )
 
     adopt_parser = add_command_parser(
@@ -7824,7 +7839,13 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             hydrate=args.hydrate,
         )
     if args.command == "hydrate-markdown":
-        return store.hydrate_markdown_chunk(limit=args.limit)
+        if args.until_complete and args.max_seconds is None:
+            raise ValueError("hydrate-markdown --until-complete requires --max-seconds to keep hydration bounded")
+        return store.hydrate_markdown_chunk(
+            limit=args.limit,
+            until_complete=args.until_complete,
+            max_seconds=args.max_seconds,
+        )
     if args.command == "backlinks":
         markdown_hydration = hydrate_query_sources_for_args(store, args, args.title)
         result = store.backlinks_report(args.title, limit=args.limit, offset=args.offset)
@@ -8565,9 +8586,14 @@ def format_hydrate_markdown(result: dict[str, Any]) -> str:
         "# Hydrate Markdown\n",
         f"project: {result.get('project')}\n",
         f"requested_limit: {result.get('requested_limit')}\n",
+        f"until_complete: {result.get('until_complete')}\n",
+        f"max_seconds: {result.get('max_seconds')}\n",
         f"hydrated: {result.get('hydrated_count', 0)}\n",
         f"skipped: {result.get('skipped_count', 0)}\n",
         f"scanned_files: {result.get('scanned_files', 0)}\n",
+        f"iterations: {result.get('iterations', 0)}\n",
+        f"elapsed_seconds: {result.get('elapsed_seconds', 0)}\n",
+        f"stopped_by: {result.get('stopped_by')}\n",
         f"reason: {result.get('reason')}\n",
     ]
     if graph:
