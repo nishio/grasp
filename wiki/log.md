@@ -1984,3 +1984,8 @@ milestone: duplicate text line policy is no longer a stable line identity residu
 code: line-id inheritance now uses unique exact text matching instead of contiguous SequenceMatcher equal blocks. Markdown re-import, `write-page`, and `write-lines` preserve `line_id` for exact moved lines when the text is unique in both old and new lines.
 coverage: added regressions for content-only re-import moving unique lines, write-page moving unique lines, and write-lines swapping unique lines within a range. Duplicate text lines still do not auto-inherit. Public version is `1.13.3`; schema remains `13`.
 milestone: unique exact move is no longer a stable line identity residual. Remaining identity gaps are split/merge/large-edit policy and Cosense/hosted sync external line id; owner cutover throughput/wait thresholds remain a policy decision.
+
+## [2026-07-01 02:14] implementation+file-back | line identity policy surface
+code: `write-page` and `write-lines` now return and event-record a `line_identity` plan with inherited/minted/tombstoned line ids. Split / merge / large-edit rewrites are not inferred as same-line identity under `unique_exact_text_v1`; they mint new ids and tombstone removed old ids unless the caller uses explicit `write-line`.
+coverage: added regressions for Markdown re-import, write-page, and write-lines covering split/merge/large-edit non-inheritance, plus CLI JSON/event visibility. Public version is `1.13.4`; schema remains `13`.
+milestone: split/merge/large-edit policy is no longer an implicit stable line identity residual. Remaining line identity stable work is Cosense/hosted sync external line id; owner cutover throughput/wait thresholds remain a policy decision.

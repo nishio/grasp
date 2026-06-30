@@ -8353,6 +8353,10 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(write_result["previous_range_line_count"], 3)
         self.assertEqual(write_result["range_line_count"], 3)
         self.assertEqual(write_result["range_lines"][1]["line_id"], kept_range_id)
+        self.assertEqual(write_result["line_identity"]["scope"], "range")
+        self.assertEqual(write_result["line_identity"]["inherited_count"], 1)
+        self.assertEqual(write_result["line_identity"]["minted_count"], 2)
+        self.assertEqual(write_result["line_identity"]["tombstoned_count"], 2)
         self.assertEqual(write_result["projection"]["written_files"], ["A.md"])
         self.assertEqual(
             page_text,
@@ -8383,6 +8387,7 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(event_payload["target_end_line_id"], end_id)
         self.assertEqual(event_payload["previous_range_lines"][1]["line_id"], kept_range_id)
         self.assertEqual(event_payload["range_lines"][1]["line_id"], kept_range_id)
+        self.assertEqual(event_payload["line_identity"], write_result["line_identity"])
         self.assertTrue(status_result["strict_ok"])
 
     def test_write_lines_refuses_cross_page_and_reverse_range(self):

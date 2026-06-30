@@ -1937,6 +1937,77 @@ def _inherited_line_payloads_by_new_index(
     }
 
 
+def _line_identity_plan(
+    previous_lines: list[dict[str, Any]],
+    current_lines: list[dict[str, Any]],
+    *,
+    scope: str,
+    policy: str = "unique_exact_text_v1",
+    minted_reason: str = "no_unique_exact_text_match",
+    tombstone_reason: str = "page_line_replaced",
+) -> dict[str, Any]:
+    previous_by_line_id = {
+        str(line.get("line_id") or ""): line
+        for line in previous_lines
+        if str(line.get("line_id") or "")
+    }
+    current_by_line_id = {
+        str(line.get("line_id") or ""): line
+        for line in current_lines
+        if str(line.get("line_id") or "")
+    }
+
+    inherited: list[dict[str, Any]] = []
+    minted: list[dict[str, Any]] = []
+    for line in current_lines:
+        line_id = str(line.get("line_id") or "")
+        if not line_id:
+            continue
+        previous = previous_by_line_id.get(line_id)
+        if previous is not None:
+            item = {
+                "line_id": line_id,
+                "previous_line_index": previous.get("line_index"),
+                "line_index": line.get("line_index"),
+                "text": line.get("text", ""),
+            }
+            previous_text = previous.get("text", "")
+            if previous_text != line.get("text", ""):
+                item["previous_text"] = previous_text
+            inherited.append(item)
+        else:
+            minted.append(
+                {
+                    "line_id": line_id,
+                    "line_index": line.get("line_index"),
+                    "text": line.get("text", ""),
+                    "reason": minted_reason,
+                }
+            )
+
+    tombstoned = [
+        {
+            "line_id": line_id,
+            "line_index": line.get("line_index"),
+            "text": line.get("text", ""),
+            "reason": tombstone_reason,
+        }
+        for line_id, line in previous_by_line_id.items()
+        if line_id not in current_by_line_id
+    ]
+
+    return {
+        "policy": policy,
+        "scope": scope,
+        "inherited_count": len(inherited),
+        "minted_count": len(minted),
+        "tombstoned_count": len(tombstoned),
+        "inherited": inherited,
+        "minted": minted,
+        "tombstoned": tombstoned,
+    }
+
+
 def _mint_markdown_line_id(page_id: str, used_line_ids: set[str]) -> str:
     while True:
         line_id = f"{page_id}:{uuid4().hex[:12]}"
@@ -4828,6 +4899,7 @@ class SQLiteStore:
         )
 
         page = self._page_by_id(page_id)
+        current_lines = self._markdown_line_payloads(project, page_id)
         return {
             "project": project,
             "page": page.to_summary() if page is not None else {"id": page_id, "title": title},
@@ -4835,7 +4907,14 @@ class SQLiteStore:
             "aliases": aliases,
             "graph_role": graph_role,
             "previous_lines": [],
-            "lines": self._markdown_line_payloads(project, page_id),
+            "lines": current_lines,
+            "line_identity": _line_identity_plan(
+                [],
+                current_lines,
+                scope="page",
+                policy="new_page_v1",
+                minted_reason="new_page",
+            ),
             "previous_line_count": 0,
             "line_count": len(line_payloads),
             "edge_count": len(edge_rows),
@@ -4901,13 +4980,15 @@ class SQLiteStore:
             updated=now,
         )
         page = self._page_by_id(page_id)
+        current_lines = self._markdown_line_payloads(project, page_id)
         return {
             "project": project,
             "page": page.to_summary(),
             "source_path": source_path,
             "graph_role": graph_role,
             "previous_lines": previous_lines,
-            "lines": self._markdown_line_payloads(project, page_id),
+            "lines": current_lines,
+            "line_identity": _line_identity_plan(previous_lines, current_lines, scope="page"),
             "previous_line_count": len(previous_lines),
             "line_count": len(next_lines),
             "edge_count": edge_count,
@@ -4947,6 +5028,7 @@ class SQLiteStore:
                     "graph_role": update_result["graph_role"],
                     "message": message,
                     "lines": update_result["lines"],
+                    "line_identity": update_result["line_identity"],
                 }
             else:
                 update_result = self._replace_markdown_page_lines_uncommitted(
@@ -4977,6 +5059,7 @@ class SQLiteStore:
                     "message": message,
                     "previous_lines": update_result["previous_lines"],
                     "lines": update_result["lines"],
+                    "line_identity": update_result["line_identity"],
                 }
             event = make_journal_event(
                 event_type,
@@ -5229,6 +5312,7 @@ class SQLiteStore:
             "end_line_index": end_index,
             "previous_range_lines": previous_range_lines,
             "range_lines": range_lines,
+            "line_identity": _line_identity_plan(previous_range_lines, range_lines, scope="range"),
             "previous_range_line_count": len(previous_range_lines),
             "range_line_count": len(range_lines),
             "previous_lines": previous_lines,
@@ -5271,6 +5355,7 @@ class SQLiteStore:
                     "end_line_index": update_result["end_line_index"],
                     "previous_range_lines": update_result["previous_range_lines"],
                     "range_lines": update_result["range_lines"],
+                    "line_identity": update_result["line_identity"],
                     "previous_lines": update_result["previous_lines"],
                     "lines": update_result["lines"],
                 },

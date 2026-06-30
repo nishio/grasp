@@ -1092,6 +1092,58 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertEqual(new_lines[3].line_id, old_lines[3].line_id)
             self.assertEqual(len({line.line_id for line in new_lines}), len(new_lines))
 
+    def test_reimport_does_not_infer_split_merge_or_large_edit_line_ids(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text(
+                "# A\n"
+                "split source\n"
+                "merge left\n"
+                "merge right\n"
+                "large edit\n"
+                "keep\n",
+                encoding="utf-8",
+            )
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                page = store.resolve_page("A")
+                old_lines, _aliases = store.page_lines(page)
+            finally:
+                store.close()
+
+            old_changed_ids = {line.line_id for line in old_lines[1:5]}
+            page_a.write_text(
+                "# A\n"
+                "split\n"
+                "source\n"
+                "merge left merge right\n"
+                "large edited\n"
+                "keep\n",
+                encoding="utf-8",
+            )
+            result = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            self.assertEqual(result["markdown_import"]["mode"], "incremental")
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                page = store.resolve_page("A")
+                new_lines, _aliases = store.page_lines(page)
+            finally:
+                store.close()
+
+            self.assertEqual(
+                [line.text for line in new_lines],
+                ["# A", "split", "source", "merge left merge right", "large edited", "keep"],
+            )
+            self.assertEqual(new_lines[0].line_id, old_lines[0].line_id)
+            self.assertEqual(new_lines[5].line_id, old_lines[5].line_id)
+            self.assertTrue(old_changed_ids.isdisjoint({line.line_id for line in new_lines[1:5]}))
+            self.assertEqual(len({line.line_id for line in new_lines}), len(new_lines))
+
     def test_reimport_full_parse_incremental_path_inherits_line_ids(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1311,7 +1363,7 @@ class MarkdownImportTests(unittest.TestCase):
                 page = store.resolve_page("A")
                 old_lines, _aliases = store.page_lines(page)
 
-                store.write_markdown_page_with_event(
+                update_result, event = store.write_markdown_page_with_event(
                     "A",
                     lines=["# A", "two", "one", "three"],
                     actor="test",
@@ -1334,6 +1386,85 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertEqual(new_lines[1].line_id, old_lines[2].line_id)
             self.assertEqual(new_lines[2].line_id, old_lines[1].line_id)
             self.assertEqual(tombstone_rows, [])
+            self.assertEqual(update_result["line_identity"]["policy"], "unique_exact_text_v1")
+            self.assertEqual(update_result["line_identity"]["inherited_count"], 4)
+            self.assertEqual(update_result["line_identity"]["minted_count"], 0)
+            self.assertEqual(update_result["line_identity"]["tombstoned_count"], 0)
+            self.assertEqual(event["payload"]["line_identity"], update_result["line_identity"])
+
+    def test_write_page_line_identity_policy_does_not_infer_split_merge_or_large_edit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text(
+                "# A\n"
+                "split source\n"
+                "merge left\n"
+                "merge right\n"
+                "large edit\n"
+                "keep\n",
+                encoding="utf-8",
+            )
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                page = store.resolve_page("A")
+                old_lines, _aliases = store.page_lines(page)
+                old_changed_ids = {line.line_id for line in old_lines[1:5]}
+
+                update_result, event = store.write_markdown_page_with_event(
+                    "A",
+                    lines=[
+                        "# A",
+                        "split",
+                        "source",
+                        "merge left merge right",
+                        "large edited",
+                        "keep",
+                    ],
+                    actor="test",
+                    session_id="line-policy-write-page-test",
+                )
+                new_page = store.resolve_page("A")
+                new_lines, _aliases = store.page_lines(new_page)
+                tombstone_rows = store.connection.execute(
+                    """
+                    SELECT line_id, text, tombstone_reason
+                    FROM line_tombstones
+                    WHERE project = ? AND line_id IN (?, ?, ?, ?)
+                    ORDER BY line_index
+                    """,
+                    ("wiki", *(line.line_id for line in old_lines[1:5])),
+                ).fetchall()
+            finally:
+                store.close()
+
+            self.assertEqual(
+                [line.text for line in new_lines],
+                ["# A", "split", "source", "merge left merge right", "large edited", "keep"],
+            )
+            self.assertEqual(new_lines[0].line_id, old_lines[0].line_id)
+            self.assertEqual(new_lines[5].line_id, old_lines[5].line_id)
+            self.assertTrue(old_changed_ids.isdisjoint({line.line_id for line in new_lines[1:5]}))
+            self.assertEqual(update_result["line_identity"]["scope"], "page")
+            self.assertEqual(update_result["line_identity"]["inherited_count"], 2)
+            self.assertEqual(update_result["line_identity"]["minted_count"], 4)
+            self.assertEqual(update_result["line_identity"]["tombstoned_count"], 4)
+            self.assertEqual(
+                [line["text"] for line in update_result["line_identity"]["minted"]],
+                ["split", "source", "merge left merge right", "large edited"],
+            )
+            self.assertEqual(
+                [line["line_id"] for line in update_result["line_identity"]["tombstoned"]],
+                [line.line_id for line in old_lines[1:5]],
+            )
+            self.assertEqual(
+                [(row["line_id"], row["text"], row["tombstone_reason"]) for row in tombstone_rows],
+                [(line.line_id, line.text, "page_line_replaced") for line in old_lines[1:5]],
+            )
+            self.assertEqual(event["payload"]["line_identity"], update_result["line_identity"])
 
     def test_write_line_range_does_not_inherit_ambiguous_duplicate_line_ids(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1431,6 +1562,96 @@ class MarkdownImportTests(unittest.TestCase):
             self.assertEqual(update_result["previous_range_line_count"], 2)
             self.assertEqual(update_result["range_line_count"], 2)
             self.assertEqual(tombstone_rows, [])
+            self.assertEqual(update_result["line_identity"]["scope"], "range")
+            self.assertEqual(update_result["line_identity"]["inherited_count"], 2)
+            self.assertEqual(update_result["line_identity"]["minted_count"], 0)
+            self.assertEqual(update_result["line_identity"]["tombstoned_count"], 0)
+
+    def test_write_line_range_identity_policy_does_not_infer_split_merge_or_large_edit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text(
+                "# A\n"
+                "- before\n"
+                "split source\n"
+                "merge left\n"
+                "merge right\n"
+                "large edit\n"
+                "keep same\n"
+                "- after\n",
+                encoding="utf-8",
+            )
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                page = store.resolve_page("A")
+                old_lines, _aliases = store.page_lines(page)
+                old_changed_ids = {line.line_id for line in old_lines[2:6]}
+
+                update_result, event = store.write_markdown_line_range_with_event(
+                    old_lines[2].line_id,
+                    old_lines[6].line_id,
+                    lines=[
+                        "split",
+                        "source",
+                        "merge left merge right",
+                        "large edited",
+                        "keep same",
+                    ],
+                    actor="test",
+                    session_id="line-policy-write-lines-test",
+                )
+                new_page = store.resolve_page("A")
+                new_lines, _aliases = store.page_lines(new_page)
+                tombstone_rows = store.connection.execute(
+                    """
+                    SELECT line_id, text, tombstone_reason
+                    FROM line_tombstones
+                    WHERE project = ? AND line_id IN (?, ?, ?, ?)
+                    ORDER BY line_index
+                    """,
+                    ("wiki", *(line.line_id for line in old_lines[2:6])),
+                ).fetchall()
+            finally:
+                store.close()
+
+            self.assertEqual(
+                [line.text for line in new_lines],
+                [
+                    "# A",
+                    "- before",
+                    "split",
+                    "source",
+                    "merge left merge right",
+                    "large edited",
+                    "keep same",
+                    "- after",
+                ],
+            )
+            self.assertEqual(new_lines[1].line_id, old_lines[1].line_id)
+            self.assertEqual(new_lines[6].line_id, old_lines[6].line_id)
+            self.assertEqual(new_lines[7].line_id, old_lines[7].line_id)
+            self.assertTrue(old_changed_ids.isdisjoint({line.line_id for line in new_lines[2:6]}))
+            self.assertEqual(update_result["line_identity"]["scope"], "range")
+            self.assertEqual(update_result["line_identity"]["inherited_count"], 1)
+            self.assertEqual(update_result["line_identity"]["minted_count"], 4)
+            self.assertEqual(update_result["line_identity"]["tombstoned_count"], 4)
+            self.assertEqual(
+                [line["text"] for line in update_result["line_identity"]["minted"]],
+                ["split", "source", "merge left merge right", "large edited"],
+            )
+            self.assertEqual(
+                [line["line_id"] for line in update_result["line_identity"]["tombstoned"]],
+                [line.line_id for line in old_lines[2:6]],
+            )
+            self.assertEqual(
+                [(row["line_id"], row["text"], row["tombstone_reason"]) for row in tombstone_rows],
+                [(line.line_id, line.text, "page_line_replaced") for line in old_lines[2:6]],
+            )
+            self.assertEqual(event["payload"]["line_identity"], update_result["line_identity"])
 
     def test_write_page_tombstones_removed_line_ids_and_revert_revives_them(self):
         with tempfile.TemporaryDirectory() as tmpdir:
