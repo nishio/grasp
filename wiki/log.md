@@ -1798,3 +1798,9 @@ verification: `python3 -m unittest tests.test_markdown.MarkdownImportTests`、`p
 - code: `MarkdownMirror.from_folder` now shares single-file record/edge helpers; `import --markdown` uses stored manifest hashes to parse only changed Markdown files when page id / title / aliases / graph_role are unchanged.
 - safety: identity-affecting changes still fall back to the existing full parse/rebuild path, and the fast path rechecks selected-project `event_sequence` inside the write transaction.
 - benchmark: 3000p/54000 edges synthetic corpus measured full 13.1s, no-op 1.23s, 1-file 1.49s with `manifest_hash_changed_files` and parsed_files=1. Remaining progressive/lazy work is initial catalog / on-demand hydration / incomplete graph status.
+
+## [2026-06-30 14:20] implementation+file-back | catalog-only Markdown import first slice
+- code: `import --markdown --catalog-only` now writes a path-derived page catalog without parsing Markdown content, returning `markdown_import.mode=catalog`, `parsed_files=0`, and `markdown_graph.complete=false`.
+- UX: `stats` and `read` surface incomplete graph status so lines/backlinks/related/unresolved are not mistaken for complete until normal `import --markdown` hydrates the graph.
+- benchmark: 3000p/54000 edges synthetic corpus measured catalog-only 0.27s, later hydrate import 12.44s with 6000 lines / 54000 edges and complete graph.
+- docs: [[grasp-v1-implemented]] updated with current facts; [[grasp-backlog]] now leaves page-on-demand / background hydration and finer incomplete/stale query contracts as the remaining progressive import work.

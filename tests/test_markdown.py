@@ -767,6 +767,61 @@ class MarkdownImportTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_catalog_only_import_marks_markdown_graph_incomplete(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "A.md").write_text("# Alpha\nlinks to [[B]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            with patch(
+                "grasp.sqlite_store.MarkdownMirror.from_folder",
+                side_effect=AssertionError("catalog-only import should not build a MarkdownMirror"),
+            ):
+                result = import_markdown_folder_to_sqlite(
+                    root,
+                    store_path,
+                    project_name="wiki",
+                    catalog_only=True,
+                )
+
+            self.assertEqual(result["markdown_import"]["mode"], "catalog")
+            self.assertEqual(result["markdown_import"]["graph_complete"], False)
+            self.assertEqual(result["markdown_import"]["parsed_files"], 0)
+            self.assertEqual(result["markdown_import"]["identity_source"], "path")
+            self.assertEqual(result["markdown_graph"]["complete"], False)
+            self.assertEqual(result["markdown_graph"]["mode"], "catalog-only")
+            self.assertEqual(result["markdown_graph"]["hydrated_files"], 0)
+            self.assertEqual(result["markdown_graph"]["total_files"], 2)
+            self.assertEqual(result["pages"], 2)
+            self.assertEqual(result["lines"], 0)
+            self.assertEqual(result["edges"], 0)
+
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                stats = store.stats()
+                self.assertEqual(stats["markdown_graph"]["complete"], False)
+                read = store.read("A", backlink_limit=10, related_limit=10, unresolved_limit=10)
+                self.assertEqual(read["page"]["title"], "A")
+                self.assertEqual(read["markdown_graph"]["complete"], False)
+                self.assertEqual(read["lines"], [])
+                self.assertEqual(read["backlink_count_total"], 0)
+                self.assertEqual(store.link_stats("B")["link_count"], 0)
+            finally:
+                store.close()
+
+            hydrated = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            self.assertEqual(hydrated["markdown_graph"]["complete"], True)
+            self.assertEqual(hydrated["lines"], 3)
+            self.assertEqual(hydrated["edges"], 1)
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                hydrated_read = store.read("A", backlink_limit=10, related_limit=10, unresolved_limit=10)
+                self.assertEqual(hydrated_read["page"]["title"], "Alpha")
+                self.assertEqual(hydrated_read["markdown_graph"]["complete"], True)
+            finally:
+                store.close()
+
     def test_noop_reimport_uses_manifest_hash_fast_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
