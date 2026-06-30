@@ -59,6 +59,8 @@ $PYTHON_BIN scripts/check_file_back_preflight.py
 
 複数 wiki page を direct patch fallback してから store に戻す場合も、1 page patch → `write-page --from-file --no-journal` → 次 page の順で行う。`write-page` の projection export は全 page を書くため、未反映の direct patch は上書きされる。
 
+Mode2 Markdown 直接編集は既定 reject。mode2 write / cutover / export の前には `python3 scripts/check_mode2_markdown_readonly.py` を走らせ、Markdown projection が SQLite authority として clean / strict green であることを確認する。失敗時は Markdown を authority と扱わず、直接編集・fallback patch・remote merge が意図的なものならまず `reconcile-markdown --dry-run` で採用可能性を見る。dry-run に blocker が無い時だけ fresh `GRASP_SESSION_ID` で明示的に reconcile する。unsupported blocker は自動 merge せず、real dogfood で必要が出てから purpose-named merge surface を作る。generic merge / queue は先に足さない。
+
 - 実装済み/current behavior: `wiki/entities/grasp-v1-implemented.md` または関連 entity page。
 - 残作業: `wiki/grasp-backlog.md`。
 - 判断や rationale: `wiki/decisions/`。
@@ -74,6 +76,7 @@ file back は factual and scoped にする。未来の over-spec は避ける。
 $PYTHON_BIN -m unittest discover -s tests
 python3 scripts/lint_wiki.py
 python3 scripts/check_file_back_runbook.py
+python3 scripts/check_mode2_markdown_readonly.py
 git diff --check
 ```
 

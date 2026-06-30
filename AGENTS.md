@@ -58,6 +58,8 @@ file back は **grasp write first**。通常編集の authority は SQLite store
 
 複数 wiki page を direct patch fallback してから grasp store に戻す場合も、**1 page patch → 直列 `write-page --from-file --no-journal` → 次 page** の順にする。`write-page` は全 Markdown projection を export するため、まだ store に入っていない別 page の direct patch は projection に上書きされる。
 
+Mode2 Markdown 直接編集は既定 reject。mode2 write / cutover / export の前には `python3 scripts/check_mode2_markdown_readonly.py` を走らせ、Markdown projection が SQLite authority として clean / strict green であることを確認する。失敗時は Markdown を authority と扱わず、直接編集・fallback patch・remote merge が意図的なものならまず `reconcile-markdown --dry-run` で採用可能性を見る。dry-run に blocker が無い時だけ fresh `GRASP_SESSION_ID` で明示的に reconcile する。unsupported blocker は自動 merge せず、real dogfood で必要が出てから purpose-named merge surface を作る。generic merge / queue は先に足さない。
+
 ### Lint
 `python3 scripts/lint_wiki.py`（孤立・壊れたリンク・未登録）→ 意味的 lint（実装済み事実・backlog・decision の矛盾 / stale open q）→ log に `## [YYYY-MM-DD HH:MM] lint | <summary>`。
 

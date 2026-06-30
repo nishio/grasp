@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git fetch:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(python3 -m unittest discover -s tests:*), Bash(python3 scripts/lint_wiki.py:*), Bash(python3 scripts/check_projection_policy.py:*), Bash(python3 scripts/check_file_back_preflight.py:*), Bash(python3 scripts/check_file_back_write_start.py:*), Bash(python3 scripts/check_file_back_postwrite.py:*), Bash(python3 scripts/check_file_back_runbook.py:*), Bash(python3 scripts/check_push_ownership.py:*), Bash(python3 -m grasp:*), Bash(git diff --check:*), Bash(date:*), Bash(rg:*), Bash(sed:*), Read, Edit, MultiEdit, TodoWrite
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git fetch:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(python3 -m unittest discover -s tests:*), Bash(python3 scripts/lint_wiki.py:*), Bash(python3 scripts/check_projection_policy.py:*), Bash(python3 scripts/check_file_back_preflight.py:*), Bash(python3 scripts/check_file_back_write_start.py:*), Bash(python3 scripts/check_file_back_postwrite.py:*), Bash(python3 scripts/check_file_back_runbook.py:*), Bash(python3 scripts/check_mode2_markdown_readonly.py:*), Bash(python3 scripts/check_push_ownership.py:*), Bash(python3 -m grasp:*), Bash(git diff --check:*), Bash(date:*), Bash(rg:*), Bash(sed:*), Read, Edit, MultiEdit, TodoWrite
 description: File back grasp work, commit, push, and propose what to build next in Japanese
 ---
 
@@ -29,10 +29,12 @@ Follow these steps:
    - keep that `GRASP_SESSION_ID` for the write commands and postwrite; postwrite requires the same session id on every SQLite event written after the preflight stamp, checks the preflight stamp session/head/base and file-back lock, and releases the lock only after clean postwrite.
    - tracked `wiki.grasp/events.jsonl` was retired and removed in `1.8.18`; normal repo file-back must not recreate or commit it.
    - `--journal` / `--with-journal` remain for legacy/ad hoc CLI audits outside the normal repo runbook. Do not use repo-runbook `--with-journal`.
+   - Mode2 Markdown direct edits are rejected by default. Before mode2 write / cutover / export, run `python3 scripts/check_mode2_markdown_readonly.py`; if it fails, do not treat Markdown as authority. Intentional direct patch fallback or remote merge adoption must first pass `reconcile-markdown --dry-run`, then an explicit reconcile with a fresh `GRASP_SESSION_ID`. Unsupported blockers need a purpose-named merge surface only after real dogfood needs it; do not add generic merge / queue first.
 3. Run verification:
    - `python3 -m unittest discover -s tests`
    - `python3 scripts/lint_wiki.py`
    - `python3 scripts/check_file_back_runbook.py`
+   - `python3 scripts/check_mode2_markdown_readonly.py`
    - if file-back / projection behavior changed, `python3 scripts/check_file_back_postwrite.py` (no-journal default; includes SQLite events semantic log projection check)
    - `git diff --check`
    - If relevant, run one small dogfood command and file back any important observation.
