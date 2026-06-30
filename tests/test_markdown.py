@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import grasp.sqlite_store as sqlite_store
 from grasp.cli import (
     format_ambiguities,
     format_backlinks,
@@ -734,6 +735,28 @@ class MarkdownImportTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_noop_reimport_uses_manifest_hash_fast_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "A.md").write_text("# A\nlinks to [[B]]\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            with patch(
+                "grasp.sqlite_store.MarkdownMirror.from_folder",
+                side_effect=AssertionError("noop reimport should not build a MarkdownMirror"),
+            ):
+                result = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            self.assertEqual(result["markdown_import"]["mode"], "incremental")
+            self.assertEqual(result["markdown_import"]["changed_files"], 0)
+            self.assertEqual(result["markdown_import"]["fast_path"], "manifest_hash_noop")
+            self.assertEqual(result["markdown_import"]["scanned_files"], 2)
+            self.assertEqual(result["pages"], 2)
+            self.assertEqual(result["edges"], 1)
+
     def test_reimport_aborts_when_writer_event_lands_during_parse(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -742,6 +765,7 @@ class MarkdownImportTests(unittest.TestCase):
             store_path = Path(tmpdir) / "store.sqlite"
 
             import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            page_a.write_text("# A\nlocal Markdown edit\n", encoding="utf-8")
             original_from_folder = MarkdownMirror.from_folder
 
             def from_folder_with_concurrent_write(*args, **kwargs):
@@ -759,6 +783,46 @@ class MarkdownImportTests(unittest.TestCase):
                 return mirror
 
             with patch("grasp.sqlite_store.MarkdownMirror.from_folder", side_effect=from_folder_with_concurrent_write):
+                with self.assertRaisesRegex(ValueError, "Markdown import aborted: project events changed"):
+                    import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+
+            store = SQLiteStore(store_path, project="wiki")
+            try:
+                page = store.resolve_page("A")
+                lines, _aliases = store.page_lines(page)
+                self.assertEqual([line.text for line in lines], ["# A", "- concurrent writer marker"])
+                self.assertEqual(store.event_count(), 1)
+            finally:
+                store.close()
+
+    def test_noop_fast_reimport_aborts_when_writer_event_lands_during_manifest_scan(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            page_a = root / "A.md"
+            page_a.write_text("# A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
+            original_fast_summary = sqlite_store._fast_noop_markdown_import_summary
+
+            def fast_summary_with_concurrent_write(*args, **kwargs):
+                summary = original_fast_summary(*args, **kwargs)
+                store = SQLiteStore(store_path, project="wiki", for_write=True)
+                try:
+                    store.write_markdown_page_with_event(
+                        "A",
+                        lines=["# A", "- concurrent writer marker"],
+                        actor="test",
+                        session_id="writer",
+                    )
+                finally:
+                    store.close()
+                return summary
+
+            with patch(
+                "grasp.sqlite_store._fast_noop_markdown_import_summary",
+                side_effect=fast_summary_with_concurrent_write,
+            ):
                 with self.assertRaisesRegex(ValueError, "Markdown import aborted: project events changed"):
                     import_markdown_folder_to_sqlite(root, store_path, project_name="wiki")
 
