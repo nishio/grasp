@@ -3,6 +3,7 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 from scripts import check_file_back_preflight as preflight
@@ -242,6 +243,96 @@ class FileBackPreflightScriptTests(unittest.TestCase):
         self.assertIn("work-1", errors[0])
         self.assertIn("first_sequence=1", errors[0])
         self.assertIn("last_sequence=3", errors[0])
+
+    def test_session_uniqueness_errors_accept_prior_active_claims_for_same_session(self):
+        errors = preflight.session_uniqueness_errors(
+            [
+                {
+                    "event_sequence": 1,
+                    "event_id": "claim-a",
+                    "event_type": "page_claim",
+                    "session_id": "work-1",
+                    "payload": {"expires_at": "2026-07-02T01:30:00+00:00"},
+                },
+                {
+                    "event_sequence": 2,
+                    "event_id": "claim-b",
+                    "event_type": "page_claim",
+                    "session_id": "work-1",
+                    "payload": {"expires_at": "2026-07-02T01:30:00+00:00"},
+                },
+            ],
+            expected_session_id="work-1",
+            now=datetime(2026, 7, 2, 1, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_session_uniqueness_errors_reject_prior_claim_after_write_event(self):
+        errors = preflight.session_uniqueness_errors(
+            [
+                {
+                    "event_sequence": 1,
+                    "event_id": "claim-a",
+                    "event_type": "page_claim",
+                    "session_id": "work-1",
+                    "payload": {"expires_at": "2026-07-02T01:30:00+00:00"},
+                },
+                {
+                    "event_sequence": 2,
+                    "event_id": "page-a",
+                    "event_type": "page_update",
+                    "session_id": "work-1",
+                },
+            ],
+            expected_session_id="work-1",
+            now=datetime(2026, 7, 2, 1, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("session_id already exists", errors[0])
+
+    def test_session_uniqueness_errors_reject_expired_or_released_prior_claim(self):
+        now = datetime(2026, 7, 2, 1, 0, tzinfo=timezone.utc)
+
+        expired_errors = preflight.session_uniqueness_errors(
+            [
+                {
+                    "event_sequence": 1,
+                    "event_id": "claim-a",
+                    "event_type": "page_claim",
+                    "session_id": "work-1",
+                    "payload": {"expires_at": "2026-07-02T00:59:00+00:00"},
+                },
+            ],
+            expected_session_id="work-1",
+            now=now,
+        )
+        released_errors = preflight.session_uniqueness_errors(
+            [
+                {
+                    "event_sequence": 1,
+                    "event_id": "claim-a",
+                    "event_type": "page_claim",
+                    "session_id": "work-1",
+                    "payload": {"expires_at": "2026-07-02T01:30:00+00:00"},
+                },
+                {
+                    "event_sequence": 2,
+                    "event_id": "release-a",
+                    "event_type": "page_claim_release",
+                    "session_id": "other-session",
+                    "payload": {"claim_event_id": "claim-a"},
+                },
+            ],
+            expected_session_id="work-1",
+            now=now,
+        )
+
+        self.assertEqual(len(expired_errors), 1)
+        self.assertIn("session_id already exists", expired_errors[0])
+        self.assertEqual(len(released_errors), 1)
+        self.assertIn("session_id already exists", released_errors[0])
 
     def test_session_uniqueness_errors_can_be_skipped_for_legacy_audits(self):
         errors = preflight.session_uniqueness_errors(
@@ -892,6 +983,78 @@ class FileBackPreflightScriptTests(unittest.TestCase):
 
         self.assertEqual(len(errors), 1)
         self.assertIn("session_id already exists", errors[0])
+
+    def test_run_grasp_preflight_accepts_prior_active_claim_for_session(self):
+        original_run_command = preflight.run_command
+        original_project_events = preflight.project_events
+        saw_projection_check = False
+
+        def fake_run_command(args, *, cwd):
+            nonlocal saw_projection_check
+            if "import" in args:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if "write-status" in args:
+                return subprocess.CompletedProcess(
+                    args,
+                    0,
+                    json.dumps(
+                        {
+                            "strict_ok": True,
+                            "projection": {"ok": True},
+                            "journal_exists": False,
+                            "event_streams_match": False,
+                            "journal_log_stale": False,
+                        }
+                    ),
+                    "",
+                )
+            if "export-markdown" in args:
+                saw_projection_check = True
+                return subprocess.CompletedProcess(
+                    args,
+                    0,
+                    json.dumps(
+                        {
+                            "ok": True,
+                            "projection_policy": {
+                                "authority": "sqlite",
+                                "base": "stored_markdown_lines",
+                                "output_role": "git_tracked_projection",
+                                "write_mode": "check",
+                                "generated_overlays": [],
+                            },
+                        }
+                    ),
+                    "",
+                )
+            self.fail(f"unexpected command: {args}")
+
+        try:
+            preflight.run_command = fake_run_command
+            preflight.project_events = lambda store, project: [
+                {
+                    "event_sequence": 7,
+                    "event_id": "claim-a",
+                    "event_type": "page_claim",
+                    "session_id": "file-back-session",
+                    "payload": {"expires_at": "2999-01-01T00:00:00+00:00"},
+                }
+            ]
+            errors = preflight.run_grasp_preflight(
+                Path("."),
+                store=".grasp/file-back.sqlite",
+                project="grasp-wiki",
+                journal=None,
+                output="wiki",
+                require_journal=False,
+                expected_session_id="file-back-session",
+            )
+        finally:
+            preflight.run_command = original_run_command
+            preflight.project_events = original_project_events
+
+        self.assertEqual(errors, [])
+        self.assertTrue(saw_projection_check)
 
 
 if __name__ == "__main__":
