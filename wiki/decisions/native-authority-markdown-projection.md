@@ -74,3 +74,7 @@ LLM Wiki の file-back dogfood に必要な面から始める:
 ## Updates 2026-06-30
 - SQLite が authority なら、current knowledge の確認もまず SQLite-backed read surface を使う。AI agent は `grasp read` / `search` / `gather` / `activity` などで `.grasp/file-back.sqlite`（またはその wiki の canonical store）を先に読み、`wiki/` Markdown は `write-status --strict` と projection policy が clean な時だけ readable cache として扱う。SQLite と Markdown が矛盾したら SQLite を勝ちにし、Markdown を再 projection / reconcile する。
 - `history` / `log-records` は SQLite events を読むが、current facts ではなく event stream である。current page state に移る時は、`history` が返す `current_state_target` か `read --page-id` / `read --path` に戻す。
+
+## Updates 2026-07-02
+- nishio policy: grasp project の mode2 / SQLite SSoT では、Markdown projection の直接編集が発生すること自体を通常 workflow ではなく **イレギュラー**として扱う。必要な状態になった場合は非常口として実行してよいが、必ず log / backlog / decision のどこかに「なぜ grasp write で表現できなかったか」「再発防止にどの write surface / runbook / guard が必要か」を file back する。direct patch は便利な第二経路ではなく、欠けている native write surface を発見する観測点。
+- frontmatter は Markdown が構造化データを表すための projection / recovery / interoperability 表現であり、grasp-native な構造化データの第一 authority ではない。come-from standing rule などの native 概念は、まず SQLite table / event payload 側を authority 候補にし、frontmatter に出す場合も人間可読 projection・fresh checkout recovery・外部 tool 互換のための派生表現として扱う。
