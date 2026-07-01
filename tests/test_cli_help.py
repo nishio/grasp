@@ -6619,7 +6619,7 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(old_text, "# Old\nbody\n")
         self.assertTrue(new_is_dir)
 
-    def test_write_page_refuses_export_when_other_projection_file_is_dirty(self):
+    def test_write_page_refuses_other_dirty_projection_file_before_mutation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir) / "repo"
             root = repo_root / "wiki"
@@ -6701,18 +6701,12 @@ class CliHelpTests(unittest.TestCase):
             a_text = (root / "A.md").read_text(encoding="utf-8")
             b_text = (root / "B.md").read_text(encoding="utf-8")
 
-        failed_error = json.loads(failed_completed.stderr)
-        rollback_diagnostic = failed_error["diagnostic"]
         peek_result = json.loads(peek_completed.stdout)
         self.assertEqual(failed_completed.returncode, 2)
-        self.assertEqual(rollback_diagnostic["type"], "projection_export_rollback")
-        self.assertTrue(rollback_diagnostic["rolled_back"])
-        self.assertEqual(rollback_diagnostic["target_event_type"], "page_update")
-        self.assertEqual(rollback_diagnostic["rollback_event_type"], "event_revert")
-        self.assertEqual(rollback_diagnostic["original_error"]["type"], "ValueError")
-        self.assertIn("dirty paths outside the current write target", rollback_diagnostic["original_error"]["message"])
-        self.assertIn("B.md", rollback_diagnostic["original_error"]["message"])
-        self.assertEqual([row[1] for row in sqlite_event_rows], ["page_update", "event_revert"])
+        self.assertIn("dirty paths outside the current write target", failed_completed.stderr)
+        self.assertIn("refusing write before mutating store state", failed_completed.stderr)
+        self.assertIn("B.md", failed_completed.stderr)
+        self.assertEqual(sqlite_event_rows, [])
         self.assertEqual([line["text"] for line in peek_result["lines"]], ["# A"])
         self.assertEqual(a_text, "# A\n")
         self.assertEqual(b_text, "# B\n- local draft\n")

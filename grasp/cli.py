@@ -1256,7 +1256,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Default target title is Log.",
             "Alpha write surface: Markdown-backed projects only; page identity changes are handled by rename-page.",
             "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
-            "Dirty projection paths outside the target page are refused before export.",
+            "Dirty projection paths outside the target page are refused before mutation.",
             "--defer-projection writes only SQLite state/events and optional journal; run export-markdown later to update Markdown.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
@@ -1298,7 +1298,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Existing-page writes are refused while another session has an active claim for the target page.",
             "Existing-page replacement inherits only unambiguous exact matching line_ids; split, merge, and large-edit rewrites are not inferred as the same line.",
             "--from-file may intentionally use the target projection file itself as the replacement input.",
-            "Dirty projection paths outside the target page are refused before export.",
+            "Dirty projection paths outside the target page are refused before mutation.",
             "--defer-projection writes only SQLite state/events and optional journal; run export-markdown later to update Markdown.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
@@ -1341,6 +1341,7 @@ def build_parser() -> argparse.ArgumentParser:
             "The target line_id is preserved even when the text changes; line_index remains the current ordering position.",
             "Writes are refused while another session has an active claim for the target page.",
             "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
+            "Dirty projection paths outside the target page are refused before mutation.",
             "--defer-projection writes only SQLite state/events and optional journal; run export-markdown later to update Markdown.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
@@ -1378,6 +1379,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Only unambiguous exact matching replacement lines inherit line_ids; duplicate text lines and split, merge, or large-edit rewrites receive new opaque line_ids, and removed line_ids are tombstoned.",
             "Writes are refused while another session has an active claim for the target page.",
             "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
+            "Dirty projection paths outside the target page are refused before mutation.",
             "--defer-projection writes only SQLite state/events and optional journal; run export-markdown later to update Markdown.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
@@ -1415,7 +1417,7 @@ def build_parser() -> argparse.ArgumentParser:
             "The first H1 is updated only when it currently matches the old title.",
             "References like [[old-title]] are preserved as text and resolve through the old-title alias.",
             "When --output is inside a Git worktree, dirty previous/new target paths that do not match the current store projection are refused before mutation.",
-            "Dirty projection paths outside the previous/new target path are refused before export.",
+            "Dirty projection paths outside the previous/new target path are refused before mutation.",
             "If projection export fails after the event write, the store is auto-reverted with event_revert; --json emits diagnostic.type=projection_export_rollback on stderr.",
         ],
     )
@@ -3491,6 +3493,11 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
             args.output,
             target_source_paths={target_source_path},
         )
+        guard_dirty_projection_paths_before_mutation(
+            store,
+            args.output,
+            allowed_source_paths={target_source_path},
+        )
     timestamp = args.timestamp or datetime.now().strftime("%Y-%m-%d %H:%M")
     heading = f"[{timestamp}] {args.op} | {args.summary}"
     log_lines = ["", f"## {heading}", *args.line]
@@ -3550,6 +3557,11 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
             target_source_paths=target_source_paths,
             allow_dirty_source_paths=write_page_allowed_dirty_source_paths(args, target_source_paths),
         )
+        guard_dirty_projection_paths_before_mutation(
+            store,
+            args.output,
+            allowed_source_paths=target_source_paths,
+        )
     update_result, event = store.write_markdown_page_with_event(
         args.title,
         lines=replacement_lines,
@@ -3600,6 +3612,11 @@ def run_write_line(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
             args.output,
             target_source_paths={target_source_path},
         )
+        guard_dirty_projection_paths_before_mutation(
+            store,
+            args.output,
+            allowed_source_paths={target_source_path},
+        )
     update_result, event = store.write_markdown_line_with_event(
         args.line_id,
         text=args.text,
@@ -3648,6 +3665,11 @@ def run_write_lines(store: SQLiteStore, args: argparse.Namespace) -> dict[str, A
             store,
             args.output,
             target_source_paths={target_source_path},
+        )
+        guard_dirty_projection_paths_before_mutation(
+            store,
+            args.output,
+            allowed_source_paths={target_source_path},
         )
     update_result, event = store.write_markdown_line_range_with_event(
         args.start_line_id,
@@ -3720,6 +3742,11 @@ def run_rename_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, A
         store,
         args.output,
         target_source_paths=target_source_paths,
+    )
+    guard_dirty_projection_paths_before_mutation(
+        store,
+        args.output,
+        allowed_source_paths=target_source_paths,
     )
     rename_result, event = store.rename_markdown_page_with_event(
         args.target,
@@ -4178,6 +4205,25 @@ def guard_dirty_projection_paths(store: SQLiteStore, output: Path, *, allowed_so
     raise ValueError(
         "Markdown projection has dirty paths outside the current write target; "
         f"refusing export before overwriting local changes: {blocked}{suffix}; "
+        f"allowed dirty paths: {allowed}"
+    )
+
+
+def guard_dirty_projection_paths_before_mutation(
+    store: SQLiteStore,
+    output: Path,
+    *,
+    allowed_source_paths: set[str],
+) -> None:
+    blocked_paths = dirty_projection_paths_outside_allowlist(store, output, allowed_source_paths)
+    if not blocked_paths:
+        return
+    blocked = ", ".join(blocked_paths[:10])
+    suffix = "" if len(blocked_paths) <= 10 else f", ... (+{len(blocked_paths) - 10} more)"
+    allowed = ", ".join(sorted(allowed_source_paths)) or "(none)"
+    raise ValueError(
+        "Markdown projection has dirty paths outside the current write target; "
+        f"refusing write before mutating store state: {blocked}{suffix}; "
         f"allowed dirty paths: {allowed}"
     )
 

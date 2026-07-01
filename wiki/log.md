@@ -2026,3 +2026,8 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - code: catalog-only Markdown import now scans only frontmatter metadata to preserve explicit page ids before hydration; titles, aliases, lines, and edges still hydrate lazily.
 - test: exploratory CLI run covered import/read/backlinks/related/path/unresolved/search/mentions/co-links/write/rename/revert/export/catalog-hydrate and reproduced the frontmatter-id mismatch before the fix.
 - file-back: [[grasp-v1-implemented]] and [[grasp-backlog]] now note that catalog-only records path-derived catalog plus frontmatter id metadata.
+
+## [2026-07-02 03:06] implementation+file-back | pre-write dirty projection guard
+- code: write/append/rename commands now reject dirty projection paths outside the current target before SQLite mutation, avoiding avoidable page_update/event_revert event-stream noise for pre-detectable conflicts.
+- test: temp Git repo exploration covered write-status projection_dirty, refused write with no SQLite events, reconcile, claims, write-lines, revert-plan --scope session, and adopt/log-records/history smoke.
+- file-back: [[sqlite-ssot-write-plan]] and [[grasp-v1-implemented]] record the current contract; true late projection export failures still use the existing rollback diagnostic path.
