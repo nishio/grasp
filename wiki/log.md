@@ -2006,3 +2006,8 @@ Added --require-cutover-thresholds to scripts/benchmark_claim_retry_throughput.p
 
 ## [2026-07-01 02:53] implementation+file-back | require both cutover thresholds
 Tightened --require-cutover-thresholds: a cutover gate now requires both --min-surviving-throughput-ratio and --max-p95-claim-wait-seconds. With only one value it exits 1 as required_thresholds_missing, preventing a half-specified owner policy from being treated as stable mode2 cutover.
+
+## [2026-07-02 00:39] file-back | P3 policy and grasp write dogfood friction
+- [[native-authority-markdown-projection]]: mode2 / SQLite SSoT では Markdown 直接編集を通常 workflow ではなくイレギュラーとして扱い、必要時は理由と再発防止を file back する。frontmatter は native authority でなく Markdown projection / recovery / interoperability 表現。
+- [[grasp-backlog]]: 次に証明する価値は P3（AI author / file-back agent）の安心して使えること。activity は使えたが、現行 guard では claim-page が preflight 前なら session uniqueness、preflight 後なら write-start event sequence に衝突するため、claim-aware preflight が残タスク。
+- dogfood: tracked wiki Markdown は直接 patch せず、temp replacement + write-start + write-page --from-file --no-journal で2 page を更新。current branch は upstream が無く default preflight が origin/main divergence で止まったため、今回は --base HEAD を明示した。
