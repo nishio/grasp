@@ -2011,3 +2011,8 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - [[native-authority-markdown-projection]]: mode2 / SQLite SSoT では Markdown 直接編集を通常 workflow ではなくイレギュラーとして扱い、必要時は理由と再発防止を file back する。frontmatter は native authority でなく Markdown projection / recovery / interoperability 表現。
 - [[grasp-backlog]]: 次に証明する価値は P3（AI author / file-back agent）の安心して使えること。activity は使えたが、現行 guard では claim-page が preflight 前なら session uniqueness、preflight 後なら write-start event sequence に衝突するため、claim-aware preflight が残タスク。
 - dogfood: tracked wiki Markdown は直接 patch せず、temp replacement + write-start + write-page --from-file --no-journal で2 page を更新。current branch は upstream が無く default preflight が origin/main divergence で止まったため、今回は --base HEAD を明示した。
+
+## [2026-07-02 00:50] implementation+file-back | claim-aware preflight for page claims
+- [[grasp-v1-implemented]]: check_file_back_preflight.py now accepts a prior same-session active page_claim as the only allowed preflight session event, so claim-page can precede guarded file-back.
+- [[grasp-backlog]]: P3 dogfood finding for claim-page/preflight collision is closed by the claim-aware session guard; write-start still requires event_sequence unchanged after the claim-aware preflight baseline.
+- dogfood: default .grasp/file-back.sqlite route used activity / claim-page / preflight --base HEAD / write-start / write-page / append-log; temp route also reached postwrite and revert-plan --scope session without direct Markdown patch.

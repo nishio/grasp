@@ -105,7 +105,10 @@ def recovery_ladder_hints(
             "- store/output pair mismatch: use .grasp/file-back.sqlite with wiki, or use a temporary store together with a temporary output."
         )
     if "session_id already exists" in joined:
-        hints.append("- reused session_id: choose a fresh GRASP_SESSION_ID unless intentionally continuing the same owner branch.")
+        hints.append(
+            "- reused session_id: choose a fresh GRASP_SESSION_ID. "
+            "The only normal prior same-session event before preflight is an active page_claim from claim-page."
+        )
     if "another file-back lock is active" in joined or "active file-back lock" in joined:
         hints.append(
             "- active lock: wait for the owner to finish. If the owner is unreachable but its writes are already in the store, "
@@ -434,6 +437,7 @@ def session_uniqueness_errors(
     *,
     expected_session_id: str | None,
     skip_session_uniqueness_check: bool = False,
+    now: datetime | None = None,
 ) -> list[str]:
     if skip_session_uniqueness_check:
         return []
@@ -447,6 +451,8 @@ def session_uniqueness_errors(
     ]
     if not matching_events:
         return []
+    if session_events_are_only_active_claims(events, matching_events, now=now):
+        return []
     first = matching_events[0]
     last = matching_events[-1]
     return [
@@ -454,6 +460,48 @@ def session_uniqueness_errors(
         f"{session_id} ({len(matching_events)} events, "
         f"first_sequence={first.get('event_sequence')}, last_sequence={last.get('event_sequence')})"
     ]
+
+
+def session_events_are_only_active_claims(
+    events: list[dict[str, Any]],
+    matching_events: list[dict[str, Any]],
+    *,
+    now: datetime | None = None,
+) -> bool:
+    if not matching_events:
+        return False
+    if any(str(event.get("event_type") or "") != "page_claim" for event in matching_events):
+        return False
+    reference_time = now or datetime.now(timezone.utc)
+    released_claim_ids = {
+        str((event.get("payload") or {}).get("claim_event_id") or "")
+        for event in events
+        if str(event.get("event_type") or "") == "page_claim_release"
+    }
+    for event in matching_events:
+        event_id = str(event.get("event_id") or "").strip()
+        if not event_id or event_id in released_claim_ids:
+            return False
+        expires_at = str((event.get("payload") or {}).get("expires_at") or "").strip()
+        expires_timestamp = claim_expires_timestamp(expires_at)
+        if expires_timestamp is None or expires_timestamp < reference_time.astimezone(timezone.utc).timestamp():
+            return False
+    return True
+
+
+def claim_expires_timestamp(value: str) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).timestamp()
 
 
 def parse_json_output(output: str, label: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -718,11 +766,18 @@ def main() -> int:
     parser.add_argument("--store", default=DEFAULT_FILE_BACK_STORE)
     parser.add_argument("--project", default="grasp-wiki")
     parser.add_argument("--journal", default="wiki.grasp/events.jsonl")
-    parser.add_argument("--session-id", default=os.environ.get("GRASP_SESSION_ID", ""), help="Unique session/work-unit id expected for the upcoming file-back. Defaults to $GRASP_SESSION_ID.")
+    parser.add_argument(
+        "--session-id",
+        default=os.environ.get("GRASP_SESSION_ID", ""),
+        help=(
+            "Session/work-unit id expected for the upcoming file-back. Defaults to $GRASP_SESSION_ID. "
+            "It must be unused except for active page_claim events created by claim-page before preflight."
+        ),
+    )
     parser.add_argument(
         "--skip-session-uniqueness-check",
         action="store_true",
-        help="Skip the unused-session-id guard for legacy/ad hoc verification.",
+        help="Skip the unused-session-id/active-claim guard for legacy/ad hoc verification.",
     )
     parser.add_argument(
         "--preflight-stamp",

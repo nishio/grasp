@@ -26,6 +26,7 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "`GRASP_SESSION_ID`",
             "current upstream（なければ `origin/main`）",
             "未使用 session id を要求",
+            "active `page_claim`",
             "fresh store は gitignored `.grasp/file-back-adopt.jsonl` へ bootstrap",
             "gitignored preflight stamp",
             "latest SQLite event_sequence",
@@ -79,6 +80,7 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "`GRASP_SESSION_ID`",
             "current upstream（なければ `origin/main`）",
             "未使用 session id を要求",
+            "active `page_claim`",
             "fresh store は gitignored `.grasp/file-back-adopt.jsonl` へ bootstrap",
             "gitignored preflight stamp",
             "latest SQLite event_sequence",
@@ -133,6 +135,7 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "`GRASP_SESSION_ID`",
             "current upstream（なければ `origin/main`）",
             "未使用 session id",
+            "active `page_claim`",
             "fresh store は gitignored `.grasp/file-back-adopt.jsonl` へ bootstrap",
             "gitignored preflight stamp",
             "latest SQLite event_sequence",
@@ -184,6 +187,7 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "`GRASP_SESSION_ID`",
             "preflight uses the current upstream branch as its base",
             "requires an unused session id",
+            "active same-session `page_claim`",
             "fresh repo store bootstraps through gitignored `.grasp/file-back-adopt.jsonl`",
             "writes a gitignored preflight stamp with session/head/base",
             "latest SQLite event_sequence",
@@ -235,6 +239,7 @@ DEFAULT_RULES: tuple[RunbookRule, ...] = (
             "`GRASP_SESSION_ID`",
             "current upstream（なければ `origin/main`）",
             "未使用 session id",
+            "active `page_claim`",
             "fresh store は gitignored `.grasp/file-back-adopt.jsonl` へ bootstrap",
             "gitignored preflight stamp",
             "latest SQLite event_sequence",
@@ -309,7 +314,8 @@ def main() -> int:
     print(
         "file-back runbook ok: no-journal default, retired journal, semantic log guard, "
         "session window marker, preflight stamp, file-back lock, write-start guard, "
-        "store/output pair guard, mode2 Markdown readonly guard, and push ownership guard documented"
+        "claim-aware session guard, store/output pair guard, mode2 Markdown readonly guard, "
+        "and push ownership guard documented"
     )
     return 0
 

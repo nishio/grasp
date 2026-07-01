@@ -114,6 +114,8 @@ v1 stable surface は read line。Markdown-backed `append-log` / `write-page` / 
 
 2026-07-02 P3 dogfood finding: 目標手順の `activity` はそのまま使えたが、現行 guard では `claim-page` を通常 file-back runbook に素直に挿入できない。preflight 前に claim すると session uniqueness guard が「使用済み session」とみなし、preflight 後に claim すると write-start の event-sequence unchanged guard が止める。今回の file-back は tracked Markdown を直接 patch せず `write-page --from-file` で進めるが、claim は省いた。残タスクは claim-aware preflight（preflight が自分の claim event を baseline に含める / preflight が claim を取得する / write-start が同一 session の claim だけ許す等）の設計。さらに、上流未設定の feature branch では preflight が `origin/main` divergence で止まったため、今回だけ `--base HEAD` を明示した。P3 の安心運用には、feature branch continuation で upstream を持たない時の正規 route（upstream 設定、base override、または isolated worktree policy）も必要。
 
+2026-07-02 implementation update: `claim-page` を preflight 前に置く通常 file-back route は `1.8.81` で実装済み。preflight の session uniqueness guard は、同じ session に既存 event があっても、それが未解放・未期限切れの `page_claim` だけなら正規 continuation として許可し、その claim 後の latest SQLite event_sequence を stamp baseline にする。`check_file_back_write_start.py` はその baseline から event_sequence が増えていないことを従来通り検査するため、claim 後・write 前の別 writer は止まる。temp dogfood と本 repo default store の両方で `activity` / `claim-page` / preflight / write-start / `write-page` / `append-log` / postwrite / `revert-plan --scope session` を direct Markdown patch なしで通した。残る P3 friction は、feature branch continuation で upstream が無い時に `--base HEAD` を明示する必要があること。
+
 **リンクは1種類でない**（Cosense は両方を単一 `[X]` に束ねたのが hub 膨張の根、原理 [[come-from-declared-gather]]）。write/identity 層は2型を別 first-class object としてモデル化する:
 
 - **felt-sense link** — 行キー・sparse・per-occurrence・著者の retrieval 意図（edge）。下記 stable line-id 層に乗る。
