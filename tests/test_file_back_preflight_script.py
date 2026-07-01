@@ -109,6 +109,8 @@ class FileBackPreflightScriptTests(unittest.TestCase):
         original_run_command = preflight.run_command
 
         def fake_run_command(args, *, cwd):
+            if args[:3] == ["git", "branch", "--show-current"]:
+                return subprocess.CompletedProcess(args, 0, "main\n", "")
             return subprocess.CompletedProcess(args, 128, "", "no upstream")
 
         try:
@@ -118,6 +120,46 @@ class FileBackPreflightScriptTests(unittest.TestCase):
             preflight.run_command = original_run_command
 
         self.assertEqual(base, "origin/main")
+
+    def test_resolve_git_base_auto_prefers_origin_current_branch_without_upstream(self):
+        original_run_command = preflight.run_command
+
+        def fake_run_command(args, *, cwd):
+            if args[-1] == "@{upstream}":
+                return subprocess.CompletedProcess(args, 128, "", "no upstream")
+            if args[:3] == ["git", "branch", "--show-current"]:
+                return subprocess.CompletedProcess(args, 0, "codex/work\n", "")
+            if args[-1] == "origin/codex/work":
+                return subprocess.CompletedProcess(args, 0, "abc123\n", "")
+            self.fail(f"unexpected command: {args}")
+
+        try:
+            preflight.run_command = fake_run_command
+            base = preflight.resolve_git_base(Path("."), "auto")
+        finally:
+            preflight.run_command = original_run_command
+
+        self.assertEqual(base, "origin/codex/work")
+
+    def test_resolve_git_base_auto_uses_head_for_no_upstream_feature_branch(self):
+        original_run_command = preflight.run_command
+
+        def fake_run_command(args, *, cwd):
+            if args[-1] == "@{upstream}":
+                return subprocess.CompletedProcess(args, 128, "", "no upstream")
+            if args[:3] == ["git", "branch", "--show-current"]:
+                return subprocess.CompletedProcess(args, 0, "codex/work\n", "")
+            if args[-1] == "origin/codex/work":
+                return subprocess.CompletedProcess(args, 1, "", "")
+            self.fail(f"unexpected command: {args}")
+
+        try:
+            preflight.run_command = fake_run_command
+            base = preflight.resolve_git_base(Path("."), "auto")
+        finally:
+            preflight.run_command = original_run_command
+
+        self.assertEqual(base, "HEAD")
 
     def test_file_back_store_output_pair_accepts_default_pair(self):
         errors = preflight.file_back_store_output_pair_errors(

@@ -32,6 +32,7 @@ DEFAULT_DIRTY_PATHS = ("wiki", "wiki.grasp/events.jsonl")
 DEFAULT_NO_JOURNAL_DIRTY_PATHS = ("wiki", "wiki.grasp/events.jsonl")
 DEFAULT_BASE = "auto"
 FALLBACK_BASE = "origin/main"
+PROTECTED_BRANCHES = ("main", "master")
 DEFAULT_FILE_BACK_STORE = ".grasp/file-back.sqlite"
 DEFAULT_FILE_BACK_OUTPUT = "wiki"
 DEFAULT_FILE_BACK_BOOTSTRAP_JOURNAL = ".grasp/file-back-adopt.jsonl"
@@ -151,7 +152,26 @@ def resolve_git_base(repo: Path, requested_base: str) -> str:
         upstream_name = upstream.stdout.strip()
         if upstream_name:
             return upstream_name
+    branch = current_branch_name(repo)
+    if branch:
+        remote_branch = f"origin/{branch}"
+        if git_ref_exists(repo, remote_branch):
+            return remote_branch
+        if branch not in PROTECTED_BRANCHES:
+            return "HEAD"
     return FALLBACK_BASE
+
+
+def current_branch_name(repo: Path) -> str | None:
+    current = run_command(["git", "branch", "--show-current"], cwd=repo)
+    if current.returncode != 0:
+        return None
+    branch = current.stdout.strip()
+    return branch or None
+
+
+def git_ref_exists(repo: Path, ref: str) -> bool:
+    return run_command(["git", "rev-parse", "--verify", "--quiet", ref], cwd=repo).returncode == 0
 
 
 def resolve_repo_path(repo: Path, path: str) -> Path:
@@ -760,7 +780,11 @@ def main() -> int:
     parser.add_argument(
         "--base",
         default=DEFAULT_BASE,
-        help="Fetched git base to compare with HEAD. 'auto' prefers the current upstream branch, then origin/main.",
+        help=(
+            "Fetched git base to compare with HEAD. 'auto' prefers the current upstream branch, "
+            "then origin/<current-branch>, then HEAD for no-upstream non-protected branches, "
+            "then origin/main."
+        ),
     )
     parser.add_argument("--skip-base-check", action="store_true", help="Skip the base divergence check.")
     parser.add_argument("--store", default=DEFAULT_FILE_BACK_STORE)

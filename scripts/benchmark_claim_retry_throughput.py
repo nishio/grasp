@@ -32,6 +32,10 @@ CUTOVER_THRESHOLD_KEYS = (
     "min_surviving_throughput_ratio",
     "max_p95_claim_wait_seconds",
 )
+DEFAULT_CUTOVER_THRESHOLDS = {
+    "min_surviving_throughput_ratio": 0.70,
+    "max_p95_claim_wait_seconds": 0.75,
+}
 PROFILES: dict[str, dict[str, Any]] = {
     "quick": {
         "iterations": 25,
@@ -493,9 +497,16 @@ def build_comparison(results: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 
 def gate_thresholds(args: argparse.Namespace) -> dict[str, float | None]:
+    defaults: dict[str, float | None] = {}
+    if getattr(args, "profile", None) == "cutover":
+        defaults = dict(DEFAULT_CUTOVER_THRESHOLDS)
     return {
-        "min_surviving_throughput_ratio": args.min_surviving_throughput_ratio,
-        "max_p95_claim_wait_seconds": args.max_p95_claim_wait_seconds,
+        "min_surviving_throughput_ratio": args.min_surviving_throughput_ratio
+        if args.min_surviving_throughput_ratio is not None
+        else defaults.get("min_surviving_throughput_ratio"),
+        "max_p95_claim_wait_seconds": args.max_p95_claim_wait_seconds
+        if args.max_p95_claim_wait_seconds is not None
+        else defaults.get("max_p95_claim_wait_seconds"),
     }
 
 
@@ -909,13 +920,19 @@ def main(argv: list[str] | None = None) -> int:
         "--min-surviving-throughput-ratio",
         type=float,
         default=None,
-        help="Optional owner cutover threshold. Fail if claim_retry surviving/s divided by uncoordinated surviving/s is below this value.",
+        help=(
+            "Owner cutover threshold. Fail if claim_retry surviving/s divided by uncoordinated "
+            "surviving/s is below this value. Defaults to 0.70 for --profile cutover."
+        ),
     )
     parser.add_argument(
         "--max-p95-claim-wait-seconds",
         type=float,
         default=None,
-        help="Optional owner cutover threshold. Fail if claim_retry p95 claim wait exceeds this many seconds.",
+        help=(
+            "Owner cutover threshold. Fail if claim_retry p95 claim wait exceeds this many seconds. "
+            "Defaults to 0.75 for --profile cutover."
+        ),
     )
     parser.add_argument(
         "--require-cutover-thresholds",

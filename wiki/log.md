@@ -2016,3 +2016,8 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - [[grasp-v1-implemented]]: check_file_back_preflight.py now accepts a prior same-session active page_claim as the only allowed preflight session event, so claim-page can precede guarded file-back.
 - [[grasp-backlog]]: P3 dogfood finding for claim-page/preflight collision is closed by the claim-aware session guard; write-start still requires event_sequence unchanged after the claim-aware preflight baseline.
 - dogfood: default .grasp/file-back.sqlite route used activity / claim-page / preflight --base HEAD / write-start / write-page / append-log; temp route also reached postwrite and revert-plan --scope session without direct Markdown patch.
+
+## [2026-07-02 02:14] implementation+file-back | cutover threshold defaults and no-upstream preflight route
+- code: scripts/benchmark_claim_retry_throughput.py --profile cutover now uses owner default thresholds 0.70 / 0.75s; explicit flags override them, and --require-cutover-thresholds treats the defaults as decided.
+- code: scripts/check_file_back_preflight.py --base auto now resolves current upstream -> origin/<branch> -> no-upstream feature HEAD -> protected-branch origin/main, removing the --base HEAD workaround for local feature continuation.
+- file-back: [[grasp-backlog]] and [[grasp-v1-implemented]] record the P3 threshold/base-route update; generic merge / queue remains deferred until a real dogfood gap appears.

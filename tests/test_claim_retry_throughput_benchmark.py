@@ -221,6 +221,7 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
 
     def test_threshold_args_are_optional_until_owner_sets_cutover_values(self):
         args = argparse.Namespace(
+            profile="quick",
             min_surviving_throughput_ratio=None,
             max_p95_claim_wait_seconds=None,
         )
@@ -250,6 +251,43 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
         self.assertTrue(required["required"])
         self.assertFalse(required["ok"])
         self.assertEqual(required["failures"], [{"type": "thresholds_not_set"}])
+
+    def test_cutover_profile_supplies_owner_threshold_defaults(self):
+        thresholds = benchmark.gate_thresholds(
+            argparse.Namespace(
+                profile="cutover",
+                min_surviving_throughput_ratio=None,
+                max_p95_claim_wait_seconds=None,
+            )
+        )
+        scenario_gate = benchmark.evaluate_scenario_gate(
+            results=[
+                {
+                    "mode": "claim_retry",
+                    "lost_markers": 0,
+                    "lost_log_markers": 0,
+                    "strict_ok": True,
+                    "strict_failures": [],
+                    "active_claim_overlap_count": 0,
+                }
+            ],
+            comparison={
+                "claim_retry_surviving_markers_per_second_ratio": 0.71,
+                "claim_retry_p95_claim_wait_seconds": 0.56,
+            },
+            thresholds=thresholds,
+        )
+        required = benchmark.summarize_gate(
+            [{"workload": "file-back", "think_seconds": 0.02, "gate": scenario_gate}],
+            thresholds,
+            require_thresholds=True,
+        )
+
+        self.assertEqual(thresholds, benchmark.DEFAULT_CUTOVER_THRESHOLDS)
+        self.assertTrue(scenario_gate["enabled"])
+        self.assertTrue(scenario_gate["ok"])
+        self.assertTrue(required["enabled"])
+        self.assertTrue(required["ok"])
 
     def test_required_threshold_gate_requires_both_owner_values(self):
         thresholds = {
