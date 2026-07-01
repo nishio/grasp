@@ -249,7 +249,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Project name defaults to the export's name field or folder name. Use --project to override.",
             "Markdown mirror uses frontmatter title/id/aliases/tags when present, falls back to first H1 then file stem, and parses [[wikilinks]] plus #tags as internal edges.",
             "Use --markdown-exclude-dir to skip heavy raw/generated directories. source/ is kept as source-backed digest content.",
-            "--catalog-only with --markdown imports a path-derived page catalog only and marks markdown_graph.complete=false; run normal import --markdown later to hydrate titles, lines, and edges.",
+            "--catalog-only with --markdown imports a path-derived page catalog plus frontmatter id metadata and marks markdown_graph.complete=false; run normal import --markdown later to hydrate titles, aliases, lines, and edges.",
             "Markdown re-import uses a manifest: content-only file changes update incrementally; title/alias/id/graph-role/exclude-dir/file-set changes trigger a safe full rebuild.",
             "A cached copy of each imported Cosense JSON is kept beside the store for automatic schema recovery.",
         ],
@@ -283,7 +283,7 @@ def build_parser() -> argparse.ArgumentParser:
     import_parser.add_argument(
         "--catalog-only",
         action="store_true",
-        help="For --markdown, import only a path-derived page catalog and mark the Markdown graph incomplete; run normal import later to hydrate titles, lines, and edges.",
+        help="For --markdown, import only a path-derived page catalog plus frontmatter id metadata and mark the Markdown graph incomplete; run normal import later to hydrate titles, aliases, lines, and edges.",
     )
 
     hydrate_markdown_parser = add_command_parser(

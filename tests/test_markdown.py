@@ -1929,6 +1929,45 @@ class MarkdownImportTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_read_hydrate_catalog_page_preserves_frontmatter_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "A.md").write_text(
+                "---\n"
+                "id: stable-a\n"
+                "title: Alpha\n"
+                "aliases:\n"
+                "  - Start\n"
+                "---\n"
+                "# Alpha\n"
+                "links to [[B]]\n",
+                encoding="utf-8",
+            )
+            (root / "B.md").write_text("# B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            result = import_markdown_folder_to_sqlite(root, store_path, project_name="wiki", catalog_only=True)
+            self.assertEqual(result["markdown_import"]["identity_source"], "path_or_frontmatter_id")
+
+            store = SQLiteStore(store_path, project="wiki", for_write=True)
+            try:
+                catalog_read = store.read("A", backlink_limit=10, related_limit=10, unresolved_limit=10)
+                self.assertEqual(catalog_read["page"]["id"], "stable-a")
+                self.assertEqual(catalog_read["page"]["title"], "A")
+                self.assertEqual(catalog_read["lines"], [])
+
+                hydrated = store.read("A", hydrate=True, backlink_limit=10, related_limit=10, unresolved_limit=10)
+                self.assertEqual(hydrated["page"]["id"], "stable-a")
+                self.assertEqual(hydrated["page"]["title"], "Alpha")
+                self.assertEqual(hydrated["markdown_hydration"]["hydrated"], True)
+                self.assertEqual([line["text"] for line in hydrated["lines"]][-2:], ["# Alpha", "links to [[B]]"])
+
+                alias_read = store.read("Start", backlink_limit=10, related_limit=10, unresolved_limit=10)
+                self.assertEqual(alias_read["page"]["id"], "stable-a")
+                self.assertEqual(alias_read["page"]["title"], "Alpha")
+            finally:
+                store.close()
+
     def test_cli_read_reports_partial_fields_on_incomplete_markdown_graph(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"

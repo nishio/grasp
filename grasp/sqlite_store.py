@@ -842,6 +842,9 @@ def _import_markdown_catalog_to_sqlite(
         hydrated_files=0,
         reason="catalog_only",
     )
+    identity_source = "path"
+    if any(record.page.id != markdown_page_id(record.relative_path) for record in records):
+        identity_source = "path_or_frontmatter_id"
     import_summary = {
         "mode": "catalog",
         "changed_files": len(records),
@@ -850,7 +853,7 @@ def _import_markdown_catalog_to_sqlite(
         "graph_complete": False,
         "scanned_files": len(records),
         "parsed_files": 0,
-        "identity_source": "path",
+        "identity_source": identity_source,
     }
 
     connection = connect_sqlite_store(store_path, for_write=True)

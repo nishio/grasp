@@ -209,8 +209,9 @@ def markdown_catalog_record_from_file(root: str | Path, path: str | Path) -> Mar
     path = Path(path)
     relative_path = path.relative_to(root)
     stat = path.stat()
+    metadata = parse_frontmatter(markdown_frontmatter_lines_from_file(path))
     file_title = markdown_title(path)
-    page_id = markdown_page_id(relative_path)
+    page_id = metadata.page_id or markdown_page_id(relative_path)
     title = file_title
     norm_title = normalize_title(title)
     updated = int(stat.st_mtime)
@@ -228,7 +229,7 @@ def markdown_catalog_record_from_file(root: str | Path, path: str | Path) -> Mar
         page=page,
         aliases=[],
         tags=[],
-        graph_role=markdown_graph_role(relative_path, parse_frontmatter([])),
+        graph_role=markdown_graph_role(relative_path, metadata),
         source_hash="",
         mtime_ns=stat.st_mtime_ns,
     )
@@ -307,6 +308,25 @@ def markdown_page_id(relative_path: Path) -> str:
 
 def markdown_title(path: Path) -> str:
     return path.stem
+
+
+def markdown_frontmatter_lines_from_file(path: str | Path) -> list[str]:
+    path = Path(path)
+    with path.open("r", encoding="utf-8") as handle:
+        try:
+            first_line = next(handle).rstrip("\r\n")
+        except StopIteration:
+            return []
+        if first_line.strip() != "---":
+            return []
+
+        lines = [first_line]
+        for raw_line in handle:
+            line = raw_line.rstrip("\r\n")
+            lines.append(line)
+            if line.strip() in {"---", "..."}:
+                return lines
+    return []
 
 
 def first_markdown_h1_title(lines: list[str]) -> str | None:

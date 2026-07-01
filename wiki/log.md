@@ -2021,3 +2021,8 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - code: scripts/benchmark_claim_retry_throughput.py --profile cutover now uses owner default thresholds 0.70 / 0.75s; explicit flags override them, and --require-cutover-thresholds treats the defaults as decided.
 - code: scripts/check_file_back_preflight.py --base auto now resolves current upstream -> origin/<branch> -> no-upstream feature HEAD -> protected-branch origin/main, removing the --base HEAD workaround for local feature continuation.
 - file-back: [[grasp-backlog]] and [[grasp-v1-implemented]] record the P3 threshold/base-route update; generic merge / queue remains deferred until a real dogfood gap appears.
+
+## [2026-07-02 02:43] implementation+file-back | catalog-only frontmatter id hydration fix
+- code: catalog-only Markdown import now scans only frontmatter metadata to preserve explicit page ids before hydration; titles, aliases, lines, and edges still hydrate lazily.
+- test: exploratory CLI run covered import/read/backlinks/related/path/unresolved/search/mentions/co-links/write/rename/revert/export/catalog-hydrate and reproduced the frontmatter-id mismatch before the fix.
+- file-back: [[grasp-v1-implemented]] and [[grasp-backlog]] now note that catalog-only records path-derived catalog plus frontmatter id metadata.
