@@ -331,9 +331,16 @@ class SQLiteStoreTests(unittest.TestCase):
 
                 update_events = store.events(event_type="page_update")
                 self.assertEqual([event["event_id"] for event in update_events], ["evt-2"])
+                page_events = store.events(event_types=("page_create", "page_update"))
+                self.assertEqual([event["event_id"] for event in page_events], ["evt-1", "evt-2"])
+                self.assertEqual(store.events(event_types=()), [])
+                with self.assertRaisesRegex(ValueError, "event_type or event_types"):
+                    store.events(event_type="page_update", event_types=("page_create",))
                 self.assertEqual(store.event_count(event_type="page_update"), 1)
                 with self.assertRaisesRegex(ValueError, "unsupported journal event_type"):
                     store.events(event_type="unknown")
+                with self.assertRaisesRegex(ValueError, "unsupported journal event_type"):
+                    store.events(event_types=("unknown",))
             finally:
                 store.close()
 

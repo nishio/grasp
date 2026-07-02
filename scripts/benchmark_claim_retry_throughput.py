@@ -28,12 +28,33 @@ LOG_PAGE = "Log"
 WORKER_PREFIX = "agent"
 MODES = ("uncoordinated", "claim_retry")
 WORKLOADS = ("hot-page", "file-back")
-CUTOVER_THRESHOLD_KEYS = (
+THROUGHPUT_GATES = (
+    "surviving-ratio",
+    "completed-ratio",
+    "claim-retry-surviving-per-second",
+    "none",
+)
+THROUGHPUT_GATE_KEY = "throughput_gate"
+THROUGHPUT_THRESHOLD_BY_GATE = {
+    "surviving-ratio": "min_surviving_throughput_ratio",
+    "completed-ratio": "min_completed_throughput_ratio",
+    "claim-retry-surviving-per-second": "min_claim_retry_surviving_throughput_per_second",
+    "none": None,
+}
+REQUIRED_CUTOVER_THRESHOLD_KEYS = (
+    "max_p95_claim_wait_seconds",
+)
+NUMERIC_THRESHOLD_KEYS = (
     "min_surviving_throughput_ratio",
+    "min_completed_throughput_ratio",
+    "min_claim_retry_surviving_throughput_per_second",
     "max_p95_claim_wait_seconds",
 )
 DEFAULT_CUTOVER_THRESHOLDS = {
+    "throughput_gate": "surviving-ratio",
     "min_surviving_throughput_ratio": 0.70,
+    "min_completed_throughput_ratio": None,
+    "min_claim_retry_surviving_throughput_per_second": None,
     "max_p95_claim_wait_seconds": 0.75,
 }
 PROFILES: dict[str, dict[str, Any]] = {
@@ -45,6 +66,12 @@ PROFILES: dict[str, dict[str, Any]] = {
     },
     "cutover": {
         "iterations": 25,
+        "think_seconds_values": [0.0, 0.02, 0.05],
+        "workloads": list(WORKLOADS),
+        "format": "table",
+    },
+    "sustained-cutover": {
+        "iterations": 100,
         "think_seconds_values": [0.0, 0.02, 0.05],
         "workloads": list(WORKLOADS),
         "format": "table",
@@ -150,6 +177,8 @@ def run_worker(argv: list[str]) -> int:
             write_args = ["write-page", PAGE]
             for line in lines:
                 write_args.extend(["--line", line])
+            if claim_event_id:
+                write_args.extend(["--release-claim", claim_event_id])
             write_args.extend(["--output", str(args.output), "--no-journal", "--defer-projection"])
             run_grasp(
                 args.store,
@@ -157,6 +186,8 @@ def run_worker(argv: list[str]) -> int:
                 actor=args.worker_id,
                 session_id=session_id,
             )
+            if claim_event_id:
+                claim_event_id = ""
             if args.workload == "file-back":
                 run_grasp(
                     args.store,
@@ -496,26 +527,47 @@ def build_comparison(results: list[dict[str, Any]]) -> dict[str, Any] | None:
     }
 
 
-def gate_thresholds(args: argparse.Namespace) -> dict[str, float | None]:
-    defaults: dict[str, float | None] = {}
-    if getattr(args, "profile", None) == "cutover":
+def gate_thresholds(args: argparse.Namespace) -> dict[str, float | str | None]:
+    defaults: dict[str, float | str | None] = {THROUGHPUT_GATE_KEY: "surviving-ratio"}
+    if getattr(args, "profile", None) in {"cutover", "sustained-cutover"}:
         defaults = dict(DEFAULT_CUTOVER_THRESHOLDS)
+    throughput_gate = getattr(args, "throughput_gate", None) or defaults.get(THROUGHPUT_GATE_KEY)
     return {
-        "min_surviving_throughput_ratio": args.min_surviving_throughput_ratio
-        if args.min_surviving_throughput_ratio is not None
+        THROUGHPUT_GATE_KEY: throughput_gate,
+        "min_surviving_throughput_ratio": getattr(args, "min_surviving_throughput_ratio", None)
+        if getattr(args, "min_surviving_throughput_ratio", None) is not None
         else defaults.get("min_surviving_throughput_ratio"),
-        "max_p95_claim_wait_seconds": args.max_p95_claim_wait_seconds
-        if args.max_p95_claim_wait_seconds is not None
+        "min_completed_throughput_ratio": getattr(args, "min_completed_throughput_ratio", None)
+        if getattr(args, "min_completed_throughput_ratio", None) is not None
+        else defaults.get("min_completed_throughput_ratio"),
+        "min_claim_retry_surviving_throughput_per_second": getattr(
+            args,
+            "min_claim_retry_surviving_throughput_per_second",
+            None,
+        )
+        if getattr(args, "min_claim_retry_surviving_throughput_per_second", None) is not None
+        else defaults.get("min_claim_retry_surviving_throughput_per_second"),
+        "max_p95_claim_wait_seconds": getattr(args, "max_p95_claim_wait_seconds", None)
+        if getattr(args, "max_p95_claim_wait_seconds", None) is not None
         else defaults.get("max_p95_claim_wait_seconds"),
     }
 
 
-def gate_enabled(thresholds: dict[str, float | None]) -> bool:
-    return any(value is not None for value in thresholds.values())
+def gate_enabled(thresholds: dict[str, float | str | None]) -> bool:
+    return any(thresholds.get(key) is not None for key in NUMERIC_THRESHOLD_KEYS)
 
 
-def missing_cutover_thresholds(thresholds: dict[str, float | None]) -> list[str]:
-    return [key for key in CUTOVER_THRESHOLD_KEYS if thresholds.get(key) is None]
+def missing_cutover_thresholds(thresholds: dict[str, float | str | None]) -> list[str]:
+    missing = [
+        key
+        for key in REQUIRED_CUTOVER_THRESHOLD_KEYS
+        if thresholds.get(key) is None
+    ]
+    throughput_gate = str(thresholds.get(THROUGHPUT_GATE_KEY) or "surviving-ratio")
+    throughput_threshold = THROUGHPUT_THRESHOLD_BY_GATE.get(throughput_gate)
+    if throughput_threshold and thresholds.get(throughput_threshold) is None:
+        missing.append(throughput_threshold)
+    return missing
 
 
 def resolve_run_config(args: argparse.Namespace) -> dict[str, Any]:
@@ -535,7 +587,7 @@ def evaluate_scenario_gate(
     *,
     results: list[dict[str, Any]],
     comparison: dict[str, Any] | None,
-    thresholds: dict[str, float | None],
+    thresholds: dict[str, float | str | None],
 ) -> dict[str, Any]:
     enabled = gate_enabled(thresholds)
     if not enabled:
@@ -564,12 +616,13 @@ def evaluate_scenario_gate(
                     "expected": 0,
                 }
             )
-    min_surviving = thresholds.get("min_surviving_throughput_ratio")
-    if min_surviving is not None:
+    throughput_gate = str(thresholds.get(THROUGHPUT_GATE_KEY) or "surviving-ratio")
+    if throughput_gate == "surviving-ratio":
+        min_surviving = thresholds.get("min_surviving_throughput_ratio")
         actual = None if comparison is None else comparison.get("claim_retry_surviving_markers_per_second_ratio")
-        if actual is None:
+        if min_surviving is not None and actual is None:
             failures.append({"type": "missing_surviving_throughput_ratio", "threshold": min_surviving})
-        elif float(actual) < float(min_surviving):
+        elif min_surviving is not None and float(actual) < float(min_surviving):
             failures.append(
                 {
                     "type": "surviving_throughput_ratio_below_threshold",
@@ -577,9 +630,44 @@ def evaluate_scenario_gate(
                     "threshold": min_surviving,
                 }
             )
+    elif throughput_gate == "completed-ratio":
+        min_completed = thresholds.get("min_completed_throughput_ratio")
+        actual = None if comparison is None else comparison.get("claim_retry_completed_writes_per_second_ratio")
+        if min_completed is not None and actual is None:
+            failures.append({"type": "missing_completed_throughput_ratio", "threshold": min_completed})
+        elif min_completed is not None and float(actual) < float(min_completed):
+            failures.append(
+                {
+                    "type": "completed_throughput_ratio_below_threshold",
+                    "actual": actual,
+                    "threshold": min_completed,
+                }
+            )
+    elif throughput_gate == "claim-retry-surviving-per-second":
+        min_claim_retry_surviving = thresholds.get("min_claim_retry_surviving_throughput_per_second")
+        actual = None if claim_retry is None else claim_retry.get("surviving_markers_per_second")
+        if min_claim_retry_surviving is not None and actual is None:
+            failures.append(
+                {
+                    "type": "missing_claim_retry_surviving_throughput_per_second",
+                    "threshold": min_claim_retry_surviving,
+                }
+            )
+        elif min_claim_retry_surviving is not None and float(actual) < float(min_claim_retry_surviving):
+            failures.append(
+                {
+                    "type": "claim_retry_surviving_throughput_below_threshold",
+                    "actual": actual,
+                    "threshold": min_claim_retry_surviving,
+                }
+            )
+    elif throughput_gate == "none":
+        pass
     max_p95 = thresholds.get("max_p95_claim_wait_seconds")
     if max_p95 is not None:
-        actual = None if comparison is None else comparison.get("claim_retry_p95_claim_wait_seconds")
+        actual = None if claim_retry is None else claim_retry.get("p95_claim_wait_seconds")
+        if actual is None and comparison is not None:
+            actual = comparison.get("claim_retry_p95_claim_wait_seconds")
         if actual is None:
             failures.append({"type": "missing_p95_claim_wait_seconds", "threshold": max_p95})
         elif float(actual) > float(max_p95):
@@ -599,7 +687,7 @@ def evaluate_scenario_gate(
 
 def summarize_gate(
     scenarios: list[dict[str, Any]],
-    thresholds: dict[str, float | None],
+    thresholds: dict[str, float | str | None],
     *,
     require_thresholds: bool = False,
 ) -> dict[str, Any]:
@@ -669,9 +757,19 @@ def summarize_cutover_metrics(scenarios: list[dict[str, Any]]) -> dict[str, Any]
         if comparison.get("claim_retry_completed_writes_per_second_ratio") is not None
     ]
     p95_waits = [
-        float(comparison["claim_retry_p95_claim_wait_seconds"])
-        for comparison in comparisons
-        if comparison.get("claim_retry_p95_claim_wait_seconds") is not None
+        float(result["p95_claim_wait_seconds"])
+        for result in claim_retry_results
+        if result.get("p95_claim_wait_seconds") is not None
+    ]
+    surviving_rates = [
+        float(result["surviving_markers_per_second"])
+        for result in claim_retry_results
+        if result.get("surviving_markers_per_second") is not None
+    ]
+    completed_rates = [
+        float(result["completed_writes_per_second"])
+        for result in claim_retry_results
+        if result.get("completed_writes_per_second") is not None
     ]
     overlap_counts = [
         int(result.get("active_claim_overlap_count") or 0)
@@ -683,6 +781,8 @@ def summarize_cutover_metrics(scenarios: list[dict[str, Any]]) -> dict[str, Any]
         "claim_retry_scenario_count": len(claim_retry_results),
         "min_claim_retry_surviving_throughput_ratio": round(min(surviving_ratios), 3) if surviving_ratios else None,
         "min_claim_retry_completed_throughput_ratio": round(min(completed_ratios), 3) if completed_ratios else None,
+        "min_claim_retry_surviving_markers_per_second": round(min(surviving_rates), 3) if surviving_rates else None,
+        "min_claim_retry_completed_writes_per_second": round(min(completed_rates), 3) if completed_rates else None,
         "max_claim_retry_p95_claim_wait_seconds": round(max(p95_waits), 3) if p95_waits else None,
         "max_claim_retry_active_claim_overlap_count": max(overlap_counts) if overlap_counts else None,
         "total_claim_retry_lost_markers": sum(int(result.get("lost_markers") or 0) for result in claim_retry_results),
@@ -799,6 +899,14 @@ def render_tables(output: dict[str, Any]) -> str:
                             metric_summary.get("min_claim_retry_completed_throughput_ratio"),
                         ],
                         [
+                            "min_claim_retry_surviving/s",
+                            metric_summary.get("min_claim_retry_surviving_markers_per_second"),
+                        ],
+                        [
+                            "min_claim_retry_completed/s",
+                            metric_summary.get("min_claim_retry_completed_writes_per_second"),
+                        ],
+                        [
                             "max_p95_wait_s",
                             metric_summary.get("max_claim_retry_p95_claim_wait_seconds"),
                         ],
@@ -885,7 +993,8 @@ def main(argv: list[str] | None = None) -> int:
         default="quick",
         help=(
             "Default matrix preset. quick preserves the original single hot-page scenario; "
-            "cutover runs hot-page and file-back workloads across think times 0,0.02,0.05 and prints a table."
+            "cutover runs hot-page and file-back workloads across think times 0,0.02,0.05 and prints a table; "
+            "sustained-cutover uses the same matrix with 100 iterations per worker."
         ),
     )
     parser.add_argument("--workers", type=int, default=2)
@@ -926,6 +1035,33 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--min-completed-throughput-ratio",
+        type=float,
+        default=None,
+        help=(
+            "Owner cutover threshold for --throughput-gate completed-ratio. Fail if claim_retry "
+            "completed/s divided by uncoordinated completed/s is below this value."
+        ),
+    )
+    parser.add_argument(
+        "--min-claim-retry-surviving-throughput-per-second",
+        type=float,
+        default=None,
+        help=(
+            "Owner cutover threshold for --throughput-gate claim-retry-surviving-per-second. "
+            "Fail if claim_retry surviving markers per second is below this absolute value."
+        ),
+    )
+    parser.add_argument(
+        "--throughput-gate",
+        choices=THROUGHPUT_GATES,
+        default=None,
+        help=(
+            "Which throughput metric participates in the threshold gate. Defaults to surviving-ratio, "
+            "and cutover profiles keep the owner default 0.70 surviving-ratio gate."
+        ),
+    )
+    parser.add_argument(
         "--max-p95-claim-wait-seconds",
         type=float,
         default=None,
@@ -960,6 +1096,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--retry-interval-seconds must be > 0")
     if args.min_surviving_throughput_ratio is not None and args.min_surviving_throughput_ratio < 0:
         parser.error("--min-surviving-throughput-ratio must be >= 0")
+    if args.min_completed_throughput_ratio is not None and args.min_completed_throughput_ratio < 0:
+        parser.error("--min-completed-throughput-ratio must be >= 0")
+    if (
+        args.min_claim_retry_surviving_throughput_per_second is not None
+        and args.min_claim_retry_surviving_throughput_per_second < 0
+    ):
+        parser.error("--min-claim-retry-surviving-throughput-per-second must be >= 0")
     if args.max_p95_claim_wait_seconds is not None and args.max_p95_claim_wait_seconds < 0:
         parser.error("--max-p95-claim-wait-seconds must be >= 0")
 

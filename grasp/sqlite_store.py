@@ -2790,9 +2790,12 @@ class SQLiteStore:
         *,
         project: str | None = None,
         event_type: str | None = None,
+        event_types: list[str] | tuple[str, ...] | set[str] | None = None,
         limit: int | None = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        if event_type is not None and event_types is not None:
+            raise ValueError("events() accepts event_type or event_types, not both")
         project_filter = normalize_project_name(project) if project is not None else self._selected_project_or_none()
         clauses: list[str] = []
         params: list[Any] = []
@@ -2804,6 +2807,16 @@ class SQLiteStore:
                 raise ValueError(f"unsupported journal event_type: {event_type!r}")
             clauses.append("event_type = ?")
             params.append(event_type)
+        if event_types is not None:
+            normalized_event_types = sorted({str(item) for item in event_types})
+            unsupported = [item for item in normalized_event_types if item not in EVENT_TYPES]
+            if unsupported:
+                raise ValueError(f"unsupported journal event_type: {unsupported[0]!r}")
+            if not normalized_event_types:
+                return []
+            placeholders = ",".join("?" for _ in normalized_event_types)
+            clauses.append(f"event_type IN ({placeholders})")
+            params.extend(normalized_event_types)
         query = """
             SELECT
               event_sequence,

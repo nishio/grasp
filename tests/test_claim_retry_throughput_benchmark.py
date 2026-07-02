@@ -40,6 +40,15 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
                 format=None,
             )
         )
+        sustained = benchmark.resolve_run_config(
+            argparse.Namespace(
+                profile="sustained-cutover",
+                iterations=None,
+                think_seconds=None,
+                workload=None,
+                format=None,
+            )
+        )
         overridden = benchmark.resolve_run_config(
             argparse.Namespace(
                 profile="cutover",
@@ -63,6 +72,15 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
             cutover,
             {
                 "iterations": 25,
+                "think_seconds_values": [0.0, 0.02, 0.05],
+                "workloads": ["hot-page", "file-back"],
+                "format": "table",
+            },
+        )
+        self.assertEqual(
+            sustained,
+            {
+                "iterations": 100,
                 "think_seconds_values": [0.0, 0.02, 0.05],
                 "workloads": ["hot-page", "file-back"],
                 "format": "table",
@@ -184,6 +202,7 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
                             "lost_log_markers": 0,
                             "strict_ok": True,
                             "active_claim_overlap_count": 0,
+                            "p95_claim_wait_seconds": 0.42,
                         },
                     ],
                 },
@@ -202,6 +221,7 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
                             "lost_log_markers": 0,
                             "strict_ok": True,
                             "active_claim_overlap_count": 0,
+                            "p95_claim_wait_seconds": 0.56,
                         },
                     ],
                 },
@@ -213,6 +233,8 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
         self.assertEqual(summary["claim_retry_scenario_count"], 2)
         self.assertEqual(summary["min_claim_retry_surviving_throughput_ratio"], 0.71)
         self.assertEqual(summary["min_claim_retry_completed_throughput_ratio"], 0.35)
+        self.assertIsNone(summary["min_claim_retry_surviving_markers_per_second"])
+        self.assertIsNone(summary["min_claim_retry_completed_writes_per_second"])
         self.assertEqual(summary["max_claim_retry_p95_claim_wait_seconds"], 0.56)
         self.assertEqual(summary["max_claim_retry_active_claim_overlap_count"], 0)
         self.assertEqual(summary["total_claim_retry_lost_markers"], 0)
@@ -288,6 +310,126 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
         self.assertTrue(scenario_gate["ok"])
         self.assertTrue(required["enabled"])
         self.assertTrue(required["ok"])
+
+    def test_sustained_cutover_profile_supplies_same_owner_threshold_defaults(self):
+        thresholds = benchmark.gate_thresholds(
+            argparse.Namespace(
+                profile="sustained-cutover",
+                min_surviving_throughput_ratio=None,
+                max_p95_claim_wait_seconds=None,
+            )
+        )
+
+        self.assertEqual(thresholds, benchmark.DEFAULT_CUTOVER_THRESHOLDS)
+
+    def test_completed_ratio_gate_avoids_survivor_baseline_policy(self):
+        thresholds = {
+            "throughput_gate": "completed-ratio",
+            "min_surviving_throughput_ratio": None,
+            "min_completed_throughput_ratio": 0.3,
+            "min_claim_retry_surviving_throughput_per_second": None,
+            "max_p95_claim_wait_seconds": 0.75,
+        }
+        passing = benchmark.evaluate_scenario_gate(
+            results=[
+                {
+                    "mode": "claim_retry",
+                    "lost_markers": 0,
+                    "lost_log_markers": 0,
+                    "strict_ok": True,
+                    "strict_failures": [],
+                    "active_claim_overlap_count": 0,
+                }
+            ],
+            comparison={
+                "claim_retry_completed_writes_per_second_ratio": 0.35,
+                "claim_retry_surviving_markers_per_second_ratio": 0.2,
+                "claim_retry_p95_claim_wait_seconds": 0.56,
+            },
+            thresholds=thresholds,
+        )
+        failing = benchmark.evaluate_scenario_gate(
+            results=[
+                {
+                    "mode": "claim_retry",
+                    "lost_markers": 0,
+                    "lost_log_markers": 0,
+                    "strict_ok": True,
+                    "strict_failures": [],
+                    "active_claim_overlap_count": 0,
+                }
+            ],
+            comparison={
+                "claim_retry_completed_writes_per_second_ratio": 0.25,
+                "claim_retry_surviving_markers_per_second_ratio": 0.8,
+                "claim_retry_p95_claim_wait_seconds": 0.56,
+            },
+            thresholds=thresholds,
+        )
+
+        self.assertTrue(passing["ok"])
+        self.assertFalse(failing["ok"])
+        self.assertEqual(
+            [failure["type"] for failure in failing["failures"]],
+            ["completed_throughput_ratio_below_threshold"],
+        )
+
+    def test_absolute_claim_retry_throughput_gate_does_not_require_uncoordinated_result(self):
+        thresholds = {
+            "throughput_gate": "claim-retry-surviving-per-second",
+            "min_surviving_throughput_ratio": None,
+            "min_completed_throughput_ratio": None,
+            "min_claim_retry_surviving_throughput_per_second": 1.5,
+            "max_p95_claim_wait_seconds": 1.0,
+        }
+        scenario_gate = benchmark.evaluate_scenario_gate(
+            results=[
+                {
+                    "mode": "claim_retry",
+                    "lost_markers": 0,
+                    "lost_log_markers": 0,
+                    "strict_ok": True,
+                    "strict_failures": [],
+                    "active_claim_overlap_count": 0,
+                    "surviving_markers_per_second": 1.4,
+                    "p95_claim_wait_seconds": 0.5,
+                }
+            ],
+            comparison=None,
+            thresholds=thresholds,
+        )
+
+        self.assertFalse(scenario_gate["ok"])
+        self.assertEqual(
+            [failure["type"] for failure in scenario_gate["failures"]],
+            ["claim_retry_surviving_throughput_below_threshold"],
+        )
+
+    def test_required_threshold_gate_uses_selected_throughput_gate(self):
+        thresholds = {
+            "throughput_gate": "completed-ratio",
+            "min_surviving_throughput_ratio": None,
+            "min_completed_throughput_ratio": None,
+            "min_claim_retry_surviving_throughput_per_second": None,
+            "max_p95_claim_wait_seconds": 0.75,
+        }
+        required = benchmark.summarize_gate(
+            [],
+            thresholds,
+            require_thresholds=True,
+        )
+
+        self.assertFalse(required["ok"])
+        self.assertEqual(required["reason"], "required_thresholds_missing")
+        self.assertEqual(
+            required["failures"],
+            [
+                {
+                    "type": "required_thresholds_missing",
+                    "missing": ["min_completed_throughput_ratio"],
+                }
+            ],
+        )
 
     def test_required_threshold_gate_requires_both_owner_values(self):
         thresholds = {
@@ -384,6 +526,8 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
                 "claim_retry_scenario_count": 1,
                 "min_claim_retry_surviving_throughput_ratio": 0.8,
                 "min_claim_retry_completed_throughput_ratio": 0.4,
+                "min_claim_retry_surviving_markers_per_second": 2.0,
+                "min_claim_retry_completed_writes_per_second": 2.0,
                 "max_claim_retry_p95_claim_wait_seconds": 0.439,
                 "max_claim_retry_active_claim_overlap_count": 0,
                 "total_claim_retry_lost_markers": 0,
@@ -401,6 +545,8 @@ class ClaimRetryThroughputBenchmarkTests(unittest.TestCase):
         self.assertIn("| claim_retry_scenarios | 1/1 |", table)
         self.assertIn("| compared_scenarios | 1/1 |", table)
         self.assertIn("| min_surviving_ratio | 0.8 |", table)
+        self.assertIn("| min_claim_retry_surviving/s | 2 |", table)
+        self.assertIn("| min_claim_retry_completed/s | 2 |", table)
         self.assertIn("| max_p95_wait_s | 0.439 |", table)
         self.assertIn("| all_strict_green | yes |", table)
         self.assertIn("## Claim Retry vs Uncoordinated", table)

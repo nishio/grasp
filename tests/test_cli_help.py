@@ -10278,6 +10278,149 @@ class CliHelpTests(unittest.TestCase):
         self.assertTrue(owner_write["projection_deferred"])
         self.assertEqual([line["text"] for line in read_after_owner["lines"]], ["# A", "- agent A owns claim"])
 
+    def test_write_page_release_claim_after_success(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "authority.sqlite"
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+            claim_a = run_json(
+                "claim-page",
+                "A",
+                "--ttl-seconds",
+                "600",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            claim_event_id = claim_a["claim"]["claim_event_id"]
+            owner_write = run_json(
+                "write-page",
+                "A",
+                "--line",
+                "# A",
+                "--line",
+                "- agent A owns claim",
+                "--release-claim",
+                claim_event_id,
+                "--no-journal",
+                "--defer-projection",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            read_after_owner = run_json("read", "A")
+            claims_a = run_json("claims", "A", "--include-expired")
+
+        self.assertTrue(owner_write["projection_deferred"])
+        self.assertEqual(owner_write["released_claim"]["claim_event_id"], claim_event_id)
+        self.assertTrue(owner_write["release_event_id"])
+        self.assertEqual(owner_write["active_claims"], [])
+        self.assertEqual(claims_a["active_claims"], [])
+        self.assertEqual(claims_a["released_claims"][0]["claim_event_id"], claim_event_id)
+        self.assertEqual([line["text"] for line in read_after_owner["lines"]], ["# A", "- agent A owns claim"])
+
+    def test_write_page_release_claim_refuses_mismatched_page_before_write(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            (root / "B.md").write_text("# B\n- old B\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "authority.sqlite"
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+            claim_b = run_json(
+                "claim-page",
+                "B",
+                "--ttl-seconds",
+                "600",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            claim_event_id = claim_b["claim"]["claim_event_id"]
+            blocked_write = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "--actor",
+                    "agent-a",
+                    "--session-id",
+                    "session-a",
+                    "write-page",
+                    "A",
+                    "--line",
+                    "# A",
+                    "--line",
+                    "- should not land",
+                    "--release-claim",
+                    claim_event_id,
+                    "--no-journal",
+                    "--defer-projection",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            read_after_blocked = run_json("read", "A")
+            claims_b = run_json("claims", "B", "--include-expired")
+
+        self.assertEqual(blocked_write.returncode, 2)
+        self.assertIn("claim target does not match write target", blocked_write.stderr)
+        self.assertEqual([line["text"] for line in read_after_blocked["lines"]], ["# A", "- old A"])
+        self.assertEqual(claims_b["active_claims"][0]["claim_event_id"], claim_event_id)
+        self.assertEqual(claims_b["released_claims"], [])
+
     def test_write_line_refuses_other_session_active_claim(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "wiki"
@@ -12011,6 +12154,86 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(overwrite["previous_session_id"], "session-a")
         self.assertEqual(overwrite["current_session_id"], "session-b")
         self.assertEqual(overwrite["removed_line_samples"], ["- agent A marker"])
+
+    def test_write_status_strict_allows_reconcile_line_id_churn_when_text_survives(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "wiki"
+            root.mkdir()
+            (root / "A.md").write_text("# A\n- old A\n", encoding="utf-8")
+            store_path = Path(tmpdir) / "store.sqlite"
+
+            def run_json(*args, actor="", session_id=""):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "grasp",
+                        "--json",
+                        "--store",
+                        str(store_path),
+                        "--project",
+                        "wiki",
+                        "--actor",
+                        actor,
+                        "--session-id",
+                        session_id,
+                        *args,
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                return json.loads(completed.stdout)
+
+            run_json("import", "--markdown", str(root))
+            (root / "A.md").write_text("# A\n- old A\n- agent A marker\n", encoding="utf-8")
+            first_reconcile = run_json(
+                "reconcile-markdown",
+                "--output",
+                str(root),
+                "--no-journal",
+                actor="agent-a",
+                session_id="session-a",
+            )
+            (root / "A.md").write_text(
+                "# A\n- old A\n- agent A marker\n- agent B marker\n",
+                encoding="utf-8",
+            )
+            second_reconcile = run_json(
+                "reconcile-markdown",
+                "--output",
+                str(root),
+                "--no-journal",
+                actor="agent-b",
+                session_id="session-b",
+            )
+            status_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "grasp",
+                    "--json",
+                    "--store",
+                    str(store_path),
+                    "--project",
+                    "wiki",
+                    "write-status",
+                    "--output",
+                    str(root),
+                    "--no-journal",
+                    "--strict",
+                ],
+                text=True,
+                capture_output=True,
+            )
+
+        status_result = json.loads(status_completed.stdout)
+        self.assertEqual(status_completed.returncode, 0)
+        self.assertEqual(first_reconcile["normal_page_updates"][0]["source_path"], "A.md")
+        self.assertEqual(second_reconcile["normal_page_updates"][0]["source_path"], "A.md")
+        self.assertTrue(status_result["projection"]["ok"])
+        self.assertTrue(status_result["strict_ok"])
+        self.assertEqual(status_result["concurrent_page_update_overwrites"], [])
 
     def test_claim_retry_hot_page_stress_preserves_all_markers(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -1281,11 +1281,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         returns=(
             "project, page, journal|null, journal_written, output|null, event_id, event_type, source_path, previous_lines[], lines[], "
-            "line_identity, previous_line_count, line_count, edge_count, projection_deferred, projection|null"
+            "line_identity, previous_line_count, line_count, edge_count, projection_deferred, projection|null, "
+            "release_event_id|null, released_claim|null, active_claims|null"
         ),
         examples=[
             "grasp --project grasp-wiki write-page 'New page' --create --path new-page.md --from-file /tmp/new-page.md --output wiki",
             "grasp --project grasp-wiki write-page scratch --from-file /tmp/scratch.md --output wiki",
+            "grasp --project grasp-wiki --session-id work-1 write-page scratch --release-claim <claim-event-id> --from-file /tmp/scratch.md --output wiki",
             "grasp --project grasp-wiki write-page 5928725cba093700118fa5b2 --target page-id --line '# scratch' --output wiki",
             "grasp --project grasp-wiki --json write-page scratch --line '# scratch' --line '- updated' --output wiki",
         ],
@@ -1296,6 +1298,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Rename and source-path changes for existing pages are handled by rename-page.",
             "When --output is inside a Git worktree, dirty target paths that do not match the current store projection are refused before mutation.",
             "Existing-page writes are refused while another session has an active claim for the target page.",
+            "--release-claim releases an owned active claim for the same target page after a successful write, avoiding a separate release-claim subprocess.",
             "Existing-page replacement inherits only unambiguous exact matching line_ids; split, merge, and large-edit rewrites are not inferred as the same line.",
             "--from-file may intentionally use the target projection file itself as the replacement input.",
             "Dirty projection paths outside the target page are refused before mutation.",
@@ -1311,6 +1314,7 @@ def build_parser() -> argparse.ArgumentParser:
     write_page_parser.add_argument("--create", action="store_true", help="Create a new Markdown-backed page instead of replacing an existing page.")
     write_page_parser.add_argument("--path", dest="source_path", default=None, help="New Markdown projection path for --create, relative to --output and ending in .md.")
     write_page_parser.add_argument("--message", default="", help="Optional update message stored in the journal payload.")
+    write_page_parser.add_argument("--release-claim", dest="release_claim_event_id", default=None, help="After a successful existing-page write, release this owned active claim for the same page.")
     write_page_parser.add_argument("--output", type=Path, default=None, help="Markdown projection output folder to update. Required unless --defer-projection is used.")
     write_page_parser.add_argument("--defer-projection", action="store_true", help="Do not export Markdown projection after the SQLite write; update it later with export-markdown.")
     add_optional_write_journal_arguments(write_page_parser)
@@ -2970,8 +2974,7 @@ def run_activity(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]
     active_claims = current_page_claims(store, now=now, query=args.title, include_inactive=False)
     events = [
         activity_event_summary(event, active_cutoff=active_cutoff, claim_states_by_id=claim_states_by_id)
-        for event in store.events(project=args.project, limit=None)
-        if event.get("event_type") in ACTIVITY_EVENT_TYPES
+        for event in store.events(project=args.project, event_types=ACTIVITY_EVENT_TYPES, limit=None)
     ]
     filtered = [
         event
@@ -3126,24 +3129,31 @@ def run_claims(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def run_release_claim(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
-    metadata = event_metadata(args)
+def release_page_claim(
+    store: SQLiteStore,
+    *,
+    claim_event_id: str,
+    message: str,
+    force: bool,
+    metadata: dict[str, str],
+    command_name: str = "release-claim",
+) -> dict[str, Any]:
     session_id = metadata["session_id"]
     if not session_id:
-        raise ValueError("release-claim requires --session-id or GRASP_SESSION_ID")
+        raise ValueError(f"{command_name} requires --session-id or GRASP_SESSION_ID")
     now = datetime.now(timezone.utc).replace(microsecond=0)
     claim: dict[str, Any] | None = None
     event: dict[str, Any] | None = None
     with store.write_transaction():
         claims = current_page_claims(store, now=now, include_inactive=True)
-        claim = next((item for item in claims if item["claim_event_id"] == args.claim_event_id), None)
+        claim = next((item for item in claims if item["claim_event_id"] == claim_event_id), None)
         if claim is None:
-            raise ValueError(f"claim not found: {args.claim_event_id}")
+            raise ValueError(f"claim not found: {claim_event_id}")
         if claim["status"] != "active":
-            raise ValueError(f"claim is not active: {args.claim_event_id} status={claim['status']}")
-        if claim["session_id"] != session_id and not args.force:
+            raise ValueError(f"claim is not active: {claim_event_id} status={claim['status']}")
+        if claim["session_id"] != session_id and not force:
             raise ValueError(
-                "release-claim requires the owning session_id; "
+                f"{command_name} requires the owning session_id; "
                 f"claim session_id={claim['session_id']!r}, current session_id={session_id!r}"
             )
         payload = {
@@ -3152,7 +3162,7 @@ def run_release_claim(store: SQLiteStore, args: argparse.Namespace) -> dict[str,
             "title": claim["title"],
             "source_path": claim["source_path"],
             "graph_role": claim["graph_role"],
-            "message": str(args.message or ""),
+            "message": str(message or ""),
         }
         event = make_journal_event("page_claim_release", project=claim["project"], payload=payload)
         insert_store_event(store.connection, event, **metadata)
@@ -3168,6 +3178,16 @@ def run_release_claim(store: SQLiteStore, args: argparse.Namespace) -> dict[str,
     }
 
 
+def run_release_claim(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
+    return release_page_claim(
+        store,
+        claim_event_id=args.claim_event_id,
+        message=args.message,
+        force=args.force,
+        metadata=event_metadata(args),
+    )
+
+
 def page_claim_target(store: SQLiteStore, title: str, *, target_kind: str = "handle") -> dict[str, str]:
     return store.markdown_page_target_summary(title, target_kind=target_kind, command="claim-page")
 
@@ -3181,7 +3201,11 @@ def current_page_claims(
 ) -> list[dict[str, Any]]:
     claims_by_id: dict[str, dict[str, Any]] = {}
     releases_by_claim_id: dict[str, dict[str, Any]] = {}
-    for event in store.events(project=store._selected_project_or_none(), limit=None):
+    for event in store.events(
+        project=store._selected_project_or_none(),
+        event_types=CLAIM_EVENT_TYPES,
+        limit=None,
+    ):
         event_type = str(event.get("event_type") or "")
         if event_type == "page_claim":
             claim = page_claim_from_event(event, now=now)
@@ -3545,8 +3569,11 @@ def run_append_log(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
 def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
     journal = optional_journal_path_for_output(args)
     preflight_journal_appendable(journal)
+    metadata = event_metadata(args)
     if args.create and args.target_kind != "handle":
         raise ValueError("write-page --target is only valid when replacing an existing page")
+    if args.release_claim_event_id:
+        validate_write_page_release_claim(store, args, metadata=metadata)
     replacement_lines = write_page_replacement_lines(args)
     target_source_paths = write_page_target_source_paths_before_mutation(store, args)
     if not args.defer_projection:
@@ -3569,8 +3596,8 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
         target_kind=args.target_kind,
         source_path=args.source_path,
         message=args.message,
-        enforce_active_claim_session_id=event_metadata(args)["session_id"],
-        **event_metadata(args),
+        enforce_active_claim_session_id=metadata["session_id"],
+        **metadata,
     )
     projection = append_event_and_maybe_export_projection(
         store,
@@ -3582,8 +3609,18 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
             allowed_source_paths={update_result["source_path"]},
         ),
         defer_projection=args.defer_projection,
-        **event_metadata(args),
+        **metadata,
     )
+    release_result = None
+    if args.release_claim_event_id:
+        release_result = release_page_claim(
+            store,
+            claim_event_id=args.release_claim_event_id,
+            message=f"write-page released claim after event {event['event_id']}",
+            force=False,
+            metadata=metadata,
+            command_name="write-page --release-claim",
+        )
     result = dict(update_result)
     result.update(
         {
@@ -3594,9 +3631,43 @@ def run_write_page(store: SQLiteStore, args: argparse.Namespace) -> dict[str, An
             "event_type": event["event_type"],
             "projection_deferred": bool(args.defer_projection),
             "projection": projection,
+            "release_event_id": None if release_result is None else release_result["release_event_id"],
+            "released_claim": None if release_result is None else release_result["released_claim"],
+            "active_claims": None if release_result is None else release_result["active_claims"],
         }
     )
     return result
+
+
+def validate_write_page_release_claim(
+    store: SQLiteStore,
+    args: argparse.Namespace,
+    *,
+    metadata: dict[str, str],
+) -> None:
+    if args.create:
+        raise ValueError("write-page --release-claim is only valid when replacing an existing page")
+    session_id = metadata["session_id"]
+    if not session_id:
+        raise ValueError("write-page --release-claim requires --session-id or GRASP_SESSION_ID")
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    claims = current_page_claims(store, now=now, include_inactive=True)
+    claim = next((item for item in claims if item["claim_event_id"] == args.release_claim_event_id), None)
+    if claim is None:
+        raise ValueError(f"claim not found: {args.release_claim_event_id}")
+    if claim["status"] != "active":
+        raise ValueError(f"claim is not active: {args.release_claim_event_id} status={claim['status']}")
+    if claim["session_id"] != session_id:
+        raise ValueError(
+            "write-page --release-claim requires the owning session_id; "
+            f"claim session_id={claim['session_id']!r}, current session_id={session_id!r}"
+        )
+    target = page_claim_target(store, args.title, target_kind=args.target_kind)
+    if claim["page_id"] != target["page_id"]:
+        raise ValueError(
+            "write-page --release-claim claim target does not match write target; "
+            f"claim_page_id={claim['page_id']} write_page_id={target['page_id']}"
+        )
 
 
 def run_write_line(store: SQLiteStore, args: argparse.Namespace) -> dict[str, Any]:
@@ -4799,6 +4870,14 @@ def removed_added_lines(
         return []
     previous_counts = Counter(line["line_id"] for line in previous_lines if line["line_id"])
     current_counts = Counter(line["line_id"] for line in current_lines if line["line_id"])
+    previous_text_counts = Counter(line["text"] for line in previous_lines)
+    current_text_counts = Counter(line["text"] for line in current_lines)
+    text_loss_budget = Counter(
+        {
+            text: max(previous_text_counts[text] - current_text_counts.get(text, 0), 0)
+            for text in previous_text_counts
+        }
+    )
     removed: list[dict[str, str]] = []
     for line in added_lines:
         line_id = line["line_id"]
@@ -4808,6 +4887,10 @@ def removed_added_lines(
         if current_counts[line_id] > 0:
             current_counts[line_id] -= 1
             continue
+        text = line["text"]
+        if text_loss_budget[text] <= 0:
+            continue
+        text_loss_budget[text] -= 1
         removed.append(line)
     return removed
 

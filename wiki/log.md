@@ -2031,3 +2031,79 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - code: write/append/rename commands now reject dirty projection paths outside the current target before SQLite mutation, avoiding avoidable page_update/event_revert event-stream noise for pre-detectable conflicts.
 - test: temp Git repo exploration covered write-status projection_dirty, refused write with no SQLite events, reconcile, claims, write-lines, revert-plan --scope session, and adopt/log-records/history smoke.
 - file-back: [[sqlite-ssot-write-plan]] and [[grasp-v1-implemented]] record the current contract; true late projection export failures still use the existing rollback diagnostic path.
+
+## [2026-07-02 20:16] file-back | wiki forest README framing
+- README / README.ja の lede を「Markdown / Cosense 対応」から「wiki森を source-format independent な graph substrate として読む」へ寄せた。
+- [[positioning-two-personas]] に、対象はファイル形式ではなく wiki forest であり、`import-forest` は中核 command だが現実装は Markdown / Obsidian registry 向け、Cosense export は同じ store に project namespace として入るという境界を記録した。
+
+## [2026-07-02 20:41] file-back | villagepump come-from feedback
+- source: https://scrapbox.io/villagepump/grasp への Cosense 追記（commitId `6a464ca32bcd9df448d4ce07`）。takker の「grep で代替できるのでは」「pageId/lineId は既にあるのでは」への返答で、説明を平易化した。
+- [[come-from-declared-gather]]: AI consumer だけなら read 側は `mentions` / `gather` という構造化 grep で十分な領域がある。come-from declare/render は毎回探すためでなく、「この語はこの概念に集める」という standing rule、公開 reader-care、AI 作ページの裸語昇格候補として後段に置く。
+- [[write-layer-alpha-and-replay-test]]: stable identity は「今 ID がある」ではなく、edit / re-import / rename の後も同じ page/line identity を引き継げること。`re-import diff` は前回 store と新 source の差分から同じものに旧 ID、削除に tombstone、新規に new ID、曖昧な split/merge/大幅編集は new ID に倒す処理。
+- file-back note: normal grasp write-first preflight was blocked by existing dirty wiki paths (`adoption-trust-gradient`, `positioning-two-personas`, `grasp-backlog`, `index`, `log`), so this result was direct Markdown fallback and needs later reconcile into `.grasp/file-back.sqlite`.
+
+## [2026-07-02 21:45] file-back | cutover threshold rerun no-go
+- measurement: `scripts/benchmark_claim_retry_throughput.py --profile cutover --require-cutover-thresholds` は claim_retry 全6 scenario で lost 0 / log_lost 0 / strict green / overlap 0 だったが、hot-page think=0.02 の surviving ratio 0.698 が `0.70` を下回り exit 1。単体再実行も 0.684 で fail。
+- sustained: N=100 checks は hot-page think=0.02 が ratio 0.495 / p95 wait 0.818s、file-back think=0 が ratio 0.439 / p95 wait 0.956s で、`0.70` / `0.75s` の両 threshold を超えた。
+- implication: correctness gate は維持されているが、current default cutover threshold は no-go。次は owner policy として、壊れた無協調 baseline の surviving/s を分母にする ratio gate を継続するか、completed ratio / absolute claim_retry throughput / p95 wait など lost 数に依存しない overhead gate へ切るかを決める。
+- file-back note: normal grasp write-first preflight was blocked by existing dirty wiki/README framing diffs, so this result was direct Markdown fallback and needs later reconcile into `.grasp/file-back.sqlite`.
+
+## [2026-07-02 22:10] implementation+file-back | selectable throughput gate metrics
+- code: `scripts/benchmark_claim_retry_throughput.py` now has `--throughput-gate surviving-ratio|completed-ratio|claim-retry-surviving-per-second|none`. The cutover profile keeps the current owner default `surviving-ratio` + `0.70` and `0.75s`.
+- code: added `--min-completed-throughput-ratio` and `--min-claim-retry-surviving-throughput-per-second`; `--require-cutover-thresholds` now checks the threshold required by the selected throughput gate plus `--max-p95-claim-wait-seconds`.
+- verification: focused benchmark tests pass; full `python3 -m unittest discover -s tests` ran 369 tests OK. Short CLI smoke passed for `completed-ratio` and absolute `claim-retry-surviving-per-second` gates.
+- file-back note: this was also direct Markdown fallback because the same pre-existing dirty wiki/README diffs block normal grasp write-first preflight; reconcile into SQLite store is still required.
+
+## [2026-07-02 22:10] implementation+file-back | selectable throughput gate metrics
+- code: `scripts/benchmark_claim_retry_throughput.py` now has `--throughput-gate surviving-ratio|completed-ratio|claim-retry-surviving-per-second|none`. The cutover profiles keep the current owner default `surviving-ratio` + `0.70` and `0.75s`.
+- code: added `--min-completed-throughput-ratio` and `--min-claim-retry-surviving-throughput-per-second`; `--require-cutover-thresholds` now checks the threshold required by the selected throughput gate plus `--max-p95-claim-wait-seconds`.
+- code: added `--profile sustained-cutover` for the same hot-page + file-back / think 0,0.02,0.05 matrix at 100 iterations/worker.
+- verification: focused benchmark tests pass; full `python3 -m unittest discover -s tests` ran 369 tests OK. Short CLI smoke passed for `completed-ratio` and absolute `claim-retry-surviving-per-second` gates.
+- file-back note: this was also direct Markdown fallback because the same pre-existing dirty wiki/README diffs block normal grasp write-first preflight; reconcile into SQLite store is still required.
+
+## [2026-07-02 22:35] benchmark+file-back | sustained-cutover full run no-go
+- measurement: `scripts/benchmark_claim_retry_throughput.py --profile sustained-cutover --require-cutover-thresholds` completed the full N=100 hot-page + file-back matrix and exited 1.
+- correctness: claim_retry was green in all 6 scenarios: lost 0 / log_lost 0 / strict green / overlap 0.
+- overhead: all 6 scenarios failed default threshold. Cutover Metric Summary: min surviving ratio 0.457, min completed ratio 0.231, min claim_retry surviving/s 1.213, max p95 wait 1.215s.
+- implication: default owner gate (`surviving-ratio 0.70` + `p95 0.75s`) is sustained no-go. Next owner policy must either lower thresholds to observed overhead or switch to the new `completed-ratio` / `claim-retry-surviving-per-second` gate with explicit values.
+- file-back note: direct Markdown fallback again; existing dirty wiki/README diffs still block normal grasp write-first preflight, so SQLite reconcile remains pending.
+
+## [2026-07-02 23:02] implementation+file-back | reconcile sustained-cutover evidence and refine overwrite guard
+- recovery: `reconcile-markdown --output wiki --no-journal` adopted the direct-fallback sustained-cutover evidence into `.grasp/file-back.sqlite`; projection and semantic log projection are clean again.
+- fix: `write-status` `concurrent_page_update_overwrite` now requires text multiplicity loss as well as missing prior line_id, so direct reconcile line_id churn with identical text survival is not treated as content lost-update.
+- verification: repo `write-status --no-journal --strict`, wiki lint, `git diff --check`, focused overwrite tests, focused benchmark tests, and full `python3 -m unittest discover -s tests` are green.
+
+## [2026-07-02 23:32] implementation+benchmark+file-back | shrink file-back claim critical section
+- code: benchmark file-back workload now releases the page claim immediately after `write-page`; `append-log` remains measured for throughput / `log_lost` but no longer inflates page claim wait.
+- measurement: short file-back smoke was lost 0 / log_lost 0 / strict green / p95 wait 0.366s. Full `--profile cutover --require-cutover-thresholds` rerun improved file-back to pass all 3 conditions; second full run had min surviving ratio 0.631 and max p95 wait 0.413s, with only hot-page think=0 failing the default `surviving-ratio 0.70` gate.
+- implication: correctness remains green and p95 wait overhead is now mostly under the 0.75s owner gate. Remaining no-go is the surviving-ratio policy against a broken uncoordinated baseline, not file-back append/log contention.
+- file-back note: normal preflight was blocked by existing dirty wiki/README diffs, so this was direct Markdown fallback and must be reconciled into SQLite.
+
+## [2026-07-02 23:56] benchmark+file-back | current sustained-cutover remains no-go
+- measurement: current `scripts/benchmark_claim_retry_throughput.py --profile sustained-cutover --require-cutover-thresholds` completed the N=100 hot-page + file-back matrix in about 15 minutes and exited 1.
+- correctness: claim_retry stayed green in all 6 scenarios: 200/200 markers survived per scenario, lost 0 / log_lost 0 / strict green / overlap 0.
+- overhead: Cutover Metric Summary was min surviving ratio 0.447, min completed ratio 0.224, min claim_retry surviving/s 1.639, max p95 wait 0.818s. File-back p95 improved to 0.674/0.718/0.691s after shrinking the claim critical section, but hot-page p95 still exceeded 0.75s at think 0.02/0.05 and surviving-ratio failed for hot-page 3 conditions plus file-back think 0.02.
+- implication: default owner gate remains sustained no-go. The remaining decision is whether `surviving-ratio` against a silent-losing uncoordinated baseline is the right stable cutover gate, not whether claim_retry preserves content.
+- file-back note: normal preflight was blocked by existing dirty wiki diffs, so this was direct Markdown fallback and must be reconciled into SQLite.
+
+## [2026-07-02 23:59] implementation+benchmark+file-back | filter claim event reads and rerun cutover
+- code: `SQLiteStore.events()` now accepts `event_types=(...)`, and `activity` / `current_page_claims` use it to read only activity/claim event rows instead of folding every SQLite event in Python.
+- verification: focused SQLite / benchmark tests are green. N=25 `scripts/benchmark_claim_retry_throughput.py --profile cutover --require-cutover-thresholds` rerun completed in about 2.5 minutes and exited 1.
+- measurement: claim_retry stayed green in all 6 scenarios: 50/50 markers survived per scenario, lost 0 / log_lost 0 / strict green / overlap 0. Cutover Metric Summary: min surviving ratio 0.644, min completed ratio 0.322, min claim_retry surviving/s 2.242, max p95 wait 0.355s.
+- implication: p95 wait is now inside the 0.75s owner gate for the short cutover profile and file-back passes all 3 conditions. Remaining short-profile fail is hot-page think=0/0.02 `surviving-ratio 0.70`; sustained N=100 still needs rerun after this micro-optimization before claiming sustained improvement.
+- file-back note: normal preflight was blocked by existing dirty wiki diffs, so this entry used direct Markdown fallback and reconcile-markdown adoption into SQLite.
+
+## [2026-07-02 23:59] benchmark+file-back | sustained after claim event filter remains no-go
+- measurement: `scripts/benchmark_claim_retry_throughput.py --profile sustained-cutover --require-cutover-thresholds` completed the N=100 hot-page + file-back matrix in about 13 minutes and exited 1.
+- correctness: claim_retry stayed green in all 6 scenarios: 200/200 markers survived per scenario, lost 0 / log_lost 0 / strict green / overlap 0.
+- overhead: Cutover Metric Summary was min surviving ratio 0.510, min completed ratio 0.293, min claim_retry surviving/s 1.747, max p95 wait 0.540s. The p95 gate now passes in every scenario.
+- implication: default owner gate remains sustained no-go because `surviving-ratio 0.70` fails for hot-page think=0/0.02 and file-back think=0/0.02. The remaining blocker is the survivor-baseline throughput policy, not claim retry correctness or p95 wait.
+- file-back note: normal preflight was blocked by existing dirty wiki diffs, so this entry used direct Markdown fallback and reconcile-markdown adoption into SQLite.
+
+## [2026-07-02 23:59] implementation+benchmark+file-back | release claim inside write-page
+- code: `write-page --release-claim <claim-event-id>` now validates owner session / active claim / same page target before mutation, then releases the claim in the same CLI process after a successful write. The benchmark claim_retry worker uses it, avoiding a separate `release-claim` subprocess on the success path.
+- verification: focused CLI / benchmark tests passed, and `python3 -m unittest discover -s tests` ran 373 tests OK.
+- measurement: N=25 `scripts/benchmark_claim_retry_throughput.py --profile cutover --require-cutover-thresholds` exited 0 with min surviving ratio 0.978, min completed ratio 0.489, min claim_retry surviving/s 3.089, max p95 wait 0.252s.
+- sustained: N=100 `scripts/benchmark_claim_retry_throughput.py --profile sustained-cutover --require-cutover-thresholds` exited 0 with min surviving ratio 0.813, min completed ratio 0.407, min claim_retry surviving/s 2.347, max p95 wait 0.348s.
+- implication: current owner default gate (`surviving-ratio 0.70` / `p95 0.75s`) now passes in all six synthetic hot-page + file-back scenarios. Correctness stayed green: lost 0 / log_lost 0 / strict green / overlap 0.
+- file-back note: normal preflight was blocked by existing dirty wiki diffs, so this entry used direct Markdown fallback and reconcile-markdown adoption into SQLite.
