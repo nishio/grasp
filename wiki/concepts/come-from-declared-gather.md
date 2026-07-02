@@ -136,3 +136,11 @@ grasp は両方を外す: substrate-限界は層分離（別 command・別 objec
 ただし **溶けない例外が1つ**: 4仕事のうち **読者ケアだけは消費者が人間**（substrate を持たない公開人間読者、§8）。著者労力が AI 化で溶けても reader-care の binding constraint は著者労力でも substrate でもなく「**消費者が人間**」なので溶けない。∴ AI 著者化で無料になるのは AI に向く3仕事（recall / attention / navigation）に限り、読者ケアは come-from-at-render（§4 render 層）という別機構を依然要する。§8 の第3消費者軸が他3仕事と非対称な *構造的理由* がこれ。
 
 §6 (c)「書き手が AI 化するほど裸言及が支配的」と同根: AI 著者は束ねる動機（労力）を持たず裸で書く。だが読者ケアが要る uncommon 語（§7 安全域=必要域）では裸のままでは人間読者に届かず、come-from declare / render が橋になる。
+
+### 2026-07-02: AI consumer だけなら grep で十分な領域がある
+
+villagepump/grasp で takker が「大きすぎるリンクの問題は LLM の認識能力では問題にならないかもしれない」「come-from リンクの目的は grep 検索でも代替できそう」と指摘した。これは read 側についてはかなり正しい。AI だけが consumer なら、過剰リンクの人間ブラウズ痛は小さく、`mentions` / `gather` は「grep を構造化して rank する道具」としてまず十分に効く可能性が高い。
+
+したがって実装優先度は、come-from declare / render を先に作るより、まず `mentions` / `gather` で「grep で十分なケース」と「standing rule が欲しいケース」を分けること。come-from が残るのは、毎回探すためではなく「この語はこの概念に集める」という per-term rule を1回だけ持つ場合。具体的には公開 Markdown / view で裸語へ自動リンクを付ける、人間読者の説明リンクを補う、AI 作ページの裸語をあとで昇格候補にする用途。
+
+含意: come-from は AI retrieval の初手ではなく、reader-care / publish / authoring cleanup の後段機構として扱う。`mentions` の出力に uncommon×頻度×一意性だけでなく「standing rule 化した方がよい理由」を出せるようにし、その観測から declare / render の最小仕様を決める。

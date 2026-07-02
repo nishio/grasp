@@ -1,9 +1,10 @@
 ---
 type: decision
-summary: grasp の audience は2層。driver = persona1（JP Cosense ヘビーユーザ＝nishio 自身の dogfooding）／upside-risk target = persona2（世界の LLM Wiki・Markdown 束ユーザ）。両者は substrate を共有するが value prop と on-ramp が別。persona2 は設計の再センタリングでなく addition（Markdown adapter＋英語 docs＋一般化 pitch）で狙う。GTM = HN/Reddit、lede は「LLM に Markdown 束でなく local graph store」、Scrapbox は lineage に後置
+summary: grasp の audience は2層。driver = persona1（JP Cosense ヘビーユーザ＝nishio 自身の dogfooding）／upside-risk target = persona2（世界の LLM Wiki・Markdown 束ユーザ）。両者は substrate を共有するが value prop と on-ramp が別。persona2 は設計の再センタリングでなく addition（Markdown adapter＋英語 docs＋一般化 pitch）で狙う。GTM = HN/Reddit、lede は「Markdown / Cosense 対応」ではなく「wiki森を source-format independent な graph substrate として読む」、Scrapbox は lineage に後置
 sources:
   - nishio 指示 2026-06-23「日本語話者で Cosense ヘビーユーザが僕の側面の一つ。一方で LLM Wiki ユーザで Markdown の束よりこっちが有用じゃんとなる世界のユーザは upside risk として狙いたい。HN/Reddit に投稿していくのもあり」
   - nishio 訂正 2026-06-23「Scrapbox はリネーム時に他ページからのリンクを書き換えたり redirect したりして対処している」（→ name=identity 欠陥の精密化）
+  - nishio README framing 2026-07-02「個々の wiki が Markdown の束であっても Cosense であっても、grasp はそれらを同じ graph substrate として掴む」
 ---
 
 # Decision: audience は2層、driver は persona1・persona2 は addition で狙う
@@ -135,3 +136,15 @@ Open Q3（「.md 束より良い」最小デモ）への含意: 低密度 corpus
 [[hn-reddit-grasp-adjacent-survey-2026-06-29]] を追加。HN では OpenKnowledge / Atomic / Karpathy-style LLM wiki など local-first AI knowledge-base が反応を取っているが、反応の芯は「Obsidian/VS Code より何が良いか」「local-first なら local model / privacy はどうか」「generic Obsidian + AI wrapper ではないか」という比較圧。Reddit では r/ObsidianMD / r/AI_Agents で Karpathy-style LLM Wiki、Obsidian vault、agentic project memory が実践・反論込みで語られている。
 
 含意: 2026-06-28 update の persona2a（高密度 Markdown wiki / Obsidian power user）は実在し、active に served する次 target として妥当。persona2b（cold HN/Reddit）は launch channel ではあるが skeptical channel なので、Scrapbox lineage や generic RAG ではなく **CLI agent substrate / bounded graph read / no up-front SSoT migration / stale-write guard** を concrete demo で出す。
+
+### 2026-07-02: README lede は source format でなく wiki forest
+
+nishio の整理: grasp の対象は「Markdown / Cosense というファイル形式」ではなく **wiki森**。各 wiki tree は Markdown folder / Obsidian vault / Scrapbox / Cosense export のどれでもよく、import 後は project-scoped nodes / edges として同じ graph substrate に乗る。外向き表現は「Markdown / Cosense を import できる local reader」という機能列挙より、**collection of wikis as one local graph forest** を先に出す。
+
+含意:
+
+- README 前半に `Use a Wiki Forest` を置き、`Use Your Notes` は形式別の操作説明として後段に置く。
+- `import-forest` は思想の中核 command だが、current implementation は Markdown / Obsidian registry 向け。Scrapbox / Cosense export は同じ SQLite store に project namespace として取り込める、と表現し、mixed-source single registry が実装済みであるかのようには書かない。
+- 用語は `wiki forest` / `project-scoped graph` / `source-format independent retrieval` / `forest-level backlinks` / `cross-project links` / `unresolved concepts across the forest` を採用候補にする。
+
+関連: [[whole-store-graph-and-cross-project-edges]] / [[wiki-forest-markdown-import-dogfood-2026-06-25]] / [[adoption-trust-gradient]]

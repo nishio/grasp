@@ -68,6 +68,12 @@ felt-sense link（行キー・著者 retrieval 意図）と come-from link（用
 
 ## Updates
 
+### 2026-07-02: stable identity は「IDがある」ではなく「再取り込み後も引き継げる」
+
+villagepump/grasp で takker が「pageId や lineId は既にあるのでは」と指摘した。ここで言う stable identity は、現在のページや行を指す ID の存在ではなく、**edit / re-import / rename の後も同じページ・行だと引き継げること**。`read --json` が page id を返すことは consumer 価値として既済だが、write/identity 層のリスクは「次の import や rename 後に同じ identity として扱えるか」にある。
+
+同じ文脈で `re-import diff` の意味も明確化する。前回の store と新しく読み込んだ source を比べ、同じページ/行には前の ID を引き継ぎ、消えたものは tombstone、新しいものは new ID にする差分取り込み。split / merge / 大幅編集のように曖昧なものは、無理に同一視せず new ID に倒す方針。この言い方にすると、既存 `pageId/lineId` と未実装の stable identity の差が誤読されにくい。
+
 ### 2026-06-26: LLM Wiki migration target は native authority + Markdown projection
 
 nishio と合意: LLM Wiki を grasp infrastructure へ移す目標形は [[native-authority-markdown-projection]]。**Markdown は出力し続けるが authority ではなく generated projection**。人間や Codex が直接 Markdown を patch するのではなく、`grasp write` が native store（＋ durable journal）を更新し、そこから Markdown を再生成する。

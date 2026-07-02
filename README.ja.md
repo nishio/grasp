@@ -4,7 +4,12 @@
 
 **AIエージェントのための、ローカルなグラフ読解レイヤー。**
 
-`grasp` は、既存のノート群をローカルの SQLite グラフに索引します。
+`grasp` は、複数の wiki をひとつのローカルな「wiki森」として読みます。
+それぞれの wiki は Markdown フォルダでも、Obsidian vault でも、Scrapbox /
+Cosense export でもかまいません。`grasp` はそれらを project-scoped な
+ノードとエッジに正規化し、AI エージェントが元形式を意識せずに CLI から
+横断読解できるようにします。
+
 まずは SSoT（信頼できる元データ）を移動せずに始められます。Cosense project、
 Markdown フォルダ、Obsidian vault を authoring の場として残し、その横に
 AI が速く読める検索・読解レイヤーを置きます。必要になったら、grasp を
@@ -25,6 +30,34 @@ SQLite authority として作る pattern は [docs/authority-modes.md](docs/auth
 まずはこういう道具だと考えてください。
 
 > Cosense や Markdown を引っ越さずに始められ、必要なら段階的に移行できるローカル index。
+
+## wiki森として読む
+
+`grasp` の対象はファイル形式ではなく wiki森です。複数の wiki tree を、project
+identity を保ったまま、ひとつの graph store として読めるようにします。
+
+```text
+Markdown wiki     Obsidian vault     Cosense export
+      \                |                  /
+       \               |                 /
+             grasp graph store
+        project-scoped nodes and edges
+        backlinks / related / path / unresolved
+                    |
+               AI agent reads
+```
+
+Markdown / Obsidian の registry がある場合は、`import-forest` でまとめて取り込めます。
+
+```bash
+grasp import-forest /path/to/wikis.yaml --markdown-exclude-dir raw
+grasp search "探したい語"
+grasp backlinks "概念名"
+```
+
+Scrapbox / Cosense export も、同じ SQLite store にそれぞれの `--project` 名で取り込めます。
+`--project` を省いた検索・読解は store 全体を対象にし、ページ identity は merge せず
+project ラベル付きで返します。
 
 ## Scrapbox / Cosense を知らない人へ
 
@@ -124,6 +157,7 @@ grasp read --help
 
 - Cosense JSON export の import
 - Markdown / Obsidian 風フォルダの read-only import
+- `wikis.yaml` registry からの Markdown / Obsidian forest import
 - 複数 project を1つの SQLite store に保持
 - `read` / `search` / `backlinks` / `related` / `path` / `suggest` / `unresolved`
 - 本文ページがないリンク先を、逆リンク文脈つきのグラフノードとして読むこと

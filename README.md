@@ -4,12 +4,16 @@
 
 **A local graph reader for AI agents.**
 
-`grasp` turns an existing note collection into a local SQLite graph that an AI
-agent can query from the command line. You can start without moving your source
-of truth: keep a Markdown folder, an Obsidian vault, or a Scrapbox / Cosense
-project as the authoring home, and use `grasp` as the read layer beside it. If
-you later want `grasp` to become the authoring store, that migration can be
-gradual.
+`grasp` treats a collection of wikis as one local graph forest. Each wiki may
+be a Markdown folder, an Obsidian vault, or a Scrapbox / Cosense export.
+`grasp` normalizes them into project-scoped graph nodes and edges, so an AI
+agent can read across the forest from the command line without caring which
+source format each wiki came from.
+
+You can start without moving your source of truth: keep a Markdown folder, an
+Obsidian vault, or a Scrapbox / Cosense project as the authoring home, and use
+`grasp` as the read layer beside it. If you later want `grasp` to become the
+authoring store, that migration can be gradual.
 
 There are two authority modes:
 
@@ -83,6 +87,35 @@ python3 -m grasp --store /tmp/persona2a.sqlite --project persona2a read "Ingesti
 
 The full walkthrough is in [docs/persona2a-demo.md](docs/persona2a-demo.md).
 
+## Use a Wiki Forest
+
+The target is not a file format. The target is the wiki forest: many wiki trees
+that can be read as one graph while keeping their project identities.
+
+```text
+Markdown wiki     Obsidian vault     Cosense export
+      \                |                  /
+       \               |                 /
+             grasp graph store
+        project-scoped nodes and edges
+        backlinks / related / path / unresolved
+                    |
+               AI agent reads
+```
+
+For a Markdown / Obsidian registry, import the forest with:
+
+```bash
+grasp import-forest /path/to/wikis.yaml --markdown-exclude-dir raw
+grasp search "some phrase"
+grasp backlinks "Some Concept"
+```
+
+Scrapbox / Cosense exports can be imported into the same SQLite store with their
+own `--project` names. Retrieval commands default to the whole store when
+`--project` is omitted, and results keep project labels instead of merging page
+identities.
+
 ## Use Your Notes
 
 For Markdown or Obsidian-style notes:
@@ -133,6 +166,7 @@ grasp read --help
 Stable:
 
 - read-only Markdown folder import
+- Markdown / Obsidian forest import from a `wikis.yaml` registry
 - Scrapbox / Cosense JSON export import
 - local SQLite store with multiple projects
 - `read`, `search`, `backlinks`, `related`, `path`, `suggest`, and `unresolved`
