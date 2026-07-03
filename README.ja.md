@@ -89,11 +89,17 @@ Python 3.10 以上が必要です。実行時依存は標準ライブラリだ�
 **推奨: [uv](https://docs.astral.sh/uv/) でインストール**
 
 ```bash
+# 最新版をインストール
 uv tool install git+https://github.com/nishio/grasp.git
+
+# 最新版にアップグレード
+uv tool upgrade grasp
+
+# バージョンを指定してインストール
+uv tool install git+https://github.com/nishio/grasp.git@v1.14.0
 ```
 
 `uv` の独立したツール環境を通じて `grasp` コマンドが `PATH` に追加されます。
-アップグレードするときは同じコマンドに `--upgrade` を付けて再実行してください。
 
 インストールせずに一度だけ試すには `uvx` を使います。
 

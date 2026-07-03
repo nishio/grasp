@@ -55,11 +55,18 @@ Python 3.10 or newer is required. Runtime dependencies are stdlib-only.
 **Recommended: install with [uv](https://docs.astral.sh/uv/)**
 
 ```bash
+# Install latest
 uv tool install git+https://github.com/nishio/grasp.git
+
+# Upgrade to latest
+uv tool upgrade grasp
+
+# Install a specific version tag
+uv tool install git+https://github.com/nishio/grasp.git@v1.14.0
 ```
 
 This puts the `grasp` command on your `PATH` via `uv`'s isolated tool
-environment. To upgrade later, rerun the same command with `--upgrade`.
+environment.
 
 To run `grasp` once without installing, use `uvx`:
 
