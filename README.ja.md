@@ -79,9 +79,30 @@ grasp --store /tmp/grasp-demo.sqlite import --markdown wiki --project grasp-wiki
 grasp --store /tmp/grasp-demo.sqlite --project grasp-wiki read grasp-v1-implemented --line-limit 20
 ```
 
+既定の store は `~/.grasp/grasp.sqlite` です。1 つの store に複数 project を入れられます。
+読む対象は `--project` で選びます。
+
 ## インストール
 
 Python 3.10 以上が必要です。実行時依存は標準ライブラリだけです。
+
+**推奨: [uv](https://docs.astral.sh/uv/) でインストール**
+
+```bash
+uv tool install git+https://github.com/nishio/grasp.git
+```
+
+`uv` の独立したツール環境を通じて `grasp` コマンドが `PATH` に追加されます。
+アップグレードするときは同じコマンドに `--upgrade` を付けて再実行してください。
+
+インストールせずに一度だけ試すには `uvx` を使います。
+
+```bash
+uvx --from git+https://github.com/nishio/grasp.git grasp --help
+```
+
+<details>
+<summary>代替手段: ローカルクローンから pip でインストール</summary>
 
 ```bash
 git clone https://github.com/nishio/grasp.git
@@ -89,10 +110,9 @@ cd grasp
 pip install -e .
 ```
 
-インストールせず試す場合は、リポジトリ直下で `python3 -m grasp ...` と実行できます。
+インストールせずに試す場合は、リポジトリ直下で `python3 -m grasp ...` と実行できます。
 
-既定の store は `~/.grasp/grasp.sqlite` です。1つの store に複数 project を入れられます。
-読む対象は `--project` で選びます。
+</details>
 
 ## AI エージェントに持たせる
 
