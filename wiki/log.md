@@ -2016,3 +2016,7 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - [[grasp-v1-implemented]]: check_file_back_preflight.py now accepts a prior same-session active page_claim as the only allowed preflight session event, so claim-page can precede guarded file-back.
 - [[grasp-backlog]]: P3 dogfood finding for claim-page/preflight collision is closed by the claim-aware session guard; write-start still requires event_sequence unchanged after the claim-aware preflight baseline.
 - dogfood: default .grasp/file-back.sqlite route used activity / claim-page / preflight --base HEAD / write-start / write-page / append-log; temp route also reached postwrite and revert-plan --scope session without direct Markdown patch.
+
+## [2026-08-18 00:51] file-back | 人間用ハーネス（tanichu）× grasp の照らし合わせ
+- [[human-harness-and-grasp]]: tanichu「人間用ハーネス」と grasp は同じ失敗モード（発散/散逸する人間AI結合系）を診断するが枷をかける相手が逆。tanichu=人間側（紙・ジャーナリング）/ grasp=AI 側と蓄積側（近傍同梱 read・provenance 保存・確定的リーダー）。
+- tanichu 三段の中間「AIにやらせる整理」が grasp に当たるが、grasp の整理は組み替えでなく既存蓄積を legible にする（由来を潰さない）。緊張点＝grasp は発散を敵視せず unresolved を航行可能な概念ノードとして残す。出典 Cosense nishio/人間用ハーネス。
