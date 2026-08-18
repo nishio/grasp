@@ -508,6 +508,44 @@ class CosenseCliSyncTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_refresh_page_line_id_enrichment_preserves_more_precise_local_updated(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            fixture = json.loads(json.dumps(FIXTURE))
+            fixture["pages"][0]["updated"] = 47
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+            remote_page = {
+                "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                "title": "A",
+                "persistent": True,
+                "created": "1970-01-01T09:00+09:00 (same minute)",
+                "updated": "1970-01-01T09:00+09:00 (same minute)",
+                "views": 100,
+                "lines": [
+                    {"id": "hosted-a-0", "text": "A", "created": 1, "updated": 1, "user": {"id": "u"}},
+                    {"id": "hosted-a-1", "text": "links to [Missing]", "created": 1, "updated": 2, "user": {"id": "u"}},
+                ],
+            }
+
+            store = SQLiteStore(store_path, project="fixture", for_write=True)
+            try:
+                result = refresh_page_from_cosense(
+                    store,
+                    "https://scrapbox.io/fixture/A",
+                    client=ExactPageClient(remote_page),
+                )
+
+                self.assertEqual(result["action"], "upserted")
+                self.assertEqual(result["reasons"], ["hosted_line_ids_missing"])
+                page = store.resolve_page("A")
+                self.assertEqual(page.updated, 47)
+                lines, _ = store.page_lines(page)
+                self.assertEqual([line.external_line_id for line in lines], ["hosted-a-0", "hosted-a-1"])
+            finally:
+                store.close()
+
     def test_refresh_page_keeps_definite_local_newer_conflict(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             export_path = Path(tmpdir) / "export.json"
