@@ -65,11 +65,13 @@ sync 改善の候補:
 
 `1.14.1` で `grasp refresh-page <page-url>` を追加した。Scrapbox / Cosense の page URL を渡されて「読んで」と言われた時、URL は title locator だけでなく hosted の現在状態を確認する freshness intent とみなす。recent `sync --limit N` は更新順 window 外の指定 page を inspect した保証にならないため、`refresh-page` は exact URL を `cosense readPage` で直接取得する。
 
-- remote `id/title/updated/本文 hash/line count/external line ids` と local page を比較し、missing、remote newer、rename、same-timestamp content change、hosted line-id enrichment の時だけ対象 page を upsertする。remote timestamp が local より古い時は `local-newer-conflict` として上書きしない。`--dry-run` は exact fetch / compare だけを行う。
+- remote `id/title/updated/本文 hash/line count/external line ids` と local page を比較し、missing、remote newer、rename、same-timestamp content change、hosted line-id enrichment の時だけ対象 page を upsertする。`cosense v1.4.4 readPage` の page timestamp は分精度なので、raw timestamp から `updated_precision_seconds=60` を導出し、同じ分内にある local の秒精度値を `local-newer-conflict` にしない。本文・identity が同一で line-id enrichment だけを行う時は、より精密な local timestamp を保持する。精度区間を越えて local が新しい時だけ conflict として上書きしない。`--dry-run` は exact fetch / compare だけを行う。
 - JSON result は `page_freshness` と `neighborhood_freshness` を分ける。対象 page を exact fetch しても、別 page からの link 追加・削除では対象 page の `updated` が変わらないため、backlinks / related は `cached` のまま。対象 page freshness と project neighborhood freshness を同一視しない。
 - partial acquisition namespace では既存 member の exact refresh は許すが、未知 page の追加は `partial_acquisition_page_missing` で拒否する。slice coverage を freshness check の副作用で広げない。
+- 認証情報を任意 origin へ送らないため、自動 fetch は `https://scrapbox.io` のみ許可する。新規 page 追加では URL project と local namespace の同一性を要求し、同名別 ID / rename 先 title 衝突は `page_identity_conflict` で拒否する。`persistent=false` は ID が無い実応答でも structured `nonpersistent_page` diagnostic にする。
 - agent orchestration は freshness subagent 1体を唯一の writer とし、親は同時に local `read` を read-only で進める。join 後に `updated=1` なら `read_after_refresh.args` で再読してから回答を確定し、`cache-hit` なら暫定 local 分析を採用できる。remote failure / blocked / conflict を local cache の最新版として黙って扱わない。
 - hosted `lines[].id` は `1.14.0` 以降 `lines.external_line_id` に保存済みで、local `lines.line_id`（grasp-managed locator）とは混ぜない。上の 2026-06-29 時点の observed-only 記述はこの後続実装で更新された。
+- internal reuse payload の `external_line_id` も extractor が round-trip する。同一 criteria の partial `acquire` が page を remote fetch せず再利用しても、refresh 済み hosted line IDs を NULL に戻さない。
 
 ## 帰結
 

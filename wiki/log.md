@@ -2028,3 +2028,8 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - code: `refresh-page <page-url>` を追加。exact `readPage` とlocal id/title/updated/line count/本文hash/external line idsを比較し、必要時だけupsertする。partial slice外追加、Markdown namespace、local-newer overwriteをguardし、page/neighborhood freshnessと再read argsを返す。public compatibility versionは `1.14.1`、schemaは`14`のまま。
 - skill/docs: Scrapbox/Cosense page URLをfreshness intentとして扱い、freshness subagent 1体を唯一のwriterとして即時spawn、親のlocal `read` と並列化、join後に`updated=1`なら再読する手順を固定。[[incremental-sync]] / [[grasp-v1-implemented]] / [[grasp-backlog]] / [[history]] を更新。
 - tests: exact URL canonicalization、newer upsert+idempotent cache-hit、same-timestamp content change、dry-run、partial acquisition slice guard、全CLI helpを回帰。`python3 -m unittest discover -s tests` green。
+
+## [2026-08-18 23:29] implementation+live-smoke | refresh-page認証実接続・時刻精度・security guardsを検証
+- local `cosense v1.4.4` / `~/.cosense/settings.json` の認証で `https://scrapbox.io` exact readを実行。初回line-id enrichment後にcache-hit / page_freshness=verified / local再readを確認。
+- live smokeでreadPage timestampが分精度、JSON exportが秒精度のため47秒差をfalse conflictにする問題を発見し、60秒uncertainty比較とmetadata-only enrichment時の精密local timestamp保持を実装。実storeの対象1page timestampもimport backup値へ復元。
+- parallel read-only reviewでuntrusted originへのPAT送信、cross-project/同名別ID/rename衝突、nonpersistent no-id、external_line_id再acquire消失を発見し、mutation前guardsとround-trip regressionへ固定。全376 tests green。
