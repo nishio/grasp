@@ -275,7 +275,15 @@ def refresh_page_from_cosense(
     elif changed and dry_run:
         action = "would-upsert"
     elif changed:
-        store.upsert_cosense_pages([remote_page])
+        page_to_store = remote_page
+        if should_preserve_local_updated_precision(
+            reasons,
+            local_updated=local_updated,
+            remote_updated=remote_updated,
+            remote_precision_seconds=remote_updated_precision,
+        ):
+            page_to_store = {**remote_page, "updated": local_updated}
+        store.upsert_cosense_pages([page_to_store])
         action = "upserted"
         updated = 1
     else:
@@ -489,6 +497,25 @@ def timestamp_definitely_newer(
     if candidate is None or reference is None:
         return False
     return candidate >= reference + max(reference_precision_seconds, 1)
+
+
+def should_preserve_local_updated_precision(
+    reasons: list[str],
+    *,
+    local_updated: int | None,
+    remote_updated: int | None,
+    remote_precision_seconds: int,
+) -> bool:
+    if local_updated is None or remote_updated is None or local_updated <= remote_updated:
+        return False
+    if timestamp_definitely_newer(
+        local_updated,
+        remote_updated,
+        reference_precision_seconds=remote_precision_seconds,
+    ):
+        return False
+    content_or_identity_reasons = {"content_changed", "renamed", "line_count_mismatch", "updated"}
+    return not content_or_identity_reasons.intersection(reasons)
 
 
 def parse_cosense_page_url(page_url: str) -> dict[str, str]:
