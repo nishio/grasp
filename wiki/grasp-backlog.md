@@ -263,7 +263,7 @@ line-id のローカル別名（text で `P1:0`、`--json` / `--full-ids` で完
 
 ## Sync freshness
 
-`grasp sync` の basic recent upsert と `--full-reconcile` は実装済み（[[incremental-sync]]）。`1.8.82` で full manifest reconcile / hosted delete tombstone / rename detection / partial acquisition boundary / hosted line-id policy は current facts に昇格済み。未実装:
+`grasp sync` の basic recent upsert と `--full-reconcile` は実装済み（[[incremental-sync]]）。`1.8.82` で full manifest reconcile / hosted delete tombstone / rename detection / partial acquisition boundary、`1.14.0` で external hosted line-id persistence、`1.14.1` で exact URL `refresh-page` と page-vs-neighborhood freshness contract / single-writer subagent orchestration は current facts に昇格済み。未実装:
 
 - **hosted REST metadata enrichment**: `readPage` / `/api/pages/:project/:title` で得られる `commitId`、stable `lines[].id`、`links` / `projectLinks` / `icons`、`linked`、`pageRank`、`accessed`、`relatedPages` をどこまで store に保存するか決める。JSON export seed には無いので optional source-specific columns として扱う。
 - **authenticated delete / rename history enrichment**: 現行 `--full-reconcile` は manifest 差分から delete tombstone と same-id rename を扱う。認証済み path で `/api/deleted-pages/:project/:pageId`、`/api/stream/:project` の `page.delete` event、`/api/commits/:project/:pageId` の `TitleChange` を取り、tombstone / alias history を補強できるか検証する。

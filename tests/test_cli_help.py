@@ -52,6 +52,7 @@ COMMANDS = [
     "revert-plan",
     "replay-journal",
     "sync",
+    "refresh-page",
     "acquire",
     "unresolved",
 ]

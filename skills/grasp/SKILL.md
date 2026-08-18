@@ -69,6 +69,18 @@ description: >-
 ### タイトルが分かっている / そのページを軸に調べたい
 → `grasp read <title>`。本文＋逆リンク＋related＋未解決を一括取得。これが基本。related の見出しだけでは足りず冒頭本文も同時に見たい時は `--related-snippets`（既定 5 行、`--related-snippet-lines N` で調整）。related/source item がなぜ出たかを見たい時は `--related-snippet-mode edge` を足して根拠リンク行を同梱する。逆リンクや related が切れていたら `--backlinks-limit` 等で広げる。
 
+### Scrapbox / Cosense の page URL を渡されて「読んで」と言われた
+→ URL は title locator だけでなく **hosted の現在状態を確認せよという freshness intent** として扱う。local store だけを黙って読まない。
+
+- multi-agent が使える時は、URL を認識した直後に **freshness subagent を1つだけ即時 spawn** する。freshness subagent は対象 store/project を明示して `grasp refresh-page <page-url>` を実行し、`action` / `updated` / `page_freshness` / `neighborhood_freshness` / `remote_checked_at` / `diagnostic` / `read_after_refresh` だけを親へ返す。この subagent が refresh の **唯一の writer**。
+- 親 agent は待っている間に、同じ store へ write せず、`grasp stats` と local `grasp read <title>` を read-only で実行して本文・backlinks・related の暫定的な文脈整理を進める。別 subagent を増やす場合も同じ store への write はさせない。
+- freshness subagent と join するまで最終回答を確定しない。`updated=1` なら `read_after_refresh.args` で local `read` を再実行し、refresh 前の暫定分析をそのまま採用しない。`action=cache-hit` なら並列に読んだ local 結果を採用してよい。
+- `refresh_allowed=false`、remote fetch failure、`page_freshness != verified` の時は local cache を最新版として黙って答えず、freshness unknown / store stale / diagnostic を明示する。ユーザが「最新版」を要求した時は stale cache だけで断定しない。
+- `refresh-page` が保証するのは対象 page 本文。別 page で link が追加・削除されても対象 page の `updated` は変わらないため、`neighborhood_freshness.status=cached` の backlinks / related は hosted 全体の現在状態とは断定しない。近傍の最新性まで必要なら、full mirror では別途 `sync`、partial corpus では同じ criteria の `acquire` 再実行を直列に行う。
+- multi-agent が使えない時は同じ分離を async/background tool call で再現する。単純な network fetch だけのために親の推論を止めないが、store mutation は常に単一 writer に限定する。
+
+`refresh-page` は exact URL を直接 `readPage` するので、recent `sync --limit N` の走査範囲外にある page も確認する。partial acquisition namespace では既存 member の refresh だけを許し、slice 外 page の混入は拒否する。
+
 ### テーマ・問いから探す（タイトル未確定）
 → `grasp search <query>` で**本文行**を検索（行レベル hit）し、良さそうな `source_title` を `grasp read` で開く。タイトルの当たりが付くなら `grasp suggest <partial>`（タイトル補完）。`suggest` の既定は fuzzy で、長文タイトルに対し空白区切り断片や詰めた文字順序でも候補を返す。厳密な部分一致だけにしたい時は `--mode substring`。
 - `search` の既定は、空白も含めて入力文字列そのものを探す literal line substring 検索。英文 phrase や空白入り query はまずこの既定でよい。
@@ -114,6 +126,8 @@ description: >-
 
 ### hosted の最新を取り込みたい（保守作業）
 → ユーザが指定した project URL で `grasp sync <project-url>`（`cosense` CLI 経由で最近更新ページのみ差分 upsert。`--dry-run` あり）。`@helpfeel/cosense-cli` の `cosense` binary が PATH にあり、対象 project に認証済みであることが必要。通常の JSON 調査では不要。
+
+単一の page URL の現在状態を確認する時は `grasp refresh-page <page-url>`。remote body / updated と local page を比較し、変更時だけ upsert する。`--dry-run` は exact fetch と比較だけを行う。`updated=1` の後は返された `read_after_refresh.args` で `read` を再実行する。
 
 ### 管理者 export が無い hosted project を部分取得したい
 → `grasp acquire <project-url>`。これは full seed 済み project の freshness path である `sync` とは別で、読めるページだけを local store の project namespace に取り込む初回 seed。
@@ -176,6 +190,7 @@ grasp --project <source-project> cross-project-acquire --limit 5 --seed-limit 10
 | `import-forest <wikis.yaml>` | Markdown wiki registry の複数 entries を 1 store の複数 project namespace に一括 import。entry diagnostics と ambiguity summary 付き |
 | `export-ai <title>` | Export for AI 風の単一テキスト bundle（alias `export-for-ai`） |
 | `sync <url>` | hosted 差分取り込み（保守） |
+| `refresh-page <page-url>` | exact hosted page を確認し、変更時だけ local mirror へ upsert。URL read の freshness worker 用 |
 | `acquire <url>` | admin export なしの hosted 部分取得 seed |
 
 ## 実行方法
@@ -211,3 +226,5 @@ grasp --project <source-project> cross-project-acquire --limit 5 --seed-limit 10
 | 向く時 | export 済みデータをグラフで辿る／逆リンク・関連を厚く見る | 最新の hosted 状態が要る／hosted project に書き込む |
 
 最新性が要らず「逆リンク・関連・未解決をグラフごと厚く読む」なら grasp。生の最新や hosted への書き込みが要るなら hosted 側の手段を使う。
+
+ただし Scrapbox/Cosense の page URL を明示して「読んで」と渡された時は例外で、`refresh-page` freshness worker と local `read` を並列化してから join する。対象 page は hosted で検証し、graph neighborhood は local cache の coverage/freshness を明示して使う。

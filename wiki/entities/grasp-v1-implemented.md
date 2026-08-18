@@ -54,7 +54,7 @@ v1 stable scope 外:
 
 ## store
 
-- current public compatibility version は `1.14.0`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.14.1`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - authoring SSoT substrate 用の canonical store path helper は `$GRASP_CANONICAL_STORE` → `<repo>/.grasp/authority.sqlite` → `$GRASP_HOME/authority.sqlite` → `~/.grasp/authority.sqlite`。これは Phase 0/1 helper であり、既存 default read/import store path とは分ける。
 - project default: `$GRASP_PROJECT`。retrieval verbs は project 未指定なら whole-store source scope、write/import/source update 系は project-targeted。
@@ -116,6 +116,7 @@ v1 stable scope 外:
 | `gather <query>` | link stats、bare mention summary、representative bare mentions、co-link slices、backlinks、次に実行する recipe を bounded bundle として返す。co-link slice は既定 `slice` ranking。`returned_counts` / `total_counts` / `omitted_counts` は row 単位（mentions=bare mention lines、co_links=ranked co-link targets、backlinks=incoming link rows）で返す。`--budget` は row limit を選ぶ近似であり厳密 token packing ではない。huge hub では bulk-linking を避ける banner を返す。`--hydrate-limit N` は incomplete Markdown graph で未 hydration source files を query 文字列 / link target / catalog handle で軽く scan し、ヒットした source page を最大 N 件だけ parse してから gather を計算する。JSON/text は `markdown_hydration` と `markdown_graph` を返し、どのくらいの partial graph からの結果かを表示する |
 | `export-ai <title>` / `export-for-ai` | main + 1-hop/2-hop page 本文を Cosense Export for AI 風に単一テキスト化 |
 | `sync <project-url>` | optional freshness path。`cosense` CLI で最近更新ページを取得し、SQLite store に upsert。`--full-reconcile` は hosted manifest 全体を walk し、古い missing / rename / delete を検出する |
+| `refresh-page <page-url>` | exact hosted page freshness path。URLを直接 `readPage` し、remote/localの本文・updated・identityを比較して変更時だけupsertする。対象 page と cached neighborhood のfreshnessを分離して返す |
 | `acquire <project-url>` | admin export なしの hosted Cosense 初回 seed / partial corpus acquisition。`--search` / `--filter` / `--full-list` / `--from-page` / `--seed-file`。fetch failure は `failed_pages[].error_class` と `diagnostic` に分類して返す |
 | `unresolved` | page 実体のない linked target を ranking して返す。TODO list ではない。Markdown graph が incomplete の時は `markdown_graph` と `markdown_query_contract(result_scope=partial_markdown_graph)` を返し、unresolved ranking が hydrated edges だけから計算されたことを明示する |
 
@@ -129,6 +130,10 @@ v1 stable scope 外:
 - `1.8.82` 以降、hosted delete は active graph から page row を削除し、`project.<project>.sync_tombstones` metadata に tombstone（id/title/last_updated/deleted_at/reason）を残す。これにより deleted page は backlinks / related / unresolved rebuild から外れ、physical delete と区別できる最小 audit が残る。認証済み REST の `/api/deleted-pages` / stream event 補強は未実装。
 - `1.8.82` 以降、partial acquisition namespace（`stats.acquisition.coverage != full-list`）に対する `sync` は mutation せず `diagnostic.type=partial_acquisition_not_syncable` を返す。partial corpus の freshness は同じ `acquire` criteria の再実行で扱い、full mirror maintenance は export seed または full-list acquisition namespace に限る。
 - hosted `readPage` が返す `lines[].id` は `sync` result の `line_id_policy` で external source metadata と明示し、SQLite `lines.external_line_id` に保存する。現行 local `line_id` は `page.id:line-index` 由来の grasp-managed locator のままで、hosted id と local id は混ぜない。
+- `1.14.1` 以降、`refresh-page <page-url>` は exact URL を `cosense readPage` で取得する。remote page id/title/updated/line count と local manifest を比較し、本文 line text の SHA-256 hash も照合するため、同一 timestamp の本文変更も `content_changed` として検出する。remote hosted line ids が local に無い時も `hosted_line_ids_missing` として upsertし、remote timestamp が local より古い時は `local-newer-conflict` で上書きしない。
+- `refresh-page` JSON result は `action=cache-hit|upserted|would-upsert|blocked|local-newer-conflict`、`page_freshness`、`store_current`、`remote_checked_at`、`remote` / `local_before`、`read_after_refresh.args` を返す。`updated=1` の時はlocal graphを再読してから回答を確定する。`neighborhood_freshness.status=cached` は、exact page refreshが別page由来backlinks/relatedのhosted現在状態を保証しない境界。
+- `refresh-page` はpartial acquisition namespaceの既存page更新を許すが、slice外のmissing page追加を `diagnostic.type=partial_acquisition_page_missing` で拒否する。Markdown-backed namespaceも `not_cosense_mirror` で拒否する。
+- `skills/grasp/SKILL.md` はScrapbox/Cosense page URLをfreshness intentとして扱う。multi-agent利用時はfreshness subagentを即時1体spawnして唯一のwriterにし、親はlocal `read` をread-onlyで並列実行、join後に更新時だけ再読する。multi-agentが無い時はasync/background tool callで同じsingle-writer分離を行う。
 
 ## acquire facts
 
