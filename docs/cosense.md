@@ -39,6 +39,16 @@ grasp --project my-cosense read "ページタイトル" --related-snippets
 grasp --project my-cosense read "ページタイトル" --related-snippets --related-snippet-mode edge
 ```
 
+Scrapbox / Cosense の page URL を渡され、hosted の現在状態を確認してから読みたい場合は `refresh-page` を使います。
+
+```bash
+grasp --project project refresh-page https://scrapbox.io/project/ページタイトル
+```
+
+`refresh-page` は認証情報を任意originへ送らないよう `https://scrapbox.io` のpage URLだけを受け付け、exact URLを直接取得します。remote の本文・更新時刻と local page を比較して、変更時だけ upsert します。新規pageを追加する場合はURLのprojectと同名、または`acquire`でhosted URLを記録済みのlocal namespaceを選びます。別projectへの混入や、同名でpage IDが異なる曖昧な追加は拒否します。`cosense readPage` の時刻が分精度の場合は `remote.updated_precision_seconds: 60` として比較し、JSON export の秒精度 timestamp が同じ分内で大きいだけでは `local-newer-conflict` にしません。`updated: 1` の時は結果の `read_after_refresh.args` で `read` を再実行してください。対象 page の freshness だけを保証し、他 page から来る backlinks / related は local cache の状態なので、結果では `neighborhood_freshness: cached` として分けます。
+
+AI agent では、freshness worker が `refresh-page` を実行する間に、親 agent が local `read` を並列実行できます。共有 store の writer は freshness worker 1体だけにし、合流後に `updated: 1` なら親が再読してから回答を確定します。
+
 ## 管理者 export が無い場合
 
 `@helpfeel/cosense-cli` の `cosense` binary が使える環境なら、hosted project から読める範囲だけを partial corpus として取得できます。
@@ -62,7 +72,7 @@ grasp --project my-cosense sync https://scrapbox.io/project/ --full-reconcile --
 
 `sync` は full mirror の保守用 path です。既定では最近更新された hosted pages だけを差分 upsert します。`--full-reconcile` は hosted manifest 全体を比較し、古い missing page、rename、hosted 側 delete tombstone を検出します。
 
-partial corpus は `sync` ではなく、同じ `acquire` criteria の再実行で更新します。`sync` は partial acquisition namespace では mutation せず diagnostic を返します。hosted `lines[].id` は今は local `line_id` に保存せず、grasp 側の `page.id:line-index` locator を維持します。
+partial corpus は `sync` ではなく、同じ `acquire` criteria の再実行で更新します。`sync` は partial acquisition namespace では mutation せず diagnostic を返します。`refresh-page` は partial namespace に既にある page の更新だけを許し、slice 外 page の追加を拒否します。hosted `lines[].id` は local `line_id` に混ぜず `external_line_id` として保存し、grasp 側の `page.id:line-index` locator を維持します。
 
 ## cross-project refs を seed にする
 
