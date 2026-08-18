@@ -8,6 +8,8 @@ import time
 import unittest
 from pathlib import Path
 
+from grasp.cli import detect_concurrent_page_update_overwrites
+
 
 COMMANDS = [
     "import",
@@ -11532,7 +11534,6 @@ class CliHelpTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
-
         status_result = json.loads(status_completed.stdout)
         self.assertEqual(status_completed.returncode, 1)
         self.assertTrue(status_result["projection"]["ok"])
@@ -12018,6 +12019,54 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(overwrite["previous_session_id"], "session-a")
         self.assertEqual(overwrite["current_session_id"], "session-b")
         self.assertEqual(overwrite["removed_line_samples"], ["- agent A marker"])
+
+
+    def test_concurrent_page_update_overwrite_ignores_reverted_update(self):
+        old_line = {"line_id": "page:0", "text": "# A"}
+        marker_a = {"line_id": "line-a", "text": "- agent A marker"}
+        marker_b = {"line_id": "line-b", "text": "- agent B marker"}
+        first_update = {
+            "event_id": "event-a",
+            "event_sequence": 1,
+            "event_type": "page_update",
+            "created_at": "2026-08-18T00:00:00+00:00",
+            "actor": "agent-a",
+            "session_id": "session-a",
+            "payload": {
+                "page_id": "page",
+                "title": "A",
+                "source_path": "A.md",
+                "previous_lines": [old_line],
+                "lines": [old_line, marker_a],
+            },
+        }
+        second_update = {
+            "event_id": "event-b",
+            "event_sequence": 2,
+            "event_type": "page_update",
+            "created_at": "2026-08-18T00:01:00+00:00",
+            "actor": "agent-b",
+            "session_id": "session-b",
+            "payload": {
+                "page_id": "page",
+                "title": "A",
+                "source_path": "A.md",
+                "previous_lines": [old_line, marker_a],
+                "lines": [old_line, marker_b],
+            },
+        }
+        revert = {
+            "event_id": "revert-b",
+            "event_sequence": 3,
+            "event_type": "event_revert",
+            "created_at": "2026-08-18T00:02:00+00:00",
+            "actor": "agent-b",
+            "session_id": "session-b-revert",
+            "payload": {"target_event_id": "event-b"},
+        }
+
+        self.assertEqual(len(detect_concurrent_page_update_overwrites([first_update, second_update])), 1)
+        self.assertEqual(detect_concurrent_page_update_overwrites([first_update, second_update, revert]), [])
 
     def test_claim_retry_hot_page_stress_preserves_all_markers(self):
         with tempfile.TemporaryDirectory() as tmpdir:

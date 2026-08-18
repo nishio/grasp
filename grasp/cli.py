@@ -4674,10 +4674,13 @@ def journal_log_record_count(events: list[dict[str, Any]], *, project: str) -> i
 
 
 def detect_concurrent_page_update_overwrites(sqlite_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    reverted_ids = reverted_target_event_ids(sqlite_events)
     previous_update_by_page: dict[str, dict[str, Any]] = {}
     overwrites: list[dict[str, Any]] = []
     for event in sqlite_events:
         if event.get("event_type") != "page_update":
+            continue
+        if str(event.get("event_id") or "") in reverted_ids:
             continue
         payload = event.get("payload") or {}
         page_id = str(payload.get("page_id") or "")
