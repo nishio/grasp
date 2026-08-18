@@ -61,6 +61,16 @@ sync 改善の候補:
 - **hosted line id / local line id policy**: hosted `readPage` が `lines[].id` を返しても、現行 schema では `lines.line_id` に保存しない。local `line_id` は引き続き grasp-managed `page.id:line-index` locator。hosted id は external source metadata として扱い、採用するなら将来 `external_line_id` 列を追加して local stable `line_id` と別管理する。
 - **partial acquisition と sync の境界**: `sync` は full hosted mirror maintenance 用。`stats.acquisition.coverage != full-list` の project namespace では mutation せず `diagnostic.type=partial_acquisition_not_syncable` を返す。partial corpus は `acquire` の同一 criteria 再実行で freshness を保つ。seed predicate 外の recently updated page を混ぜないため、slice coverage の意味が保たれる。
 
+## Update (2026-08-18): page URL は exact freshness intent として扱う
+
+`1.14.1` で `grasp refresh-page <page-url>` を追加した。Scrapbox / Cosense の page URL を渡されて「読んで」と言われた時、URL は title locator だけでなく hosted の現在状態を確認する freshness intent とみなす。recent `sync --limit N` は更新順 window 外の指定 page を inspect した保証にならないため、`refresh-page` は exact URL を `cosense readPage` で直接取得する。
+
+- remote `id/title/updated/本文 hash/line count/external line ids` と local page を比較し、missing、remote newer、rename、same-timestamp content change、hosted line-id enrichment の時だけ対象 page を upsertする。remote timestamp が local より古い時は `local-newer-conflict` として上書きしない。`--dry-run` は exact fetch / compare だけを行う。
+- JSON result は `page_freshness` と `neighborhood_freshness` を分ける。対象 page を exact fetch しても、別 page からの link 追加・削除では対象 page の `updated` が変わらないため、backlinks / related は `cached` のまま。対象 page freshness と project neighborhood freshness を同一視しない。
+- partial acquisition namespace では既存 member の exact refresh は許すが、未知 page の追加は `partial_acquisition_page_missing` で拒否する。slice coverage を freshness check の副作用で広げない。
+- agent orchestration は freshness subagent 1体を唯一の writer とし、親は同時に local `read` を read-only で進める。join 後に `updated=1` なら `read_after_refresh.args` で再読してから回答を確定し、`cache-hit` なら暫定 local 分析を採用できる。remote failure / blocked / conflict を local cache の最新版として黙って扱わない。
+- hosted `lines[].id` は `1.14.0` 以降 `lines.external_line_id` に保存済みで、local `lines.line_id`（grasp-managed locator）とは混ぜない。上の 2026-06-29 時点の observed-only 記述はこの後続実装で更新された。
+
 ## 帰結
 
 - import adapter は **2モード**: bulk seed（export）と incremental delta（cosense-cli）。native store（[[persistence-custom-format]]）はどちらの入力も同じ正規化先。

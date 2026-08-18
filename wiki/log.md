@@ -2023,3 +2023,8 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 
 ## [2026-08-18 21:04] file-back | 人間側スッキリ最大化は目的関数として誤り（human-harness-and-grasp に Updates）
 - [[human-harness-and-grasp]] ## Updates: nishio「人間のスッキリを最大化するのは正しくない」。スッキリは Goodhart に弱く（外部化と忘却が内側から区別できない）、最大化圧は捨てる/忘れるへ滑る。正しい目的関数＝蓄積の航行可能性の最大化、スッキリは下限制約。Open Q2（収束 vs 航行可能は排他か）を解消。
+
+## [2026-08-18 22:31] implementation+file-back | Scrapbox URL exact freshness workerと並列agent readを実装
+- code: `refresh-page <page-url>` を追加。exact `readPage` とlocal id/title/updated/line count/本文hash/external line idsを比較し、必要時だけupsertする。partial slice外追加、Markdown namespace、local-newer overwriteをguardし、page/neighborhood freshnessと再read argsを返す。public compatibility versionは `1.14.1`、schemaは`14`のまま。
+- skill/docs: Scrapbox/Cosense page URLをfreshness intentとして扱い、freshness subagent 1体を唯一のwriterとして即時spawn、親のlocal `read` と並列化、join後に`updated=1`なら再読する手順を固定。[[incremental-sync]] / [[grasp-v1-implemented]] / [[grasp-backlog]] / [[history]] を更新。
+- tests: exact URL canonicalization、newer upsert+idempotent cache-hit、same-timestamp content change、dry-run、partial acquisition slice guard、全CLI helpを回帰。`python3 -m unittest discover -s tests` green。

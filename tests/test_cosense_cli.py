@@ -5,7 +5,14 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from grasp.cli import run_cross_project_acquire
-from grasp.cosense_cli import CosenseCliError, acquire_from_cosense, page_url_for_title, sync_from_cosense
+from grasp.cosense_cli import (
+    CosenseCliError,
+    acquire_from_cosense,
+    page_url_for_title,
+    parse_cosense_page_url,
+    refresh_page_from_cosense,
+    sync_from_cosense,
+)
 from grasp.sqlite_store import SQLiteStore, ensure_store_schema, import_export_to_sqlite, parse_cosense_time
 
 
@@ -61,6 +68,16 @@ class FakeClient:
                 },
             ],
         }
+
+
+class ExactPageClient:
+    def __init__(self, page):
+        self.page = page
+        self.read_urls = []
+
+    def read_page(self, page_url):
+        self.read_urls.append(page_url)
+        return self.page
 
 
 class FullReconcileClient:
@@ -251,6 +268,12 @@ class ReusableListAcquireClient(FakeAcquireClient):
             "pages": pages[skip : skip + limit],
         }
 
+    def read_page(self, page_url):
+        page = super().read_page(page_url)
+        for index, line in enumerate(page["lines"]):
+            line["id"] = f"hosted-{page['title'].lower()}-{index}"
+        return page
+
 
 class FailingAcquireClient:
     def read_page(self, page_url):
@@ -350,6 +373,367 @@ class CosenseCliSyncTests(unittest.TestCase):
 
     def test_page_url_for_title(self):
         self.assertEqual(page_url_for_title("https://scrapbox.io/nishio/", "A B"), "https://scrapbox.io/nishio/A%20B")
+
+    def test_parse_cosense_page_url_strips_query_and_preserves_fragment(self):
+        result = parse_cosense_page_url("https://scrapbox.io/nishio/A%20B?x=1#hosted-line")
+        self.assertEqual(result["project_url"], "https://scrapbox.io/nishio/")
+        self.assertEqual(result["page_url"], "https://scrapbox.io/nishio/A%20B")
+        self.assertEqual(result["title"], "A B")
+        self.assertEqual(result["fragment"], "hosted-line")
+
+    def test_parse_cosense_page_url_rejects_untrusted_origin(self):
+        for page_url in (
+            "https://example.com/nishio/A",
+            "https://scrapbox.io.example.com/nishio/A",
+            "https://attacker@scrapbox.io/nishio/A",
+            "http://scrapbox.io/nishio/A",
+            "https://scrapbox.io:8443/nishio/A",
+        ):
+            with self.subTest(page_url=page_url):
+                with self.assertRaisesRegex(ValueError, "origin must be https://scrapbox.io"):
+                    parse_cosense_page_url(page_url)
+
+    def test_refresh_page_upserts_exact_newer_page_and_requests_reread(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+            client = ExactPageClient(FakeClient().read_page("ignored"))
+
+            store = SQLiteStore(store_path, project="fixture", for_write=True)
+            try:
+                result = refresh_page_from_cosense(
+                    store,
+                    "https://scrapbox.io/fixture/A#hosted-line-a1",
+                    client=client,
+                )
+
+                self.assertEqual(client.read_urls, ["https://scrapbox.io/fixture/A"])
+                self.assertEqual(result["action"], "upserted")
+                self.assertEqual(result["updated"], 1)
+                self.assertTrue(result["store_current"])
+                self.assertEqual(result["fragment"], "hosted-line-a1")
+                self.assertTrue(result["read_after_refresh"]["required"])
+                self.assertEqual(result["read_after_refresh"]["args"][-2:], ["--page-id", "aaaaaaaaaaaaaaaaaaaaaaaa"])
+                self.assertEqual(store.search("updated")[0]["source_title"], "A")
+
+                second = refresh_page_from_cosense(
+                    store,
+                    "https://scrapbox.io/fixture/A",
+                    client=client,
+                )
+                self.assertEqual(second["action"], "cache-hit")
+                self.assertEqual(second["updated"], 0)
+                self.assertFalse(second["read_after_refresh"]["required"])
+            finally:
+                store.close()
+
+    def test_refresh_page_same_timestamp_content_change_is_not_a_cache_hit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+            remote_page = {
+                "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                "title": "A",
+                "persistent": True,
+                "created": 1,
+                "updated": 10,
+                "views": 100,
+                "lines": [
+                    {"id": "hosted-a0", "text": "A", "created": 1, "updated": 1, "user": {"id": "u"}},
+                    {"id": "hosted-a1", "text": "changed in the same second", "created": 1, "updated": 10, "user": {"id": "u"}},
+                ],
+            }
+
+            store = SQLiteStore(store_path, project="fixture", for_write=True)
+            try:
+                result = refresh_page_from_cosense(
+                    store,
+                    "https://scrapbox.io/fixture/A",
+                    client=ExactPageClient(remote_page),
+                )
+
+                self.assertEqual(result["action"], "upserted")
+                self.assertIn("content_changed", result["reasons"])
+                self.assertEqual(store.search("same second")[0]["source_title"], "A")
+            finally:
+                store.close()
+
+    def test_refresh_page_accepts_local_seconds_within_remote_minute_precision(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            fixture = json.loads(json.dumps(FIXTURE))
+            fixture["pages"][0]["updated"] = 47
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+            remote_page = {
+                "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                "title": "A",
+                "persistent": True,
+                "created": "1970-01-01T09:00+09:00 (same minute)",
+                "updated": "1970-01-01T09:00+09:00 (same minute)",
+                "views": 100,
+                "lines": [
+                    {"text": "A", "created": 1, "updated": 1, "user": {"id": "u"}},
+                    {"text": "links to [Missing]", "created": 1, "updated": 2, "user": {"id": "u"}},
+                ],
+            }
+
+            store = SQLiteStore(store_path, project="fixture", for_write=True)
+            try:
+                result = refresh_page_from_cosense(
+                    store,
+                    "https://scrapbox.io/fixture/A",
+                    client=ExactPageClient(remote_page),
+                )
+
+                self.assertEqual(result["action"], "cache-hit")
+                self.assertEqual(result["page_freshness"], "verified")
+                self.assertEqual(result["remote"]["updated_precision_seconds"], 60)
+                self.assertEqual(store.resolve_page("A").updated, 47)
+
+                remote_page["lines"][1]["text"] = "changed within the same hosted minute"
+                changed_result = refresh_page_from_cosense(
+                    store,
+                    "https://scrapbox.io/fixture/A",
+                    client=ExactPageClient(remote_page),
+                )
+                self.assertEqual(changed_result["action"], "upserted")
+                self.assertIn("content_changed", changed_result["reasons"])
+                self.assertEqual(store.search("same hosted minute")[0]["source_title"], "A")
+            finally:
+                store.close()
+
+    def test_refresh_page_keeps_definite_local_newer_conflict(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            fixture = json.loads(json.dumps(FIXTURE))
+            fixture["pages"][0]["updated"] = 60
+            export_path.write_text(json.dumps(fixture), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+            remote_page = {
+                "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                "title": "A",
+                "persistent": True,
+                "created": "1970-01-01T09:00+09:00 (older minute)",
+                "updated": "1970-01-01T09:00+09:00 (older minute)",
+                "views": 100,
+                "lines": [
+                    {"text": "A", "created": 1, "updated": 1, "user": {"id": "u"}},
+                    {"text": "remote differs", "created": 1, "updated": 2, "user": {"id": "u"}},
+                ],
+            }
+
+            store = SQLiteStore(store_path, project="fixture", for_write=True)
+            try:
+                result = refresh_page_from_cosense(
+                    store,
+                    "https://scrapbox.io/fixture/A",
+                    client=ExactPageClient(remote_page),
+                )
+
+                self.assertEqual(result["action"], "local-newer-conflict")
+                self.assertEqual(result["page_freshness"], "conflict")
+                self.assertEqual(store.search("remote differs"), [])
+            finally:
+                store.close()
+
+    def test_refresh_page_dry_run_does_not_mutate_store(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+            client = ExactPageClient(FakeClient().read_page("ignored"))
+
+            store = SQLiteStore(store_path, project="fixture", for_write=True)
+            try:
+                result = refresh_page_from_cosense(
+                    store,
+                    "https://scrapbox.io/fixture/A",
+                    client=client,
+                    dry_run=True,
+                )
+
+                self.assertEqual(result["action"], "would-upsert")
+                self.assertEqual(result["updated"], 0)
+                self.assertFalse(result["store_current"])
+                self.assertEqual(store.resolve_page("A").updated, 10)
+                self.assertEqual(store.search("updated"), [])
+            finally:
+                store.close()
+
+    def test_refresh_page_refuses_to_expand_partial_acquisition_namespace(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = Path(tmpdir) / "store.sqlite"
+            ensure_store_schema(store_path)
+            store = SQLiteStore(store_path, for_write=True)
+            try:
+                acquire_from_cosense(
+                    store,
+                    "https://scrapbox.io/remote/",
+                    client=FakeAcquireClient(),
+                    project="remote:slice",
+                    searches=["needle"],
+                    limit=10,
+                )
+                remote_c = FakeAcquireClient().read_page("https://scrapbox.io/remote/C")
+                result = refresh_page_from_cosense(
+                    store,
+                    "https://scrapbox.io/remote/C",
+                    client=ExactPageClient(remote_c),
+                )
+
+                self.assertFalse(result["refresh_allowed"])
+                self.assertEqual(result["action"], "blocked")
+                self.assertEqual(result["diagnostic"]["type"], "partial_acquisition_page_missing")
+                self.assertIsNone(store.resolve_page("C"))
+            finally:
+                store.close()
+
+    def test_refresh_page_refuses_unverified_cross_project_insert(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+            remote_page = {
+                "id": "cccccccccccccccccccccccc",
+                "title": "C",
+                "persistent": True,
+                "created": 1,
+                "updated": 30,
+                "lines": [{"text": "C"}],
+            }
+
+            store = SQLiteStore(store_path, project="fixture", for_write=True)
+            try:
+                result = refresh_page_from_cosense(
+                    store,
+                    "https://scrapbox.io/another-project/C",
+                    client=ExactPageClient(remote_page),
+                )
+
+                self.assertEqual(result["action"], "blocked")
+                self.assertEqual(result["diagnostic"]["type"], "project_identity_unverified")
+                self.assertIsNone(store.resolve_page("C"))
+            finally:
+                store.close()
+
+    def test_refresh_page_refuses_same_title_with_different_page_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+            remote_page = {
+                "id": "cccccccccccccccccccccccc",
+                "title": "A",
+                "persistent": True,
+                "created": 1,
+                "updated": 30,
+                "lines": [{"text": "A recreated"}],
+            }
+
+            store = SQLiteStore(store_path, project="fixture", for_write=True)
+            try:
+                result = refresh_page_from_cosense(
+                    store,
+                    "https://scrapbox.io/fixture/A",
+                    client=ExactPageClient(remote_page),
+                )
+
+                self.assertEqual(result["action"], "blocked")
+                self.assertEqual(result["diagnostic"]["type"], "page_identity_conflict")
+                self.assertEqual(store.resolve_page("A").id, "aaaaaaaaaaaaaaaaaaaaaaaa")
+            finally:
+                store.close()
+
+    def test_refresh_page_refuses_rename_onto_another_local_title(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+            remote_page = {
+                "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                "title": "B",
+                "persistent": True,
+                "created": 1,
+                "updated": 30,
+                "lines": [{"text": "A renamed to B"}],
+            }
+
+            store = SQLiteStore(store_path, project="fixture", for_write=True)
+            try:
+                result = refresh_page_from_cosense(
+                    store,
+                    "https://scrapbox.io/fixture/B",
+                    client=ExactPageClient(remote_page),
+                )
+
+                self.assertEqual(result["action"], "blocked")
+                self.assertEqual(result["diagnostic"]["type"], "page_identity_conflict")
+                self.assertEqual(store.resolve_page("A").id, "aaaaaaaaaaaaaaaaaaaaaaaa")
+                self.assertEqual(store.resolve_page("B").id, "bbbbbbbbbbbbbbbbbbbbbbbb")
+            finally:
+                store.close()
+
+    def test_refresh_page_returns_diagnostic_for_nonpersistent_page_without_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+            remote_page = {
+                "title": "Transient",
+                "persistent": False,
+                "lines": [{"text": "Transient"}],
+            }
+
+            store = SQLiteStore(store_path, project="fixture", for_write=True)
+            try:
+                result = refresh_page_from_cosense(
+                    store,
+                    "https://scrapbox.io/fixture/Transient",
+                    client=ExactPageClient(remote_page),
+                )
+
+                self.assertEqual(result["action"], "blocked")
+                self.assertEqual(result["diagnostic"]["type"], "nonpersistent_page")
+                self.assertEqual(result["remote"]["id"], "")
+                self.assertIsNone(store.resolve_page("Transient"))
+            finally:
+                store.close()
+
+    def test_refresh_page_rejects_persistent_response_without_title(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+            store_path = Path(tmpdir) / "store.sqlite"
+            export_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
+            import_export_to_sqlite(export_path, store_path)
+            remote_page = {
+                "id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                "persistent": True,
+                "updated": 30,
+                "lines": [{"text": "malformed"}],
+            }
+
+            store = SQLiteStore(store_path, project="fixture", for_write=True)
+            try:
+                with self.assertRaisesRegex(ValueError, "must include title"):
+                    refresh_page_from_cosense(
+                        store,
+                        "https://scrapbox.io/fixture/A",
+                        client=ExactPageClient(remote_page),
+                    )
+            finally:
+                store.close()
 
     def test_sync_upserts_changed_pages_until_unchanged(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -568,6 +952,12 @@ class CosenseCliSyncTests(unittest.TestCase):
                 self.assertTrue(all(page["reused"] for page in second["pages"]))
                 self.assertEqual(store.resolve_page("A").updated, 10)
                 self.assertEqual(store.resolve_page("B").updated, 20)
+                page_a = store.resolve_page("A")
+                lines, _ = store.page_lines(page_a)
+                self.assertEqual(
+                    [line.external_line_id for line in lines],
+                    ["hosted-a-0", "hosted-a-1"],
+                )
             finally:
                 store.close()
 

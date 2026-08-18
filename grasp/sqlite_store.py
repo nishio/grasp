@@ -3702,6 +3702,7 @@ class SQLiteStore:
                     "created": line["created"],
                     "updated": line["updated"],
                     "user": {"id": user_id} if user_id is not None else {},
+                    "external_line_id": line["external_line_id"],
                 }
             )
         return {
