@@ -20,7 +20,7 @@ from typing import Any
 
 from . import __version__
 from .cosense import normalize_title
-from .cosense_cli import CosenseCliClient, acquire_from_cosense, sync_from_cosense
+from .cosense_cli import CosenseCliClient, acquire_from_cosense, refresh_page_from_cosense, sync_from_cosense
 from .forest import import_forest_from_registry
 from .journal import append_journal_event, make_journal_event, read_journal_events
 from .markdown import (
@@ -53,6 +53,7 @@ STORE_WRITE_COMMANDS = {
     "hydrate-markdown",
     "import-log-records",
     "release-claim",
+    "refresh-page",
     "reconcile-markdown",
     "rename",
     "rename-page",
@@ -1688,6 +1689,37 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser.add_argument("--cosense-command", default="cosense", help="cosense CLI binary.")
     sync_parser.add_argument("--dry-run", action="store_true", help="List changed pages without fetching/upserting them.")
     sync_parser.add_argument("--full-reconcile", action="store_true", help="Walk the full hosted manifest and reconcile missing, renamed, and deleted pages.")
+
+    refresh_page_parser = add_command_parser(
+        subparsers,
+        "refresh-page",
+        help="Verify one hosted page URL and refresh its local mirror entry.",
+        description=(
+            "Fetch the exact Scrapbox/Cosense page named by a URL, compare its current hosted body and updated time "
+            "with the selected local project namespace, and upsert only that page when needed. This is the "
+            "single-writer freshness primitive for an agent that reads the local graph in parallel."
+        ),
+        returns=(
+            "page_url, input_url, project_url, project, fragment, dry_run, refresh_allowed, changed, updated, "
+            "action, reasons[], store_current, page_freshness, neighborhood_freshness, remote_checked_at, "
+            "remote, local_before|null, read_after_refresh, line_id_policy, diagnostic|null"
+        ),
+        examples=[
+            "grasp --project nishio refresh-page https://scrapbox.io/nishio/盲点カード",
+            "grasp --project nishio refresh-page https://scrapbox.io/nishio/盲点カード --dry-run",
+            "grasp --json --project nishio refresh-page https://scrapbox.io/nishio/盲点カード",
+        ],
+        notes=[
+            "Requires @helpfeel/cosense-cli's `cosense` binary in PATH and a working login.",
+            "The exact hosted page is fetched even when it falls outside sync's recent updated window.",
+            "A partial acquisition namespace may refresh an existing member, but refresh-page refuses to add an out-of-slice page.",
+            "Only the target page is verified; backlinks and related pages remain cached project-neighborhood results.",
+            "When updated=1, rerun read with read_after_refresh.args before finalizing an answer based on the local graph.",
+        ],
+    )
+    refresh_page_parser.add_argument("page_url", help="Hosted Scrapbox/Cosense page URL, including project and page title.")
+    refresh_page_parser.add_argument("--cosense-command", default="cosense", help="cosense CLI binary.")
+    refresh_page_parser.add_argument("--dry-run", action="store_true", help="Fetch and compare the exact page without updating the store.")
 
     acquire_parser = add_command_parser(
         subparsers,
@@ -8715,6 +8747,13 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             dry_run=args.dry_run,
             full_reconcile=args.full_reconcile,
         )
+    if args.command == "refresh-page":
+        return refresh_page_from_cosense(
+            store,
+            args.page_url,
+            client=CosenseCliClient(args.cosense_command),
+            dry_run=args.dry_run,
+        )
     if args.command == "acquire":
         seed_titles = read_seed_file(args.seed_file) if args.seed_file is not None else []
         return acquire_from_cosense(
@@ -9225,6 +9264,8 @@ def format_result(command: str, result: Any, aliases: LineIdAliases | None = Non
         return format_unresolved_result(result, aliases=aliases)
     if command == "sync":
         return format_sync(result)
+    if command == "refresh-page":
+        return format_refresh_page(result)
     if command == "acquire":
         return format_acquire(result)
     return json.dumps(result, ensure_ascii=False, indent=2) + "\n"
@@ -11138,6 +11179,49 @@ def format_sync(result: dict[str, Any]) -> str:
         parts.append("\n## Line ID Policy\n")
         parts.append(f"local_line_id: {line_policy.get('local_line_id_source')}\n")
         parts.append(f"hosted_line_id: {line_policy.get('hosted_line_id')}\n")
+    return "".join(parts)
+
+
+def format_refresh_page(result: dict[str, Any]) -> str:
+    remote = result["remote"]
+    local = result.get("local_before")
+    neighborhood = result.get("neighborhood_freshness") or {}
+    parts = [
+        f"project: {result['project']}\n",
+        f"page_url: {result['page_url']}\n",
+        f"dry_run: {result['dry_run']}\n",
+        f"refresh_allowed: {result['refresh_allowed']}\n",
+        f"action: {result['action']}\n",
+        f"changed: {result['changed']}\n",
+        f"updated: {result['updated']}\n",
+        f"store_current: {result['store_current']}\n",
+        f"page_freshness: {result['page_freshness']}\n",
+        f"neighborhood_freshness: {neighborhood.get('status')}\n",
+        f"remote_checked_at: {result['remote_checked_at']}\n",
+        f"remote: {remote['title']} ({remote['id']}) updated={remote.get('updated')} lines={remote.get('line_count')}\n",
+    ]
+    if local is not None:
+        parts.append(
+            f"local_before: {local['title']} ({local['id']}) updated={local.get('updated')} lines={local.get('line_count')}\n"
+        )
+    if result.get("fragment"):
+        parts.append(f"fragment: {result['fragment']}\n")
+    if result.get("reasons"):
+        parts.append("reasons: " + ", ".join(result["reasons"]) + "\n")
+    diagnostic = result.get("diagnostic")
+    if diagnostic:
+        parts.append("\n## Diagnostic\n")
+        parts.append(f"type: {diagnostic.get('type')}\n")
+        parts.append(f"message: {diagnostic.get('message')}\n")
+        for action in diagnostic.get("next_actions") or []:
+            parts.append(f"- {action}\n")
+    read_after = result.get("read_after_refresh") or {}
+    if read_after.get("command"):
+        parts.append("\n## Read After Refresh\n")
+        parts.append(f"required: {read_after.get('required')}\n")
+        parts.append(f"command: {read_after['command']}\n")
+    parts.append("\n## Freshness Boundary\n")
+    parts.append(f"{neighborhood.get('note')}\n")
     return "".join(parts)
 
 

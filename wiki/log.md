@@ -2016,3 +2016,8 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - [[grasp-v1-implemented]]: check_file_back_preflight.py now accepts a prior same-session active page_claim as the only allowed preflight session event, so claim-page can precede guarded file-back.
 - [[grasp-backlog]]: P3 dogfood finding for claim-page/preflight collision is closed by the claim-aware session guard; write-start still requires event_sequence unchanged after the claim-aware preflight baseline.
 - dogfood: default .grasp/file-back.sqlite route used activity / claim-page / preflight --base HEAD / write-start / write-page / append-log; temp route also reached postwrite and revert-plan --scope session without direct Markdown patch.
+
+## [2026-08-18 22:31] implementation+file-back | Scrapbox URL exact freshness workerと並列agent readを実装
+- code: `refresh-page <page-url>` を追加。exact `readPage` とlocal id/title/updated/line count/本文hash/external line idsを比較し、必要時だけupsertする。partial slice外追加、Markdown namespace、local-newer overwriteをguardし、page/neighborhood freshnessと再read argsを返す。public compatibility versionは `1.14.1`、schemaは`14`のまま。
+- skill/docs: Scrapbox/Cosense page URLをfreshness intentとして扱い、freshness subagent 1体を唯一のwriterとして即時spawn、親のlocal `read` と並列化、join後に`updated=1`なら再読する手順を固定。[[incremental-sync]] / [[grasp-v1-implemented]] / [[grasp-backlog]] / [[history]] を更新。
+- tests: exact URL canonicalization、newer upsert+idempotent cache-hit、same-timestamp content change、dry-run、partial acquisition slice guard、全CLI helpを回帰。`python3 -m unittest discover -s tests` green。

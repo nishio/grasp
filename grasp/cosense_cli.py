@@ -3,10 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import re
 import subprocess
 import time
 from typing import Any, Protocol
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import quote, unquote, urlparse, urlunparse
 
 from .cosense import normalize_title, parse_cosense_links
 from .sqlite_store import SQLiteStore, parse_cosense_time
@@ -214,6 +215,311 @@ def sync_from_cosense(
         tombstoned_pages=reconcile["tombstoned_pages"],
         hosted_line_ids_seen=hosted_line_ids_seen,
     )
+
+
+def refresh_page_from_cosense(
+    store: SQLiteStore,
+    page_url: str,
+    *,
+    client: CosenseClient | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Verify one hosted page exactly and refresh its local mirror entry when needed."""
+    client = client or CosenseCliClient()
+    target = parse_cosense_page_url(page_url)
+    remote_page = client.read_page(target["page_url"])
+    checked_at = int(time.time())
+    remote_id = str(remote_page.get("id") or "")
+    remote_title = str(remote_page.get("title") or "")
+    if not remote_title or (remote_page.get("persistent", True) and not remote_id):
+        raise ValueError("cosense readPage result must include title and persistent pages must include id")
+
+    project_metadata = store.project_metadata()
+    project = str(project_metadata["name"])
+    local_manifest = store.cosense_project_page_manifest()
+    local_page = local_manifest.get(remote_id)
+    local_title_payload = store.cosense_page_dict_by_norm(project, normalize_title(remote_title))
+    local_title_page = None
+    if local_title_payload is not None and str(local_title_payload.get("id") or "") != remote_id:
+        local_title_page = local_manifest.get(str(local_title_payload.get("id") or ""))
+    if local_page is not None:
+        local_payload = store.cosense_page_dict_by_norm(project, normalize_title(str(local_page["title"])))
+    else:
+        local_payload = local_title_payload
+
+    diagnostic = refresh_page_boundary_diagnostic(
+        store,
+        project_url=target["project_url"],
+        url_project=target["project"],
+        local_page=local_page,
+        local_title_page=local_title_page,
+        remote_page=remote_page,
+    )
+    remote_updated = parse_cosense_time(remote_page.get("updated"))
+    remote_updated_precision = cosense_time_precision_seconds(remote_page.get("updated"))
+    local_updated = _int_or_none(local_page.get("updated")) if local_page is not None else None
+    local_newer = timestamp_definitely_newer(
+        local_updated,
+        remote_updated,
+        reference_precision_seconds=remote_updated_precision,
+    )
+    reasons = refresh_page_change_reasons(remote_page, local_page, local_payload)
+
+    refresh_allowed = diagnostic is None
+    changed = bool(reasons)
+    updated = 0
+    if not refresh_allowed:
+        action = "blocked"
+    elif local_newer:
+        action = "local-newer-conflict"
+    elif changed and dry_run:
+        action = "would-upsert"
+    elif changed:
+        store.upsert_cosense_pages([remote_page])
+        action = "upserted"
+        updated = 1
+    else:
+        action = "cache-hit"
+
+    store_current = refresh_allowed and not local_newer and (not changed or updated == 1)
+    page_freshness = "verified" if store_current else (
+        "conflict" if local_newer else "remote-verified-store-stale"
+    )
+    metadata = store.metadata()
+    read_available = store_current or local_page is not None
+    read_args = [
+        "--store",
+        str(store.path),
+        "--project",
+        project,
+        "read",
+        "--page-id",
+        remote_id,
+    ] if read_available else None
+    return {
+        "page_url": target["page_url"],
+        "input_url": page_url,
+        "project_url": target["project_url"],
+        "project": project,
+        "fragment": target["fragment"],
+        "dry_run": dry_run,
+        "refresh_allowed": refresh_allowed,
+        "changed": changed,
+        "updated": updated,
+        "action": action,
+        "reasons": reasons,
+        "store_current": store_current,
+        "page_freshness": page_freshness,
+        "neighborhood_freshness": {
+            "status": "cached",
+            "last_sync_project": metadata.get("last_sync_project"),
+            "last_sync_updated": _int_or_none(metadata.get("last_sync_updated")),
+            "note": "exact page refresh does not verify backlinks or related pages changed elsewhere",
+        },
+        "remote_checked_at": checked_at,
+        "remote": {
+            "id": remote_id,
+            "title": remote_title,
+            "updated": remote_updated,
+            "updated_raw": remote_page.get("updated"),
+            "updated_precision_seconds": remote_updated_precision,
+            "commit_id": remote_page.get("commitId"),
+            "line_count": len(remote_page.get("lines") or []),
+            "content_hash": cosense_page_content_hash(remote_page),
+        },
+        "local_before": None if local_page is None else {
+            "id": local_page.get("id"),
+            "title": local_page.get("title"),
+            "updated": local_updated,
+            "line_count": local_page.get("line_count"),
+            "content_hash": cosense_page_content_hash(local_payload or {}),
+        },
+        "read_after_refresh": {
+            "required": updated == 1,
+            "available": read_available,
+            "args": read_args,
+            "command": None if read_args is None else "grasp " + " ".join(quote_shell_arg(part) for part in read_args),
+        },
+        "line_id_policy": line_id_policy(),
+        "diagnostic": diagnostic,
+    }
+
+
+def refresh_page_boundary_diagnostic(
+    store: SQLiteStore,
+    *,
+    project_url: str,
+    url_project: str,
+    local_page: dict[str, Any] | None,
+    local_title_page: dict[str, Any] | None,
+    remote_page: dict[str, Any],
+) -> dict[str, Any] | None:
+    project_metadata = store.project_metadata()
+    project = str(project_metadata["name"])
+    source_type = store.metadata().get(f"project.{project}.source_type")
+    if source_type not in {None, "cosense"}:
+        return {
+            "type": "not_cosense_mirror",
+            "severity": "warning",
+            "message": "refresh-page only mutates Cosense-backed project namespaces",
+            "source_type": source_type,
+        }
+    if not remote_page.get("persistent", True):
+        return {
+            "type": "nonpersistent_page",
+            "severity": "warning",
+            "message": "hosted page is nonpersistent and was not written to the local store",
+        }
+    if local_title_page is not None:
+        return {
+            "type": "page_identity_conflict",
+            "severity": "warning",
+            "message": "hosted page title matches a different local page id; refusing to create an ambiguous duplicate",
+            "remote_page_id": remote_page.get("id"),
+            "local_page_id": local_title_page.get("id"),
+            "title": remote_page.get("title"),
+            "next_actions": [
+                "Run sync --full-reconcile when the hosted page was deleted and recreated under the same title.",
+                "Inspect the selected local project when this URL belongs to another namespace.",
+            ],
+        }
+    acquisition = store.project_acquisition_metadata()
+    acquisition_url = str((acquisition or {}).get("project_url") or "")
+    source_export = str(project_metadata.get("source_export") or "")
+    source_project_url = source_export.removeprefix("cosense:") if source_export.startswith("cosense:") else ""
+    expected_project_url = acquisition_url or source_project_url
+    if expected_project_url and canonical_project_url(expected_project_url) != canonical_project_url(project_url):
+        return {
+            "type": "project_url_mismatch",
+            "severity": "warning",
+            "message": "page URL does not belong to the hosted project recorded for this namespace",
+            "expected_project_url": canonical_project_url(expected_project_url),
+            "actual_project_url": canonical_project_url(project_url),
+        }
+    if not expected_project_url and normalize_title(project) != normalize_title(url_project) and local_page is None:
+        return {
+            "type": "project_identity_unverified",
+            "severity": "warning",
+            "message": "selected local project cannot be proven to mirror the project in this page URL",
+            "local_project": project,
+            "url_project": url_project,
+            "next_actions": [
+                "Select the local project whose name matches the hosted project.",
+                "Seed the namespace with acquire so its hosted project URL is recorded.",
+            ],
+        }
+    if acquisition is None:
+        return None
+    coverage = str(acquisition.get("coverage") or "")
+    if coverage and coverage != "full-list" and local_page is None:
+        return {
+            "type": "partial_acquisition_page_missing",
+            "severity": "warning",
+            "message": "refusing to add an out-of-slice page to a partial acquisition namespace",
+            "coverage": coverage,
+            "next_actions": [
+                "Refresh the partial corpus by rerunning acquire with the same criteria.",
+                "Use a separate URL-cache namespace when this page should be acquired independently.",
+            ],
+        }
+    return None
+
+
+def refresh_page_change_reasons(
+    remote_page: dict[str, Any],
+    local_page: dict[str, Any] | None,
+    local_payload: dict[str, Any] | None,
+) -> list[str]:
+    if local_page is None:
+        return ["missing_local"]
+    remote_updated = parse_cosense_time(remote_page.get("updated"))
+    local_updated = _int_or_none(local_page.get("updated"))
+    if timestamp_definitely_newer(
+        local_updated,
+        remote_updated,
+        reference_precision_seconds=cosense_time_precision_seconds(remote_page.get("updated")),
+    ):
+        return []
+
+    metadata = dict(remote_page)
+    metadata["linesCount"] = len(remote_page.get("lines") or [])
+    reasons = sync_change_reasons(metadata, local_page)
+    if cosense_page_content_hash(remote_page) != cosense_page_content_hash(local_payload or {}):
+        reasons.append("content_changed")
+    if hosted_line_id_enrichment_needed(remote_page, local_payload or {}):
+        reasons.append("hosted_line_ids_missing")
+    return list(dict.fromkeys(reasons))
+
+
+def hosted_line_id_enrichment_needed(remote_page: dict[str, Any], local_page: dict[str, Any]) -> bool:
+    remote_ids = [
+        line.get("id") or line.get("lineId")
+        for line in remote_page.get("lines") or []
+    ]
+    local_ids = [line.get("external_line_id") for line in local_page.get("lines") or []]
+    return any(remote_ids) and remote_ids != local_ids
+
+
+def cosense_page_content_hash(page: dict[str, Any]) -> str:
+    lines = [str(line.get("text", "")) for line in page.get("lines") or []]
+    payload = json.dumps(lines, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def cosense_time_precision_seconds(value: Any) -> int:
+    """Return the uncertainty interval represented by a Cosense timestamp."""
+    if isinstance(value, (int, float)):
+        return 1
+    if not isinstance(value, str):
+        return 1
+    iso_part = value.split(" ", 1)[0]
+    if "T" not in iso_part:
+        return 86_400
+    time_part = iso_part.split("T", 1)[1]
+    time_without_zone = re.split(r"Z|[+-]\d{2}:?\d{2}$", time_part, maxsplit=1)[0]
+    return 1 if time_without_zone.count(":") >= 2 else 60
+
+
+def timestamp_definitely_newer(
+    candidate: int | None,
+    reference: int | None,
+    *,
+    reference_precision_seconds: int,
+) -> bool:
+    if candidate is None or reference is None:
+        return False
+    return candidate >= reference + max(reference_precision_seconds, 1)
+
+
+def parse_cosense_page_url(page_url: str) -> dict[str, str]:
+    parsed = urlparse(page_url.strip())
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "scrapbox.io"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.port not in {None, 443}
+    ):
+        raise ValueError("page URL origin must be https://scrapbox.io")
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2:
+        raise ValueError("page URL must include both project and page title")
+    project = unquote(parts[0])
+    title = unquote("/".join(parts[1:]))
+    project_url = urlunparse(("https", "scrapbox.io", f"/{quote(project, safe='')}/", "", "", ""))
+    return {
+        "project": project,
+        "title": title,
+        "project_url": project_url,
+        "page_url": page_url_for_title(project_url, title),
+        "fragment": parsed.fragment,
+    }
+
+
+def quote_shell_arg(value: str) -> str:
+    if value and all(character.isalnum() or character in "-._/:" for character in value):
+        return value
+    return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
 def sync_boundary_diagnostic(store: SQLiteStore) -> dict[str, Any] | None:

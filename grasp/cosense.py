@@ -264,6 +264,8 @@ def external_line_id_from_cosense_line(line_data: dict | str) -> str | None:
     if external_id is None:
         external_id = line_data.get("lineId")
     if external_id is None:
+        external_id = line_data.get("external_line_id")
+    if external_id is None:
         return None
     external_id = str(external_id)
     return external_id or None
