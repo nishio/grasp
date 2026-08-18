@@ -2020,3 +2020,6 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 ## [2026-08-18 00:51] file-back | 人間用ハーネス（tanichu）× grasp の照らし合わせ
 - [[human-harness-and-grasp]]: tanichu「人間用ハーネス」と grasp は同じ失敗モード（発散/散逸する人間AI結合系）を診断するが枷をかける相手が逆。tanichu=人間側（紙・ジャーナリング）/ grasp=AI 側と蓄積側（近傍同梱 read・provenance 保存・確定的リーダー）。
 - tanichu 三段の中間「AIにやらせる整理」が grasp に当たるが、grasp の整理は組み替えでなく既存蓄積を legible にする（由来を潰さない）。緊張点＝grasp は発散を敵視せず unresolved を航行可能な概念ノードとして残す。出典 Cosense nishio/人間用ハーネス。
+
+## [2026-08-18 21:04] file-back | 人間側スッキリ最大化は目的関数として誤り（human-harness-and-grasp に Updates）
+- [[human-harness-and-grasp]] ## Updates: nishio「人間のスッキリを最大化するのは正しくない」。スッキリは Goodhart に弱く（外部化と忘却が内側から区別できない）、最大化圧は捨てる/忘れるへ滑る。正しい目的関数＝蓄積の航行可能性の最大化、スッキリは下限制約。Open Q2（収束 vs 航行可能は排他か）を解消。
