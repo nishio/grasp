@@ -2043,3 +2043,7 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - [[ai-consumer-cost-and-trust]]: Updates 追加。cost/trust の根「実資源で縛られた観測者に置き換えると正しい量が変わる」は Simon 限定合理性(1947)の一般形。token-bounded AI(grasp) と Epiplexity 論文(arxiv 2601.03220, computationally bounded intelligence / time-bounded entropy)は同じ操作の別インスタンスで、縛る資源が違うだけ(token+round-trip vs 計算時間)。token-bounded は computationally bounded の工学的インスタンスだが同族であって同一でない(取得コスト vs 学習可能性)。
 - [[value-is-problem-solving-not-novelty]]: 「唯一の未踏＝prior art が無い」claim を精緻化。無いのは資源軸レベルのみ、メタには prior art(限定合理性)がある。未踏なのは一族を token/round-trip で instantiate した retrieval コスト関数。ラベル token-bounded AI は AI 造語だが底の操作は既存 → pitch は「既知の一族の未 instantiate な一員を工学した」が正確。
 - 由来トレイル: 親 nishio Scrapbox `From Entropy to Epiplexity`(arxiv 2601.03220 clip) / `限定合理性と認知能力の限界`(Simon 1947)。session 対話で nishio が time-bounded↔token-bounded の親近性を指摘。
+
+## [2026-08-24 02:39] file-back | 偽陰性 benchmark に precision + density 実測を追記（recall は取れるが回収物の precision は低い＝主張を限定）
+- [[false-negative-recall-benchmark-2026-08-24]] Updates: grep 不可視 top-20 related の precision を 8 query で独立判定。lenient 平均 0.40 / strict(core) 0.07＝回収物の過半は noise。corr(density,precision)=+0.81・corr(density,recall)=−0.66 でトレードオフ。真の driver は bridge-hub topicality（LLM が density 反例）。value 主張を密×topical-hub 概念に限定し、via bridge の down-weight ranking を [[grasp-backlog]] 候補に。
+- 手法: sweep.py/sweep_top20.py で 35 concept を density 層化、judge subagent 8 体で core/tangential/noise 分類。両 Open Question（precision 未測定・density 閾値）を解決マーク。
