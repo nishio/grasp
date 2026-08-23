@@ -2038,3 +2038,8 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - [[false-negative-recall-benchmark-2026-08-24]]: hub 概念（KJ法/知的生産/発想法）で grasp read の 2-hop related の 60–90% が grep 不可視（本文に literal Q 無し）かつ出力 10–30倍 bounded。KJ法 3 page の本文を grasp peek で敵対的検証（literal KJ法 0 行）。疎な leaf（ベイズ/中動態）は利得ゼロ〜負＝density-conditional。
 - [[read-vs-grep-benchmark-2026-06-24]]: Open Question「gather/2-hop を bounded token で返せるか」を偽陰性軸で実証し解決マーク。value proof は grep が原理的に落とす 2-hop 到達範囲の回収に限定。
 - harness: scratchpad/fn_probe.py（grep-arm=grasp search --limit 100000 / grasp-arm=grasp read）。
+
+## [2026-08-24 02:36] file back | token-bounded AI の由来＝Simon 限定合理性の一族、Epiplexity 論文が橋
+- [[ai-consumer-cost-and-trust]]: Updates 追加。cost/trust の根「実資源で縛られた観測者に置き換えると正しい量が変わる」は Simon 限定合理性(1947)の一般形。token-bounded AI(grasp) と Epiplexity 論文(arxiv 2601.03220, computationally bounded intelligence / time-bounded entropy)は同じ操作の別インスタンスで、縛る資源が違うだけ(token+round-trip vs 計算時間)。token-bounded は computationally bounded の工学的インスタンスだが同族であって同一でない(取得コスト vs 学習可能性)。
+- [[value-is-problem-solving-not-novelty]]: 「唯一の未踏＝prior art が無い」claim を精緻化。無いのは資源軸レベルのみ、メタには prior art(限定合理性)がある。未踏なのは一族を token/round-trip で instantiate した retrieval コスト関数。ラベル token-bounded AI は AI 造語だが底の操作は既存 → pitch は「既知の一族の未 instantiate な一員を工学した」が正確。
+- 由来トレイル: 親 nishio Scrapbox `From Entropy to Epiplexity`(arxiv 2601.03220 clip) / `限定合理性と認知能力の限界`(Simon 1947)。session 対話で nishio が time-bounded↔token-bounded の親近性を指摘。

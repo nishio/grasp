@@ -41,6 +41,8 @@ prior art は全員「画面を持つ人間ナビゲータ」を消費者と想�
 
 ここは prior art が無い＝**自前で慎重に設計すべき frontier**。誇るべき novelty ではなく、注意すべき領域として扱う。
 
+**精緻化（2026-08-24, nishio 指摘）**: 「prior art が無い」は**資源軸レベルに限った**主張で、**メタレベルには prior art がある**。「実資源に縛られた観測者に置き換えると正しい量が変わる」という操作そのものは Simon の限定合理性（bounded rationality, 1947、親 nishio `限定合理性と認知能力の限界`）の一族で、情報理論側では Epiplexity 論文（arxiv 2601.03220, *computationally bounded intelligence* / *time-bounded entropy*、親 nishio `From Entropy to Epiplexity`）が同型。∴ 本当に未踏なのは**この一族を token / round-trip という具体的資源で instantiate した retrieval コスト関数**であって、「資源制約された消費者」という発想そのものではない。`token-bounded AI` はラベルこそ AI 造語だが底の操作は既存 —— pitch では「新しい発想」でなく「**既知の一族（限定合理性）の、まだ instantiate されていない一員を工学した**」と言うのが正確で、かつ強い。詳細な軸の対応は [[ai-consumer-cost-and-trust]] Updates（2026-08-24）。
+
 ## ∴ pitch ルール
 
 - lede = **「目前の問題を解く local graph store」**。✕「研究的に新規」。

@@ -65,3 +65,13 @@ grasp scope の判断点（nishio）: 「substrate-backed な公開 view を出�
 
 - **ディスク wall-clock は3手法とも sub-second**（cat 0.02s / grep 0.3s / grasp 0.25–0.75s）→ 速度は論点でない。効くのは context に入る token 量。MD 全読みは ~14M token で 1M window の14倍、**そもそも入らない**。
 - **grep は出力が無制限**（`民主主義` 1 クエリで 498KB≈125K token の生ログ）、**grasp search は bounded**（7–14KB）。∴ grasp の対 grep 優位は「速さ」ではなく「**同等 wall-clock で bounded・ranked・structured を返す**」点 = read=近傍同梱 / `gather --budget` / related-snippets の token-economy 動機の実証。
+
+### 2026-08-24: 両軸の根＝Simon 限定合理性の一族（Epiplexity 論文が橋）
+
+nishio 指摘で、cost/trust の根（§根「実資源に縛られた消費者に置き換えると正しい量が変わる」）が孤立した AI 造語でなく **Simon の限定合理性（bounded rationality, 1947）の一族**だと確定した。`token-bounded AI`（[[value-is-problem-solving-not-novelty]] の consumer-swap ラベル）と、Epiplexity 論文（arxiv 2601.03220, *From Entropy to Epiplexity: Rethinking Information for Computationally Bounded Intelligence*、親 nishio `From Entropy to Epiplexity`）の **time-bounded entropy / computationally bounded intelligence** は、同じ操作の別インスタンス:
+
+- **共通の操作** = 「無限能力の理想観測者」を「実資源に縛られた観測者」に置き換えると、意味のある量が変わる。これが限定合理性の一般形。nishio corpus は既に `限定合理性と認知能力の限界`（親 nishio, Simon 1947）で保持している。
+- **縛る資源が違うだけ**: 論文は**計算時間**（多項式時間）で縛り「何が学習・抽出できるか」を問う（epiplexity=学べる構造 / time-bounded entropy=学べないノイズ）。grasp は **context token ＋ round-trip** で縛り「何を取得して割に合うか」を問う（本ページ軸1/軸2）。
+- ∴ **token-bounded は computationally bounded の工学的インスタンス**（context window＝計算資源制約、round-trip＝時間軸）。ただし**同一でなく同族**: 答える問いが違う（学習可能性 vs 取得コスト）。
+
+positioning への含意（「prior art が無い」claim の精緻化）は [[value-is-problem-solving-not-novelty]] 側に書いた。ラベル `token-bounded AI` は AI 造語だが底の操作は既存 —— pitch の lede に昇格させない規律は不変で、むしろ「既知の一族の未 instantiate な一員を工学した」と言えるようになった。
