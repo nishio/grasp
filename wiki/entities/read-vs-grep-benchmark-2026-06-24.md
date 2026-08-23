@@ -80,6 +80,6 @@ I/O floor: `cat` 53.2MB MD = **0.02s**（ディスク読み自体は一瞬）。
 
 ## Open Questions
 
-- grasp `gather --budget`（近傍同梱の token 予算 orchestration、[[grasp-backlog]]）を同じ harness で測ると、
-  grep が原理的に出せない 2-hop neighborhood を bounded token で返せることを示せるはず。次に測る候補。
+- ~~grasp `gather --budget`（近傍同梱の token 予算 orchestration、[[grasp-backlog]]）を同じ harness で測ると、
+  grep が原理的に出せない 2-hop neighborhood を bounded token で返せることを示せるはず。次に測る候補。~~ **解決 2026-08-24**: [[false-negative-recall-benchmark-2026-08-24]] が偽陰性測定で実証（hub 概念で related の 60–90% が grep 不可視、出力 10–30倍 bounded、利得は density-conditional）。
 - warm process（daemon / persistent）での grasp 再計測。cold start を除いた純粋な検索 wall-clock を grep と並べる。

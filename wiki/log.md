@@ -2033,3 +2033,8 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - local `cosense v1.4.4` / `~/.cosense/settings.json` の認証で `https://scrapbox.io` exact readを実行。初回line-id enrichment後にcache-hit / page_freshness=verified / local再readを確認。
 - live smokeでreadPage timestampが分精度、JSON exportが秒精度のため47秒差をfalse conflictにする問題を発見し、60秒uncertainty比較とmetadata-only enrichment時の精密local timestamp保持を実装。実storeの対象1page timestampもimport backup値へ復元。
 - parallel read-only reviewでuntrusted originへのPAT送信、cross-project/同名別ID/rename衝突、nonpersistent no-id、external_line_id再acquire消失を発見し、mutation前guardsとround-trip regressionへ固定。全376 tests green。
+
+## [2026-08-24 02:22] file-back | grasp vs grep 偽陰性 A/B 実測を outcome story 化（read-vs-grep Open Q を density-conditional に閉じる）
+- [[false-negative-recall-benchmark-2026-08-24]]: hub 概念（KJ法/知的生産/発想法）で grasp read の 2-hop related の 60–90% が grep 不可視（本文に literal Q 無し）かつ出力 10–30倍 bounded。KJ法 3 page の本文を grasp peek で敵対的検証（literal KJ法 0 行）。疎な leaf（ベイズ/中動態）は利得ゼロ〜負＝density-conditional。
+- [[read-vs-grep-benchmark-2026-06-24]]: Open Question「gather/2-hop を bounded token で返せるか」を偽陰性軸で実証し解決マーク。value proof は grep が原理的に落とす 2-hop 到達範囲の回収に限定。
+- harness: scratchpad/fn_probe.py（grep-arm=grasp search --limit 100000 / grasp-arm=grasp read）。
