@@ -73,11 +73,20 @@ query Q に対し同一コーパス（project `nishio`）で2手法:
 
 **真の driver は density でなく bridge-hub の topicality（8 judge の収束所見）:** 判定者は全員独立に、related が Q に *topical な* ハブ（KJ法勉強会@サイボウズ, マインドマップとKJ法, しない理由探し）経由なら有用、*generic/temporal* ハブ（日記2025-xx, XREAL One, pIntEn 英語化, ドラッカー, 主観か客観か…）経由なら noise、と判定した。density はこの topicality を不完全に proxy するだけ（**LLM が反例**: density 57 と高いのに precision 0.18 ＝ 隣人が Plurality/Polis 勉強会という generic hub 経由）。webtiling（precision 0.05）は 2-hop が同週の開発日記ハブに橋渡しされ、ほぼ純 noise。
 
-**∴ 改訂した value 主張:** grasp の grep 越え（2-hop 偽陰性回収）が実利になるのは **①density が高く ②topical な dedicated hub に橋渡しされる概念**（KJ法が代表）に絞られる。疎/generic-hub 概念では 2-hop はほぼ noise で grep 越えの価値は消える。**梃子は `via` bridge**: grasp は related の橋渡しハブを露出しており（grep には bridge の概念自体が無い）、2-hop related を bridge-hub の topicality で down-weight（date/temporal/generic hub を減点）すれば precision を上げられる。これは grep が構造的にできない改善方向で、[[grasp-backlog]] の related ranking の具体タスク。
+**∴ 改訂した value 主張:** grasp の grep 越え（2-hop 偽陰性回収）が実利になるのは **①density が高く ②topical な dedicated hub に橋渡しされる概念**（KJ法が代表）に絞られる。疎/generic-hub 概念では 2-hop はほぼ noise で grep 越えの価値は消える。改善の梃子候補として当初は「`via` bridge-hub を topicality で down-weight」を挙げたが、下の Updates 2026-08-24b でこれは falsify した。
+
+## Updates 2026-08-24b: 実装可能な修正の切り分け（down-weight を falsify、co-citation tiering へ）
+
+「有用なツールを作る」観点で、上の precision 問題を潰す具体実装を検討し、案のメカニズムを実装前に手元 labels で検証した。
+
+- **falsify: bridge-hub の out-degree による down-weight は効かない。** 「noise は高次数のスーパーノード（日記・索引）経由」という仮説を、判定済み 118 item の最強 bridge の out-degree で検定したところ、useful / noise とも **out-degree 中央値 8** で分離しない（閾値では noise を 16% しか落とせない）。generic hub は raw な次数では捕まらない。∴ 次数ベースのランカーは作らない。上の「via down-weight」提案は撤回。
+- **効く唯一の構造信号 = grasp が既に持つ `score`（共有 bridge 数 = co-citation）。** 160 judged item で tier 別 precision: score≥2 で strong precision 0.38（useful の 60% を保持）/ weak 0.20、score≥3 で strong 0.50（useful 31%）。ハードフィルタではなく **confidence 信号**（strong precision も 0.5 止まり、useful の 40–70% は single-bridge=score1 で weak に落ちる）。∴ weak は drop せず demote する。
+- **per-query の collapse が本命価値**: score≥2 で strong 件数は webtiling=0 / 主観的な思い込み=0 / ADHD=0（疎・noise 概念は strong が消える）、KJ法=20 / イノベーション=20 / LLM=17（密概念は cluster を保つ）。strong=0 は「この概念は 2-hop が信用できない」という honest な sparsity 信号＝[[ai-consumer-cost-and-trust]] 軸2（negative-result contract）の実装。
+- **実装先**: default `grasp read` を confidence-tiered にする（strong tier を prominent、single-bridge の weak tail は count + `--related-weak` フラグ裏に降格、`related_confidence` summary と `sparse` フラグを出す）。Codex 指示書 = [[related-confidence-tiering-plan]]。code locus は `cosense.py:604 related()`（score 済み）/ `cli.py:10505 format_related_items`。embedding は使わない。新規 A/B でなく本 session の 8 query labels で smoke test する。
 
 ## Open Questions
 
 - ~~偽陰性の precision 未測定~~ **解決（上 Updates）**: lenient 0.40 / strict 0.07、density と +0.81 相関。ただし判定は各 query 1 judge（LLM 審査員）で、judge 間一致（複数審査員の κ）は未測定。precision の絶対値には judge バイアスが乗りうる。
-- ~~density 閾値が未定量~~ **解決（上 Updates）**: 閾値でなく勾配（corr +0.81）。真の driver は bridge-hub topicality で density はその proxy（LLM が反例）。次段は bridge-hub topicality を直接 feature 化して precision を回帰し、`via` down-weight ranking の効果を A/B する。
+- ~~density 閾値が未定量~~ **解決（上 Updates）**: 閾値でなく勾配（corr +0.81）。真の driver は bridge-hub topicality で density はその proxy（LLM が反例）。実装は bridge-hub の次数 down-weight（Updates 2026-08-24b で falsify）でなく co-citation `score` の confidence tiering（[[related-confidence-tiering-plan]]）へ。
 - grep-arm は `grasp search`（同一 store の literal substring）を proxy にした。実 ripgrep on flat MD との差は速度のみで recall 同値のはずだが未確認。
 - precision judge は grasp の `via`/lead snippet を材料にしており、grasp の出力構造に依存した評価。独立コーパス知識だけで判定した場合に noise 率が上がる/下がるかは未検証。

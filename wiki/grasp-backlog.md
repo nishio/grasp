@@ -194,7 +194,8 @@ recall（boolean / page scope / 正規化 fallback）は実装済み。順序は
 - **大規模 store での完全なかな/カナ・全半角本文正規化 index**。本文側を materialize した normalized column / FTS hybrid / trigram で持たない限り、完全な正規化 search は大規模 store で高コスト（現状の Python scan は 50k lines 以下に限定）。
 - FTS5 trigram hybrid による `search` 高速化。literal substring semantics を守るには `LIKE` fallback / post-filter が要る（[[fts5-trigram-search]]）。
 - backlink line の前後文脈窓。
-- related ranking の重み調整と、大規模化した時の 2-hop cost 対策。
+- **related の confidence tiering（次の実装候補、指示書 [[related-confidence-tiering-plan]]）**: 2-hop related の precision は grep 不可視 subset で平均 0.40 / strict 0.07（[[false-negative-recall-benchmark-2026-08-24]]）。co-citation `score`（共有 bridge 数, 既に計算済み）で strong/weak に分け、default `read` は strong のみ prominent、single-bridge の weak は count + `--related-weak` 裏に降格し `sparse` を明示（negative-result contract の実装）。**bridge-hub の out-degree down-weight は実測で falsify 済み → 作らない**。embedding も使わない。
+- 大規模化した時の 2-hop cost 対策（dense hub の related compute、[[mode2-parallel-edit-stress-2026-06-30]] の superlinear 疑い）。
 
 ### gather / mentions / co-links の残課題
 

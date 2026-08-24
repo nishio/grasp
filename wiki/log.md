@@ -2055,3 +2055,8 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 
 ## [2026-08-24 14:51] file-back | lock 主張を訂正・時間差多エージェント共存の肯定証拠を追記
 - [[parallel-agent-substrate-goal]] / [[parallel-write-stress-remeasure-2026-08-24]]: file-back #1 の lock 消失は1回のみ・未再現・自損疑いで「協調層 live evidence」を監視項目に格下げ。むしろ本 session 中に別 session の2 file-back とクリーン共存（消失0/クロバー0）＝共有 store の時間差直列化の肯定証拠。残る協調層リスクは同時刻 write＋working-tree/lock＋in-flight 可視化に限定。
+
+## [2026-08-24 14:54] file-back | related confidence tiering の実装方針を確定し Codex 指示書を作成（via 次数 down-weight は falsify）
+- [[related-confidence-tiering-plan]] 新規: grasp read の 2-hop related を co-citation score で strong/weak tier に分け、default は strong のみ prominent・single-bridge weak は count+フラグ裏に降格・sparse 明示。code locus cosense.py:604 related / cli.py:10505。embedding 不使用、新規 A/B でなく手元 8 query labels で smoke test。
+- [[false-negative-recall-benchmark-2026-08-24]] Updates 2026-08-24b: bridge-hub の out-degree down-weight を実装前に検定し falsify（useful/noise とも median degree 8）。効く構造信号は grasp が既に持つ score のみ（score>=2 で strong precision 0.38・useful 60% 保持、疎概念は strong=0 に collapse）。前 session の via down-weight 提案を撤回。
+- [[grasp-backlog]] Search and retrieval: related ranking bullet を tiering plan へ張り替え。
