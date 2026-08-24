@@ -60,3 +60,11 @@ goal 1 の残作業は再定義される:
 - 消失0が直列化由来なら、[[mode2-parallel-edit-stress-2026-06-30]] の `claim-page` lease は**消失防止としては不要**になり、役割は in-flight 可視化へ移る（lease の ~50% skip=throughput 半減の前提が変わる）。
 - 本 session の lock 消失の**根本原因が未特定**。write-start/write-page/postwrite のどれが lock を解放/消去したか、runbook を再走して再現・切り分けが要る。
 - Part B は throwaway temp store（accessism 56p 級）での measurement。goal の想定する grasp-wiki/nishio 級の高密度 store での長い real dogfood は未実施（[[parallel-agent-substrate-goal]] 2026-06-28 audit の future monitoring と同じ留保）。
+
+## Updates
+
+### 2026-08-24: 時間差多エージェント file-back がクリーンに共存（本 session 中の live event）
+
+本 remeasure を file back する最中に、別 session が2 file-back（02:37 [[ai-consumer-cost-and-trust]] へ Simon 限定合理性 Updates / 02:39 [[false-negative-recall-benchmark-2026-08-24]] へ precision+density 追記）を入れた。私の #2 file-back は index/goal/log を store から再生成したが、彼らの concept 編集・entity への precision 追記・log 全 entry を**クロバーせず時系列順に共存**（検証済み）。合成 Part B より強い、実リポジトリでの多エージェント coexistence の肯定証拠。ただし全イベントは**時間差**（同時刻でない）で、共有 store が直列化した結果。
+
+**lock 消失の訂正**: 上の結論 §2 と Open Q「本 session の lock 消失」は file-back #1 の1回のみで、#2＋間の別 session 2回は全て lock 正常＝**未再現**。#1 は並行由来でなく自損疑い（zsh 変数失敗→再実行）。「協調層が脆い live evidence」としては弱め、監視項目に格下げ。残る協調層リスクは真に同時刻の write＋working-tree/lock 層＋in-flight 可視化に絞る。

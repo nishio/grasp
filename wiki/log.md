@@ -2052,3 +2052,6 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - [[parallel-write-stress-remeasure-2026-08-24]]: projection コストは edges に線形(505p/1万edge=0.88s、超線形なし)、並行 append/write-page 8×25=200 で消失0・database is locked0・clobber0。06-30/06-26 incident は現行版で再現せず。
 - [[parallel-agent-substrate-goal]]: Done の焦点を「消失0(達成済)」から「協調層の堅牢化＆観測可能化」へ更新。本 session の postwrite lock 消失が残る壁の live evidence。
 - [[mode2-parallel-edit-stress-2026-06-30]] / [[parallel-agent-write-incident-2026-06-26]]: 現行 go/no-go 材料としては superseded とマーク。古い log から現状推論しない規律の実行例。
+
+## [2026-08-24 14:51] file-back | lock 主張を訂正・時間差多エージェント共存の肯定証拠を追記
+- [[parallel-agent-substrate-goal]] / [[parallel-write-stress-remeasure-2026-08-24]]: file-back #1 の lock 消失は1回のみ・未再現・自損疑いで「協調層 live evidence」を監視項目に格下げ。むしろ本 session 中に別 session の2 file-back とクリーン共存（消失0/クロバー0）＝共有 store の時間差直列化の肯定証拠。残る協調層リスクは同時刻 write＋working-tree/lock＋in-flight 可視化に限定。

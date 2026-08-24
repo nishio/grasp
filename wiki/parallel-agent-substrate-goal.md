@@ -145,3 +145,9 @@ Done 条件1-5は current `main` で green。証拠は `tests.test_cli_help` の
 - **並行書き込みの silent lost**（06-30 の 50中24 / [[parallel-agent-write-incident-2026-06-26]] の projection 上書き）→ 再現せず。8 writer×25=200 の append 同一ページ / write-page 別ページ全 export で消失0・`database is locked`0・clobber0。write プリミティブは並行安全(SQLite write ロック待機で直列化が最有力説明)。
 
 ∴ **Done 条件の焦点が移る**: 「消失0」は達成済みとして status から外し、残る壁は runbook/協調層——lock ライフサイクルが session 跨ぎで壊れないこと（本 session の postwrite で `.grasp/file-back.lock.json` 消失によりガード停止を踏んだのが live evidence）／互いの in-flight 可視化／単一 working tree ボトルネック解消（[[parallel-session-file-back-contention-2026-06-28]]）。未解決の測定 = 直列化 vs 並列の実効スループット、lock 消失の根本原因、高密度 store での長い real dogfood。
+
+### 2026-08-24 追記: 時間差多エージェント file-back がクリーンに共存（lock 主張を訂正）
+
+上の「lock 消失＝協調層の脆さ live evidence」は**言い過ぎ**だったので訂正する。lock 消失は remeasure session の file-back #1 の**1回だけ**で、#2 も、その間に挟まった**別 session の2 file-back**（[[ai-consumer-cost-and-trust]] への Simon 限定合理性 Updates / [[false-negative-recall-benchmark-2026-08-24]] への precision+density 追記）も lock は正常。#1 の消失は時刻的に並行由来でなく、最有力は自損（zsh 変数失敗→write シーケンス再実行）で未再現。
+
+むしろ強い**肯定証拠**が出た: 私の remeasure file-back の最中に、別エージェントが私の残した Open Question（precision/density）を拾って実測 file-back し、私の #2 と log.md 上で時系列順にクリーン共存（消失0・クロバー0）。**共有 store＋runbook が時間差の多エージェント file-back を正しく直列化した**のを実リポジトリで確認。∴ 残る協調層リスクは「時間差 file-back」ではなく、**真に同時刻の write ＋ working-tree/lock 層＋ in-flight 可視化**に絞られる。lock ライフサイクルの一回性事象は監視項目として残すが、確定した defect ではない。
