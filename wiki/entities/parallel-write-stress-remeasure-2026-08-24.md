@@ -68,3 +68,18 @@ goal 1 の残作業は再定義される:
 本 remeasure を file back する最中に、別 session が2 file-back（02:37 [[ai-consumer-cost-and-trust]] へ Simon 限定合理性 Updates / 02:39 [[false-negative-recall-benchmark-2026-08-24]] へ precision+density 追記）を入れた。私の #2 file-back は index/goal/log を store から再生成したが、彼らの concept 編集・entity への precision 追記・log 全 entry を**クロバーせず時系列順に共存**（検証済み）。合成 Part B より強い、実リポジトリでの多エージェント coexistence の肯定証拠。ただし全イベントは**時間差**（同時刻でない）で、共有 store が直列化した結果。
 
 **lock 消失の訂正**: 上の結論 §2 と Open Q「本 session の lock 消失」は file-back #1 の1回のみで、#2＋間の別 session 2回は全て lock 正常＝**未再現**。#1 は並行由来でなく自損疑い（zsh 変数失敗→再実行）。「協調層が脆い live evidence」としては弱め、監視項目に格下げ。残る協調層リスクは真に同時刻の write＋working-tree/lock 層＋in-flight 可視化に絞る。
+
+### 2026-08-24: throughput 測定 — 並行 write は直列化されていない（Open Q1/Q2 解決）
+
+10 コア機で W=64 の別ページ write を N writer に分散し wall-clock を計測（`scratchpad` throughput harness）:
+
+| mode | N=1 | N=8 | speedup | median latency N1→N8 | 消失 |
+|---|---|---|---|---|---|
+| full（projection export 込み） | 5.4 w/s | 28 w/s | 5.17× | 174→273ms | 0 |
+| defer（`--defer-projection`, SQLite write のみ） | 9.3 w/s | 49 w/s | 5.25× | 103→**117ms**（横ばい） | 0 |
+
+**Open Q1（直列化 vs 並列）= 並列**。消失0の安全性は単一書き手直列化で買ったものではない。8 writer で約5.2×の実スループット。決め手は defer の median latency が N=1→8 でほぼ動かない（103→117ms）こと＝SQLite write critical section は律速でない。~5.2×（10コアで8×でない）の直列成分は (1) プロセス毎 Python cold-start（defer 103ms の大半、長寿命プロセスで消える）(2) 毎 write の全 projection export（full の latency 174→273ms 上昇の正体、`--defer-projection`＋batch export で横ばい化）——どちらも根本的な単一書き手ロックではない。
+
+**Open Q2（lease の役割）= 消失防止にもスループットにも不要**。並列も消失0も `claim-page` 無しで達成。[[mode2-parallel-edit-stress-2026-06-30]] の「lease で ~50% skip＝throughput 半減」は払う必要のなかったコスト。lease の役割は in-flight 可視化だけに絞られる。
+
+**実装指針**: 高並行 write は per-write export でなく `--defer-projection`＋定期 batch export（full 28→defer 49 w/s、latency 横ばい）。goal 1 の並行基盤の write パターンとして確定。残る Open Q は lock 消失の根本原因と高密度 store の long dogfood のみ。

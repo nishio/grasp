@@ -2060,3 +2060,6 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - [[related-confidence-tiering-plan]] 新規: grasp read の 2-hop related を co-citation score で strong/weak tier に分け、default は strong のみ prominent・single-bridge weak は count+フラグ裏に降格・sparse 明示。code locus cosense.py:604 related / cli.py:10505。embedding 不使用、新規 A/B でなく手元 8 query labels で smoke test。
 - [[false-negative-recall-benchmark-2026-08-24]] Updates 2026-08-24b: bridge-hub の out-degree down-weight を実装前に検定し falsify（useful/noise とも median degree 8）。効く構造信号は grasp が既に持つ score のみ（score>=2 で strong precision 0.38・useful 60% 保持、疎概念は strong=0 に collapse）。前 session の via down-weight 提案を撤回。
 - [[grasp-backlog]] Search and retrieval: related ranking bullet を tiering plan へ張り替え。
+
+## [2026-08-24 16:39] file-back | throughput 測定：並行 write は直列化されず~5.2×並列、lease 不要（Open Q1/Q2 解決）
+- [[parallel-write-stress-remeasure-2026-08-24]]: 10コアで 8 writer=~5.2× 実スループット（full 28 / defer 49 w/s）、消失0。defer の median latency 横ばい(103→117ms)＝SQLite write は律速でない。直列成分は cold-start と全 projection export のみで単一書き手ロックではない。claim-page lease は安全にもスループットにも不要＝役割は in-flight 可視化のみ。実装指針：高並行は --defer-projection＋batch export。
