@@ -134,3 +134,14 @@ Done 条件1-5は current `main` で green。証拠は `tests.test_cli_help` の
 - 複数 **人間** の協調編集（Co- 層）。削いだ軸であり対象外。
 - 分散 / リモート共有 store。今日は単一マシン上の同一 local store 共有まで。
 - Markdown projection の publish/review 体裁の最適化。
+
+## Updates
+
+### 2026-08-24: write 側2ブロッカーは現行版で再現せず、残作業は協調層へ
+
+[[parallel-write-stress-remeasure-2026-08-24]] で write 側の2ブロッカーを現行版(schema 14)で再測定。両方とも再現しない:
+
+- **projection コストの density 超線形**（[[mode2-parallel-edit-stress-2026-06-30]] の 25s timeout）→ 再現せず。7 corpus ladder(39–505 md)で export-markdown は edges にほぼ線形、505p/1万edge=0.88s。
+- **並行書き込みの silent lost**（06-30 の 50中24 / [[parallel-agent-write-incident-2026-06-26]] の projection 上書き）→ 再現せず。8 writer×25=200 の append 同一ページ / write-page 別ページ全 export で消失0・`database is locked`0・clobber0。write プリミティブは並行安全(SQLite write ロック待機で直列化が最有力説明)。
+
+∴ **Done 条件の焦点が移る**: 「消失0」は達成済みとして status から外し、残る壁は runbook/協調層——lock ライフサイクルが session 跨ぎで壊れないこと（本 session の postwrite で `.grasp/file-back.lock.json` 消失によりガード停止を踏んだのが live evidence）／互いの in-flight 可視化／単一 working tree ボトルネック解消（[[parallel-session-file-back-contention-2026-06-28]]）。未解決の測定 = 直列化 vs 並列の実効スループット、lock 消失の根本原因、高密度 store での長い real dogfood。

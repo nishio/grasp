@@ -2047,3 +2047,8 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 ## [2026-08-24 02:39] file-back | 偽陰性 benchmark に precision + density 実測を追記（recall は取れるが回収物の precision は低い＝主張を限定）
 - [[false-negative-recall-benchmark-2026-08-24]] Updates: grep 不可視 top-20 related の precision を 8 query で独立判定。lenient 平均 0.40 / strict(core) 0.07＝回収物の過半は noise。corr(density,precision)=+0.81・corr(density,recall)=−0.66 でトレードオフ。真の driver は bridge-hub topicality（LLM が density 反例）。value 主張を密×topical-hub 概念に限定し、via bridge の down-weight ranking を [[grasp-backlog]] 候補に。
 - 手法: sweep.py/sweep_top20.py で 35 concept を density 層化、judge subagent 8 体で core/tangential/noise 分類。両 Open Question（precision 未測定・density 閾値）を解決マーク。
+
+## [2026-08-24 13:54] file-back | write 側2ブロッカーを現行版で再測定→再現せず、goal 1 status を協調層へ更新
+- [[parallel-write-stress-remeasure-2026-08-24]]: projection コストは edges に線形(505p/1万edge=0.88s、超線形なし)、並行 append/write-page 8×25=200 で消失0・database is locked0・clobber0。06-30/06-26 incident は現行版で再現せず。
+- [[parallel-agent-substrate-goal]]: Done の焦点を「消失0(達成済)」から「協調層の堅牢化＆観測可能化」へ更新。本 session の postwrite lock 消失が残る壁の live evidence。
+- [[mode2-parallel-edit-stress-2026-06-30]] / [[parallel-agent-write-incident-2026-06-26]]: 現行 go/no-go 材料としては superseded とマーク。古い log から現状推論しない規律の実行例。

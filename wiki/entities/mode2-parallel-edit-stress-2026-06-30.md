@@ -55,3 +55,9 @@ Round B が「協調さえ入れれば 0 loss」を示したので方向は正�
 - **soft claim の 0-loss は1 run の観測**。check→claim は別コマンドで TOCTOU 窓があり、より速い timing / 3+ agent では skip 漏れ→lost が起きうる。回帰試験として固定し再現性を測るべき。
 - Round A の極端な非対称（agent1=25 / agent2=1）の機序は未分析。headline（silent loss）は揺るがない。
 - **大規模 import は本 run では未完**: `/nishio`（25,791 pages / 123MB）の `import` は CPU 6分超で store に1行も書けず中断した。ただし [[read-vs-grep-benchmark-2026-06-24]] は同コーパスを 2026-06-23 に import 済みと記録しており、**確定的な regression ではない**（性能の再計測が必要な open item）。本 stress は llmwiki adopt で実施した。
+
+## Updates
+
+### 2026-08-24: 本 run の loss/perf 所見は現行版(schema 14)で再現しない
+
+[[parallel-write-stress-remeasure-2026-08-24]] の再測定で、本 entity の headline 2点が現行版では出ない: (A) 無協調 silent lost（50中24）→ 8 writer×25=200 で消失0・`database is locked`0。(B) 高密度グラフの projection/graph compute 病理（export-markdown --check 25s timeout・superlinear 疑い）→ 505p/1万edge で 0.88s、edges に線形。write プリミティブは 06-30 以降のバージョンで並行安全化した(SQLite write ロック待機での直列化が最有力)。本 entity は 2026-06-30 時点の観測記録として残すが、**現行の go/no-go 材料としては superseded**。cutover 判断は再測定側を見る。ただし直列化由来ならスループット上限は別途未測定。
