@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
+import os
 import re
 import subprocess
 import time
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from urllib.parse import quote, unquote, urlparse, urlunparse
 
 from .cosense import normalize_title, parse_cosense_links
@@ -51,9 +52,42 @@ class CosenseCliError(RuntimeError):
         return f"{self.error_class}: {details}"
 
 
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return default
+
+
 @dataclass
 class CosenseCliClient:
     command: str = "cosense"
+    # Reactive HTTP 429 handling: the hosted project rate-limits rapid reads, and the
+    # cosense CLI surfaces only the "HTTP 429 Too Many Requests" text (no Retry-After
+    # header), so grasp retries the same call with blind exponential backoff. This makes
+    # both sync (which fetches every changed page) and acquire (which fetches every seed)
+    # wait out the window instead of crashing / mass-failing.
+    max_retries: int = field(default_factory=lambda: _env_int("GRASP_COSENSE_MAX_RETRIES", 5))
+    base_delay_seconds: float = field(default_factory=lambda: _env_float("GRASP_COSENSE_RETRY_BASE_SECONDS", 2.0))
+    max_delay_seconds: float = field(default_factory=lambda: _env_float("GRASP_COSENSE_RETRY_MAX_SECONDS", 60.0))
+    sleep: Callable[[float], None] = time.sleep
+
+    def _retry_delay_seconds(self, attempt: int) -> float:
+        delay = self.base_delay_seconds * (2 ** attempt)
+        return min(delay, self.max_delay_seconds)
 
     def list_pages(
         self,
@@ -86,28 +120,35 @@ class CosenseCliClient:
         return self._run_json([self.command, "searchFullText", project_url, query])
 
     def _run_json(self, command: list[str]) -> dict[str, Any]:
-        try:
-            completed = subprocess.run(command, check=True, text=True, capture_output=True)
-        except FileNotFoundError as error:
-            raise CosenseCliError(
-                command=command,
-                error_class="command-not-found",
-                message=f"command not found: {command[0]}",
-            ) from error
-        except subprocess.CalledProcessError as error:
-            error_class = classify_cosense_cli_failure(
-                returncode=error.returncode,
-                stderr=error.stderr or "",
-                stdout=error.stdout or "",
-            )
-            raise CosenseCliError(
-                command=command,
-                error_class=error_class,
-                message=f"cosense CLI command failed: {' '.join(command)}",
-                returncode=error.returncode,
-                stderr=error.stderr or "",
-                stdout=error.stdout or "",
-            ) from error
+        attempt = 0
+        while True:
+            try:
+                completed = subprocess.run(command, check=True, text=True, capture_output=True)
+            except FileNotFoundError as error:
+                raise CosenseCliError(
+                    command=command,
+                    error_class="command-not-found",
+                    message=f"command not found: {command[0]}",
+                ) from error
+            except subprocess.CalledProcessError as error:
+                error_class = classify_cosense_cli_failure(
+                    returncode=error.returncode,
+                    stderr=error.stderr or "",
+                    stdout=error.stdout or "",
+                )
+                if error_class == "rate-limited" and attempt < self.max_retries:
+                    self.sleep(self._retry_delay_seconds(attempt))
+                    attempt += 1
+                    continue
+                raise CosenseCliError(
+                    command=command,
+                    error_class=error_class,
+                    message=f"cosense CLI command failed: {' '.join(command)}",
+                    returncode=error.returncode,
+                    stderr=error.stderr or "",
+                    stdout=error.stdout or "",
+                ) from error
+            break
         try:
             return json.loads(completed.stdout)
         except json.JSONDecodeError as error:
@@ -1409,6 +1450,8 @@ def acquire_next_actions(error_classes: dict[str, int]) -> list[str]:
         actions.append("Check that the cosense CLI is logged in and that the hosted project/pages are readable.")
     if "page-not-found" in error_classes:
         actions.append("Check seed titles/URLs; some referenced pages may be moved, deleted, or inaccessible.")
+    if "rate-limited" in error_classes:
+        actions.append("Hosted Cosense rate-limited the fetch (HTTP 429); grasp already retries with exponential backoff, so remaining 429s mean the window stayed saturated. Retry after a longer cooldown or raise GRASP_COSENSE_MAX_RETRIES.")
     if not actions and error_classes:
         actions.append("Inspect failed_pages[].error and retry with a smaller seed file or known readable page.")
     return actions
@@ -1424,6 +1467,8 @@ def classify_cosense_cli_failure(*, returncode: int, stderr: str, stdout: str) -
     text = f"{stderr}\n{stdout}".casefold()
     if returncode == 127 or "env: node" in text or "node: no such file" in text or "node: command not found" in text:
         return "command-env"
+    if "429" in text or "too many requests" in text or "rate limit" in text:
+        return "rate-limited"
     if "forbidden" in text or "unauthorized" in text or "permission" in text or "login" in text or "not logged in" in text:
         return "permission"
     if "not found" in text or "404" in text:

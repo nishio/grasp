@@ -1,13 +1,17 @@
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from urllib.parse import unquote
 
 from grasp.cli import run_cross_project_acquire
 from grasp.cosense_cli import (
+    CosenseCliClient,
     CosenseCliError,
     acquire_from_cosense,
+    classify_cosense_cli_failure,
     page_url_for_title,
     parse_cosense_page_url,
     refresh_page_from_cosense,
@@ -1208,6 +1212,94 @@ class CosenseCliSyncTests(unittest.TestCase):
                 self.assertEqual(project["failed_page_sample"][0]["error_class"], "command-env")
             finally:
                 store.close()
+
+
+class _RateLimitThenOkRunner:
+    """Fake subprocess.run: raise a 429 CalledProcessError N times, then succeed."""
+
+    def __init__(self, fail_times, stdout='{"ok": true}'):
+        self.fail_times = fail_times
+        self.stdout = stdout
+        self.calls = 0
+
+    def __call__(self, command, check, text, capture_output):
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise subprocess.CalledProcessError(
+                1, command, output="", stderr="cosense readPage ...: HTTP 429 Too Many Requests"
+            )
+        return subprocess.CompletedProcess(command, 0, stdout=self.stdout, stderr="")
+
+
+class RateLimitRetryTest(unittest.TestCase):
+    def test_classify_429_as_rate_limited(self):
+        self.assertEqual(
+            classify_cosense_cli_failure(returncode=1, stderr="HTTP 429 Too Many Requests", stdout=""),
+            "rate-limited",
+        )
+        self.assertEqual(
+            classify_cosense_cli_failure(returncode=1, stderr="rate limit exceeded", stdout=""),
+            "rate-limited",
+        )
+
+    def test_run_json_retries_then_succeeds_with_exponential_backoff(self):
+        delays: list[float] = []
+        client = CosenseCliClient(
+            max_retries=5, base_delay_seconds=2.0, max_delay_seconds=60.0, sleep=delays.append
+        )
+        runner = _RateLimitThenOkRunner(fail_times=3)
+        with mock.patch("grasp.cosense_cli.subprocess.run", runner):
+            result = client.read_page("https://scrapbox.io/p/A")
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(runner.calls, 4)  # 3 rate-limited attempts + 1 success
+        self.assertEqual(delays, [2.0, 4.0, 8.0])  # 2*2**0, 2*2**1, 2*2**2
+
+    def test_backoff_is_capped_at_max_delay(self):
+        delays: list[float] = []
+        client = CosenseCliClient(
+            max_retries=6, base_delay_seconds=10.0, max_delay_seconds=15.0, sleep=delays.append
+        )
+        runner = _RateLimitThenOkRunner(fail_times=4)
+        with mock.patch("grasp.cosense_cli.subprocess.run", runner):
+            client.read_page("https://scrapbox.io/p/A")
+        self.assertEqual(delays, [10.0, 15.0, 15.0, 15.0])  # 10, 20→15, 40→15, 80→15
+
+    def test_run_json_gives_up_after_max_retries(self):
+        delays: list[float] = []
+        client = CosenseCliClient(
+            max_retries=2, base_delay_seconds=1.0, max_delay_seconds=60.0, sleep=delays.append
+        )
+        runner = _RateLimitThenOkRunner(fail_times=99)
+        with mock.patch("grasp.cosense_cli.subprocess.run", runner):
+            with self.assertRaises(CosenseCliError) as ctx:
+                client.read_page("https://scrapbox.io/p/A")
+        self.assertEqual(ctx.exception.error_class, "rate-limited")
+        self.assertEqual(runner.calls, 3)  # initial attempt + 2 retries
+        self.assertEqual(delays, [1.0, 2.0])
+
+    def test_non_rate_limit_error_is_not_retried(self):
+        delays: list[float] = []
+        client = CosenseCliClient(sleep=delays.append)
+
+        def runner(command, check, text, capture_output):
+            raise subprocess.CalledProcessError(1, command, output="", stderr="403 Forbidden: not logged in")
+
+        with mock.patch("grasp.cosense_cli.subprocess.run", runner):
+            with self.assertRaises(CosenseCliError) as ctx:
+                client.read_page("https://scrapbox.io/p/A")
+        self.assertEqual(ctx.exception.error_class, "permission")
+        self.assertEqual(delays, [])  # no backoff for non-429 failures
+
+    def test_max_retries_zero_disables_retry(self):
+        delays: list[float] = []
+        client = CosenseCliClient(max_retries=0, sleep=delays.append)
+        runner = _RateLimitThenOkRunner(fail_times=99)
+        with mock.patch("grasp.cosense_cli.subprocess.run", runner):
+            with self.assertRaises(CosenseCliError) as ctx:
+                client.read_page("https://scrapbox.io/p/A")
+        self.assertEqual(ctx.exception.error_class, "rate-limited")
+        self.assertEqual(runner.calls, 1)
+        self.assertEqual(delays, [])
 
 
 if __name__ == "__main__":
