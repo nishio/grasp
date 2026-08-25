@@ -52,14 +52,41 @@ surface for agents.
 
 Python 3.10 or newer is required. Runtime dependencies are stdlib-only.
 
+**Recommended: install with [uv](https://docs.astral.sh/uv/)**
+
+```bash
+# Install latest
+uv tool install git+https://github.com/nishio/grasp.git
+
+# Upgrade to latest
+uv tool upgrade grasp
+
+# Install a specific version tag
+uv tool install git+https://github.com/nishio/grasp.git@v1.14.0
+```
+
+This puts the `grasp` command on your `PATH` via `uv`'s isolated tool
+environment.
+
+To run `grasp` once without installing, use `uvx`:
+
+```bash
+uvx --from git+https://github.com/nishio/grasp.git grasp --help
+```
+
+<details>
+<summary>Alternative: pip install from a local clone</summary>
+
 ```bash
 git clone https://github.com/nishio/grasp.git
 cd grasp
 pip install -e .
 ```
 
-If you do not want to install it yet, run commands from the repository with
-`python3 -m grasp ...`.
+Without installing, you can also run `python3 -m grasp ...` directly from the
+repository root.
+
+</details>
 
 ## Try It
 
