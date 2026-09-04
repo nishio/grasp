@@ -61,6 +61,10 @@ pip install -e .
 If you do not want to install it yet, run commands from the repository with
 `python3 -m grasp ...`.
 
+Note: the `grasp` package on PyPI is an unrelated project by a different
+author. `pip install grasp` installs that package, not this tool — install
+from this repository as shown above.
+
 ## Try It
 
 This repository contains its own Markdown wiki, so you can try `grasp` without

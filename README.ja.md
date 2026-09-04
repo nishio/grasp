@@ -91,6 +91,9 @@ pip install -e .
 
 インストールせず試す場合は、リポジトリ直下で `python3 -m grasp ...` と実行できます。
 
+注意: PyPI にある `grasp` パッケージは別作者の無関係なプロジェクトです。
+`pip install grasp` ではこのツールは入りません。上記の通りリポジトリからインストールしてください。
+
 既定の store は `~/.grasp/grasp.sqlite` です。1つの store に複数 project を入れられます。
 読む対象は `--project` で選びます。
 
