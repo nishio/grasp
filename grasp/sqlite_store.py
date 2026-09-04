@@ -3647,7 +3647,8 @@ class SQLiteStore:
                 ),
             )
             for page in pages:
-                self._upsert_cosense_page(page, project)
+                self._upsert_cosense_page(page, project, refresh_resolutions=False)
+            refresh_edge_resolutions(self.connection, project)
             rebuild_unresolved_targets(self.connection, project)
             self._refresh_project_counts(project)
 
@@ -3755,7 +3756,8 @@ class SQLiteStore:
         project = self._require_project()
         with self.connection:
             for page in pages:
-                self._upsert_cosense_page(page, project)
+                self._upsert_cosense_page(page, project, refresh_resolutions=False)
+            refresh_edge_resolutions(self.connection, project)
             rebuild_unresolved_targets(self.connection, project)
             self._refresh_project_counts(project)
 
@@ -9257,7 +9259,13 @@ class SQLiteStore:
         ).fetchone()
         return None if row is None else dict(row)
 
-    def _upsert_cosense_page(self, page: dict[str, Any], project: str) -> None:
+    def _upsert_cosense_page(
+        self,
+        page: dict[str, Any],
+        project: str,
+        *,
+        refresh_resolutions: bool = True,
+    ) -> None:
         page_id = str(page["id"])
         title = str(page["title"])
         lines = page.get("lines") or []
@@ -9371,7 +9379,12 @@ class SQLiteStore:
             line_rows,
         )
         _insert_edge_rows(self.connection, edge_rows)
-        refresh_edge_resolutions(self.connection, project)
+        # refresh_edge_resolutions rewrites resolution state for the whole store, not just
+        # this page, so bulk callers pass refresh_resolutions=False and call it once after
+        # their loop. Per page it is O(all page_handles + all edges): a 15k-page acquire
+        # spent ~34h in it and grew the WAL past the free disk before failing.
+        if refresh_resolutions:
+            refresh_edge_resolutions(self.connection, project)
 
     def _refresh_project_counts(self, project: str) -> None:
         self.connection.execute(
