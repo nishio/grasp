@@ -157,6 +157,20 @@ def default_idle_hydrate_limit() -> int:
         return 1
 
 
+def default_read_refresh() -> bool:
+    value = os.environ.get("GRASP_READ_REFRESH")
+    if value is None:
+        return False
+    return value.strip().lower() not in {"", "0", "false", "no", "off"}
+
+
+def resolve_read_refresh(args: argparse.Namespace) -> bool:
+    value = getattr(args, "refresh", None)
+    if value is None:
+        return default_read_refresh()
+    return bool(value)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="grasp",
@@ -628,7 +642,7 @@ def build_parser() -> argparse.ArgumentParser:
             "query, page|null, link_stats, lines, lines_truncated, backlinks, "
             "line_window|null, backlink_count_returned, backlink_count_total, related, "
             "unresolved_targets, recovery_hints|null, ambiguity|null, markdown_hydration|null, "
-            "markdown_graph|null, markdown_query_contract|null; with --around-line, lines[] is the bounded "
+            "markdown_refresh|null, markdown_graph|null, markdown_query_contract|null; with --around-line, lines[] is the bounded "
             "window around that line; with --related-snippets, related[] items also include "
             "snippet_lines[], snippet_truncated, and snippet_mode"
         ),
@@ -640,6 +654,7 @@ def build_parser() -> argparse.ArgumentParser:
             "grasp read 盲点カード --related-snippets --related-snippet-mode edge",
             "grasp read --page-id 5928725cba093700118fa5b2",
             "grasp read --path source/Digest.md",
+            "grasp read 盲点カード --refresh",
             "grasp --json read 民主主義 --backlinks-limit 3 --related-limit 5",
         ],
         notes=[
@@ -648,6 +663,10 @@ def build_parser() -> argparse.ArgumentParser:
             "--around-line accepts a full line_id from JSON or --full-ids text output. Local aliases like P1:12 are per-output only.",
             "--page-id and --path select a page identity directly when a visible handle is ambiguous.",
             "--hydrate on a catalog-only Markdown graph parses the selected source file before reading it.",
+            "--refresh stats the page's Markdown source file first and re-parses it when it changed since import; "
+            "markdown_refresh.reason is fresh|source_changed|content_unchanged|hydrated_source|source_file_missing|"
+            "source_folder_missing|not_markdown_backed. Neighborhoods (backlinks/related) stay cached.",
+            "Set GRASP_READ_REFRESH=1 to make --refresh the default for read; --no-refresh overrides it per command.",
             "On incomplete Markdown graphs, markdown_query_contract.partial_fields marks page lines and graph neighborhoods as partial.",
             "--related-snippets includes the first N lines of each related/source page, matching the Cosense related-pane reading pattern.",
             "--related-snippet-mode edge centers snippets on the link line that explains each related/source item.",
@@ -658,6 +677,8 @@ def build_parser() -> argparse.ArgumentParser:
     read_parser.add_argument("--page-id", default=None, help="Open a materialized page by stable page id instead of visible title/alias.")
     read_parser.add_argument("--path", dest="source_path", default=None, help="Open a Markdown mirror page by source path relative to the imported folder.")
     read_parser.add_argument("--hydrate", action="store_true", help="For incomplete Markdown graphs, parse the selected source file before reading it.")
+    read_parser.add_argument("--refresh", action="store_true", default=None, help="Re-parse the page's Markdown source file before reading when it changed on disk since import.")
+    read_parser.add_argument("--no-refresh", action="store_false", dest="refresh", help="Disable --refresh even when GRASP_READ_REFRESH is set.")
     read_parser.add_argument("--line-context", type=int, default=5, help="Number of lines before and after --around-line to return.")
     read_parser.add_argument("--line-limit", type=int, default=None, help="Maximum page lines to return; omit for all lines.")
     read_parser.add_argument("--backlinks-limit", type=int, default=20, help="Maximum backlink lines to return.")
@@ -7969,6 +7990,7 @@ def main(argv: list[str] | None = None) -> int:
     store_for_write = (
         args.command in STORE_WRITE_COMMANDS
         or (args.command == "read" and getattr(args, "hydrate", False))
+        or (args.command == "read" and not getattr(args, "around_line", None) and resolve_read_refresh(args))
         or (
             args.command in {"backlinks", "co-links", "gather", "mentions", "path", "related", "search", "unresolved"}
             and getattr(args, "hydrate_limit", 0) > 0
@@ -8339,6 +8361,8 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
         if args.around_line:
             if args.hydrate:
                 raise ValueError("--hydrate cannot be combined with --around-line")
+            if args.refresh:
+                raise ValueError("--refresh cannot be combined with --around-line")
             if args.page_id or args.source_path:
                 raise ValueError("--around-line cannot be combined with --page-id or --path")
             if args.line_limit is not None:
@@ -8379,6 +8403,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             related_snippet_lines=args.related_snippet_lines,
             related_snippet_mode=args.related_snippet_mode,
             hydrate=args.hydrate,
+            refresh=resolve_read_refresh(args),
         )
         attach_markdown_query_context(
             result,
@@ -10133,6 +10158,17 @@ def format_read(result: dict[str, Any], aliases: LineIdAliases | None = None) ->
                 f"({markdown_hydration.get('line_count')} lines, "
                 f"{markdown_hydration.get('edge_count')} edges, "
                 f"{graph.get('hydrated_files')}/{graph.get('total_files')} files)\n"
+            )
+        markdown_refresh = result.get("markdown_refresh")
+        if markdown_refresh and markdown_refresh.get("refreshed"):
+            parts.append(
+                f"refreshed: {markdown_refresh.get('source_path')} "
+                f"(source file changed; {markdown_refresh.get('line_count')} lines, "
+                f"{markdown_refresh.get('edge_count')} edges; neighborhoods cached)\n"
+            )
+        elif markdown_refresh and markdown_refresh.get("reason") in {"source_file_missing", "source_folder_missing"}:
+            parts.append(
+                f"refresh: source missing ({markdown_refresh.get('source_path')}); showing cached lines\n"
             )
         markdown_graph = result.get("markdown_graph")
         if markdown_graph and markdown_graph.get("complete") is False:

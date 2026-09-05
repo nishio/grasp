@@ -4230,6 +4230,163 @@ class SQLiteStore:
                 "markdown_graph": graph_status,
             }
 
+    def refresh_markdown_page_if_stale(self, page: Page) -> dict[str, Any]:
+        project = page.project or self._require_project()
+        manifest = self._markdown_manifest_for_project(project)
+        files = manifest.get("files")
+        if not isinstance(files, dict) or not files:
+            return {
+                "refreshed": False,
+                "reason": "not_markdown_backed",
+                "project": project,
+                "page": page.to_summary(),
+                "source_path": None,
+            }
+        source_path, item = self._markdown_manifest_entry_for_page(manifest, page.id)
+        if not str(item.get("hash") or ""):
+            hydration = self.hydrate_markdown_page(page)
+            return {
+                "refreshed": bool(hydration.get("hydrated")),
+                "reason": "hydrated_source" if hydration.get("hydrated") else str(hydration.get("reason") or ""),
+                "project": project,
+                "page": hydration.get("page") or page.to_summary(),
+                "source_path": source_path,
+                "line_count": hydration.get("line_count"),
+                "edge_count": hydration.get("edge_count"),
+                "hydration": hydration,
+            }
+
+        project_row = self.project_metadata(project)
+        if project_row is None:
+            raise ValueError(f"project does not exist: {project}")
+        folder_path = Path(str(project_row.get("source_export") or ""))
+        markdown_path = folder_path / source_path
+        if not folder_path.exists() or not folder_path.is_dir():
+            return {
+                "refreshed": False,
+                "reason": "source_folder_missing",
+                "project": project,
+                "page": page.to_summary(),
+                "source_path": source_path,
+            }
+        if not markdown_path.exists() or not markdown_path.is_file():
+            return {
+                "refreshed": False,
+                "reason": "source_file_missing",
+                "project": project,
+                "page": page.to_summary(),
+                "source_path": source_path,
+            }
+        if markdown_path.stat().st_mtime_ns == _int_or_none(item.get("mtime_ns")):
+            return {
+                "refreshed": False,
+                "reason": "fresh",
+                "project": project,
+                "page": page.to_summary(),
+                "source_path": source_path,
+            }
+
+        record = markdown_page_record_from_file(folder_path, markdown_path)
+        if record.page.id != page.id:
+            raise ValueError(
+                "Markdown refresh aborted: parsed page id differs from stored id; "
+                "run normal import --markdown to rebuild this project"
+            )
+        expected_event_sequence = latest_project_event_sequence(self.connection, project)
+        line_payloads = [
+            {
+                "line_id": line.line_id,
+                "line_index": line.index,
+                "text": line.text,
+                "created": line.created,
+                "updated": line.updated,
+                "user_id": line.user_id,
+            }
+            for line in record.page.lines
+        ]
+
+        with self.write_transaction():
+            require_project_events_unchanged(
+                self.connection,
+                project,
+                expected_event_sequence,
+                operation="Markdown refresh",
+            )
+            current_page = self._page_by_id(page.id, project=project)
+            if current_page is None:
+                raise ValueError(f"page id not found: {page.id}")
+            current_manifest = self._markdown_manifest_for_project(project)
+            current_source_path, current_item = self._markdown_manifest_entry_for_page(current_manifest, page.id)
+            if current_source_path != source_path:
+                raise ValueError("Markdown refresh aborted: source path changed")
+            if str(current_item.get("hash") or "") == record.source_hash:
+                # mtime moved but content matches the store (e.g. touch or projection
+                # export); record the new mtime so later reads take the stat fast path.
+                self._update_markdown_manifest_entry_mtime_uncommitted(
+                    project,
+                    current_manifest,
+                    source_path,
+                    record.mtime_ns,
+                )
+                return {
+                    "refreshed": False,
+                    "reason": "content_unchanged",
+                    "project": project,
+                    "page": current_page.to_summary(),
+                    "source_path": source_path,
+                }
+            edge_count = self._apply_markdown_page_identity_uncommitted(
+                project,
+                page.id,
+                title=record.page.title,
+                source_path=source_path,
+                aliases=record.aliases,
+                lines=line_payloads,
+                graph_role=record.graph_role,
+                updated=record.page.updated or int(time.time()),
+                source_hash=record.source_hash,
+                mtime_ns=record.mtime_ns,
+            )
+            refreshed_page = self._page_by_id(page.id, project=project)
+            return {
+                "refreshed": True,
+                "reason": "source_changed",
+                "project": project,
+                "page": refreshed_page.to_summary() if refreshed_page is not None else record.page.to_summary(),
+                "source_path": source_path,
+                "previous_title": page.title,
+                "line_count": len(line_payloads),
+                "edge_count": edge_count,
+            }
+
+    def _update_markdown_manifest_entry_mtime_uncommitted(
+        self,
+        project: str,
+        manifest: dict[str, Any],
+        source_path: str,
+        mtime_ns: int,
+    ) -> None:
+        files = manifest.get("files")
+        if not isinstance(files, dict):
+            raise ValueError("Markdown manifest has no files")
+        new_files = {str(path): dict(value) for path, value in files.items() if isinstance(value, dict)}
+        entry = new_files.get(source_path)
+        if entry is None:
+            raise ValueError(f"Markdown manifest has no entry for source path: {source_path}")
+        entry["mtime_ns"] = mtime_ns
+        new_manifest = dict(manifest)
+        new_manifest["files"] = new_files
+        _write_metadata(
+            self.connection,
+            {
+                f"project.{project}.markdown_manifest": json.dumps(
+                    new_manifest,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            },
+        )
+
     def hydrate_markdown_chunk(
         self,
         *,
@@ -8381,6 +8538,7 @@ class SQLiteStore:
         related_snippet_lines: int = 5,
         related_snippet_mode: str = "lead",
         hydrate: bool = False,
+        refresh: bool = False,
     ) -> dict[str, Any]:
         if page_id and source_path:
             raise ValueError("read accepts only one of --page-id or --path")
@@ -8412,6 +8570,7 @@ class SQLiteStore:
                     "ambiguity": self._handle_ambiguity(title, candidates),
                     "markdown_graph": None,
                     "markdown_hydration": None,
+                    "markdown_refresh": None,
                     "link_stats": None,
                     "lines": [],
                     "lines_truncated": False,
@@ -8434,6 +8593,14 @@ class SQLiteStore:
             markdown_hydration = self.hydrate_markdown_page(page)
             hydrated_page_id = str((markdown_hydration.get("page") or {}).get("id") or page.id)
             page = self._page_by_id(hydrated_page_id, project=markdown_hydration.get("project") or page.project) or page
+            if not explicit_page:
+                lookup_title = title or page.title
+
+        markdown_refresh: dict[str, Any] | None = None
+        if refresh and page is not None:
+            markdown_refresh = self.refresh_markdown_page_if_stale(page)
+            refreshed_page_id = str((markdown_refresh.get("page") or {}).get("id") or page.id)
+            page = self._page_by_id(refreshed_page_id, project=markdown_refresh.get("project") or page.project) or page
             if not explicit_page:
                 lookup_title = title or page.title
 
@@ -8464,6 +8631,7 @@ class SQLiteStore:
                 "ambiguity": None,
                 "markdown_graph": self.project_markdown_graph_status_by_name(self._selected_project_or_none()),
                 "markdown_hydration": markdown_hydration,
+                "markdown_refresh": markdown_refresh,
                 "link_stats": link_stats,
                 "lines": [],
                 "lines_truncated": False,
@@ -8483,6 +8651,7 @@ class SQLiteStore:
             "ambiguity": None,
             "markdown_graph": self.project_markdown_graph_status_by_name(page.project),
             "markdown_hydration": markdown_hydration,
+            "markdown_refresh": markdown_refresh,
             "link_stats": link_stats,
             "lines": [line.to_dict() for line in lines],
             "lines_truncated": lines_truncated,

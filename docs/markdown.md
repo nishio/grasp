@@ -59,6 +59,19 @@ grasp --project notes read --path source/Digest.md
 grasp --project notes ambiguities
 ```
 
+## ソースファイルの更新を追いかける
+
+取り込み後もソース Markdown は編集され続けます。取り直しは 2 段階あります。
+
+- **project 全体**: 同じ `import --markdown <folder>` の再実行。file manifest（hash/mtime）との差分だけを増分で取り込みます。
+- **読むページだけ**: `read --refresh`。そのページのソースファイルを stat し、mtime が manifest とずれていた時だけ再 parse してから読みます。ソースがローカルファイルなので、変更がない時のコストは stat 1 回です。
+
+```bash
+grasp --project notes read "ページタイトル" --refresh
+```
+
+常に refresh してほしい場合は `GRASP_READ_REFRESH=1` を設定します（`--no-refresh` で個別に無効化）。`refresh-page`（Cosense の hosted 比較）の Markdown 対称です。対象ページの鮮度だけを保証し、backlinks / related は local cache のままです（結果の `markdown_refresh.reason` で fresh / source_changed / content_unchanged などを区別できます）。
+
 ## 複数 wiki をまとめて読む
 
 `wikis.yaml` のような registry がある場合は、複数 Markdown wiki を 1 store の複数 project namespace としてまとめて import できます。
