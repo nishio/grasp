@@ -87,7 +87,7 @@ grasp 自身の wiki を mirror の最初の dogfood corpus にするのは実�
 - 森は全部 nishio 所有＝マクロな非 Co- 実例なので、多人数協調を削ぐ grasp の cross-project がちょうど嵌まる。
 - **森用の特別 edge policy は要らない**: cross-wiki 参照は import 時に裸の referenced-only 赤 node のまま入れ、whole-store の弱い接続（normalize-title の cross-project 一致）が query 時に繋ぐ（下記 cross-project strength 層）。
 
-- `import-forest <wikis.yaml>` orchestration は実装済み。2026-06-25 の command smoke では 42/42 entries を 1 store の 42 project namespace に import し、entry diagnostics / aggregate / `ambiguities` summary まで返せた。未実装:
+- `import-forest <wikis.yaml>` orchestration は実装済み。2026-06-25 の command smoke では 42/42 entries を import し、2026-09-06 に registry 45/45 を default store（`~/.grasp/grasp.sqlite`）へ本番 import 完了: 55 projects / 41,212 pages / 1,594,008 lines / 253,695 edges / unresolved targets 64,089、wall ~9 分（`1.14.2` の bulk import perf fix 後）。森の俯瞰グラフ層（cross-project spread の材料）が実データで常備になった。未実装:
 
 - 森規模での navigation/log artifact handling の追加 dogfood（path/frontmatter heuristic と outgoing edge 除外の最小実装は [[grasp-v1-implemented]]）。
 - weak 接続の **cross-wiki spread ranking** は `cross-project-spread <title>` と seed title なしの `cross-project-spreads` として実装済み。次は spread ranking の継続 dogfood と、whole-store retrieval / first-class cross-project edge への接続。
@@ -264,12 +264,14 @@ line-id のローカル別名（text で `P1:0`、`--json` / `--full-ids` で完
 
 ## Sync freshness
 
-`grasp sync` の basic recent upsert と `--full-reconcile` は実装済み（[[incremental-sync]]）。`1.8.82` で full manifest reconcile / hosted delete tombstone / rename detection / partial acquisition boundary、`1.14.0` で external hosted line-id persistence、`1.14.1` で exact URL `refresh-page` と page-vs-neighborhood freshness contract / single-writer subagent orchestration は current facts に昇格済み。未実装:
+`grasp sync` の basic recent upsert と `--full-reconcile` は実装済み（[[incremental-sync]]）。`1.8.82` で full manifest reconcile / hosted delete tombstone / rename detection / partial acquisition boundary、`1.14.0` で external hosted line-id persistence、`1.14.1` で exact URL `refresh-page` と page-vs-neighborhood freshness contract / single-writer subagent orchestration、`1.14.2` で Markdown-backed page の `read --refresh`（source file stat → 変更時のみ再 parse、`GRASP_READ_REFRESH=1` で default 化）は current facts に昇格済み。未実装:
 
 - **hosted REST metadata enrichment**: `readPage` / `/api/pages/:project/:title` で得られる `commitId`、stable `lines[].id`、`links` / `projectLinks` / `icons`、`linked`、`pageRank`、`accessed`、`relatedPages` をどこまで store に保存するか決める。JSON export seed には無いので optional source-specific columns として扱う。
 - **authenticated delete / rename history enrichment**: 現行 `--full-reconcile` は manifest 差分から delete tombstone と same-id rename を扱う。認証済み path で `/api/deleted-pages/:project/:pageId`、`/api/stream/:project` の `page.delete` event、`/api/commits/:project/:pageId` の `TitleChange` を取り、tombstone / alias history を補強できるか検証する。
 - **external hosted line-id persistence**: `1.14.0` で schema `14` として実装済み。hosted `lines[].id` / `lineId` は local `lines.line_id` に混ぜず、`lines.external_line_id` として別列に保存する。
 - **last-sync cursor の運用精度**: pinned pages / updated ties / clock skew / partial failure の扱い。
+- **write/export 後の manifest mtime 追随**: `write-page` / `rename-page` / `export-markdown` は projection file を書いた後に manifest の hash/mtime を更新しないため、grasp 自身が書いた page への最初の `read --refresh` は `content_unchanged` 経路を一度通る（実害なし・2回目から stat fast path）。export 後に manifest を追随させれば初回から直行できる。
+- **read 以外への source 変更反映**: `search` / `backlinks` 等の全体系 command はソース変更を `import --markdown` 再実行でしか拾えない。idle-hydrate policy の流用で「コマンド後に N 秒だけ変更ファイルを再取り込み」が候補。
 
 ## Cross-project graph / whole-store retrieval residuals
 

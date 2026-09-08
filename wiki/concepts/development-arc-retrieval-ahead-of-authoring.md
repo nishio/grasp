@@ -62,6 +62,10 @@ sources:
 
 決定は §3 Open Question（「authoring では dogfood 駆動が効かないリスク」）に直接答える形になっている: **authoring 専用の dogfood loop を用意**（このリポジトリ自身の過去 wiki 編集を grasp で再現する replay test、[[write-layer-alpha-and-replay-test]] 決定2）し、**big-bang を避ける**（cadence A: 最高リスクスライスが通った時点で merge、長寿命ブランチで tight loop を失わない）。retrieval を成功させた loop を authoring へ移植する試み。
 
+## Updates
+
+- 2026-09-05: §3 の非対称を**利用側でも実測確認**した。local store 群の SQLite event stream 集計で、write event は grasp 自身の dogfood wiki（`.grasp/file-back.sqlite`）に限定: authored write ~100 events（page_create 54 / page_update 28 / log_append 14）+ revert 6、15 sessions、2026-07-17〜08-31、開発セッション単位の 10 件前後のバースト。default store の他 project（nishio Cosense 25.9k pages・wiki森 import 群）への write は 0 で、read-only mirror のまま。実装の非対称（retrieval 厚い / authoring alpha）は解消済みだが（[[ai-author-feedback-2026-06-26]]）、**利用の非対称はそのまま**——write 採用は capability でなく workflow 側（file back 規約が grasp write を要求する repo が本 repo のみ）に律速されている。
+
 ## 関連
 
 - [[history]] — 1.0.0→1.5.23 の store-compat ledger（本ページ §1・§2 の一次データ）

@@ -2067,3 +2067,9 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 ## [2026-08-31 22:41] file back | Cosense fetch の 429 rate-limit 実測+mitigation(commit 55240a7) を新 concept 化、write-concurrency に cross-session lock 全喪失を追記
 新規 [[cosense-fetch-rate-limit]]: hosted 429 は分オーダーで回復・~57連続=0失敗・Retry-After非露出→_run_json blind 指数backoff retry。862p の private project 862p が retry で0失敗完走
 [[sqlite-write-concurrency]] Updates: busy_timeout/WAL は 1.7.39 で導入済(30s)だが大 namespace-replace write が超過し、acquire は lock 負けで fetch 済み全喪失(2026-08-28 別 session の acquire chain と衝突)
+
+## [2026-09-08 15:47] implementation+ops+file back | Markdown read --refresh (1.14.2)・bulk import perf・wiki森 45/45 import・write 利用実測
+- code: `read --refresh` で Markdown source file の stat→変更時のみ再 parse（fresh / content_unchanged / source_changed / hydrated_source / source_file_missing / not_markdown_backed）。`GRASP_READ_REFRESH=1` で default 化、`--no-refresh` で個別無効。bulk Cosense import の per-page `refresh_edge_resolutions` をループ後 1 回に集約（15k page acquire ~34h→分オーダー）。version は store 互換のため `1.15.0`→`1.14.2` に改番。tests: 全 391 OK（refresh 新規 8 件）。
+- ops: `import-forest wikis.yaml` を default store へ本番実行、45/45 成功（55 projects / 41,212 pages / 1,594,008 lines / 253,695 edges / unresolved 64,089、~9 分）。
+- 実測: local store 群の write event は dogfood wiki のみ（authored ~100 events / 15 sessions / 2026-07-17〜08-31）、import 済み wiki森・Cosense mirror への write は 0。
+- file back: [[history]] / [[grasp-v1-implemented]] / [[grasp-backlog]] / [[development-arc-retrieval-ahead-of-authoring]] を更新。
