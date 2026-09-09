@@ -1215,19 +1215,18 @@ class CosenseCliSyncTests(unittest.TestCase):
 
 
 class _RateLimitThenOkRunner:
-    """Fake subprocess.run: raise a 429 CalledProcessError N times, then succeed."""
+    """Fake subprocess.run: raise a transient CalledProcessError N times, then succeed."""
 
-    def __init__(self, fail_times, stdout='{"ok": true}'):
+    def __init__(self, fail_times, stdout='{"ok": true}', stderr="cosense readPage ...: HTTP 429 Too Many Requests"):
         self.fail_times = fail_times
         self.stdout = stdout
+        self.stderr = stderr
         self.calls = 0
 
     def __call__(self, command, check, text, capture_output):
         self.calls += 1
         if self.calls <= self.fail_times:
-            raise subprocess.CalledProcessError(
-                1, command, output="", stderr="cosense readPage ...: HTTP 429 Too Many Requests"
-            )
+            raise subprocess.CalledProcessError(1, command, output="", stderr=self.stderr)
         return subprocess.CompletedProcess(command, 0, stdout=self.stdout, stderr="")
 
 
@@ -1276,6 +1275,47 @@ class RateLimitRetryTest(unittest.TestCase):
         self.assertEqual(ctx.exception.error_class, "rate-limited")
         self.assertEqual(runner.calls, 3)  # initial attempt + 2 retries
         self.assertEqual(delays, [1.0, 2.0])
+
+    def test_classify_transient_5xx_as_transient_server_error(self):
+        for stderr in (
+            "cosense readPage ...: HTTP 503 Service Unavailable",
+            "HTTP 502 Bad Gateway",
+            "HTTP 504 Gateway Timeout",
+        ):
+            with self.subTest(stderr=stderr):
+                self.assertEqual(
+                    classify_cosense_cli_failure(returncode=1, stderr=stderr, stdout=""),
+                    "transient-server-error",
+                )
+
+    def test_page_body_digits_are_not_misread_as_5xx(self):
+        # stdout can carry page text; a bare "503" there must not look like an outage.
+        self.assertEqual(
+            classify_cosense_cli_failure(returncode=1, stderr="", stdout="line about 503 buses"),
+            "command-failed",
+        )
+
+    def test_transient_5xx_is_retried_like_429(self):
+        delays: list[float] = []
+        client = CosenseCliClient(
+            max_retries=5, base_delay_seconds=2.0, max_delay_seconds=60.0, sleep=delays.append
+        )
+        runner = _RateLimitThenOkRunner(
+            fail_times=2, stderr="cosense readPage ...: HTTP 503 Service Unavailable"
+        )
+        with mock.patch("grasp.cosense_cli.subprocess.run", runner):
+            result = client.read_page("https://scrapbox.io/p/A")
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(runner.calls, 3)
+        self.assertEqual(delays, [2.0, 4.0])
+
+    def test_transient_5xx_gives_up_with_its_own_error_class(self):
+        client = CosenseCliClient(max_retries=1, base_delay_seconds=1.0, sleep=lambda _: None)
+        runner = _RateLimitThenOkRunner(fail_times=99, stderr="HTTP 503 Service Unavailable")
+        with mock.patch("grasp.cosense_cli.subprocess.run", runner):
+            with self.assertRaises(CosenseCliError) as ctx:
+                client.read_page("https://scrapbox.io/p/A")
+        self.assertEqual(ctx.exception.error_class, "transient-server-error")
 
     def test_non_rate_limit_error_is_not_retried(self):
         delays: list[float] = []

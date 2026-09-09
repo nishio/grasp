@@ -2066,7 +2066,7 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 
 ## [2026-08-31 22:41] file back | Cosense fetch の 429 rate-limit 実測+mitigation(commit 55240a7) を新 concept 化、write-concurrency に cross-session lock 全喪失を追記
 新規 [[cosense-fetch-rate-limit]]: hosted 429 は分オーダーで回復・~57連続=0失敗・Retry-After非露出→_run_json blind 指数backoff retry。862p の private project 862p が retry で0失敗完走
-[[sqlite-write-concurrency]] Updates: busy_timeout/WAL は 1.7.39 で導入済(30s)だが大 namespace-replace write が超過し、acquire は lock 負けで fetch 済み全喪失(2026-08-28 別 session の acquire chain と衝突)
+[[sqlite-write-concurrency]] Updates: busy_timeout/WAL は 1.7.39 で導入済(30s)だが大 namespace-replace write が超過し、acquire は lock 負けで fetch 済み全喪失(2026-08-28 別 session の大規模 acquire chain と衝突)
 
 ## [2026-09-08 15:47] implementation+ops+file back | Markdown read --refresh (1.14.2)・bulk import perf・wiki森 45/45 import・write 利用実測
 - code: `read --refresh` で Markdown source file の stat→変更時のみ再 parse（fresh / content_unchanged / source_changed / hydrated_source / source_file_missing / not_markdown_backed）。`GRASP_READ_REFRESH=1` で default 化、`--no-refresh` で個別無効。bulk Cosense import の per-page `refresh_edge_resolutions` をループ後 1 回に集約（15k page acquire ~34h→分オーダー）。version は store 互換のため `1.15.0`→`1.14.2` に改番。tests: 全 391 OK（refresh 新規 8 件）。
@@ -2074,7 +2074,20 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - 実測: local store 群の write event は dogfood wiki のみ（authored ~100 events / 15 sessions / 2026-07-17〜08-31）、import 済み wiki森・Cosense mirror への write は 0。
 - file back: [[history]] / [[grasp-v1-implemented]] / [[grasp-backlog]] / [[development-arc-retrieval-ahead-of-authoring]] を更新。
 
-## [2026-09-09 12:31] ops+file back | ある private project 15,311p 取得完走・WAL 原因説の訂正・pacing 実測
-- ops: `acquire --full-list` で ある private project を 15,311 page 取得、`failed: 0`（skipped_nonpersistent 1 は実体なし page）。fetch 12.16h @21.1 req/min、write phase **53s**（`1.14.2` の deferred refresh 実効確認）。8/25 の初回は同じ acquire が write phase ~34h の末に `database or disk is full` で全喪失していた。
+## [2026-09-09 12:31] ops+file back | 15k page 規模 project の取得完走・WAL 原因説の訂正・pacing 実測
+- ops: `acquire --full-list` である外部 project を 15,311 page 取得、`failed: 0`（skipped_nonpersistent 1 は実体なし page）。fetch 12.16h @21.1 req/min、write phase **53s**（`1.14.2` の deferred refresh 実効確認）。8/25 の初回は同じ acquire が write phase ~34h の末に `database or disk is full` で全喪失していた。
 - 訂正: per-page `refresh_edge_resolutions` が **WAL を溢れさせた**という説明は誤り。A/B の WAL peak は n=100 で 104.7MB、n=400 で 123.3MB と頭打ち。時間コスト（~4.6s/page）が真の問題で、disk full の真因は未特定。[[grasp-v1-implemented]] を訂正、`sqlite_store.py` のコメントも訂正（commit `95c9b79` の message には旧説明が残る）。
-- 実測: proactive pacing（wrapper 側 adaptive 1.2→3.0s）でも実効 21/min で、pacing 無しと同じ。~21/min はこの project の天井。pacing が買うのは throughput でなく信頼性。grasp の retry は 429 のみで **503 は retry されない**（別の private project で 35 page 喪失）。[[cosense-fetch-rate-limit]] に `## Updates` として記録。
+- 実測: proactive pacing（wrapper 側 adaptive 1.2→3.0s）でも実効 21/min で、pacing 無しと同じ。~21/min はこの project の天井。pacing が買うのは throughput でなく信頼性。grasp の retry は 429 のみで **503 は retry されない**（別の外部 project で 35 page 喪失）。[[cosense-fetch-rate-limit]] に `## Updates` として記録。
+
+## [2026-09-09 14:52] file back | transient 5xx retry の欠落を backlog へ（外部 project で 35 page 喪失した経路）
+- [[grasp-backlog]] の acquire 節に **transient 5xx の retry** を追加。`classify_cosense_cli_failure` の retryable は 429 のみで 502/503/504 は即 `failed_pages` 行き。concept 側（[[cosense-fetch-rate-limit]] の Updates）には実測が入っていたが、未実装項目として backlog に無かったギャップを埋めた。
+
+## [2026-09-09 14:57] implementation+file back | 1.14.3 — hosted fetch retry を transient 5xx へ拡張
+- code: `classify_cosense_cli_failure` に `transient-server-error` class（HTTP 502/503/504 と bad gateway / service unavailable / gateway timeout）。`_run_json` は `RETRYABLE_ERROR_CLASSES` = {rate-limited, transient-server-error} を同じ指数 backoff で retry。判定は `http 5xx` 前置きと phrase に限定し、page 本文の裸の数字は `command-failed` のまま（regression test あり）。`acquire` の next_actions にも 5xx 専用の案内。tests: 395 OK（新規 4）。
+- 動機: 2026-09-08 の 5.5k page 規模の外部 project `acquire --full-list` が単発 503 で 35 page 喪失。`acquire` は namespace 置換なので、35 page を埋めるには 5,500 page 再取得（~4.3h @21 req/min）が要るという非対称性が痛い。
+- 残: connection-level transient（`socket hang up` / `ECONNRESET`）は `command-failed` のままで retry されない（[[grasp-backlog]]）。
+
+## [2026-09-09 15:51] file back | grasp は public repo なので、他人の hosted project の具体名を書かない
+- 方針: grasp は public repo。**他人の Scrapbox/Cosense project を読み込んだ記録に具体的な project 名を書かない**（owner 判断）。private project は名前だけで存在と access 権が露出する。規模・役割（例「5.5k page 規模の外部 project」）で書き、再現に要る数値（page 数・rate・失敗内訳）は残す。
+- 適用: [[log]] / [[grasp-backlog]] / [[history]] / [[sqlite-write-concurrency]] / [[cosense-fetch-rate-limit]] / [[grasp-v1-implemented]] の該当箇所を置換。技術的事実は変えていない。
+- 未処理: 既に push 済みの commit（`018118b` 他）の git history には旧記述が残る。public repo の history 書き換えは別判断。[[cross-project-reference-acquire-2026-06-24]] は public project 名（cross-project ref の dogfood 記録）なので今回は触っていない。

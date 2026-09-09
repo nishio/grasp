@@ -291,6 +291,7 @@ line-id のローカル別名（text で `P1:0`、`--json` / `--full-ids` で完
 
 未実装 / 残課題:
 
+- **transient 5xx の retry**: `1.14.3` で実装済み。`classify_cosense_cli_failure` が HTTP 502 / 503 / 504 を `transient-server-error` class として返し、`_run_json` が `rate-limited` と同じ指数 backoff で retry する。動機は 2026-09-08 の 5.5k page 規模の外部 project `acquire --full-list` が単発 503 で 35 page を失った事例（`acquire` は namespace 置換なので埋めるには 5,500 page 再取得が要る）。実測は [[cosense-fetch-rate-limit]] の `## Updates`。残: connection-level transient（`socket hang up` / `ECONNRESET`）はまだ `command-failed` 扱いで retry されない。
 - **direct public API fallback**: `cosense` binary / Node が無い環境でも public project は Scrapbox API（`curl .../api/pages/<project>` 等）で読める。auth が要る project では従来通り `cosense-cli` に戻す adapter。villagepump dogfood で `cosense` 不在により acquire 不可だったので、入れれば agent 実験の摩擦が下がる。副観測: `search/query?q=...` は 100 件固定で `skip` が効かず、網羅抽出には `pages?sort=title` の列挙が要る。
 - env 診断（`cosense` / `node` の shebang `env node` 失敗等）を seed discovery phase（`searchFullText` / `listPages`）へ拡張する。fetch phase は実装済み。
 - `cross-project-acquire` の実データ dogfood、project / target ranking の weighting 調整、取得後 summary（reciprocal refs / top internal links / cluster handoff）の richer 化。

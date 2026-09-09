@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.14.3`（更新: 2026-09-09 14:57、store: schema `14`、compat: schema `14` compatible）: hosted Cosense fetch の retry 対象に transient 5xx を追加した。`classify_cosense_cli_failure` は HTTP 502 / 503 / 504（および `bad gateway` / `service unavailable` / `gateway timeout`）を `transient-server-error` class として返し、`_run_json` は `RETRYABLE_ERROR_CLASSES`（`rate-limited` + `transient-server-error`）を同じ指数 backoff で retry する。retry を使い切った場合は `transient-server-error` として上がり、`acquire` の next_actions にも 専用の案内が出る。判定は `http 5xx` 前置きと phrase に限定し、page 本文中の裸の数字を誤判定しない。動機は 2026-09-08 の 5.5k page 規模の外部 project `acquire --full-list` で、単発 503 により 35 page を失った事例（`acquire` は namespace 置換なので 5,500 page 再取得が必要になる）。schema は不変
 - `1.14.2`（更新: 2026-09-08 15:46、store: schema `14`、compat: schema `14` compatible）: Markdown-backed page の read 時 source freshness `read --refresh` を追加した。対象 page の source file を stat し、manifest の `mtime_ns` とずれた時だけ再 parse する（mtime のみ変化で hash 同一なら manifest mtime を追随させて `content_unchanged`、内容変更なら upsert）。`GRASP_READ_REFRESH=1` で read の default になり、`--no-refresh` で個別無効化。catalog-only entry は hydration に委譲し、非 Markdown project は `not_markdown_backed` no-op なので env default は Cosense 混在 store でも安全。neighborhood は cached のまま（`refresh-page` の page-vs-neighborhood 境界と同じ contract）。同 release で bulk Cosense import / acquire の per-page `refresh_edge_resolutions` をループ後 1 回に集約（15k page acquire が ~34h→分オーダー）、README に PyPI `grasp` は別作者プロジェクトである注記を追加。一時 `1.15.0` として push されたが store 互換変更のため `1.14.2` に改番（tag/release なし）
 - `1.14.1`（更新: 2026-08-18 22:31、store: schema `14`、compat: schema `14` compatible）: exact Scrapbox/Cosense page URL freshness primitive `refresh-page <page-url>` を追加した。remote pageを直接`readPage`してlocalのid/title/updated/line count/本文hash/external line idsと比較し、missing/newer/rename/same-timestamp content change/line-id enrichmentだけをupsertする。partial namespaceへのslice外page追加とMarkdown namespace mutationを拒否し、`page_freshness`と`neighborhood_freshness=cached`、更新後の`read_after_refresh.args`を返す。SkillはURL受領時にfreshness subagent 1体を唯一のwriterとして即時spawnし、親のlocal readと並列化、join後に更新時だけ再読する。schema は不変
 - `1.14.0`（更新: 2026-07-01 02:39、store: schema `14`、compat: schema `14`）: `lines.external_line_id` と `line_tombstones.external_line_id` を追加した。Cosense JSON export や hosted `readPage` が返す `lines[].id` / `lineId` は local `lines.line_id` に混ぜず、外部 source metadata として別列に保存し、JSON line output では値がある時だけ `external_line_id` を返す。`sync` result の `line_id_policy.hosted_line_id_persisted` は true になった。schema は `14`
@@ -234,6 +235,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.14.2`
+- Current public compatibility version: `1.14.3`
 - Current internal `SCHEMA_VERSION`: `14`
-- Current package metadata should match `1.14.2`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.14.3`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。

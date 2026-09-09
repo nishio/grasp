@@ -72,6 +72,13 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+# Transient hosted failures worth retrying: 429 rate limiting, and 5xx from the
+# Cloudflare front. A 15k-page acquire that retried only 429 still lost pages to
+# single 503s, and acquire replaces its namespace, so one lost page means refetching
+# the whole slice to recover it.
+RETRYABLE_ERROR_CLASSES = frozenset({"rate-limited", "transient-server-error"})
+
+
 @dataclass
 class CosenseCliClient:
     command: str = "cosense"
@@ -136,7 +143,7 @@ class CosenseCliClient:
                     stderr=error.stderr or "",
                     stdout=error.stdout or "",
                 )
-                if error_class == "rate-limited" and attempt < self.max_retries:
+                if error_class in RETRYABLE_ERROR_CLASSES and attempt < self.max_retries:
                     self.sleep(self._retry_delay_seconds(attempt))
                     attempt += 1
                     continue
@@ -1452,6 +1459,8 @@ def acquire_next_actions(error_classes: dict[str, int]) -> list[str]:
         actions.append("Check seed titles/URLs; some referenced pages may be moved, deleted, or inaccessible.")
     if "rate-limited" in error_classes:
         actions.append("Hosted Cosense rate-limited the fetch (HTTP 429); grasp already retries with exponential backoff, so remaining 429s mean the window stayed saturated. Retry after a longer cooldown or raise GRASP_COSENSE_MAX_RETRIES.")
+    if "transient-server-error" in error_classes:
+        actions.append("Hosted Cosense returned 5xx (502/503/504); grasp already retries these with exponential backoff, so remaining failures mean the outage outlasted the retry budget. Retry later or raise GRASP_COSENSE_MAX_RETRIES.")
     if not actions and error_classes:
         actions.append("Inspect failed_pages[].error and retry with a smaller seed file or known readable page.")
     return actions
@@ -1469,6 +1478,11 @@ def classify_cosense_cli_failure(*, returncode: int, stderr: str, stdout: str) -
         return "command-env"
     if "429" in text or "too many requests" in text or "rate limit" in text:
         return "rate-limited"
+    if any(
+        marker in text
+        for marker in ("http 502", "http 503", "http 504", "bad gateway", "service unavailable", "gateway timeout")
+    ):
+        return "transient-server-error"
     if "forbidden" in text or "unauthorized" in text or "permission" in text or "login" in text or "not logged in" in text:
         return "permission"
     if "not found" in text or "404" in text:
