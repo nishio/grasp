@@ -2065,7 +2065,7 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - [[parallel-write-stress-remeasure-2026-08-24]]: 10コアで 8 writer=~5.2× 実スループット（full 28 / defer 49 w/s）、消失0。defer の median latency 横ばい(103→117ms)＝SQLite write は律速でない。直列成分は cold-start と全 projection export のみで単一書き手ロックではない。claim-page lease は安全にもスループットにも不要＝役割は in-flight 可視化のみ。実装指針：高並行は --defer-projection＋batch export。
 
 ## [2026-08-31 22:41] file back | Cosense fetch の 429 rate-limit 実測+mitigation(commit 55240a7) を新 concept 化、write-concurrency に cross-session lock 全喪失を追記
-新規 [[cosense-fetch-rate-limit]]: hosted 429 は分オーダーで回復・~57連続=0失敗・Retry-After非露出→_run_json blind 指数backoff retry。862p の private project 862p が retry で0失敗完走
+新規 [[cosense-fetch-rate-limit]]: hosted 429 は分オーダーで回復・~57連続=0失敗・Retry-After非露出→_run_json blind 指数backoff retry。862p の private project が retry で0失敗完走
 [[sqlite-write-concurrency]] Updates: busy_timeout/WAL は 1.7.39 で導入済(30s)だが大 namespace-replace write が超過し、acquire は lock 負けで fetch 済み全喪失(2026-08-28 別 session の大規模 acquire chain と衝突)
 
 ## [2026-09-08 15:47] implementation+ops+file back | Markdown read --refresh (1.14.2)・bulk import perf・wiki森 45/45 import・write 利用実測
@@ -2091,3 +2091,8 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - 方針: grasp は public repo。**他人の Scrapbox/Cosense project を読み込んだ記録に具体的な project 名を書かない**（owner 判断）。private project は名前だけで存在と access 権が露出する。規模・役割（例「5.5k page 規模の外部 project」）で書き、再現に要る数値（page 数・rate・失敗内訳）は残す。
 - 適用: [[log]] / [[grasp-backlog]] / [[history]] / [[sqlite-write-concurrency]] / [[cosense-fetch-rate-limit]] / [[grasp-v1-implemented]] の該当箇所を置換。技術的事実は変えていない。
 - 未処理: 既に push 済みの commit（`018118b` 他）の git history には旧記述が残る。public repo の history 書き換えは別判断。[[cross-project-reference-acquire-2026-06-24]] は public project 名（cross-project ref の dogfood 記録）なので今回は触っていない。
+
+## [2026-09-09 16:23] file back | 残っていた private project 名を除去（public project 参照は保持）
+- 参加中 188 project 名で repo 全体を走査し、hosted project への参照を public / private で分類した。現行ファイルに残っていた private 参照は 4 行（[[cosense-fetch-rate-limit]] の実測見出しと実証行、[[sqlite-write-concurrency]] の lock 喪失行、[[log]] の該当行）で、いずれも規模表記に置換。
+- [[cross-project-reference-acquire-2026-06-24]] の project 名（villagepump / omoikane / tkgshn / blu3mo-public / plurality-japanese / mitou-meikan / unnamedcamp / intellitech-en）は**全て public project**（未認証 200 で確認）なので保持する。cross-project ref の dogfood 記録として名前自体が内容。
+- 未処理: push 済み commit（`6648eac` / `018118b` / `6726509`）の git history には private 名が残る。public repo の history 書き換えは別判断。

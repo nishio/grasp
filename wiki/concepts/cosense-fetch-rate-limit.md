@@ -31,7 +31,7 @@ title: cosense-fetch-rate-limit
 - `classify_cosense_cli_failure` に **`rate-limited`** クラスを追加 (`429` / `too many requests` / `rate limit`)。本物のエラー (permission / page-not-found / command-env) と区別する。
 - `_run_json`: `rate-limited` を検知したら `sleep(base·2^n)` (上限 `max_delay`) で `max_retries` 回まで待って再試行。使い切ってなお 429 なら従来通り `CosenseCliError` を送出。
 - env knobs: `GRASP_COSENSE_MAX_RETRIES`=5 / `GRASP_COSENSE_RETRY_BASE_SECONDS`=2.0 / `GRASP_COSENSE_RETRY_MAX_SECONDS`=60.0。`CosenseCliClient.sleep` は注入可能で、test は実時間を消費しない (`RateLimitRetryTest`)。
-- 実証: 862p の private project 862p の `acquire --full-list` が **0 失敗**で完走 (retry 前は同じ acquire で 577/862 が 429 失敗)。
+- 実証: 862p の private project の `acquire --full-list` が **0 失敗**で完走 (retry 前は同じ acquire で 577/862 が 429 失敗)。
 
 ## scope の限界 (未実装, backlog 候補)
 
