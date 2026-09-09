@@ -2073,3 +2073,8 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - ops: `import-forest wikis.yaml` を default store へ本番実行、45/45 成功（55 projects / 41,212 pages / 1,594,008 lines / 253,695 edges / unresolved 64,089、~9 分）。
 - 実測: local store 群の write event は dogfood wiki のみ（authored ~100 events / 15 sessions / 2026-07-17〜08-31）、import 済み wiki森・Cosense mirror への write は 0。
 - file back: [[history]] / [[grasp-v1-implemented]] / [[grasp-backlog]] / [[development-arc-retrieval-ahead-of-authoring]] を更新。
+
+## [2026-09-09 12:31] ops+file back | ある private project 15,311p 取得完走・WAL 原因説の訂正・pacing 実測
+- ops: `acquire --full-list` で ある private project を 15,311 page 取得、`failed: 0`（skipped_nonpersistent 1 は実体なし page）。fetch 12.16h @21.1 req/min、write phase **53s**（`1.14.2` の deferred refresh 実効確認）。8/25 の初回は同じ acquire が write phase ~34h の末に `database or disk is full` で全喪失していた。
+- 訂正: per-page `refresh_edge_resolutions` が **WAL を溢れさせた**という説明は誤り。A/B の WAL peak は n=100 で 104.7MB、n=400 で 123.3MB と頭打ち。時間コスト（~4.6s/page）が真の問題で、disk full の真因は未特定。[[grasp-v1-implemented]] を訂正、`sqlite_store.py` のコメントも訂正（commit `95c9b79` の message には旧説明が残る）。
+- 実測: proactive pacing（wrapper 側 adaptive 1.2→3.0s）でも実効 21/min で、pacing 無しと同じ。~21/min はこの project の天井。pacing が買うのは throughput でなく信頼性。grasp の retry は 429 のみで **503 は retry されない**（別の private project で 35 page 喪失）。[[cosense-fetch-rate-limit]] に `## Updates` として記録。

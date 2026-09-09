@@ -9550,8 +9550,9 @@ class SQLiteStore:
         _insert_edge_rows(self.connection, edge_rows)
         # refresh_edge_resolutions rewrites resolution state for the whole store, not just
         # this page, so bulk callers pass refresh_resolutions=False and call it once after
-        # their loop. Per page it is O(all page_handles + all edges): a 15k-page acquire
-        # spent ~34h in it and grew the WAL past the free disk before failing.
+        # their loop. Per page it is O(all page_handles + all edges): ~4.6s/page against a
+        # 38k-page store, so a 15k-page acquire spent ~34h here. Deferred to one call after
+        # the loop, that same acquire wrote its 15,311 pages in 53s.
         if refresh_resolutions:
             refresh_edge_resolutions(self.connection, project)
 
