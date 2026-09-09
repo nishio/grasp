@@ -21,7 +21,7 @@ sources:
 3つの guard が**設計通り正しく**停止させた。問題は guard でなく、停止後に並行下で進める経路が無かったこと。
 
 1. **preflight の dirty-wiki guard**: 別 session の untracked / dirty wiki ファイル（`wiki/parallel-agent-substrate-goal.md` 等）で `dirty file-back paths before file-back` で停止。共有 working tree に別 session の in-flight 編集があると preflight は通らない。
-2. **write-start の HEAD-stability guard**: file-back 準備中に共有 working tree が別 session に branch 切替され HEAD が動いた（`c8c0e02` → `96df1d1`〔PR #37 merge〕→ branch `friction/cross-agent-write`、`grasp/cli.py` dirty）。`current HEAD ... differs from preflight stamp head` で停止。store の event_sequence は 324 のまま動いておらず、**壊れたのは git working tree 側だけ**だった。
+2. **write-start の HEAD-stability guard**: file-back 準備中に共有 working tree が別 session に branch 切替され HEAD が動いた（`55d752c` → `50236d2`〔PR #37 merge〕→ branch `friction/cross-agent-write`、`grasp/cli.py` dirty）。`current HEAD ... differs from preflight stamp head` で停止。store の event_sequence は 324 のまま動いておらず、**壊れたのは git working tree 側だけ**だった。
 3. **store/output pairing guard**: 逃げ道として isolated worktree（temp output）+ 共有 repo store を試すと preflight が `mixed file-back store/output pair ... Use the repo dogfood pair store='.grasp/file-back.sqlite' with output='wiki', or use a temporary store together with a temporary output. Do not run a temporary output against the repo file-back store.` で拒否。
 
 ## Root constraint
@@ -38,7 +38,7 @@ file-back lock `.grasp/file-back.lock.json` は **grasp file-back session しか
 
 ## 回避策（本ページ自身もこの経路で file back された）
 
-isolated worktree（off `origin/main`）→ **direct-patch**（Markdown を直接編集、grasp write-first runbook を bypass）→ commit → push branch → PR → merge。**remote 操作のみで、占有された working tree に一切触れない。** `origin/main` が branch の base のままなら conflict 0 で clean merge できる（persona PR #40 / #40 merge `23cab08` が実例）。
+isolated worktree（off `origin/main`）→ **direct-patch**（Markdown を直接編集、grasp write-first runbook を bypass）→ commit → push branch → PR → merge。**remote 操作のみで、占有された working tree に一切触れない。** `origin/main` が branch の base のままなら conflict 0 で clean merge できる（persona PR #40 / #40 merge `3dae7f8` が実例）。
 
 代償: **authoritative SQLite store は未 reconcile のまま**（event ≤ 324）。store → main の full projection が将来走ると、store に無い Markdown 編集が上書きされうる divergence が残る。reconcile は working tree が clean な main-based 状態になってから `write-page` で行う必要がある。
 
@@ -92,9 +92,9 @@ direct-patch + remote-merge fallback の「remote-merge」側自体に friction 
 
 ### 2026-06-29: dirty primary main への fast-forward は autostash conflict を生む
 
-Sync Freshness 実装は隔離 worktree `codex/sync-freshness` で完了したが、primary `/Users/nishio/grasp` では `main` が既に checkout され、別作業の `README.md` / `README.ja.md` / `scripts/check_file_back_runbook.py` / wiki projection dirty を持っていた。そのため別 worktree 側で `main` へ switch して merge する経路は取れず、primary で `git merge --ff-only --autostash codex/sync-freshness` を実行した。結果、`main` は commit `ac01c0c` へ fast-forward したが、autostash replay が append-only hotspot の `wiki/log.md` で conflict した。
+Sync Freshness 実装は隔離 worktree `codex/sync-freshness` で完了したが、primary `/Users/nishio/grasp` では `main` が既に checkout され、別作業の `README.md` / `README.ja.md` / `scripts/check_file_back_runbook.py` / wiki projection dirty を持っていた。そのため別 worktree 側で `main` へ switch して merge する経路は取れず、primary で `git merge --ff-only --autostash codex/sync-freshness` を実行した。結果、`main` は commit `a6a71ca` へ fast-forward したが、autostash replay が append-only hotspot の `wiki/log.md` で conflict した。
 
-正しい復旧は「どちらかの log entry を捨てない」こと。今回の conflict では Sync Freshness の `00:43` entry と README 分離の `00:52` entry を両方残し、`git add wiki/log.md && git reset HEAD wiki/log.md` で unmerged state だけを解消した。その後、autostash 由来のユーザ dirty files が staged に混じっていないことを確認し、reapplied 済みの autostash だけを drop した。これにより primary main は `origin/main` より `ac01c0c` だけ ahead、かつユーザ dirty 差分を保持する状態で止まった。
+正しい復旧は「どちらかの log entry を捨てない」こと。今回の conflict では Sync Freshness の `00:43` entry と README 分離の `00:52` entry を両方残し、`git add wiki/log.md && git reset HEAD wiki/log.md` で unmerged state だけを解消した。その後、autostash 由来のユーザ dirty files が staged に混じっていないことを確認し、reapplied 済みの autostash だけを drop した。これにより primary main は `origin/main` より `a6a71ca` だけ ahead、かつユーザ dirty 差分を保持する状態で止まった。
 
 教訓: dirty primary main へ isolated worktree の完了 branch を fast-forward する必要がある時、`--autostash` は merge 自体を可能にするが、projection append 領域の conflict は普通に起きる。復旧は append union を手で作る作業であり、protected dirty main をそのまま push してよい理由にはならない。file-back preflight もこの状態を `branch differs from origin/main` と dirty wiki で止めるので、後続 file-back は clean owner reconcile か direct Markdown fallback を明示して進める。
 

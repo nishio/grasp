@@ -116,7 +116,7 @@
 - 並行で Codex が PR #2 merge（1.5.24）・v6 decision [[whole-store-graph-and-cross-project-edges]] を追加済み。takker entity の PR #2 status は merged に揃っている。自分の hunk だけ commit。
 
 ## [2026-06-24 23:29] implementation | PR #2 を mergeし Cosense string line import を許容
-- GitHub PR #2（takker99 `fix/string-lines-cosense-import`, `f139c516`）を review し、ローカル main に merge。`grasp/cosense.py` は Cosense JSON export の line が plain string の場合、metadata なし本文行（created/updated/user_id = `None`）として import する。string line 内の `[B]` なども通常通り edge 抽出対象。
+- GitHub PR #2（takker99 `fix/string-lines-cosense-import`, `52b0fa91`）を review し、ローカル main に merge。`grasp/cosense.py` は Cosense JSON export の line が plain string の場合、metadata なし本文行（created/updated/user_id = `None`）として import する。string line 内の `[B]` なども通常通り edge 抽出対象。
 - 回帰テスト `tests/test_cosense.py::CosenseStoreTests.test_store_imports_plain_string_lines_without_metadata` を追加。`python3` が system 3.9 だと既存 `requires-python >=3.10` / union type 構文で失敗するため、検証は Codex bundled Python 3.12 を使用。
 - public compatibility version を `1.5.24` に bump。store schema は v5 のまま。[[grasp-v1-implemented]] / [[history]] / [[cosense-json-export]] / [[grasp-backlog]] / [[takker-opencode-villagepump-test-2026-06-24]] / README に反映。
 
@@ -292,7 +292,7 @@
 ## [2026-06-24 02:21] file back | PR #1 Markdown mirror を main に merge
 - GitHub PR #1 `feat/read-only-markdown-mirror`（read-only Markdown mirror import）は draft / conflict 状態だったため、PR worktree で `origin/main` を merge し conflict を解消した。解消 commit は `bf206bf`。
 - conflict は version/current facts/log まわりで、package version と [[history]] の current version は `1.5.10` に統合した。`import --markdown` と `read --around-line` の両 surface を保持。
-- GitHub 上で PR を ready 化し、head SHA `bf206bf3ef6665bb96132c151fa65892add04886` 固定で merge。merge commit は `2a3972d`。`/Users/nishio/grasp` の `main` worktree は `origin/main` に fast-forward 済み。
+- GitHub 上で PR を ready 化し、head SHA `bf206bf3ef6665bb96132c151fa65892add04886` 固定で merge。merge commit は `44ec186`。`/Users/nishio/grasp` の `main` worktree は `origin/main` に fast-forward 済み。
 - 検証: conflict 解消前に PR worktree で `python3 -m unittest discover -s tests` OK（39 tests; sqlite ResourceWarning 1件）、`python3 scripts/lint_wiki.py` OK、`git diff --check --cached` OK。
 
 ## [2026-06-24 02:19] file back | log entry は current fact ではなく transition event
@@ -1098,18 +1098,18 @@
 - Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
 
 ## [2026-06-26 21:36] implementation+test+file-back | expand git history replay corpus
-- Added an actual git history replay test for `3eaab75`, reproducing the source digest policy correction as six existing-page `write-page` updates and checking replay/direct re-import/projection exact match.
+- Added an actual git history replay test for `1f8cbbf`, reproducing the source digest policy correction as six existing-page `write-page` updates and checking replay/direct re-import/projection exact match.
 - Fixed existing `write-page` update JSON to include `source_path`, matching the documented return contract and allowing replay tests to assert target files directly.
 - Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
 
 ## [2026-06-26 21:44] implementation+test+file-back | add consecutive git history replay
-- Added a consecutive git history replay test for `3eaab75` -> `3605e05`, applying both commits as page_update events in one temp store/journal.
+- Added a consecutive git history replay test for `1f8cbbf` -> `659cf32`, applying both commits as page_update events in one temp store/journal.
 - The test checks replay after each step, final projection exact match, and direct re-import of the final projected wiki.
 - Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
 
 ## [2026-06-26 21:52] implementation+test+file-back | table-drive continuous replay sequences
 - Converted the consecutive git history replay test to a `CONTINUOUS_REPLAY_SEQUENCES` table with per-sequence commit/path lists and final assertions.
-- Added the `7360053` -> `8278069` handle ambiguity sequence alongside the existing source role sequence, both replayed in the same harness with final projection exact match and direct re-import.
+- Added the `c224968` -> `b12dad0` handle ambiguity sequence alongside the existing source role sequence, both replayed in the same harness with final projection exact match and direct re-import.
 - Updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[llm-wiki-infra-fast-path-plan]] through grasp write-first.
 
 ## [2026-06-26 22:10] implementation+test+file-back | mixed operation continuous replay
@@ -1332,7 +1332,7 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 - docs: bumped compatibility version to 1.8.33 and narrowed remaining work-unit inference to cases beyond log-batch, subject-log, log-page-subjects, content-subjects, same-page, explicit event-window, time-burst, or session boundaries.
 
 ## [2026-06-28 00:49] implementation+file-back | harden revert-plan baseline detection
-- implemented: `revert-plan` initial adopt baseline detection no longer treats real `write-page --create` events before a `content-subjects` anchor as baseline; regression uses git history fixture `b644237`.
+- implemented: `revert-plan` initial adopt baseline detection no longer treats real `write-page --create` events before a `content-subjects` anchor as baseline; regression uses git history fixture `20c9a5d`.
 
 ## [2026-06-28 01:05] implementation+file-back | add content-subjects anchor-target fallback
 `1.8.35` lets `revert-plan --scope content-subjects` use the anchor event target when changed lines have no wikilink or Markdown path subjects; regression covers a plain created page linked by another page and the closing log.
@@ -1348,7 +1348,7 @@ file back: [[history]], [[grasp-v1-implemented]], [[sqlite-ssot-write-plan]], an
 
 ## [2026-06-28 02:03] implementation+file-back | add version-bump revert plan
 `1.8.38` adds `revert-plan --scope version-bump`, using shared semver tokens in a log-bounded slice to recover release/file-back version update work units that subject-based scopes cannot infer.
-Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-page file-back is selected by the shared version token while `content-subjects` and `log-page-subjects` remain insufficient.
+Regression replays git history commit `7bd30c4` and confirms the `1.8.37` five-page file-back is selected by the shared version token while `content-subjects` and `log-page-subjects` remain insufficient.
 
 ## [2026-06-28 02:27] implementation+file-back | require file-back session marker in postwrite
 - code: `scripts/check_file_back_postwrite.py` now requires a non-empty expected session id by default and checks latest `sqlite_last_event.session_id` against `$GRASP_SESSION_ID` / `--session-id`. Legacy/ad hoc checks must opt out with `--skip-session-check`.
@@ -1459,7 +1459,7 @@ Regression replays git history commit `5f1b821` and confirms the `1.8.37` five-p
 
 ## [2026-06-28 08:29] implementation+file-back | cover page_update revert in real history replay
 
-- tests: added a continuous git history replay sequence for commit `3eaab75` that applies six existing-page `page_update` events, then reverts only the `grasp-backlog.md` update.
+- tests: added a continuous git history replay sequence for commit `1f8cbbf` that applies six existing-page `page_update` events, then reverts only the `grasp-backlog.md` update.
 - coverage: expected projection is mixed state: the reverted page matches the parent revision while the other five pages remain at the updated commit; `replay-journal --check` and direct re-import stay clean.
 - docs: bumped public/package version to `1.8.62` and updated [[history]], [[grasp-v1-implemented]], [[grasp-backlog]], and [[sqlite-ssot-write-plan]]. schema remains v8.
 
@@ -1710,7 +1710,7 @@ ai-author-feedback §Updates 散文にしか無かった bug 候補を backlog �
 ## [2026-06-29 02:10] file-back | whole-store forest import timing
 - filed: [[wiki-forest-markdown-import-dogfood-2026-06-25]] に `1.9.0` whole-store cross-project retrieval dogfood の import timing を追記。final store は 42 projects / 3,404 pages / 270,371 lines / 24,279 edges / 1,639 unresolved targets、約 98 MiB、weak inferred edge 553。
 - timing: SQLite `projects.imported_at` と import cache manifest mtime から、project import span 約 223 秒、final derivative/cache 完了まで約 233 秒（3分53秒）と推定。command output の `wall_seconds` は保存していなかったため推定値として記録。
-- fallback: grasp write-first preflight は local main が `origin/main` より `4e9b036` だけ ahead で `branch differs from origin/main` 停止。今回は direct Markdown patch fallback で記録した。
+- fallback: grasp write-first preflight は local main が `origin/main` より `1163d3e` だけ ahead で `branch differs from origin/main` 停止。今回は direct Markdown patch fallback で記録した。
 
 ## [2026-06-29 03:14] file-back | HN/Reddit Grasp-adjacent survey
 [[hn-reddit-grasp-adjacent-survey-2026-06-29]] を追加。HN は OpenKnowledge / Atomic / Karpathy-style LLM wiki など local-first AI knowledge-base の場だが、generic Obsidian + AI との比較・local/privacy・concrete value の突っ込みが強い。
@@ -2076,7 +2076,7 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 
 ## [2026-09-09 12:31] ops+file back | 15k page 規模 project の取得完走・WAL 原因説の訂正・pacing 実測
 - ops: `acquire --full-list` である外部 project を 15,311 page 取得、`failed: 0`（skipped_nonpersistent 1 は実体なし page）。fetch 12.16h @21.1 req/min、write phase **53s**（`1.14.2` の deferred refresh 実効確認）。8/25 の初回は同じ acquire が write phase ~34h の末に `database or disk is full` で全喪失していた。
-- 訂正: per-page `refresh_edge_resolutions` が **WAL を溢れさせた**という説明は誤り。A/B の WAL peak は n=100 で 104.7MB、n=400 で 123.3MB と頭打ち。時間コスト（~4.6s/page）が真の問題で、disk full の真因は未特定。[[grasp-v1-implemented]] を訂正、`sqlite_store.py` のコメントも訂正（commit `95c9b79` の message には旧説明が残る）。
+- 訂正: per-page `refresh_edge_resolutions` が **WAL を溢れさせた**という説明は誤り。A/B の WAL peak は n=100 で 104.7MB、n=400 で 123.3MB と頭打ち。時間コスト（~4.6s/page）が真の問題で、disk full の真因は未特定。[[grasp-v1-implemented]] を訂正、`sqlite_store.py` のコメントも訂正（commit `d4842e0` の message には旧説明が残る）。
 - 実測: proactive pacing（wrapper 側 adaptive 1.2→3.0s）でも実効 21/min で、pacing 無しと同じ。~21/min はこの project の天井。pacing が買うのは throughput でなく信頼性。grasp の retry は 429 のみで **503 は retry されない**（別の外部 project で 35 page 喪失）。[[cosense-fetch-rate-limit]] に `## Updates` として記録。
 
 ## [2026-09-09 14:52] file back | transient 5xx retry の欠落を backlog へ（外部 project で 35 page 喪失した経路）
@@ -2090,9 +2090,14 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 ## [2026-09-09 15:51] file back | grasp は public repo なので、他人の hosted project の具体名を書かない
 - 方針: grasp は public repo。**他人の Scrapbox/Cosense project を読み込んだ記録に具体的な project 名を書かない**（owner 判断）。private project は名前だけで存在と access 権が露出する。規模・役割（例「5.5k page 規模の外部 project」）で書き、再現に要る数値（page 数・rate・失敗内訳）は残す。
 - 適用: [[log]] / [[grasp-backlog]] / [[history]] / [[sqlite-write-concurrency]] / [[cosense-fetch-rate-limit]] / [[grasp-v1-implemented]] の該当箇所を置換。技術的事実は変えていない。
-- 未処理: 既に push 済みの commit（`018118b` 他）の git history には旧記述が残る。public repo の history 書き換えは別判断。[[cross-project-reference-acquire-2026-06-24]] は public project 名（cross-project ref の dogfood 記録）なので今回は触っていない。
+- 未処理: 既に push 済みの commit（`949355f` 他）の git history には旧記述が残る。public repo の history 書き換えは別判断。[[cross-project-reference-acquire-2026-06-24]] は public project 名（cross-project ref の dogfood 記録）なので今回は触っていない。
 
 ## [2026-09-09 16:23] file back | 残っていた private project 名を除去（public project 参照は保持）
 - 参加中 188 project 名で repo 全体を走査し、hosted project への参照を public / private で分類した。現行ファイルに残っていた private 参照は 4 行（[[cosense-fetch-rate-limit]] の実測見出しと実証行、[[sqlite-write-concurrency]] の lock 喪失行、[[log]] の該当行）で、いずれも規模表記に置換。
 - [[cross-project-reference-acquire-2026-06-24]] の project 名（villagepump / omoikane / tkgshn / blu3mo-public / plurality-japanese / mitou-meikan / unnamedcamp / intellitech-en）は**全て public project**（未認証 200 で確認）なので保持する。cross-project ref の dogfood 記録として名前自体が内容。
-- 未処理: push 済み commit（`6648eac` / `018118b` / `6726509`）の git history には private 名が残る。public repo の history 書き換えは別判断。
+- 未処理: push 済み commit（`df4517c` / `949355f` / `e6c4e62`）の git history には private 名が残る。public repo の history 書き換えは別判断。
+
+## [2026-09-09 17:41] ops+file back | git history から private project 名を除去（filter-repo）・SHA 参照を張り替え
+- ops: `git filter-repo --replace-text --replace-message` で全 history（524 commit）から private hosted project 名を除去し、force push。public project 名は保持。現行 tree の内容は書き換え前と **同一 tree hash** で、SQLite store / projection は無影響（`write-status --no-journal --strict` green）。
+- 副作用: 最初の書き換え対象以降の commit SHA が全て変わり、(a) [[git-history-replay]] corpus の pin していた 8 SHA が fixture unavailable で skip（6 件）、(b) wiki 内の commit 参照 50 箇所が dangling になった。filter-repo の `.git/filter-repo/commit-map` で両方を機械的に張り替え、tests は 395 passed に復帰。
+- 教訓: **history 書き換えは wiki の provenance 参照と replay fixture を道連れにする**。commit SHA を source of truth として wiki に書く運用と、history を書き換えうる運用は衝突する。次に書き換える時も commit-map での張り替えを同じ作業単位に含める。
