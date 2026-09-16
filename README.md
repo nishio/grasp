@@ -52,18 +52,31 @@ surface for agents.
 
 Python 3.10 or newer is required. Runtime dependencies are stdlib-only.
 
+The recommended way is `pipx`, which gives the CLI its own virtual environment
+and works on systems where the system Python is externally managed (PEP 668):
+
 ```bash
 git clone https://github.com/nishio/grasp.git
 cd grasp
-pip install -e .
+pipx install -e .
 ```
+
+`-e` keeps the install pointed at the clone, so `git pull` updates the command.
+Without a clone, `pipx install git+https://github.com/nishio/grasp.git` also
+works.
+
+If `pipx` is missing, install it from your OS package manager (for example
+`sudo apt install pipx` on Debian / Ubuntu). Plain `pip install -e .` fails
+with `externally-managed-environment` on those systems, and `python3 -m venv`
+can fail there too until `python3-venv` is installed. Inside a virtual
+environment you already manage, `pip install -e .` is fine.
 
 If you do not want to install it yet, run commands from the repository with
 `python3 -m grasp ...`.
 
 Note: the `grasp` package on PyPI is an unrelated project by a different
-author. `pip install grasp` installs that package, not this tool — install
-from this repository as shown above.
+author. `pip install grasp` and `pipx install grasp` install that package, not
+this tool — install from this repository as shown above.
 
 ## Try It
 
