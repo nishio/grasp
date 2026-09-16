@@ -83,16 +83,28 @@ grasp --store /tmp/grasp-demo.sqlite --project grasp-wiki read grasp-v1-implemen
 
 Python 3.10 以上が必要です。実行時依存は標準ライブラリだけです。
 
+推奨は `pipx` です。CLI 専用の仮想環境を作ってくれるので、システム Python が外部管理
+（PEP 668）になっている環境でもそのまま入ります。
+
 ```bash
 git clone https://github.com/nishio/grasp.git
 cd grasp
-pip install -e .
+pipx install -e .
 ```
+
+`-e` を付けると clone を直接参照するので、`git pull` だけでコマンドも更新されます。
+clone せずに入れる場合は `pipx install git+https://github.com/nishio/grasp.git` でも入ります。
+
+`pipx` が無ければ OS のパッケージ管理から入れてください（Debian / Ubuntu なら
+`sudo apt install pipx`）。これらの環境では素の `pip install -e .` は
+`externally-managed-environment` で拒否され、`python3 -m venv` も `python3-venv`
+を入れるまで失敗することがあります。自分で管理している仮想環境の中であれば
+`pip install -e .` で問題ありません。
 
 インストールせず試す場合は、リポジトリ直下で `python3 -m grasp ...` と実行できます。
 
 注意: PyPI にある `grasp` パッケージは別作者の無関係なプロジェクトです。
-`pip install grasp` ではこのツールは入りません。上記の通りリポジトリからインストールしてください。
+`pip install grasp` や `pipx install grasp` ではこのツールは入りません。上記の通りリポジトリからインストールしてください。
 
 既定の store は `~/.grasp/grasp.sqlite` です。1つの store に複数 project を入れられます。
 読む対象は `--project` で選びます。
