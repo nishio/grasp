@@ -54,7 +54,7 @@ v1 stable scope 外:
 
 ## store
 
-- current public compatibility version は `1.14.3`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.14.4`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - authoring SSoT substrate 用の canonical store path helper は `$GRASP_CANONICAL_STORE` → `<repo>/.grasp/authority.sqlite` → `$GRASP_HOME/authority.sqlite` → `~/.grasp/authority.sqlite`。これは Phase 0/1 helper であり、既存 default read/import store path とは分ける。
 - project default: `$GRASP_PROJECT`。retrieval verbs は project 未指定なら whole-store source scope、write/import/source update 系は project-targeted。
@@ -260,3 +260,7 @@ parser が link から除外するもの:
 - store 決定: [[persistence-custom-format]]
 - freshness path: [[incremental-sync]]
 - hosted Cosense との使い分け: [[cosense-cli]]
+
+## Updates: 2026-09-18 Gyazo local media
+
+`images scan|fetch|list|status` is available in 1.14.4. It owns a sidecar image cache and leaves source notes unchanged. See [[gyazo-local-media]] for limits and the UI boundary.

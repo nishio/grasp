@@ -77,3 +77,7 @@ _他に: read＝近傍同梱 / 行リンク / 未解決 link target / identity-w
 
 - [grasp-backlog](grasp-backlog.md) — v1 時点で未実装の backlog
 - [[log]] — 出来事の時系列（現状ではない）
+
+## Local media
+
+- [gyazo-local-media](entities/gyazo-local-media.md) — Gyazo reference enumeration, local reuse, bounded fetching and resumable status.

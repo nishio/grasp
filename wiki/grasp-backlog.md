@@ -320,3 +320,7 @@ Open Questions:
 - `pipx install` 前提の配布導線。
 - user-level Skill symlink と package install の統合。
 - Python 不可 agent 環境が現実化した場合の native binary 配布。
+
+## Updates: 2026-09-18 Local Gyazo cache
+
+[[gyazo-local-media]] implements URL enumeration, reuse, bounded downloads, provenance and retry statuses. Authenticated images, video, cache migration/eviction and automatic acquisition remain future work.

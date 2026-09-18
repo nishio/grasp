@@ -2101,3 +2101,6 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - ops: `git filter-repo --replace-text --replace-message` で全 history（524 commit）から private hosted project 名を除去し、force push。public project 名は保持。現行 tree の内容は書き換え前と **同一 tree hash** で、SQLite store / projection は無影響（`write-status --no-journal --strict` green）。
 - 副作用: 最初の書き換え対象以降の commit SHA が全て変わり、(a) [[git-history-replay]] corpus の pin していた 8 SHA が fixture unavailable で skip（6 件）、(b) wiki 内の commit 参照 50 箇所が dangling になった。filter-repo の `.git/filter-repo/commit-map` で両方を機械的に張り替え、tests は 395 passed に復帰。
 - 教訓: **history 書き換えは wiki の provenance 参照と replay fixture を道連れにする**。commit SHA を source of truth として wiki に書く運用と、history を書き換えうる運用は衝突する。次に書き換える時も commit-map での張り替えを同じ作業単位に含める。
+
+## [2026-09-18 11:50] implementation | Gyazo local media sidecar
+Implemented [[gyazo-local-media]]: scan references, reuse local files, bounded fetch and retry, metadata/provenance, and source-store immutability tests.

@@ -1806,6 +1806,23 @@ def build_parser() -> argparse.ArgumentParser:
     unresolved_parser.add_argument("--limit", type=int, default=50, help="Maximum unresolved targets to return.")
     unresolved_parser.add_argument("--hydrate-limit", type=int, default=0, help="For incomplete Markdown graphs, hydrate up to this many source files before ranking unresolved targets.")
 
+    images_parser = add_command_parser(
+        subparsers, "images", help="Scan, reuse and cache referenced Gyazo images locally.",
+        description="Read source notes without changing them; keep resumable image state in a grasp-owned sidecar cache.",
+        returns="cache_dir, project, images, references, states; list adds items[] with references and local_path; fetch adds counters",
+        examples=["grasp --project notes images scan", "grasp --project notes images fetch --reuse-dir ~/saved-images --local-only", "grasp --project notes images fetch --limit 20", "grasp --project notes images list --page-id ID"],
+        notes=["Only canonical 32-hex Gyazo references in materialized lines are scanned; this does not hydrate an incomplete graph.", "Cache defaults to <store>.assets; source note store is read-only. Saved images are not fetched again.", "Local candidates use exact image-id filenames; extension and byte signature are checked. Original-vs-thumbnail provenance depends on the chosen source folder.", "Network failures are recorded, not fatal. Use --retry-failed to retry. No authentication is attempted.", "--limit bounds network attempts for fetch; local reuse processes all referenced candidates."])
+    images_parser.add_argument("action", choices=["scan", "fetch", "list", "status"])
+    images_parser.add_argument("--cache-dir", type=Path)
+    images_parser.add_argument("--reuse-dir", type=Path, action="append", default=[])
+    images_parser.add_argument("--page-id")
+    images_parser.add_argument("--image-id", action="append", default=[])
+    images_parser.add_argument("--limit", type=int, default=50)
+    images_parser.add_argument("--offset", type=int, default=0)
+    images_parser.add_argument("--local-only", action="store_true")
+    images_parser.add_argument("--retry-failed", action="store_true")
+    images_parser.add_argument("--timeout", type=float, default=5)
+
     return parser
 
 
@@ -7999,6 +8016,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     store: SQLiteStore | None = SQLiteStore(args.store, project=args.project, for_write=store_for_write)
     try:
+        if args.command == "images" and not store.schema_ok():
+            parser.error("images requires a current-schema store; refusing automatic source-store recovery")
         if args.command != "stats" and not store.schema_ok():
             schema_version = store.schema_version()
             store.close()
@@ -8355,6 +8374,9 @@ def related_result_empty(result: dict[str, Any]) -> bool:
 
 
 def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
+    if args.command == "images":
+        from .gyazo import run_images
+        return run_images(store, args)
     if args.command == "stats":
         return store.stats()
     if args.command == "read":
@@ -9190,6 +9212,8 @@ def format_idle_hydration_footer(result: Any) -> str:
 
 def format_result(command: str, result: Any, aliases: LineIdAliases | None = None) -> str:
     aliases = aliases or LineIdAliases(enabled=False)
+    if command == "images":
+        return json.dumps(result, ensure_ascii=False, indent=2) + "\n"
     if command == "import":
         return format_import(result)
     if command == "hydrate-markdown":

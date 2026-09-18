@@ -160,3 +160,20 @@ dogfooding 用 alpha surface です。通常の利用では、まず読み取り
 ## License
 
 MIT
+
+## Local Gyazo images
+
+```sh
+grasp --store library.sqlite --project notes images scan
+grasp --store library.sqlite --project notes images fetch --reuse-dir ./saved-images --local-only
+grasp --store library.sqlite --project notes images fetch --limit 20 --timeout 4
+grasp --store library.sqlite --project notes images list --page-id PAGE_ID
+grasp --store library.sqlite --project notes images fetch --retry-failed --limit 20
+```
+
+Source notes stay unchanged. Images and reference/status metadata live in
+`library.sqlite.assets/`; retain this directory for offline use. Scanning only
+covers locally materialized pages. Failed downloads are recorded and can be
+retried; saved images are reused. Local reuse accepts exact Gyazo-ID filenames
+and records provenance, without promising original resolution. Authenticated
+images and video are not supported. See [media contract](wiki/entities/gyazo-local-media.md).
