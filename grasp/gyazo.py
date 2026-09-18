@@ -253,6 +253,11 @@ def run_images(store, args):
         raise ValueError('limit/offset must be nonnegative; timeout must be 0..60 seconds')
     cache = ImageCache(store, args.cache_dir)
     try:
+        if args.action == 'import-vt':
+            if not args.vt_dir:
+                raise ValueError('import-vt requires --vt-dir')
+            from .cards import import_vt
+            return import_vt(cache, args.vt_dir)
         if args.action == 'scan':
             return cache.scan()
         if args.action == 'fetch':

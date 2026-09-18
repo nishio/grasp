@@ -2104,3 +2104,6 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 
 ## [2026-09-18 11:50] implementation | Gyazo local media sidecar
 Implemented [[gyazo-local-media]]: scan references, reuse local files, bounded fetch and retry, metadata/provenance, and source-store immutability tests.
+
+## [2026-09-18 15:12] implementation | Page cards and VT image-analysis snapshots
+[[page-cards-and-image-analysis]] adds read-only browsing and project-qualified connections. Descriptions and review provenance are separate. Preflight origin/main comparison found only this session history’s unpushed 072e737; audited no remote divergence and pinned preflight base to that existing local commit. GUI tests were not run because the user requested no GUI interaction.

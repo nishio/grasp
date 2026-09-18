@@ -324,3 +324,7 @@ Open Questions:
 ## Updates: 2026-09-18 Local Gyazo cache
 
 [[gyazo-local-media]] implements URL enumeration, reuse, bounded downloads, provenance and retry statuses. Authenticated images, video, cache migration/eviction and automatic acquisition remain future work.
+
+## Updates: 2026-09-18 Page cards and image analysis
+
+[[page-cards-and-image-analysis]] implements paginated cards, project-qualified connections and VT snapshots. Separate-store federation, live dataset refresh and diagram similarity ranking remain future work.

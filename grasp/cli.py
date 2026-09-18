@@ -1812,7 +1812,8 @@ def build_parser() -> argparse.ArgumentParser:
         returns="cache_dir, project, images, references, states; list adds items[] with references and local_path; fetch adds counters",
         examples=["grasp --project notes images scan", "grasp --project notes images fetch --reuse-dir ~/saved-images --local-only", "grasp --project notes images fetch --limit 20", "grasp --project notes images list --page-id ID"],
         notes=["Only canonical 32-hex Gyazo references in materialized lines are scanned; this does not hydrate an incomplete graph.", "Cache defaults to <store>.assets; source note store is read-only. Saved images are not fetched again.", "Local candidates use exact image-id filenames; extension and byte signature are checked. Original-vs-thumbnail provenance depends on the chosen source folder.", "Network failures are recorded, not fatal. Use --retry-failed to retry. No authentication is attempted.", "--limit bounds network attempts for fetch; local reuse processes all referenced candidates."])
-    images_parser.add_argument("action", choices=["scan", "fetch", "list", "status"])
+    images_parser.add_argument("action", choices=["scan", "fetch", "list", "status", "import-vt"])
+    images_parser.add_argument("--vt-dir", type=Path, help="VT repository or data directory for import-vt; source files are read-only.")
     images_parser.add_argument("--cache-dir", type=Path)
     images_parser.add_argument("--reuse-dir", type=Path, action="append", default=[])
     images_parser.add_argument("--page-id")
@@ -1823,6 +1824,12 @@ def build_parser() -> argparse.ArgumentParser:
     images_parser.add_argument("--retry-failed", action="store_true")
     images_parser.add_argument("--timeout", type=float, default=5)
 
+    cards_parser = add_command_parser(subparsers, "cards", help="Browse page cards and cross-project connections.", description="Read page cards with cached image previews, or a page connection context; no network or source-note writes.", returns="items,total,next_offset; with --page-id: outgoing,incoming,shared_images,same_title,analyses,truncated", examples=["grasp cards --saved-only --limit 40", "grasp --project notes cards --page-id PAGE_ID"], notes=["Page identity is (project,id). Same-title matches and shared-image references are separate from explicit graph links.", "Image references must first be indexed with images scan; VT analysis snapshots with images import-vt --vt-dir DIR."])
+    cards_parser.add_argument("--query", default="")
+    cards_parser.add_argument("--saved-only", action="store_true")
+    cards_parser.add_argument("--limit", type=int, default=40)
+    cards_parser.add_argument("--offset", type=int, default=0)
+    cards_parser.add_argument("--page-id")
     return parser
 
 
@@ -8016,8 +8023,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     store: SQLiteStore | None = SQLiteStore(args.store, project=args.project, for_write=store_for_write)
     try:
-        if args.command == "images" and not store.schema_ok():
-            parser.error("images requires a current-schema store; refusing automatic source-store recovery")
+        if args.command in {"images", "cards"} and not store.schema_ok():
+            parser.error("media browsing requires a current-schema store; refusing automatic source-store recovery")
         if args.command != "stats" and not store.schema_ok():
             schema_version = store.schema_version()
             store.close()
@@ -8374,6 +8381,9 @@ def related_result_empty(result: dict[str, Any]) -> bool:
 
 
 def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
+    if args.command == "cards":
+        from .cards import run_cards
+        return run_cards(store, args)
     if args.command == "images":
         from .gyazo import run_images
         return run_images(store, args)
@@ -9212,7 +9222,7 @@ def format_idle_hydration_footer(result: Any) -> str:
 
 def format_result(command: str, result: Any, aliases: LineIdAliases | None = None) -> str:
     aliases = aliases or LineIdAliases(enabled=False)
-    if command == "images":
+    if command in {"images", "cards"}:
         return json.dumps(result, ensure_ascii=False, indent=2) + "\n"
     if command == "import":
         return format_import(result)
