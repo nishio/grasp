@@ -2107,3 +2107,6 @@ Implemented [[gyazo-local-media]]: scan references, reuse local files, bounded f
 
 ## [2026-09-18 15:12] implementation | Page cards and VT image-analysis snapshots
 [[page-cards-and-image-analysis]] adds read-only browsing and project-qualified connections. Descriptions and review provenance are separate. Preflight origin/main comparison found only this session history’s unpushed 072e737; audited no remote divergence and pinned preflight base to that existing local commit. GUI tests were not run because the user requested no GUI interaction.
+
+## [2026-09-30 16:30] file-back | preflight base-divergence が ahead-only を diverged と誤判定（root cause）
+- [[grasp-backlog]] Local write and identity layer: file-back preflight の `base_divergence_errors` は `git log --left-right {base}...HEAD` が非空なら一律停止し、ahead-only（未 push の local 先行）と真の diverged を区別しない。upstream 無し feature branch と local main ahead の両方で `--base HEAD` / direct-patch fallback を強いる。1.8.41 の base auto は解決のみ修正、判定は未修正。修正候補=left-right marker parse で `<` がある時だけ fail。本 file-back 自体も ahead-only 2 で default preflight 停止→--base HEAD で live 再現。
