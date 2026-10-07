@@ -13,7 +13,7 @@ title: parallel-write-stress-remeasure-2026-08-24
 
 ## Context
 
-[[grasp vs grep 偽陰性 A/B]]（[[false-negative-recall-benchmark-2026-08-24]]）で retrieval 側の価値を実証した続きに、
+grasp vs grep 偽陰性 A/B（[[false-negative-recall-benchmark-2026-08-24]]）で retrieval 側の価値を実証した続きに、
 [[parallel-agent-substrate-goal]]（goal 1＝並行 agent 知識共有基盤）を本気目標とする前提で、
 write 側の2ブロッカーを現行版で再測定した。両ブロッカーの一次ソースは 2026-06〜07 の incident で、
 古い log から現状を推論しないという規律（親 CLAUDE.md）に従い、測定で status を更新する。

@@ -240,7 +240,3 @@ v1 系では public version を `1.x.y` とする。
 - Current public compatibility version: `1.14.5`
 - Current internal `SCHEMA_VERSION`: `14`
 - Current package metadata should match `1.14.5`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
-
-## 1.14.4 — 2026-09-18
-
-Adds `images scan|fetch|list|status` and a separate local Gyazo media cache. Note store schema remains 14; no re-import or source-store migration. See [[gyazo-local-media]].

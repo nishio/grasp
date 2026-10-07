@@ -2110,3 +2110,12 @@ Implemented [[gyazo-local-media]]: scan references, reuse local files, bounded f
 
 ## [2026-09-30 16:30] file-back | preflight base-divergence が ahead-only を diverged と誤判定（root cause）
 - [[grasp-backlog]] Local write and identity layer: file-back preflight の `base_divergence_errors` は `git log --left-right {base}...HEAD` が非空なら一律停止し、ahead-only（未 push の local 先行）と真の diverged を区別しない。upstream 無し feature branch と local main ahead の両方で `--base HEAD` / direct-patch fallback を強いる。1.8.41 の base auto は解決のみ修正、判定は未修正。修正候補=left-right marker parse で `<` がある時だけ fail。本 file-back 自体も ahead-only 2 で default preflight 停止→--base HEAD で live 再現。
+
+## [2026-10-07 18:13] lint | 2026-06-24 以降 ~440 commit 分の意味的 lint（superseded 主張3・index drift 4・壊れたリンク2・重複1・backlog 欠落1）
+- 機械 lint: 真の壊れた wikilink 2→0（[[parallel-write-stress-remeasure-2026-08-24]] の存在しない page 名リンクを平文化、[[grasp-backlog]] の `[[log]]` を通常リンク化）。孤立 3 件（いずれも index 登録済みの concept）は判断保留で残置。
+- superseded: [[cosense-fetch-rate-limit]] の「HTTP 503 は retry されない」は 1.14.3（`e6c4e62`）で解消済みなのに summary・Updates・index に未反映だった → Updates 追記＋summary/index 更新。[[sqlite-write-concurrency]] の summary「authority は SQLite 外の plain file」は 1.8.0〜1.8.18 の SQLite SSoT 移行で過去形 → summary を incident 当時の記述と明示、Open Questions 3件に解決/部分解決を追記（自ページの教訓「解決は該当 OQ への追記で反映」に従う）。
+- index drift: [[mode2-parallel-edit-stress-2026-06-30]] 行に 2026-08-24 再測定で非再現の旨、[[sqlite-write-concurrency]] / [[cosense-fetch-rate-limit]] 行を更新。英語の独立節「Local media」を entities 表に日本語行で統合（[[gyazo-local-media]] / [[page-cards-and-image-analysis]]）。
+- 重複: [[history]] 末尾の英語節「1.14.4 — 2026-09-18」が ledger 行と重複していたので削除（ledger 行は保持）。
+- backlog 欠落: acquire/sync の lock 負けによる fetch 済み全喪失（2026-08-28 実例）が concept 側にのみあり backlog に無かった → [[grasp-backlog]] acquire 節に転記（2026-09-09 の 5xx 転記と同型）。
+- 検証して stale でなかったもの: preflight の ahead-only 誤判定（`base_divergence_errors` は未修正、backlog 記述は current）、related confidence tiering（未実装、backlog の「次の実装候補」は current）、connection-level transient retry（未実装）。
+- 判断待ち: [[gyazo-local-media]] / [[page-cards-and-image-analysis]] は本文が英語（wiki 規約は日本語）。本 lint の作業 branch は `codex/gyazo-local-media`（main でない）で、grasp write-first（preflight --base HEAD）経由で書いた。

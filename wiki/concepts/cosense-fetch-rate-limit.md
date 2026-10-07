@@ -1,6 +1,6 @@
 ---
 type: concept
-summary: hosted Cosense は rapid read を HTTP 429 で絞る。cosense CLI は "HTTP 429" テキストのみで Retry-After 非露出。実測(2026-08)はリセット分オーダー(token-bucket的)・fresh window で ~57 連続 fetch は 0 失敗・数百連打で通過率20-33%。mitigation は `_run_json` の 429 検知＋指数backoff retry (commit 55240a7, env GRASP_COSENSE_*)。scope=retry-only で pacing と sync 部分コミットは未実装。
+summary: hosted Cosense は rapid read を HTTP 429 で絞る。cosense CLI は "HTTP 429" テキストのみで Retry-After 非露出。実測(2026-08)はリセット分オーダー(token-bucket的)・fresh window で ~57 連続 fetch は 0 失敗・数百連打で通過率20-33%。mitigation は `_run_json` の 429 検知＋指数backoff retry (commit 55240a7, env GRASP_COSENSE_*)、1.14.3 で transient 5xx (502/503/504) も同じ retry 対象に拡張。scope=retry-only で pacing・sync 部分コミット・connection-level transient (ECONNRESET 等) の retry は未実装。
 sources:
   - grasp/cosense_cli.py
   - tests/test_cosense_cli.py
@@ -46,6 +46,7 @@ title: cosense-fetch-rate-limit
 - **2026-09-09 実測（15,311 page の外部 project, `acquire --full-list`）** — proactive pacing を grasp 外の `--cosense-command` wrapper で実装して測定した。1.2s 間隔（~50/min）で開始し、429 を受けるたび +0.5s、成功 50 連続で -0.05s する adaptive 制御。間隔は 2.3-3.0s に収束し、**実効 21.1 req/min・12.16h で完走**。上の安全域見積り「20-25 req/min」を追認する。
 - **pacing が買うのは throughput ではなく信頼性** — pacing 無しで素の速度（~67/min）から走った 2026-08-25 の同 project も実効 21/min だった。∴ ~21/min はこの project の天井で、投げ方の工夫では縮まない。一方 pacing + wrapper retry により `failed: 0`（pacing 無しの回は恒久失敗 1 件 + 429 error event 605 件）。
 - **429 だけでなく transient 5xx も吸収が要る** — `_run_json` の retry は `rate-limited` class のみで、**HTTP 503 は retry されない**。2026-09-08 の 5.5k page 規模の外部 project `acquire` は 503 で 35 page を失った。`acquire` は namespace 置換なので、この 35 page を埋めるには 5,500 page の再取得が要る。wrapper 側で 502/503/504 も retry したところ 15,311 page で 0 失敗。`classify_cosense_cli_failure` の retryable class に transient 5xx を足すのが backlog 候補。
+- **2026-10-07 lint 追記: 上の 5xx 欠落は `1.14.3`（2026-09-09, commit `e6c4e62`）で解消済み** — `classify_cosense_cli_failure` が HTTP 502/503/504 を `transient-server-error` class として返し、`_run_json` は `rate-limited` と同じ指数 backoff で retry する（[[history]] の `1.14.3` 行、[[grasp-backlog]] の acquire 節）。残るのは connection-level transient（`socket hang up` / `ECONNRESET`）で、これは依然 `command-failed` 扱い。
 
 ## 関連
 
