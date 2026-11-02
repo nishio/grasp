@@ -268,7 +268,6 @@ line-id のローカル別名（text で `P1:0`、`--json` / `--full-ids` で完
 
 - **hosted REST metadata enrichment**: `readPage` / `/api/pages/:project/:title` で得られる `commitId`、stable `lines[].id`、`links` / `projectLinks` / `icons`、`linked`、`pageRank`、`accessed`、`relatedPages` をどこまで store に保存するか決める。JSON export seed には無いので optional source-specific columns として扱う。
 - **authenticated delete / rename history enrichment**: 現行 `--full-reconcile` は manifest 差分から delete tombstone と same-id rename を扱う。認証済み path で `/api/deleted-pages/:project/:pageId`、`/api/stream/:project` の `page.delete` event、`/api/commits/:project/:pageId` の `TitleChange` を取り、tombstone / alias history を補強できるか検証する。
-- **external hosted line-id persistence**: `1.14.0` で schema `14` として実装済み。hosted `lines[].id` / `lineId` は local `lines.line_id` に混ぜず、`lines.external_line_id` として別列に保存する。
 - **last-sync cursor の運用精度**: pinned pages / updated ties / clock skew / partial failure の扱い。
 - **write/export 後の manifest mtime 追随**: `write-page` / `rename-page` / `export-markdown` は projection file を書いた後に manifest の hash/mtime を更新しないため、grasp 自身が書いた page への最初の `read --refresh` は `content_unchanged` 経路を一度通る（実害なし・2回目から stat fast path）。export 後に manifest を追随させれば初回から直行できる。
 - **read 以外への source 変更反映**: `search` / `backlinks` 等の全体系 command はソース変更を `import --markdown` 再実行でしか拾えない。idle-hydrate policy の流用で「コマンド後に N 秒だけ変更ファイルを再取り込み」が候補。
@@ -291,7 +290,7 @@ line-id のローカル別名（text で `P1:0`、`--json` / `--full-ids` で完
 
 未実装 / 残課題:
 
-- **transient 5xx の retry**: `1.14.3` で実装済み。`classify_cosense_cli_failure` が HTTP 502 / 503 / 504 を `transient-server-error` class として返し、`_run_json` が `rate-limited` と同じ指数 backoff で retry する。動機は 2026-09-08 の 5.5k page 規模の外部 project `acquire --full-list` が単発 503 で 35 page を失った事例（`acquire` は namespace 置換なので埋めるには 5,500 page 再取得が要る）。実測は [[cosense-fetch-rate-limit]] の `## Updates`。残: connection-level transient（`socket hang up` / `ECONNRESET`）はまだ `command-failed` 扱いで retry されない。
+- **connection-level transient の retry**: transient 5xx（HTTP 502 / 503 / 504）の retry は `1.14.3` で実装済み（current facts は [[grasp-v1-implemented]]、実測は [[cosense-fetch-rate-limit]] の `## Updates`）。残るのは connection-level transient（`socket hang up` / `ECONNRESET`）で、`classify_cosense_cli_failure` ではまだ `command-failed` 扱いになり retry されない。動機は 5xx と同じで、`acquire` は namespace 置換なので単発の取りこぼしを埋めるのに全 page 再取得が要る（2026-09-08 の 5.5k page 規模の外部 project で 503 により 35 page 喪失）。
 - **direct public API fallback**: `cosense` binary / Node が無い環境でも public project は Scrapbox API（`curl .../api/pages/<project>` 等）で読める。auth が要る project では従来通り `cosense-cli` に戻す adapter。villagepump dogfood で `cosense` 不在により acquire 不可だったので、入れれば agent 実験の摩擦が下がる。副観測: `search/query?q=...` は 100 件固定で `skip` が効かず、網羅抽出には `pages?sort=title` の列挙が要る。
 - env 診断（`cosense` / `node` の shebang `env node` 失敗等）を seed discovery phase（`searchFullText` / `listPages`）へ拡張する。fetch phase は実装済み。
 - `cross-project-acquire` の実データ dogfood、project / target ranking の weighting 調整、取得後 summary（reciprocal refs / top internal links / cluster handoff）の richer 化。
@@ -316,7 +315,7 @@ Open Questions:
 
 実装言語と配布チャネルの軸は [[language-and-distribution]]（当面 Python + pipx）。未実装:
 
-- PyPI 公開時の package 名確認。
-- `pipx install` 前提の配布導線。
+- PyPI 公開時の package 名の決定。PyPI の `grasp` は無関係な別 project が既に使っている（2026-11-03 に PyPI JSON API で確認: `grasp` 0.3.2「Useful introspection tools.」）。README は `pip install grasp` / `pipx install grasp` が別物を入れると警告済み（commit `3de1a53` / `2e8b895`）。公開するなら別名が要る。
+- PyPI 経由の `pipx install` 配布導線。repo からの導線（`pipx install -e .` / `pipx install git+https://github.com/nishio/grasp.git`）は README / README.ja / `skills/grasp/SKILL.md` に記載済み（commit `2e8b895`）。
 - user-level Skill symlink と package install の統合。
 - Python 不可 agent 環境が現実化した場合の native binary 配布。

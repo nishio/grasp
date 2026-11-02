@@ -45,6 +45,7 @@ v1 stable scope 外:
 
 - Python package `grasp`。`python3 -m grasp ...` と console script `grasp` の両方で起動する。
 - Python 3.10+、runtime dependencies は無し（stdlib `sqlite3`）。
+- install 導線は repo からの `pipx install -e .`（または `pipx install git+https://github.com/nishio/grasp.git`）が README / README.ja / `skills/grasp/SKILL.md` の推奨。素の `pip install -e .` は PEP 668（externally-managed system Python）で拒否されるため、自分で管理する venv の中に限る（commit `2e8b895`）。PyPI の `grasp` は無関係な別 project なので `pip install grasp` / `pipx install grasp` では入らない（commit `3de1a53`）。PyPI 公開はしていない（[[language-and-distribution]]）。
 - license = MIT（`LICENSE` / `pyproject.toml`、2026-06-24 追加）。inajob の「土台にするのでライセンス明記してほしい」要望に対応したもので、persona2 GTM（HN/Reddit, [[positioning-two-personas]]）でも前提になる。
 - `README.md` は英語の初見読者向け introduction で、Scrapbox / Cosense を知らない読者にも local graph reader として説明する。`README.ja.md` は日本語版で、Cosense / Markdown の既存 SSoT を移さず始められ、必要なら grasp authoring store へ段階移行できる価値を前面に出す。どちらも詳細な repo-local file-back runbook は持たず、CLI mechanics は `grasp <cmd> --help` に寄せる。
 - `skills/grasp/SKILL.md` が「いつ使うか」を持ち、CLI mechanics は `grasp <cmd> --help` に寄せる。

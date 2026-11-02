@@ -2064,7 +2064,7 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 ## [2026-08-24 16:39] file-back | throughput 測定：並行 write は直列化されず~5.2×並列、lease 不要（Open Q1/Q2 解決）
 - [[parallel-write-stress-remeasure-2026-08-24]]: 10コアで 8 writer=~5.2× 実スループット（full 28 / defer 49 w/s）、消失0。defer の median latency 横ばい(103→117ms)＝SQLite write は律速でない。直列成分は cold-start と全 projection export のみで単一書き手ロックではない。claim-page lease は安全にもスループットにも不要＝役割は in-flight 可視化のみ。実装指針：高並行は --defer-projection＋batch export。
 
-## [2026-08-31 22:41] file back | Cosense fetch の 429 rate-limit 実測+mitigation(commit 55240a7) を新 concept 化、write-concurrency に cross-session lock 全喪失を追記
+## [2026-08-31 22:41] file back | Cosense fetch の 429 rate-limit 実測+mitigation(commit f4ca686) を新 concept 化、write-concurrency に cross-session lock 全喪失を追記
 新規 [[cosense-fetch-rate-limit]]: hosted 429 は分オーダーで回復・~57連続=0失敗・Retry-After非露出→_run_json blind 指数backoff retry。862p の private project が retry で0失敗完走
 [[sqlite-write-concurrency]] Updates: busy_timeout/WAL は 1.7.39 で導入済(30s)だが大 namespace-replace write が超過し、acquire は lock 負けで fetch 済み全喪失(2026-08-28 別 session の大規模 acquire chain と衝突)
 
@@ -2101,3 +2101,13 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - ops: `git filter-repo --replace-text --replace-message` で全 history（524 commit）から private hosted project 名を除去し、force push。public project 名は保持。現行 tree の内容は書き換え前と **同一 tree hash** で、SQLite store / projection は無影響（`write-status --no-journal --strict` green）。
 - 副作用: 最初の書き換え対象以降の commit SHA が全て変わり、(a) [[git-history-replay]] corpus の pin していた 8 SHA が fixture unavailable で skip（6 件）、(b) wiki 内の commit 参照 50 箇所が dangling になった。filter-repo の `.git/filter-repo/commit-map` で両方を機械的に張り替え、tests は 395 passed に復帰。
 - 教訓: **history 書き換えは wiki の provenance 参照と replay fixture を道連れにする**。commit SHA を source of truth として wiki に書く運用と、history を書き換えうる運用は衝突する。次に書き換える時も commit-map での張り替えを同じ作業単位に含める。
+
+## [2026-11-03 02:07] lint+file back | Wiki と現状の食い違いを修正（pipx 導線・PyPI 名衝突・1.14.3 の反映漏れ・dangling SHA・壊れたリンク）
+- 現実との食い違い: commit `2e8b895`（README / SKILL を pipx 推奨に）は wiki に未反映だった。[[grasp-v1-implemented]] の delivery に install 導線を追記、[[language-and-distribution]] に `## Updates`（PyPI の `grasp` は別 project で衝突確定＝決定 2 の `pipx install grasp` はそのままでは別物を入れる、repo からの pipx install が README 推奨）を追記し Open Q に注記、[[grasp-backlog]] Packaging の 2 項目を現状に合わせた。PyPI 側は JSON API で `grasp` 0.3.2（別 author）を確認。
+- [[cosense-fetch-rate-limit]] の Updates は「503 は retry されない」のままだった。`1.14.3`（commit `e6c4e62`）で transient 5xx retry 実装済みである旨と、残りの connection-level transient を追記。summary と index の該当行にも 5xx 拡張を注記。
+- dangling SHA: 429 retry の commit 参照 `55240a7` はどの ref からも引けない。cosense_cli.py に 429 retry を入れた commit は `f4ca686`（file back `df4517c` の親、`RateLimitRetryTest` / `GRASP_COSENSE_MAX_RETRIES` を含む）なので、concept・index・本 log の参照を張り替えた。
+- [[related-confidence-tiering-plan]] の code locus を現行行番号へ更新（`cli.py:664`→`685` `--related-limit`、`:10505`→`10541` `format_related_items`、`:809`→`830` related verb。`9437282` の `read --refresh` 追加でずれた）。`cosense.py:604/610/636` は不変。
+- [[grasp-backlog]]: 実装済みの「external hosted line-id persistence」（`1.14.0`）を削除し、「transient 5xx の retry」を残課題の connection-level transient retry に書き換えた（current facts は [[grasp-v1-implemented]] に既にある）。
+- 壊れたリンク: [[parallel-write-stress-remeasure-2026-08-24]] の `[[grasp vs grep 偽陰性 A/B]]` をプレーン文字列に（直後に実体 page へのリンクがある）。lint の壊れたリンク 1→0。
+- direct Markdown patch fallback: この作業は別 session が使っている checkout の外（git worktree）で行い、gitignored の `.grasp/file-back.sqlite` は worktree に無く、共有 store に書くと他 session と衝突しうるため grasp write first を使わなかった。merge 後に `reconcile-markdown --dry-run` で SQLite authority へ取り込む必要がある。
+- 未処理: [[parallel-agent-write-incident-2026-06-26]] の commit `6c166af` も dangling だが、対応する commit を一意に特定できないので残した。
