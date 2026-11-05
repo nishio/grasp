@@ -50,6 +50,11 @@ class MarkdownParsingTests(unittest.TestCase):
             ["Board Rev.2 design", "v1.5 notes", "Ver.3 plan"],
         )
 
+    def test_parse_markdown_links_ignores_attachment_wikilinks(self):
+        text = "![[Diagram.png]] [[raw/scan.PDF]] ![[clip.mp4|320]] ![[Note]] [[Spec v1.2]]"
+
+        self.assertEqual(parse_markdown_links(text), ["Note", "Spec v1.2"])
+
     def test_markdown_mirror_skips_fenced_code_links(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
