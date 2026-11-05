@@ -858,7 +858,24 @@ def parse_markdown_line_link_targets(
 def parse_markdown_hash_tag(text: str, start: int) -> tuple[str, int] | None:
     if start >= 2 and text[start - 1] == "(" and text[start - 2] == "]":
         return None
-    return parse_cosense_hash_tag(text, start)
+    parsed = parse_cosense_hash_tag(text, start)
+    if parsed is None:
+        return None
+    # Unlike Cosense, Markdown (Obsidian) tags end at punctuation, so
+    # "#tag、text" is the tag "tag" and "#,text" is not a tag at all.
+    tag, _ = parsed
+    end = len(tag)
+    for index, char in enumerate(tag):
+        if char not in MARKDOWN_TAG_PUNCTUATION_ALLOWED and unicodedata.category(char).startswith("P"):
+            end = index
+            break
+    tag = tag[:end]
+    if not tag:
+        return None
+    return tag, start + 1 + len(tag)
+
+
+MARKDOWN_TAG_PUNCTUATION_ALLOWED = frozenset("_-/")
 
 
 def markdown_wikilink_target(content: str) -> str | None:

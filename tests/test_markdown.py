@@ -55,6 +55,11 @@ class MarkdownParsingTests(unittest.TestCase):
 
         self.assertEqual(parse_markdown_links(text), ["Note", "Spec v1.2"])
 
+    def test_parse_markdown_links_ends_tags_at_punctuation(self):
+        text = "#3の具体化。詳細は #tag、次 #a/b-c_d. Customer #,Description #タグ"
+
+        self.assertEqual(parse_markdown_links(text), ["3の具体化", "tag", "a/b-c_d", "タグ"])
+
     def test_markdown_mirror_skips_fenced_code_links(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
