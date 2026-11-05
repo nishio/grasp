@@ -42,6 +42,14 @@ class MarkdownParsingTests(unittest.TestCase):
             ["Page", "Page", "Other", "Embed", "Std", "Block", "Space Page", "tag", "2024"],
         )
 
+    def test_parse_markdown_links_keeps_dots_in_page_names(self):
+        text = "[[Board Rev.2 design]] [[Folder/v1.5 notes.md#Heading]] [std](Ver.3%20plan.md)"
+
+        self.assertEqual(
+            parse_markdown_links(text),
+            ["Board Rev.2 design", "v1.5 notes", "Ver.3 plan"],
+        )
+
     def test_markdown_mirror_skips_fenced_code_links(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

@@ -927,8 +927,12 @@ def markdown_inline_link_target(destination: str) -> MarkdownLinkTarget | None:
 
 
 def markdown_path_link_target(path_text: str) -> str | None:
-    path = Path(path_text)
-    target = path.stem.strip()
+    # Only a trailing ".md" is a file extension here. Page names may contain
+    # dots ("Rev.2 design"), so Path.stem would truncate them.
+    target = Path(path_text).name
+    if target.casefold().endswith(".md"):
+        target = target[: -len(".md")]
+    target = target.strip()
     return target or None
 
 
