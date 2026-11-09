@@ -215,6 +215,7 @@ Scrapbox 互換では `#1` は link として成立する。したがって pars
 - **attachment embed は edge にしない**。上の Obsidian compatibility scope で「要検討」としていた `![[embed]]` は、target が画像・音声・動画・PDF の拡張子を持つ時は file 参照であって page 参照ではない、として edge から外す。note embed `![[Note]]` は従来どおり edge。2026-06-25 correction の「link-shaped expression は parser で捨てず annotation で弱める」方針とは矛盾しない: `#1` は page 参照として成立しうる（`#1` という page は作れる）が、`Diagram.png` は vault 内の file であり、page として materialize されることが無いため、unresolved concept hub に出ても常に noise になる。拡張子リスト外（`.csv` / `.canvas` 等）は実害が出てから足す。
 - **page 名のドットは保持する**。拡張子として落とすのは末尾 `.md` だけ。Markdown page title は file stem 由来でもドットを含みうるため、link 側だけ `Path.stem` で切るのは非対称だった。
 - **Markdown の `#tag` は punctuation で終わる**（Obsidian 準拠、`_` `-` `/` は許可）。Cosense の「whitespace まで」規則を Markdown に流用していたため、日本語本文や CSV header で偽 tag が出ていた。Cosense の hashtag 規則は Scrapbox 互換のまま変えない。
+  - 既知の挙動差（受容）: Cosense では `#1.2` は `1.2` へのリンクになるが、Markdown では `.` で切れて `1` になる（`#v1.2` → `v1` も同様）。同じ文字列が parser によって別 target になるが、**困るという声が実際に出るまで、数字ドットの例外などを先回りして実装しない**（nishio 2026-11-09）。Markdown 側は Obsidian の tag 規則に合わせることを優先する。
 
 ## Open Questions
 

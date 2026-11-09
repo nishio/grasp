@@ -2121,3 +2121,6 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - 検証: PR branch で `python3 -m unittest discover -s tests` 398 tests OK。この repo の `wiki/` 全 `.md` で `parse_markdown_links` を merge 前後比較し、差分は 4 page の hashtag target が全角括弧以降を含まなくなっただけ（例 `2（takker99）を` → `2`）。
 - file back: [[grasp-v1-implemented]] の Markdown mirror facts に 3 規則を追記。[[markdown-obsidian-indexed-mirror]] の「`![[embed]]` を edge にするか要検討」を決定済みにし、`#1` annotation 方針と矛盾しない理由を Update に記録。[[grasp-backlog]] に `mentions` の `_line_internal_link_spans` が Markdown 行でも Cosense hashtag 規則で span を取る食い違いを追加。
 - store: この checkout には `.grasp/file-back.sqlite` が無かったため preflight が現 Markdown から fresh bootstrap した。これにより [2026-11-03 02:07] / [2026-11-03 04:10] の direct Markdown patch 分も SQLite authority に取り込まれた（reconcile 待ちは解消）。
+
+## [2026-11-09 13:55] decision | Markdown と Cosense の hashtag のドットの扱いの違いを受容し、先回り実装しない
+- Cosense では `#1.2` は `1.2` へのリンクだが、PR #111 以降の Markdown では `1` になる。nishio 判断: この挙動差は既知として受容し、困るという意見が出るまで数字ドットの例外などを先回りで実装しない。[[markdown-obsidian-indexed-mirror]] の 2026-11-09 Update に追記。
