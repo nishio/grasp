@@ -858,7 +858,24 @@ def parse_markdown_line_link_targets(
 def parse_markdown_hash_tag(text: str, start: int) -> tuple[str, int] | None:
     if start >= 2 and text[start - 1] == "(" and text[start - 2] == "]":
         return None
-    return parse_cosense_hash_tag(text, start)
+    parsed = parse_cosense_hash_tag(text, start)
+    if parsed is None:
+        return None
+    # Unlike Cosense, Markdown (Obsidian) tags end at punctuation, so
+    # "#tag、text" is the tag "tag" and "#,text" is not a tag at all.
+    tag, _ = parsed
+    end = len(tag)
+    for index, char in enumerate(tag):
+        if char not in MARKDOWN_TAG_PUNCTUATION_ALLOWED and unicodedata.category(char).startswith("P"):
+            end = index
+            break
+    tag = tag[:end]
+    if not tag:
+        return None
+    return tag, start + 1 + len(tag)
+
+
+MARKDOWN_TAG_PUNCTUATION_ALLOWED = frozenset("_-/")
 
 
 def markdown_wikilink_target(content: str) -> str | None:
@@ -873,6 +890,8 @@ def markdown_wikilink_link_target(content: str) -> MarkdownLinkTarget | None:
     if not raw_target:
         return None
     path_part, separator, fragment_part = raw_target.partition("#")
+    if is_markdown_attachment_target(path_part):
+        return None
     fragment = unquote(fragment_part).strip() if separator else None
     title = markdown_path_link_target(path_part) if path_part.strip() else ""
     if not title and not fragment:
@@ -926,9 +945,31 @@ def markdown_inline_link_target(destination: str) -> MarkdownLinkTarget | None:
     return MarkdownLinkTarget(title=title, fragment=fragment)
 
 
+MARKDOWN_ATTACHMENT_EXTENSIONS = frozenset(
+    {
+        # images
+        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".svg", ".webp", ".avif", ".tif", ".tiff", ".ico",
+        # audio / video
+        ".mp3", ".wav", ".m4a", ".ogg", ".flac", ".webm", ".mp4", ".mkv", ".mov", ".ogv",
+        # documents
+        ".pdf",
+    }
+)
+
+
+def is_markdown_attachment_target(path_text: str) -> bool:
+    # [[image.png]] / ![[image.png]] point at an attachment file, not a page.
+    # Note embeds such as ![[Note]] stay page links.
+    return Path(path_text.strip()).suffix.casefold() in MARKDOWN_ATTACHMENT_EXTENSIONS
+
+
 def markdown_path_link_target(path_text: str) -> str | None:
-    path = Path(path_text)
-    target = path.stem.strip()
+    # Only a trailing ".md" is a file extension here. Page names may contain
+    # dots ("Rev.2 design"), so Path.stem would truncate them.
+    target = Path(path_text).name
+    if target.casefold().endswith(".md"):
+        target = target[: -len(".md")]
+    target = target.strip()
     return target or None
 
 
