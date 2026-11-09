@@ -63,7 +63,7 @@ grasp related "Some Note"
 - `[[Page]]`
 - `[[Page|alias]]`
 - `[[Page#Heading]]`
-- `![[embed]]`（edge として扱うかは要検討）
+- `![[embed]]`（edge として扱うかは要検討 → 2026-11-09 決定: note embed は edge、attachment embed は edge にしない。下記 Update 参照）
 - frontmatter `aliases`, `tags`, 可能なら `id`
 - `#tag`
 - filename と title の衝突
@@ -207,6 +207,14 @@ grasp における実装含意:
 grasp wiki dogfood で `log.md` が graph を汚すことと、`PR #2` / `Open Q #4` のような `#1` 系が hashtag edge になることを同一視しかけたが、これは別問題。log / navigation artifact handling は **page/file の役割**の問題で、`#1` は **link-shaped expression が意味のある概念リンクか**の問題。
 
 Scrapbox 互換では `#1` は link として成立する。したがって parser が捨てるのではなく、edge を保持した上で system / LLM / human が「意味リンクではない」「issue number / ordinal reference」などの annotation を付け、retrieval ranking や unresolved concept hub から弱める方針が正しい。これは [[grasp-backlog]] の link-shaped but non-semantic edge annotation に積む。
+
+### 2026-11-09 update: attachment embed / ドット入り page 名 / Markdown hashtag 境界
+
+外部 contributor（uchan-nos）の Obsidian vault（約 60 page）import で見つかった parser bug 3 件を PR #111 として merge した（`b89fdf2`）。報告者の vault で unresolved targets 24→5、主要設計 page の backlinks 0→18。current facts は [[grasp-v1-implemented]] の Markdown mirror facts。
+
+- **attachment embed は edge にしない**。上の Obsidian compatibility scope で「要検討」としていた `![[embed]]` は、target が画像・音声・動画・PDF の拡張子を持つ時は file 参照であって page 参照ではない、として edge から外す。note embed `![[Note]]` は従来どおり edge。2026-06-25 correction の「link-shaped expression は parser で捨てず annotation で弱める」方針とは矛盾しない: `#1` は page 参照として成立しうる（`#1` という page は作れる）が、`Diagram.png` は vault 内の file であり、page として materialize されることが無いため、unresolved concept hub に出ても常に noise になる。拡張子リスト外（`.csv` / `.canvas` 等）は実害が出てから足す。
+- **page 名のドットは保持する**。拡張子として落とすのは末尾 `.md` だけ。Markdown page title は file stem 由来でもドットを含みうるため、link 側だけ `Path.stem` で切るのは非対称だった。
+- **Markdown の `#tag` は punctuation で終わる**（Obsidian 準拠、`_` `-` `/` は許可）。Cosense の「whitespace まで」規則を Markdown に流用していたため、日本語本文や CSV header で偽 tag が出ていた。Cosense の hashtag 規則は Scrapbox 互換のまま変えない。
 
 ## Open Questions
 
