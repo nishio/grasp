@@ -2064,7 +2064,7 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 ## [2026-08-24 16:39] file-back | throughput 測定：並行 write は直列化されず~5.2×並列、lease 不要（Open Q1/Q2 解決）
 - [[parallel-write-stress-remeasure-2026-08-24]]: 10コアで 8 writer=~5.2× 実スループット（full 28 / defer 49 w/s）、消失0。defer の median latency 横ばい(103→117ms)＝SQLite write は律速でない。直列成分は cold-start と全 projection export のみで単一書き手ロックではない。claim-page lease は安全にもスループットにも不要＝役割は in-flight 可視化のみ。実装指針：高並行は --defer-projection＋batch export。
 
-## [2026-08-31 22:41] file back | Cosense fetch の 429 rate-limit 実測+mitigation(commit 55240a7) を新 concept 化、write-concurrency に cross-session lock 全喪失を追記
+## [2026-08-31 22:41] file back | Cosense fetch の 429 rate-limit 実測+mitigation(commit f4ca686) を新 concept 化、write-concurrency に cross-session lock 全喪失を追記
 新規 [[cosense-fetch-rate-limit]]: hosted 429 は分オーダーで回復・~57連続=0失敗・Retry-After非露出→_run_json blind 指数backoff retry。862p の private project が retry で0失敗完走
 [[sqlite-write-concurrency]] Updates: busy_timeout/WAL は 1.7.39 で導入済(30s)だが大 namespace-replace write が超過し、acquire は lock 負けで fetch 済み全喪失(2026-08-28 別 session の大規模 acquire chain と衝突)
 
@@ -2101,3 +2101,26 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - ops: `git filter-repo --replace-text --replace-message` で全 history（524 commit）から private hosted project 名を除去し、force push。public project 名は保持。現行 tree の内容は書き換え前と **同一 tree hash** で、SQLite store / projection は無影響（`write-status --no-journal --strict` green）。
 - 副作用: 最初の書き換え対象以降の commit SHA が全て変わり、(a) [[git-history-replay]] corpus の pin していた 8 SHA が fixture unavailable で skip（6 件）、(b) wiki 内の commit 参照 50 箇所が dangling になった。filter-repo の `.git/filter-repo/commit-map` で両方を機械的に張り替え、tests は 395 passed に復帰。
 - 教訓: **history 書き換えは wiki の provenance 参照と replay fixture を道連れにする**。commit SHA を source of truth として wiki に書く運用と、history を書き換えうる運用は衝突する。次に書き換える時も commit-map での張り替えを同じ作業単位に含める。
+
+## [2026-11-03 02:07] lint+file back | Wiki と現状の食い違いを修正（pipx 導線・PyPI 名衝突・1.14.3 の反映漏れ・dangling SHA・壊れたリンク）
+- 現実との食い違い: commit `2e8b895`（README / SKILL を pipx 推奨に）は wiki に未反映だった。[[grasp-v1-implemented]] の delivery に install 導線を追記、[[language-and-distribution]] に `## Updates`（PyPI の `grasp` は別 project で衝突確定＝決定 2 の `pipx install grasp` はそのままでは別物を入れる、repo からの pipx install が README 推奨）を追記し Open Q に注記、[[grasp-backlog]] Packaging の 2 項目を現状に合わせた。PyPI 側は JSON API で `grasp` 0.3.2（別 author）を確認。
+- [[cosense-fetch-rate-limit]] の Updates は「503 は retry されない」のままだった。`1.14.3`（commit `e6c4e62`）で transient 5xx retry 実装済みである旨と、残りの connection-level transient を追記。summary と index の該当行にも 5xx 拡張を注記。
+- dangling SHA: 429 retry の commit 参照 `55240a7` はどの ref からも引けない。cosense_cli.py に 429 retry を入れた commit は `f4ca686`（file back `df4517c` の親、`RateLimitRetryTest` / `GRASP_COSENSE_MAX_RETRIES` を含む）なので、concept・index・本 log の参照を張り替えた。
+- [[related-confidence-tiering-plan]] の code locus を現行行番号へ更新（`cli.py:664`→`685` `--related-limit`、`:10505`→`10541` `format_related_items`、`:809`→`830` related verb。`9437282` の `read --refresh` 追加でずれた）。`cosense.py:604/610/636` は不変。
+- [[grasp-backlog]]: 実装済みの「external hosted line-id persistence」（`1.14.0`）を削除し、「transient 5xx の retry」を残課題の connection-level transient retry に書き換えた（current facts は [[grasp-v1-implemented]] に既にある）。
+- 壊れたリンク: [[parallel-write-stress-remeasure-2026-08-24]] の `[[grasp vs grep 偽陰性 A/B]]` をプレーン文字列に（直後に実体 page へのリンクがある）。lint の壊れたリンク 1→0。
+- direct Markdown patch fallback: この作業は別 session が使っている checkout の外（git worktree）で行い、gitignored の `.grasp/file-back.sqlite` は worktree に無く、共有 store に書くと他 session と衝突しうるため grasp write first を使わなかった。merge 後に `reconcile-markdown --dry-run` で SQLite authority へ取り込む必要がある。
+- 未処理: [[parallel-agent-write-incident-2026-06-26]] の commit `6c166af` も dangling だが、対応する commit を一意に特定できないので残した。
+
+## [2026-11-03 04:10] lint+file back | 査読の見落とし分を修正（hosted REST metadata enrichment の対象を現状に絞る）
+- [[grasp-backlog]] Sync freshness 節の「hosted REST metadata enrichment」は、保存範囲を決める対象に stable `lines[].id` を挙げたままだった。`1.14.0`（commit `7f4e758`、schema v14）で `lines.external_line_id` として保存済み（[[grasp-v1-implemented]] の schema / sync 節）なので対象から外し、その旨を同じ項目に注記した。残る対象は `commitId` / `links` / `projectLinks` / `icons` / `linked` / `pageRank` / `accessed` / `relatedPages`。`commitId` は `refresh_page_from_cosense` の result（`remote.commit_id`）に出るだけで store には保存していないことも併記。
+- direct Markdown patch fallback（前回 [2026-11-03 02:07] と同じ理由: worktree に `.grasp/file-back.sqlite` が無く、共有 store は別 session が使いうる）。merge する側は、前回分（grasp-v1-implemented / language-and-distribution / grasp-backlog / cosense-fetch-rate-limit / index / related-confidence-tiering-plan / parallel-write-stress-remeasure-2026-08-24 / log）と今回分（grasp-backlog / log）を合わせて、次の `write-page` / `export-markdown` より前に `reconcile-markdown --dry-run` で SQLite authority へ取り込むこと。先に write / export が走ると projection export がこれらの直接修正を上書きしうる。
+
+## [2026-11-09 13:50] merge+file back | PR #111（外部 contributor）の Markdown link parsing 修正を merge し current facts へ反映
+- merge: uchan-nos の PR #111 を merge commit `b89fdf2` で main へ。3 commit は独立: `8169df5`（wikilink target のドットを保持、末尾 `.md` だけ落とす）/ `4e00442`（attachment 拡張子の wikilink / embed を edge にしない）/ `2b9d96e`（Markdown `#tag` を Unicode punctuation で終える、`_` `-` `/` は許可）。報告者の Obsidian vault で unresolved targets 24→5。
+- 検証: PR branch で `python3 -m unittest discover -s tests` 398 tests OK。この repo の `wiki/` 全 `.md` で `parse_markdown_links` を merge 前後比較し、差分は 4 page の hashtag target が全角括弧以降を含まなくなっただけ（例 `2（takker99）を` → `2`）。
+- file back: [[grasp-v1-implemented]] の Markdown mirror facts に 3 規則を追記。[[markdown-obsidian-indexed-mirror]] の「`![[embed]]` を edge にするか要検討」を決定済みにし、`#1` annotation 方針と矛盾しない理由を Update に記録。[[grasp-backlog]] に `mentions` の `_line_internal_link_spans` が Markdown 行でも Cosense hashtag 規則で span を取る食い違いを追加。
+- store: この checkout には `.grasp/file-back.sqlite` が無かったため preflight が現 Markdown から fresh bootstrap した。これにより [2026-11-03 02:07] / [2026-11-03 04:10] の direct Markdown patch 分も SQLite authority に取り込まれた（reconcile 待ちは解消）。
+
+## [2026-11-09 13:55] decision | Markdown と Cosense の hashtag のドットの扱いの違いを受容し、先回り実装しない
+- Cosense では `#1.2` は `1.2` へのリンクだが、PR #111 以降の Markdown では `1` になる。nishio 判断: この挙動差は既知として受容し、困るという意見が出るまで数字ドットの例外などを先回りで実装しない。[[markdown-obsidian-indexed-mirror]] の 2026-11-09 Update に追記。

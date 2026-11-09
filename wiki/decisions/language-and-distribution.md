@@ -75,7 +75,15 @@ grasp 固有の事実が判断を決める: **真のユーザは当面 nishio + 
 
 ## Open Questions
 
-- PyPI 公開時の package 名（`grasp` は PyPI で衝突しうる）・console script 名の衝突回避。
+- PyPI 公開時の package 名（`grasp` は PyPI で衝突しうる）・console script 名の衝突回避。→ 2026-11-03: 衝突は確定（下の `## Updates`）。別名の選定は未決。
 - user-level skill（`~/.claude/skills/grasp/`）化（[[delivery-cli-plus-skill]] Open Q）と PyPI 配布の install 順序関係。Skill symlink を pip/pipx の data_files で配れるか。
 - `search` の 178ms を index で詰める（FTS5 hybrid, [[fts5-trigram-search]]）のは言語選択と独立に効く — native 化より優先順位が高い可能性。
 - trigger (b)（Python 不可環境）が現実に起きるか。Codex / Claude Code はいずれも Python を前提にできる環境か、要観察。
+
+## Updates
+
+### 2026-11-03: PyPI の `grasp` は別 project。repo からの pipx install を README の推奨にした
+
+- **package 名の衝突は「しうる」でなく確定**: PyPI の `grasp` は無関係な別 author の project（PyPI JSON API で確認: `grasp` 0.3.2、summary「Useful introspection tools.」）。∴ 決定 2 と配布チャネル表の `pipx install grasp` は、そのままでは**別物を入れる**。PyPI に出すなら別の distribution 名が要る（未決, [[grasp-backlog]] Packaging）。決定 2 の方針（PyPI → pipx で案内、素の pip にしない）自体は変えない。
+- **決定 1 の「git から `pipx install`」は README の推奨手順になった**: README / README.ja は `pipx install -e .`（clone 済み）と `pipx install git+https://github.com/nishio/grasp.git` を第一の導線にし、素の `pip install -e .` は自分で管理する venv の中だけ可とした。`skills/grasp/SKILL.md` も pipx 前提に揃え、agent に `pipx install grasp` を使わないよう警告する（commit `2e8b895`、PyPI 衝突の警告は commit `3de1a53`）。
+- PEP 668 の実害（表の「素の `pip` は弾かれる」）は Ubuntu 26.04（system Python 3.14, externally-managed）で再確認された。`python3 -m venv` も `python3-venv` が入るまで失敗する（commit `2e8b895` の message）。

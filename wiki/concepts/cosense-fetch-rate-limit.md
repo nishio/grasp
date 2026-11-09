@@ -1,6 +1,6 @@
 ---
 type: concept
-summary: hosted Cosense は rapid read を HTTP 429 で絞る。cosense CLI は "HTTP 429" テキストのみで Retry-After 非露出。実測(2026-08)はリセット分オーダー(token-bucket的)・fresh window で ~57 連続 fetch は 0 失敗・数百連打で通過率20-33%。mitigation は `_run_json` の 429 検知＋指数backoff retry (commit 55240a7, env GRASP_COSENSE_*)。scope=retry-only で pacing と sync 部分コミットは未実装。
+summary: hosted Cosense は rapid read を HTTP 429 で絞る。cosense CLI は "HTTP 429" テキストのみで Retry-After 非露出。実測(2026-08)はリセット分オーダー(token-bucket的)・fresh window で ~57 連続 fetch は 0 失敗・数百連打で通過率20-33%。mitigation は `_run_json` の 429 検知＋指数backoff retry (commit f4ca686, env GRASP_COSENSE_*)、`1.14.3` で transient 5xx（502/503/504）にも拡張。scope=retry-only で pacing と sync 部分コミットは未実装。
 sources:
   - grasp/cosense_cli.py
   - tests/test_cosense_cli.py
@@ -24,7 +24,7 @@ title: cosense-fetch-rate-limit
 - 安全域 ≈ **1 バースト 50-60 件 + パス間 2-3 分** ≒ 20-25 req/min。この刻みなら 429 を踏まずに完走できた。
 - **cosense CLI は `Retry-After` を露出しない** — grasp が見えるのは stderr の "HTTP 429" 文字列だけ。∴ 正確な待機秒は読めず、盲目的 (blind) 指数 backoff にするしかない。
 
-## Mitigation (実装済み, commit 55240a7)
+## Mitigation (実装済み, commit f4ca686)
 
 全 hosted read が通る choke-point `_run_json` ([grasp/cosense_cli.py](grasp/cosense_cli.py)) に 429 retry を一枚噛ませた。listPages / readPage / searchFullText 全経路を通るので **sync も acquire も refresh-page も**この一箇所で救われる。
 
@@ -46,6 +46,7 @@ title: cosense-fetch-rate-limit
 - **2026-09-09 実測（15,311 page の外部 project, `acquire --full-list`）** — proactive pacing を grasp 外の `--cosense-command` wrapper で実装して測定した。1.2s 間隔（~50/min）で開始し、429 を受けるたび +0.5s、成功 50 連続で -0.05s する adaptive 制御。間隔は 2.3-3.0s に収束し、**実効 21.1 req/min・12.16h で完走**。上の安全域見積り「20-25 req/min」を追認する。
 - **pacing が買うのは throughput ではなく信頼性** — pacing 無しで素の速度（~67/min）から走った 2026-08-25 の同 project も実効 21/min だった。∴ ~21/min はこの project の天井で、投げ方の工夫では縮まない。一方 pacing + wrapper retry により `failed: 0`（pacing 無しの回は恒久失敗 1 件 + 429 error event 605 件）。
 - **429 だけでなく transient 5xx も吸収が要る** — `_run_json` の retry は `rate-limited` class のみで、**HTTP 503 は retry されない**。2026-09-08 の 5.5k page 規模の外部 project `acquire` は 503 で 35 page を失った。`acquire` は namespace 置換なので、この 35 page を埋めるには 5,500 page の再取得が要る。wrapper 側で 502/503/504 も retry したところ 15,311 page で 0 失敗。`classify_cosense_cli_failure` の retryable class に transient 5xx を足すのが backlog 候補。
+- **2026-11-03 追記: transient 5xx retry は `1.14.3`（commit `e6c4e62`）で実装済み** — 上の項の「503 は retry されない」は 1.14.3 より前の状態。現行の `classify_cosense_cli_failure` は HTTP 502 / 503 / 504（と bad gateway / service unavailable / gateway timeout）を `transient-server-error` class として返し、`_run_json` は `RETRYABLE_ERROR_CLASSES` = {`rate-limited`, `transient-server-error`} を同じ指数 backoff で retry する（`grasp/cosense_cli.py`）。残る穴は connection-level transient（`socket hang up` / `ECONNRESET`）で、これは `command-failed` のまま retry されない（[[grasp-backlog]] の acquire 節）。proactive pacing と sync の部分コミットは引き続き未実装。
 
 ## 関連
 
