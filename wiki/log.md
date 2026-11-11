@@ -2124,3 +2124,8 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 
 ## [2026-11-09 13:55] decision | Markdown と Cosense の hashtag のドットの扱いの違いを受容し、先回り実装しない
 - Cosense では `#1.2` は `1.2` へのリンクだが、PR #111 以降の Markdown では `1` になる。nishio 判断: この挙動差は既知として受容し、困るという意見が出るまで数字ドットの例外などを先回りで実装しない。[[markdown-obsidian-indexed-mirror]] の 2026-11-09 Update に追記。
+
+## [2026-11-11 16:35] file back | [[monika]] を新設し、Monika v0.1.0 の実装を grasp の未決4つの参照実装として整理
+- [[monika]]（entities）: 川端薫の Monika（`KijitoraFinch/Monika` v0.1.0）を local clone で読み、grasp 側の示唆を4つに絞った。stable line identity の外側（ID を振れない対象は意味のセレクタ＋content 比較、Link ごとに見直す）／typed link の法則と検査器／辺の注釈は Sidecar の自由 JSON／Resource ごとの鮮度方針。逆引きをパイプで組む点は grasp と逆の選択として対照に置いた。
+- [[grasp-backlog]] 末尾に Updates: 2026-11-11 を追加（4項目、実装方針の決定ではなく参照）。index.md entities 表に1行。
+- 起点: monika-mentoring-wiki のセッションで西尾「この実装が grasp に参考になるところはある？」→「grasp との比較は grasp の wiki に」。local の codex/gyazo-local-media は origin/main と分岐していたため、origin/main から worktree（branch docs/monika-comparison）を切って write-first で実行。

@@ -320,3 +320,12 @@ Open Questions:
 - PyPI 経由の `pipx install` 配布導線。repo からの導線（`pipx install -e .` / `pipx install git+https://github.com/nishio/grasp.git`）は README / README.ja / `skills/grasp/SKILL.md` に記載済み（commit `2e8b895`）。
 - user-level Skill symlink と package install の統合。
 - Python 不可 agent 環境が現実化した場合の native binary 配布。
+
+## Updates: 2026-11-11 Monika との比較
+
+[[monika]]（川端薫、`KijitoraFinch/Monika` v0.1.0）の実装を読み、grasp の未決に効く所を整理した。実装方針の決定ではなく、次に判断する時の参照実装として置く。
+
+- **stable line identity の外側**: grasp が所有しない対象（コード・外部文書）は ID を mint できない。Monika は意味のセレクタ＋Capture の `content` 比較で同定し、変わった Link ごとに見直す。grasp wiki の current facts → 実装関数への Capture 付きリンクで陳腐化を検出する dogfood 候補。
+- **typed / directional link**: contains / part_of を入れるなら、Monika の EXTENSIONS.md のように法則（同値関係・半順序、`incomparable` と失敗の区別）を契約に書き、`extension test` 相当の検査（反対称 ⇒ 循環禁止）を同時に持つ。
+- **non-semantic edge annotation**: Monika は注釈を Sidecar の自由 JSON に置き、Core は等値（重複検出）しか解釈しない。raw edge 不変・注釈は別テーブル・provenance は注釈 field、の形の参照例。
+- **Sync freshness の read 以外への反映**: Monika は Resource ごとに `observe`／`refreshed` を設定で宣言し、全操作に同じく効かせる。操作ごとのフラグを増やす代わりに source ごとの方針宣言にする案。
