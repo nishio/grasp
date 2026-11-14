@@ -2124,3 +2124,8 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 
 ## [2026-11-09 13:55] decision | Markdown と Cosense の hashtag のドットの扱いの違いを受容し、先回り実装しない
 - Cosense では `#1.2` は `1.2` へのリンクだが、PR #111 以降の Markdown では `1` になる。nishio 判断: この挙動差は既知として受容し、困るという意見が出るまで数字ドットの例外などを先回りで実装しない。[[markdown-obsidian-indexed-mirror]] の 2026-11-09 Update に追記。
+
+## [2026-11-14 13:55] file back | Cosense の名前の正規化（空白→_）と grasp の差を記録し、数字のみ [1] の古い記述を直す
+- [[cosense-json-export]] gotcha 3: 「数字のみ `[1]` を link から除外」は `1.5.0` 以降の実装（internal link として拾う）と食い違ったまま残っていた（[2026-06-23] の lint が指摘済み）。`parse_cosense_links` で確認して current facts に直した。
+- [[cosense-json-export]] gotcha 5 に訂正、Update (2026-11-14)、Open Question を追加: Cosense の `linksLc` / `titleLc` は小文字化 ＋ 空白→`_`（`@helpfeel/cosense-cli` の `toTitleLc` と `readPage` help）。grasp の `normalize_title` は `_` と空白を同一視しない。手元の別 project の export（3536 pages、本文のリンク 33857 本）で、Cosense の規則なら解決し grasp では unresolved になるリンクは 10 本（distinct 9 名前）、逆向きは 0 本。nishio project は未計測。
+- 実装は変えていない。`_` と空白を同一視するかは Open Question として残した（store generation と既存 handle の解決が変わるため、判断は nishio）。
