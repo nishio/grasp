@@ -117,6 +117,8 @@ v1 stable surface は read line。Markdown-backed `append-log` / `write-page` / 
 
 2026-07-02 implementation update: `claim-page` を preflight 前に置く通常 file-back route は `1.8.81` で実装済み。preflight の session uniqueness guard は、同じ session に既存 event があっても、それが未解放・未期限切れの `page_claim` だけなら正規 continuation として許可し、その claim 後の latest SQLite event_sequence を stamp baseline にする。`check_file_back_write_start.py` はその baseline から event_sequence が増えていないことを従来通り検査するため、claim 後・write 前の別 writer は止まる。temp dogfood と本 repo default store の両方で `activity` / `claim-page` / preflight / write-start / `write-page` / `append-log` / postwrite / `revert-plan --scope session` を direct Markdown patch なしで通した。残る P3 friction は、feature branch continuation で upstream が無い時に `--base HEAD` を明示する必要があること。
 
+2026-09-30 P3 dogfood finding（root cause 特定）: 上の「残る P3 friction＝`--base HEAD` を明示する必要」は upstream 未設定 feature branch 固有ではなく、`scripts/check_file_back_preflight.py` の `base_divergence_errors` が **ahead-only を diverged と区別しない**ことが根。`git log --left-right --cherry-pick {base}...HEAD` の出力が空でなければ一律 `branch differs from {base}` で停止するため、(a) upstream 無し feature branch（auto→origin/main、local commit が ahead）、(b) **未 push で local `main` が `origin/main` より ahead**（[log](log.md) の direct-patch fallback 2026-06 に複数例、`366fd62` / `1163d3e` ahead で停止）の両方で誤停止する。`1.8.41` の `--base auto`（upstream 優先）は base の *解決* を直したが、ahead-only の *判定* は未修正のまま。この concept file-back session（human-harness × grasp）でも1回目 commit 後の2回目 preflight が同因で停止し `--base HEAD` で回避、さらに本 finding 自体の file-back も upstream 無し branch の ahead-only 2 commits で default preflight が停止し `--base HEAD` を要した（live 再現）。修正候補: `base_divergence_errors` を left-right marker parse にし、`<`（base 側にあり HEAD に無い commit＝behind/diverged）が1つでもある時だけ fail、`>` のみ（ahead-only）は pass にする。これで (a)(b) 両方の `--base HEAD` / direct-patch fallback 摩擦が消え、真の diverged（rebase / force-push / 別 agent の base commit 取り込み）は従来通り止まる。`--skip-base-check` は残すが通常運用に要らなくなる。
+
 **リンクは1種類でない**（Cosense は両方を単一 `[X]` に束ねたのが hub 膨張の根、原理 [[come-from-declared-gather]]）。write/identity 層は2型を別 first-class object としてモデル化する:
 
 - **felt-sense link** — 行キー・sparse・per-occurrence・著者の retrieval 意図（edge）。下記 stable line-id 層に乗る。
@@ -265,11 +267,11 @@ line-id のローカル別名（text で `P1:0`、`--json` / `--full-ids` で完
 
 ## Sync freshness
 
-`grasp sync` の basic recent upsert と `--full-reconcile` は実装済み（[[incremental-sync]]）。`1.8.82` で full manifest reconcile / hosted delete tombstone / rename detection / partial acquisition boundary、`1.14.0` で external hosted line-id persistence、`1.14.1` で exact URL `refresh-page` と page-vs-neighborhood freshness contract / single-writer subagent orchestration、`1.14.2` で Markdown-backed page の `read --refresh`（source file stat → 変更時のみ再 parse、`GRASP_READ_REFRESH=1` で default 化）は current facts に昇格済み。未実装:
+`grasp sync` の basic recent upsert と `--full-reconcile` は実装済み（[[incremental-sync]]）。`1.8.82` で full manifest reconcile / hosted delete tombstone / rename detection / partial acquisition boundary、`1.14.0` で external hosted line-id persistence、`1.14.1` で exact URL `refresh-page` と page-vs-neighborhood freshness contract / single-writer subagent orchestration、`1.14.2` で Markdown-backed page の `read --refresh`（source file stat → 変更時のみ再 parse、`GRASP_READ_REFRESH=1` で default 化）、`1.14.6` で sync の部分コミット（古い変更から順に `--commit-every` page ごとに upsert、retry を使い切ったら書けた分を残して `complete=false`）は current facts に昇格済み。未実装:
 
 - **hosted REST metadata enrichment**: `readPage` / `/api/pages/:project/:title` で得られる `commitId`、`links` / `projectLinks` / `icons`、`linked`、`pageRank`、`accessed`、`relatedPages` をどこまで store に保存するか決める。JSON export seed には無いので optional source-specific columns として扱う。stable `lines[].id` は `1.14.0`（schema v14）で `lines.external_line_id` として保存済み（[[grasp-v1-implemented]]）なので対象外。`commitId` は `refresh-page` の result（`remote.commit_id`）に出すだけで store には保存していない。
 - **authenticated delete / rename history enrichment**: 現行 `--full-reconcile` は manifest 差分から delete tombstone と same-id rename を扱う。認証済み path で `/api/deleted-pages/:project/:pageId`、`/api/stream/:project` の `page.delete` event、`/api/commits/:project/:pageId` の `TitleChange` を取り、tombstone / alias history を補強できるか検証する。
-- **last-sync cursor の運用精度**: pinned pages / updated ties / clock skew / partial failure の扱い。
+- **last-sync cursor の運用精度**: pinned pages / updated ties / clock skew の扱い。partial failure は `1.14.6` で古い変更から書く順序により続きから取れるようにした（[[grasp-v1-implemented]] の sync facts）。残: 恒久に読めない page が 1 件あると、recent sync はそこで毎回止まり、それより新しい変更を書けない（1.14.5 までは sync 全体が落ちていたので後退ではない）。
 - **write/export 後の manifest mtime 追随**: `write-page` / `rename-page` / `export-markdown` は projection file を書いた後に manifest の hash/mtime を更新しないため、grasp 自身が書いた page への最初の `read --refresh` は `content_unchanged` 経路を一度通る（実害なし・2回目から stat fast path）。export 後に manifest を追随させれば初回から直行できる。
 - **read 以外への source 変更反映**: `search` / `backlinks` 等の全体系 command はソース変更を `import --markdown` 再実行でしか拾えない。idle-hydrate policy の流用で「コマンド後に N 秒だけ変更ファイルを再取り込み」が候補。
 
@@ -292,6 +294,7 @@ line-id のローカル別名（text で `P1:0`、`--json` / `--full-ids` で完
 未実装 / 残課題:
 
 - **connection-level transient の retry**: transient 5xx（HTTP 502 / 503 / 504）の retry は `1.14.3` で実装済み（current facts は [[grasp-v1-implemented]]、実測は [[cosense-fetch-rate-limit]] の `## Updates`）。残るのは connection-level transient（`socket hang up` / `ECONNRESET`）で、`classify_cosense_cli_failure` ではまだ `command-failed` 扱いになり retry されない。動機は 5xx と同じで、`acquire` は namespace 置換なので単発の取りこぼしを埋めるのに全 page 再取得が要る（2026-09-08 の 5.5k page 規模の外部 project で 503 により 35 page 喪失）。
+- **lock 負けによる fetch 済み全喪失**: `acquire` / `sync` は全候補を in-memory に fetch してから最後に1回の namespace-replace write transaction で store を置換するため、その write が他 writer との競合で busy_timeout（30s）を超えて `database is locked` で落ちると、数時間分の fetch が1件も残らない（2026-08-28 に 862p の外部 project で2回発生）。fix 候補: mutation path の write-retry / acquire 時のより長い busy_timeout / 別 store で fetch してから merge。実測と構造は [[sqlite-write-concurrency]] の Updates 2026-08-31。（2026-10-07 lint: concept 側にだけあり backlog に無かったギャップを転記）`1.14.6` で `sync` は `--commit-every` page ごとに書くので、lock 負けで失うのは最後の 1 塊まで。`acquire` は未対応のまま。
 - **direct public API fallback**: `cosense` binary / Node が無い環境でも public project は Scrapbox API（`curl .../api/pages/<project>` 等）で読める。auth が要る project では従来通り `cosense-cli` に戻す adapter。villagepump dogfood で `cosense` 不在により acquire 不可だったので、入れれば agent 実験の摩擦が下がる。副観測: `search/query?q=...` は 100 件固定で `skip` が効かず、網羅抽出には `pages?sort=title` の列挙が要る。
 - env 診断（`cosense` / `node` の shebang `env node` 失敗等）を seed discovery phase（`searchFullText` / `listPages`）へ拡張する。fetch phase は実装済み。
 - `cross-project-acquire` の実データ dogfood、project / target ranking の weighting 調整、取得後 summary（reciprocal refs / top internal links / cluster handoff）の richer 化。
@@ -320,3 +323,11 @@ Open Questions:
 - PyPI 経由の `pipx install` 配布導線。repo からの導線（`pipx install -e .` / `pipx install git+https://github.com/nishio/grasp.git`）は README / README.ja / `skills/grasp/SKILL.md` に記載済み（commit `2e8b895`）。
 - user-level Skill symlink と package install の統合。
 - Python 不可 agent 環境が現実化した場合の native binary 配布。
+
+## Updates: 2026-09-18 Local Gyazo cache
+
+[[gyazo-local-media]] implements URL enumeration, reuse, bounded downloads, provenance and retry statuses. Authenticated images, video, cache migration/eviction and automatic acquisition remain future work.
+
+## Updates: 2026-09-18 Page cards and image analysis
+
+[[page-cards-and-image-analysis]] implements paginated cards, project-qualified connections and VT snapshots. Separate-store federation, live dataset refresh and diagram similarity ranking remain future work.

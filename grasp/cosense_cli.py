@@ -78,6 +78,23 @@ def _env_float(name: str, default: float) -> float:
 # the whole slice to recover it.
 RETRYABLE_ERROR_CLASSES = frozenset({"rate-limited", "transient-server-error"})
 
+_RETRY_AFTER_RE = re.compile(r"retry[-_ ]after[\"']?\s*[:=]\s*[\"']?(\d+(?:\.\d+)?)", re.IGNORECASE)
+
+
+def retry_after_seconds_from_text(text: str) -> float | None:
+    """Return a Retry-After hint in seconds if the failure text carries one.
+
+    Only stderr is passed in: stdout of a failed read may contain page text.
+    HTTP-date forms are ignored and fall back to blind backoff.
+    """
+    match = _RETRY_AFTER_RE.search(text or "")
+    if match is None:
+        return None
+    try:
+        return max(0.0, float(match.group(1)))
+    except ValueError:
+        return None
+
 
 @dataclass
 class CosenseCliClient:
@@ -90,11 +107,22 @@ class CosenseCliClient:
     max_retries: int = field(default_factory=lambda: _env_int("GRASP_COSENSE_MAX_RETRIES", 5))
     base_delay_seconds: float = field(default_factory=lambda: _env_float("GRASP_COSENSE_RETRY_BASE_SECONDS", 2.0))
     max_delay_seconds: float = field(default_factory=lambda: _env_float("GRASP_COSENSE_RETRY_MAX_SECONDS", 60.0))
+    # Upper bound for a server-supplied Retry-After hint. The current cosense CLI does
+    # not print the header, so this only applies when a hint appears in its stderr.
+    retry_after_max_seconds: float = field(
+        default_factory=lambda: _env_float("GRASP_COSENSE_RETRY_AFTER_MAX_SECONDS", 900.0)
+    )
     sleep: Callable[[float], None] = time.sleep
+    # One entry per retry wait, so callers such as sync can report how long they waited.
+    retry_events: list[dict[str, Any]] = field(default_factory=list)
 
-    def _retry_delay_seconds(self, attempt: int) -> float:
-        delay = self.base_delay_seconds * (2 ** attempt)
-        return min(delay, self.max_delay_seconds)
+    def _retry_delay_seconds(self, attempt: int, retry_after: float | None = None) -> float:
+        delay = min(self.base_delay_seconds * (2 ** attempt), self.max_delay_seconds)
+        if retry_after is not None:
+            # Never wait less than the server asked for (up to a sane cap), and never
+            # less than the blind backoff would have waited.
+            delay = max(delay, min(retry_after, self.retry_after_max_seconds))
+        return delay
 
     def list_pages(
         self,
@@ -144,7 +172,12 @@ class CosenseCliClient:
                     stdout=error.stdout or "",
                 )
                 if error_class in RETRYABLE_ERROR_CLASSES and attempt < self.max_retries:
-                    self.sleep(self._retry_delay_seconds(attempt))
+                    retry_after = retry_after_seconds_from_text(error.stderr or "")
+                    delay = self._retry_delay_seconds(attempt, retry_after)
+                    self.retry_events.append(
+                        {"error_class": error_class, "attempt": attempt + 1, "delay_seconds": delay, "retry_after": retry_after}
+                    )
+                    self.sleep(delay)
                     attempt += 1
                     continue
                 raise CosenseCliError(
@@ -177,10 +210,13 @@ def sync_from_cosense(
     batch_size: int = 100,
     dry_run: bool = False,
     full_reconcile: bool = False,
+    commit_every: int = 50,
 ) -> dict[str, Any]:
     client = client or CosenseCliClient()
     if batch_size <= 0:
         raise ValueError("--batch-size must be > 0")
+    if commit_every <= 0:
+        raise ValueError("--commit-every must be > 0")
     if limit <= 0:
         raise ValueError("--limit must be > 0")
 
@@ -217,20 +253,62 @@ def sync_from_cosense(
         manifest = {"pages": [], "count": None, "projectName": None}
         reconcile = empty_manifest_reconcile()
 
+    # Recent sync stops scanning at the first unchanged page in updated-desc order.
+    # Fetch and commit the oldest change first, so a run that is interrupted leaves
+    # only a contiguous block of the oldest changes committed: the next run still sees
+    # every uncommitted (newer) change above its stop point and resumes from there.
+    # Full reconcile re-derives its work list from the whole manifest, so order is
+    # irrelevant there and the manifest order is kept.
+    fetch_order = changed_metadata if full_reconcile else list(reversed(changed_metadata))
     hosted_line_ids_seen = 0
-    fetched_pages: list[dict[str, Any]] = []
+    committed_count = 0
+    committed_updated_max = 0
+    pending_pages: list[dict[str, Any]] = []
+    pending_updated: list[int] = []
     skipped_nonpersistent: list[dict[str, Any]] = []
+    interruption: dict[str, Any] | None = None
+    retry_events = getattr(client, "retry_events", None)
+    retry_events_before = len(retry_events) if isinstance(retry_events, list) else 0
+
+    def flush_pending() -> None:
+        nonlocal committed_count, committed_updated_max, pending_pages, pending_updated
+        if not pending_pages:
+            return
+        store.upsert_cosense_pages(pending_pages)
+        committed_count += len(pending_pages)
+        committed_updated_max = max([committed_updated_max, *pending_updated])
+        pending_pages = []
+        pending_updated = []
+
     if not dry_run:
-        for page in changed_metadata:
-            page_url = page_url_for_title(project_url, str(page.get("title", "")))
-            page_data = client.read_page(page_url)
-            if not page_data.get("persistent", True):
-                skipped_nonpersistent.append({"title": page.get("title"), "url": page_url})
-                continue
-            hosted_line_ids_seen += count_hosted_line_ids(page_data)
-            fetched_pages.append(page_data)
-        store.upsert_cosense_pages(fetched_pages)
-        if full_reconcile:
+        try:
+            for index, page in enumerate(fetch_order):
+                page_url = page_url_for_title(project_url, str(page.get("title", "")))
+                try:
+                    page_data = client.read_page(page_url)
+                except CosenseCliError as error:
+                    interruption = {
+                        "error_class": error.error_class,
+                        "error": str(error)[:500],
+                        "title": page.get("title"),
+                        "url": page_url,
+                        "remaining": len(fetch_order) - index,
+                    }
+                    break
+                if not page_data.get("persistent", True):
+                    skipped_nonpersistent.append({"title": page.get("title"), "url": page_url})
+                    continue
+                hosted_line_ids_seen += count_hosted_line_ids(page_data)
+                pending_pages.append(page_data)
+                pending_updated.append(parse_cosense_time(page.get("updated")) or 0)
+                if len(pending_pages) >= commit_every:
+                    flush_pending()
+        except KeyboardInterrupt:
+            # Keep what was already fetched; the commit order keeps resume correct.
+            flush_pending()
+            raise
+        flush_pending()
+        if full_reconcile and interruption is None:
             reconcile["tombstoned_pages"] = store.tombstone_cosense_pages(
                 [page["id"] for page in reconcile["deleted_pages"] if page.get("id")],
                 reason="remote_manifest_missing",
@@ -239,12 +317,31 @@ def sync_from_cosense(
             {
                 "last_sync_project": project_url,
                 "last_sync_checked": str(inspected),
-                "last_sync_updated": str(max((parse_cosense_time(page.get("updated")) or 0 for page in changed_metadata), default=0)),
+                "last_sync_updated": str(committed_updated_max),
                 "last_sync_mode": "full-reconcile" if full_reconcile else "recent",
                 "last_sync_manifest_count": str(manifest.get("count") or len(manifest["pages"])),
                 "last_sync_deleted": str(len(reconcile["tombstoned_pages"])),
                 "last_sync_renamed": str(len(reconcile["renamed_pages"])),
+                "last_sync_complete": "false" if interruption is not None else "true",
+                "last_sync_committed": str(committed_count),
             }
+        )
+
+    retries = None
+    if isinstance(retry_events, list):
+        waits = retry_events[retry_events_before:]
+        retries = {
+            "count": len(waits),
+            "waited_seconds": round(sum(float(event.get("delay_seconds") or 0) for event in waits), 3),
+            "by_class": count_values(str(event.get("error_class")) for event in waits),
+        }
+
+    diagnostic = None
+    if interruption is not None:
+        diagnostic = sync_interrupted_diagnostic(
+            interruption,
+            committed=committed_count,
+            full_reconcile=full_reconcile,
         )
 
     return sync_result(
@@ -254,7 +351,7 @@ def sync_from_cosense(
         inspected=inspected,
         manifest_count=manifest.get("count"),
         changed_metadata=changed_metadata,
-        updated=0 if dry_run else len(fetched_pages),
+        updated=0 if dry_run else committed_count,
         skipped_nonpersistent=skipped_nonpersistent,
         stopped_at=stopped_at,
         missing_local_pages=reconcile["missing_local_pages"],
@@ -262,7 +359,55 @@ def sync_from_cosense(
         deleted_pages=reconcile["deleted_pages"],
         tombstoned_pages=reconcile["tombstoned_pages"],
         hosted_line_ids_seen=hosted_line_ids_seen,
+        diagnostic=diagnostic,
+        complete=interruption is None,
+        interrupted=interruption,
+        commit_every=commit_every,
+        fetch_order="manifest" if full_reconcile else "oldest-first",
+        retries=retries,
     )
+
+
+def count_values(values: Any) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def sync_interrupted_diagnostic(
+    interruption: dict[str, Any],
+    *,
+    committed: int,
+    full_reconcile: bool,
+) -> dict[str, Any]:
+    next_actions = [
+        "Rerun the same sync command. Pages already committed are kept; the next run resumes from the oldest uncommitted change.",
+    ]
+    if interruption.get("error_class") == "rate-limited":
+        next_actions.append(
+            "Hosted Cosense kept answering HTTP 429 after the retry budget. Wait several minutes before rerunning, "
+            "or give each call a longer budget with GRASP_COSENSE_MAX_RETRIES / GRASP_COSENSE_RETRY_MAX_SECONDS."
+        )
+    elif interruption.get("error_class") == "transient-server-error":
+        next_actions.append("Hosted Cosense kept returning 5xx after the retry budget. Rerun later.")
+    else:
+        next_actions.append(
+            "This page failed with a non-transient error; a rerun will stop at the same page until it is readable. "
+            "Inspect interrupted.error."
+        )
+    if full_reconcile:
+        next_actions.append("Remote deletions were not tombstoned because the reconcile did not finish.")
+    return {
+        "type": "sync_interrupted",
+        "severity": "warning",
+        "message": (
+            f"sync stopped at {interruption.get('title')!r} ({interruption.get('error_class')}); "
+            f"{committed} page(s) committed, {interruption.get('remaining')} not fetched"
+        ),
+        "error_class": interruption.get("error_class"),
+        "next_actions": next_actions,
+    }
 
 
 def refresh_page_from_cosense(
@@ -842,6 +987,11 @@ def sync_result(
     hosted_line_ids_seen: int = 0,
     diagnostic: dict[str, Any] | None = None,
     sync_allowed: bool = True,
+    complete: bool = True,
+    interrupted: dict[str, Any] | None = None,
+    commit_every: int | None = None,
+    fetch_order: str | None = None,
+    retries: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     missing_local_pages = missing_local_pages or []
     renamed_pages = renamed_pages or []
@@ -852,6 +1002,7 @@ def sync_result(
         "mode": "full-reconcile" if full_reconcile else "recent",
         "dry_run": dry_run,
         "sync_allowed": sync_allowed,
+        "complete": complete,
         "inspected": inspected,
         "manifest_count": manifest_count,
         "changed": len(changed_metadata),
@@ -867,6 +1018,10 @@ def sync_result(
         "deleted_pages": deleted_pages,
         "tombstoned_pages": tombstoned_pages,
         "hosted_line_ids_seen": hosted_line_ids_seen,
+        "commit_every": commit_every,
+        "fetch_order": fetch_order,
+        "interrupted": interrupted,
+        "retries": retries,
         "line_id_policy": line_id_policy(),
         "diagnostic": diagnostic,
     }

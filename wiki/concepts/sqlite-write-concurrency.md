@@ -1,6 +1,6 @@
 ---
 type: concept
-summary: grasp の write path は journal(jsonl)+store(sqlite)+projection(md) の3層で、authority は SQLite 外の plain file にある。「単一人間が使うから並行性は無関係」は AI 著者/複数 agent プロセスが本来の用途なので甘かった。SQLite の write は DB 全体ロックで直列化するが store 1層しか守らず、import→export の論理 RMW と cross-store atomicity は守らない。2026-06-26 incident が実例。
+summary: 2026-06-26 incident 当時の grasp write path は journal(jsonl)+store(sqlite)+projection(md) の3層で、authority は SQLite 外の plain file にあった（現在は option (D) の SQLite SSoT へ移行済み: 1.8.0 events table → 1.8.18 tracked events.jsonl 退役。[[sqlite-ssot-write-plan]]）。「単一人間が使うから並行性は無関係」は AI 著者/複数 agent プロセスが本来の用途なので甘かった。SQLite の write は DB 全体ロックで直列化するが store 1層しか守らず、import→export の論理 RMW と cross-store atomicity は守らない。2026-06-26 incident が実例。
 sources:
   - [[parallel-agent-write-incident-2026-06-26]]
   - [[grasp-v1-implemented]]
@@ -59,8 +59,11 @@ Git レイヤーで複数 writer が衝突するのは既知問題。本ペー�
 ## Open Questions
 
 - write.lock（悲観）か compare-and-append（楽観）か。AI agent は失敗 retry が安いので楽観が合うか。
+  - → 2026-10-07 lint 追記（解決）: どちらでもなく (D) を採った。SQLite SSoT（state+event を1 transaction、`BEGIN IMMEDIATE`）で authority 層が直列化される（[[sqlite-ssot-write-plan]]）。file-back 手順の application 層では preflight の `.grasp/file-back.lock.json` と event_sequence 比較（write-start）が残る。並行 throughput は 8 writer で ~5.2×・消失0、`claim-page` lease は安全にも throughput にも不要（[[parallel-write-stress-remeasure-2026-08-24]]）。
 - default store `grasp_home()/grasp.sqlite` を複数 agent が同時使用したら（busy_timeout 無しで即 fail）。store は常に per-task `/tmp` を強制すべきか。
+  - → 2026-10-07 lint 追記（部分解決）: busy_timeout=30s + WAL は 1.7.39 で導入済み（下の Updates 2026-08-31）。残るのは大規模 namespace-replace write が 30s を超えて fetch 済みを全喪失する問題で、per-task `/tmp` 強制は採っていない。
 - direct Markdown patch を**禁止**すべきか（incident では全 agent が逃げ込み、journal authority を壊した張本人）。
+  - → 2026-10-07 lint 追記（解決）: 既定 reject・fallback は理由を log に残す運用になった。mode2 では `scripts/check_mode2_markdown_readonly.py` が guard し、意図的な直接編集は `reconcile-markdown --dry-run` を経て取り込む（`AGENTS.md` / `CLAUDE.md` の file back 節）。
 - 並行下の per-write 検証コスト（Claude2「confidence コストは upfront でなく ongoing」）を (A)/(B) はどこまで下げるか。
 
 ## 関連
@@ -102,3 +105,6 @@ Git レイヤーで複数 writer が衝突するのは既知問題。本ペー�
 - **だが大きな namespace-replace write は 30s busy_timeout を超えうる**: `acquire` / `sync` の store mutation は `replace_project_with_cosense_pages` → `_delete_project`(6 テーブル DELETE) + 全ページ re-INSERT を **1 write transaction** で行う。大規模 project（例 20000p 指定の外部 project）ではこの write が 30s を超え、WAL も肥大（実測 155MB）するため、共有 default store `~/.grasp/grasp.sqlite` への並行 writer が `database is locked` で落ちる。Open Q（line 62）「default store を複数 agent が同時使用したら」の実地確認（2026-08-28、別 Claude session の外部 project acquire chain と衝突）。
 - **acquire は lock 負けで fetch 済みを全喪失する**: `acquire` は候補を全て in-memory に fetch してから最後に 1 回 replace-write する構造なので、その最終 write が busy_timeout 超過で落ちると **数百ページ・数時間分の fetch を 1 件も残さず捨てる**（今回その 862p project がこれで 2 回喪失）。回避は他 writer の完了を待って再 acquire（待機後に 862p 完走）。fix 候補: mutation path に write-retry / より長い busy_timeout / 別 store で fetch してから merge。
 - cf. [[cosense-fetch-rate-limit]] — この lock 待ちと直交して hosted 側の 429 rate-limit も別途効く。
+
+## Updates 2026-10-07（lint）
+- 本ページ本文（「3層永続化」「設計オプション（未決・要検討）」）は 2026-06-26 incident 当時の記述として残す。current の write authority は option (D) の SQLite SSoT（`.grasp/file-back.sqlite` の state+events、Markdown は projection）で、[[sqlite-ssot-write-plan]] と [[history]] の `1.8.0`〜`1.8.18` が current facts。Open Questions のうち3つに解決/部分解決を追記した。残る open は「並行下の per-write 検証コスト」と、Updates 2026-08-31 の大規模 namespace-replace write の lock 負け全喪失。

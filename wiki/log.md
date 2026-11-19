@@ -2102,6 +2102,24 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 - 副作用: 最初の書き換え対象以降の commit SHA が全て変わり、(a) [[git-history-replay]] corpus の pin していた 8 SHA が fixture unavailable で skip（6 件）、(b) wiki 内の commit 参照 50 箇所が dangling になった。filter-repo の `.git/filter-repo/commit-map` で両方を機械的に張り替え、tests は 395 passed に復帰。
 - 教訓: **history 書き換えは wiki の provenance 参照と replay fixture を道連れにする**。commit SHA を source of truth として wiki に書く運用と、history を書き換えうる運用は衝突する。次に書き換える時も commit-map での張り替えを同じ作業単位に含める。
 
+## [2026-09-18 11:50] implementation | Gyazo local media sidecar
+Implemented [[gyazo-local-media]]: scan references, reuse local files, bounded fetch and retry, metadata/provenance, and source-store immutability tests.
+
+## [2026-09-18 15:12] implementation | Page cards and VT image-analysis snapshots
+[[page-cards-and-image-analysis]] adds read-only browsing and project-qualified connections. Descriptions and review provenance are separate. Preflight origin/main comparison found only this session history’s unpushed 072e737; audited no remote divergence and pinned preflight base to that existing local commit. GUI tests were not run because the user requested no GUI interaction.
+
+## [2026-09-30 16:30] file-back | preflight base-divergence が ahead-only を diverged と誤判定（root cause）
+- [[grasp-backlog]] Local write and identity layer: file-back preflight の `base_divergence_errors` は `git log --left-right {base}...HEAD` が非空なら一律停止し、ahead-only（未 push の local 先行）と真の diverged を区別しない。upstream 無し feature branch と local main ahead の両方で `--base HEAD` / direct-patch fallback を強いる。1.8.41 の base auto は解決のみ修正、判定は未修正。修正候補=left-right marker parse で `<` がある時だけ fail。本 file-back 自体も ahead-only 2 で default preflight 停止→--base HEAD で live 再現。
+
+## [2026-10-07 18:13] lint | 2026-06-24 以降 ~440 commit 分の意味的 lint（superseded 主張3・index drift 4・壊れたリンク2・重複1・backlog 欠落1）
+- 機械 lint: 真の壊れた wikilink 2→0（[[parallel-write-stress-remeasure-2026-08-24]] の存在しない page 名リンクを平文化、[[grasp-backlog]] の `[[log]]` を通常リンク化）。孤立 3 件（いずれも index 登録済みの concept）は判断保留で残置。
+- superseded: [[cosense-fetch-rate-limit]] の「HTTP 503 は retry されない」は 1.14.3（`e6c4e62`）で解消済みなのに summary・Updates・index に未反映だった → Updates 追記＋summary/index 更新。[[sqlite-write-concurrency]] の summary「authority は SQLite 外の plain file」は 1.8.0〜1.8.18 の SQLite SSoT 移行で過去形 → summary を incident 当時の記述と明示、Open Questions 3件に解決/部分解決を追記（自ページの教訓「解決は該当 OQ への追記で反映」に従う）。
+- index drift: [[mode2-parallel-edit-stress-2026-06-30]] 行に 2026-08-24 再測定で非再現の旨、[[sqlite-write-concurrency]] / [[cosense-fetch-rate-limit]] 行を更新。英語の独立節「Local media」を entities 表に日本語行で統合（[[gyazo-local-media]] / [[page-cards-and-image-analysis]]）。
+- 重複: [[history]] 末尾の英語節「1.14.4 — 2026-09-18」が ledger 行と重複していたので削除（ledger 行は保持）。
+- backlog 欠落: acquire/sync の lock 負けによる fetch 済み全喪失（2026-08-28 実例）が concept 側にのみあり backlog に無かった → [[grasp-backlog]] acquire 節に転記（2026-09-09 の 5xx 転記と同型）。
+- 検証して stale でなかったもの: preflight の ahead-only 誤判定（`base_divergence_errors` は未修正、backlog 記述は current）、related confidence tiering（未実装、backlog の「次の実装候補」は current）、connection-level transient retry（未実装）。
+- 判断待ち: [[gyazo-local-media]] / [[page-cards-and-image-analysis]] は本文が英語（wiki 規約は日本語）。本 lint の作業 branch は `codex/gyazo-local-media`（main でない）で、grasp write-first（preflight --base HEAD）経由で書いた。
+
 ## [2026-11-03 02:07] lint+file back | Wiki と現状の食い違いを修正（pipx 導線・PyPI 名衝突・1.14.3 の反映漏れ・dangling SHA・壊れたリンク）
 - 現実との食い違い: commit `2e8b895`（README / SKILL を pipx 推奨に）は wiki に未反映だった。[[grasp-v1-implemented]] の delivery に install 導線を追記、[[language-and-distribution]] に `## Updates`（PyPI の `grasp` は別 project で衝突確定＝決定 2 の `pipx install grasp` はそのままでは別物を入れる、repo からの pipx install が README 推奨）を追記し Open Q に注記、[[grasp-backlog]] Packaging の 2 項目を現状に合わせた。PyPI 側は JSON API で `grasp` 0.3.2（別 author）を確認。
 - [[cosense-fetch-rate-limit]] の Updates は「503 は retry されない」のままだった。`1.14.3`（commit `e6c4e62`）で transient 5xx retry 実装済みである旨と、残りの connection-level transient を追記。summary と index の該当行にも 5xx 拡張を注記。
@@ -2124,3 +2142,9 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 
 ## [2026-11-09 13:55] decision | Markdown と Cosense の hashtag のドットの扱いの違いを受容し、先回り実装しない
 - Cosense では `#1.2` は `1.2` へのリンクだが、PR #111 以降の Markdown では `1` になる。nishio 判断: この挙動差は既知として受容し、困るという意見が出るまで数字ドットの例外などを先回りで実装しない。[[markdown-obsidian-indexed-mirror]] の 2026-11-09 Update に追記。
+
+## [2026-11-20 00:05] implementation+file back | sync の部分コミット（1.14.6）と、Gyazo branch への origin/main の取り込み
+- 動機: 2026-11-19 22:20 ごろ `nishio` project の `sync --limit 3000` が 517 件の差分を取る途中の HTTP 429 で落ち、1 件も書かれなかった（[[cosense-fetch-rate-limit]] の「scope の限界」にあった「sync は部分コミットしない」そのもの）。
+- 実装: `sync_from_cosense` は変わった page を古い変更から順に読み、`--commit-every`（既定 50）page ごとに upsert する。retry を使い切ったら書けた分を残して `complete=false` / `diagnostic.type=sync_interrupted` を返し、CLI は exit 1。古い変更から書くのは、recent sync が updated 降順で最初の未変更 page に当たると走査を止めるため。Retry-After は stderr にあれば下限にする（現行 cosense CLI は出さない）。待ちを削る・並列を増やす変更はしていない。テスト 8 件追加。[[grasp-v1-implemented]] の sync facts、[[history]] の `1.14.6`、[[grasp-backlog]] を更新。
+- 取り込み: Mac の作業 branch `codex/gyazo-local-media` の 4 commit（072e737・faa8232・98eb802・8bcbf9e。後ろの 3 つは README と wiki の例の path を直して作り直した版で、手元の元の SHA は d99ec0a・e4322ac・caaa4be）に origin/main（PR #111・#112 ほか 10 commit）を merge した。衝突は wiki の Markdown だけで、両側が同じ 1.14.3 の事実を別々に書いていた（branch 側は引けない SHA `55240a7` のまま）。main 側の文を採り、branch 側にだけあった「connection-level transient の retry は未実装」と backlog の lock 負けの項を残した。log は両側を日付順に並べた。
+- direct Markdown patch fallback: 共有の `.grasp/file-back.sqlite` は別の checkout（Mac の primary worktree）にあり、そこは動いている grasp なので書かなかった。この worktree には写しを置いて `reconcile-markdown --dry-run` で blocker 0 を確かめた。merge する側は primary の store で `reconcile-markdown --dry-run` → reconcile を行うこと。

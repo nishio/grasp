@@ -176,3 +176,36 @@ and [docs/cosense.md](docs/cosense.md). The authority-mode guide is in
 ## License
 
 MIT
+
+## Local Gyazo images
+
+```sh
+grasp --store library.sqlite --project notes images scan
+grasp --store library.sqlite --project notes images fetch --reuse-dir ./saved-images --local-only
+grasp --store library.sqlite --project notes images fetch --limit 20 --timeout 4
+grasp --store library.sqlite --project notes images list --page-id PAGE_ID
+grasp --store library.sqlite --project notes images fetch --retry-failed --limit 20
+```
+
+Source notes stay unchanged. Images and reference/status metadata live in
+`library.sqlite.assets/`; retain this directory for offline use. Scanning only
+covers locally materialized pages. Failed downloads are recorded and can be
+retried; saved images are reused. Local reuse accepts exact Gyazo-ID filenames
+and records provenance, without promising original resolution. Authenticated
+images and video are not supported. See [media contract](wiki/entities/gyazo-local-media.md).
+
+### Page cards and diagram analysis
+
+```sh
+grasp --store library.sqlite images scan
+grasp --store library.sqlite cards --saved-only --limit 40
+grasp --store library.sqlite --project notes cards --page-id PAGE_ID
+grasp --store library.sqlite images import-vt --vt-dir /path/to/vt-data
+grasp --store library.sqlite cards --query mediator
+```
+
+Cards preserve project identity and return cached-image previews. Connection context
+separates explicit links, shared-image references and same-title suggestions. VT's
+existing catalog/description and optional historical-index JSON snapshots are read
+without modification; AI descriptions and review provenance remain separate. See
+[the contract and supported formats](wiki/entities/page-cards-and-image-analysis.md).

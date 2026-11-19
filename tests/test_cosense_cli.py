@@ -1,3 +1,4 @@
+import io
 import json
 import subprocess
 import tempfile
@@ -15,6 +16,7 @@ from grasp.cosense_cli import (
     page_url_for_title,
     parse_cosense_page_url,
     refresh_page_from_cosense,
+    retry_after_seconds_from_text,
     sync_from_cosense,
 )
 from grasp.sqlite_store import SQLiteStore, ensure_store_schema, import_export_to_sqlite, parse_cosense_time
@@ -1340,6 +1342,189 @@ class RateLimitRetryTest(unittest.TestCase):
         self.assertEqual(ctx.exception.error_class, "rate-limited")
         self.assertEqual(runner.calls, 1)
         self.assertEqual(delays, [])
+
+    def test_retry_after_hint_in_stderr_extends_the_wait(self):
+        delays: list[float] = []
+        client = CosenseCliClient(max_retries=3, base_delay_seconds=2.0, max_delay_seconds=60.0, sleep=delays.append)
+        runner = _RateLimitThenOkRunner(fail_times=2, stderr="HTTP 429 Too Many Requests\nRetry-After: 30\n")
+        with mock.patch("grasp.cosense_cli.subprocess.run", runner):
+            client.read_page("https://scrapbox.io/p/A")
+        self.assertEqual(delays, [30.0, 30.0])
+        self.assertEqual([event["retry_after"] for event in client.retry_events], [30.0, 30.0])
+
+    def test_retry_after_hint_never_shortens_backoff_and_is_capped(self):
+        self.assertEqual(retry_after_seconds_from_text("retry-after: 1"), 1.0)
+        client = CosenseCliClient(base_delay_seconds=8.0, max_delay_seconds=60.0, retry_after_max_seconds=100.0)
+        self.assertEqual(client._retry_delay_seconds(0, 1.0), 8.0)
+        self.assertEqual(client._retry_delay_seconds(0, 5000.0), 100.0)
+        self.assertEqual(client._retry_delay_seconds(0, None), 8.0)
+
+    def test_retry_after_is_read_from_stderr_only(self):
+        delays: list[float] = []
+        client = CosenseCliClient(max_retries=1, base_delay_seconds=2.0, sleep=delays.append)
+
+        def runner(command, check, text, capture_output):
+            if not delays:
+                raise subprocess.CalledProcessError(1, command, output="retry-after: 999", stderr="HTTP 429 Too Many Requests")
+            return subprocess.CompletedProcess(command, 0, stdout='{"ok": true}', stderr="")
+
+        with mock.patch("grasp.cosense_cli.subprocess.run", runner):
+            client.read_page("https://scrapbox.io/p/A")
+        self.assertEqual(delays, [2.0])
+        self.assertIsNone(retry_after_seconds_from_text("Retry-After: Wed, 21 Oct 2026 07:28:00 GMT"))
+
+
+def _iso(seconds):
+    return f"1970-01-01T09:{seconds // 60:02d}:{seconds % 60:02d}+09:00 (just now)"
+
+
+class ResumableSyncClient:
+    """Hosted project with four new pages (N1 newest .. N4 oldest) above local page B."""
+
+    TITLES = ["N1", "N2", "N3", "N4"]
+
+    def __init__(self, fail_on=None, error_class="rate-limited"):
+        self.fail_on = set(fail_on or [])
+        self.error_class = error_class
+        self.read_titles = []
+        self.retry_events = []
+
+    def list_pages(self, project_url, *, sort, limit, skip):
+        pages = [
+            {"id": f"{index:024d}", "title": title, "updated": _iso(100 - index), "pin": 0, "linesCount": 2}
+            for index, title in enumerate(self.TITLES, start=1)
+        ]
+        pages.append({"id": "bbbbbbbbbbbbbbbbbbbbbbbb", "title": "B", "updated": _iso(20), "pin": 0, "linesCount": 1})
+        return {"pages": pages[skip:skip + limit]}
+
+    def read_page(self, page_url):
+        title = unquote(page_url.rsplit("/", 1)[1])
+        self.read_titles.append(title)
+        if title in self.fail_on:
+            raise CosenseCliError(
+                command=["cosense", "readPage", page_url],
+                error_class=self.error_class,
+                message="cosense CLI command failed",
+                returncode=1,
+                stderr="HTTP 429 Too Many Requests",
+            )
+        index = self.TITLES.index(title) + 1
+        return {
+            "id": f"{index:024d}",
+            "title": title,
+            "persistent": True,
+            "created": _iso(1),
+            "updated": _iso(100 - index),
+            "lines": [
+                {"text": title, "created": _iso(1), "updated": _iso(1), "user": {"id": "u"}},
+                {"text": f"body of {title}", "created": _iso(1), "updated": _iso(1), "user": {"id": "u"}},
+            ],
+        }
+
+
+class ResumableSyncTests(unittest.TestCase):
+    def make_store(self, tmpdir):
+        export_path = Path(tmpdir) / "export.json"
+        store_path = Path(tmpdir) / "store.sqlite"
+        export_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
+        import_export_to_sqlite(export_path, store_path)
+        return store_path
+
+    def test_recent_sync_fetches_oldest_change_first_and_commits_in_chunks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SQLiteStore(self.make_store(tmpdir))
+            client = ResumableSyncClient()
+            try:
+                with mock.patch.object(store, "upsert_cosense_pages", wraps=store.upsert_cosense_pages) as upsert:
+                    result = sync_from_cosense(store, "https://scrapbox.io/fixture/", client=client, limit=10, commit_every=3)
+                self.assertTrue(result["complete"])
+                self.assertEqual(result["updated"], 4)
+                self.assertEqual(result["fetch_order"], "oldest-first")
+                self.assertEqual(result["stopped_at"]["title"], "B")
+                self.assertEqual(client.read_titles, ["N4", "N3", "N2", "N1"])
+                self.assertEqual([len(call.args[0]) for call in upsert.call_args_list], [3, 1])
+                self.assertEqual(result["retries"], {"count": 0, "waited_seconds": 0, "by_class": {}})
+                self.assertEqual(store.metadata()["last_sync_complete"], "true")
+            finally:
+                store.close()
+
+    def test_interrupted_sync_keeps_committed_pages_and_next_run_resumes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = self.make_store(tmpdir)
+            store = SQLiteStore(store_path)
+            try:
+                failing = ResumableSyncClient(fail_on={"N2"})
+                result = sync_from_cosense(store, "https://scrapbox.io/fixture/", client=failing, limit=10, commit_every=50)
+                self.assertFalse(result["complete"])
+                self.assertEqual(result["updated"], 2)
+                self.assertEqual(failing.read_titles, ["N4", "N3", "N2"])
+                self.assertEqual(result["interrupted"]["title"], "N2")
+                self.assertEqual(result["interrupted"]["error_class"], "rate-limited")
+                self.assertEqual(result["interrupted"]["remaining"], 2)
+                self.assertEqual(result["diagnostic"]["type"], "sync_interrupted")
+                self.assertIsNotNone(store.resolve_page("N4"))
+                self.assertIsNotNone(store.resolve_page("N3"))
+                self.assertIsNone(store.resolve_page("N2"))
+                self.assertEqual(store.metadata()["last_sync_complete"], "false")
+                self.assertEqual(store.metadata()["last_sync_updated"], str(100 - 3))
+
+                resumed = ResumableSyncClient()
+                result = sync_from_cosense(store, "https://scrapbox.io/fixture/", client=resumed, limit=10)
+                self.assertTrue(result["complete"])
+                self.assertEqual(result["stopped_at"]["title"], "N3")
+                self.assertEqual(resumed.read_titles, ["N2", "N1"])
+                for title in ResumableSyncClient.TITLES:
+                    self.assertIsNotNone(store.resolve_page(title))
+            finally:
+                store.close()
+
+    def test_interrupted_full_reconcile_does_not_tombstone(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SQLiteStore(self.make_store(tmpdir), project="fixture")
+            try:
+                client = FullReconcileClient()
+                original = client.read_page
+
+                def failing_read(page_url):
+                    if page_url.endswith("/C"):
+                        raise CosenseCliError(command=["cosense"], error_class="transient-server-error", message="x")
+                    return original(page_url)
+
+                client.read_page = failing_read
+                result = sync_from_cosense(
+                    store, "https://scrapbox.io/fixture/", client=client, batch_size=1, full_reconcile=True, commit_every=1,
+                )
+                self.assertFalse(result["complete"])
+                self.assertEqual(result["updated"], 1)
+                self.assertEqual(result["tombstoned_pages"], [])
+                self.assertIsNotNone(store.resolve_page("B"))
+                self.assertEqual(store.resolve_page("A Renamed").id, "aaaaaaaaaaaaaaaaaaaaaaaa")
+            finally:
+                store.close()
+
+    def test_commit_every_must_be_positive(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SQLiteStore(self.make_store(tmpdir))
+            try:
+                with self.assertRaisesRegex(ValueError, "commit-every"):
+                    sync_from_cosense(store, "https://scrapbox.io/fixture/", client=ResumableSyncClient(), commit_every=0)
+            finally:
+                store.close()
+
+    def test_cli_sync_exits_1_with_json_when_interrupted(self):
+        from grasp import cli
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = self.make_store(tmpdir)
+            failing = ResumableSyncClient(fail_on={"N4"})
+            stdout = io.StringIO()
+            with mock.patch.object(cli, "CosenseCliClient", lambda *args, **kwargs: failing), mock.patch("sys.stdout", stdout):
+                code = cli.main(["--json", "--store", str(store_path), "sync", "https://scrapbox.io/fixture/", "--limit", "10"])
+            self.assertEqual(code, 1)
+            payload = json.loads(stdout.getvalue())
+            self.assertFalse(payload["complete"])
+            self.assertEqual(payload["updated"], 0)
+            self.assertEqual(payload["diagnostic"]["type"], "sync_interrupted")
 
 
 if __name__ == "__main__":

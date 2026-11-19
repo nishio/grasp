@@ -1,6 +1,6 @@
 ---
 type: concept
-summary: hosted Cosense は rapid read を HTTP 429 で絞る。cosense CLI は "HTTP 429" テキストのみで Retry-After 非露出。実測(2026-08)はリセット分オーダー(token-bucket的)・fresh window で ~57 連続 fetch は 0 失敗・数百連打で通過率20-33%。mitigation は `_run_json` の 429 検知＋指数backoff retry (commit f4ca686, env GRASP_COSENSE_*)、`1.14.3` で transient 5xx（502/503/504）にも拡張。scope=retry-only で pacing と sync 部分コミットは未実装。
+summary: hosted Cosense は rapid read を HTTP 429 で絞る。cosense CLI は "HTTP 429" テキストのみで Retry-After 非露出。実測(2026-08)はリセット分オーダー(token-bucket的)・fresh window で ~57 連続 fetch は 0 失敗・数百連打で通過率20-33%。mitigation は `_run_json` の 429 検知＋指数backoff retry (commit f4ca686, env GRASP_COSENSE_*)、`1.14.3` で transient 5xx（502/503/504）にも拡張。`1.14.6` で sync の部分コミット（古い変更から順に N page ごとに upsert、落ちたら続きから）と Retry-After ヒントの尊重を追加。pacing と connection-level transient（ECONNRESET 等）の retry は未実装。
 sources:
   - grasp/cosense_cli.py
   - tests/test_cosense_cli.py
@@ -47,6 +47,7 @@ title: cosense-fetch-rate-limit
 - **pacing が買うのは throughput ではなく信頼性** — pacing 無しで素の速度（~67/min）から走った 2026-08-25 の同 project も実効 21/min だった。∴ ~21/min はこの project の天井で、投げ方の工夫では縮まない。一方 pacing + wrapper retry により `failed: 0`（pacing 無しの回は恒久失敗 1 件 + 429 error event 605 件）。
 - **429 だけでなく transient 5xx も吸収が要る** — `_run_json` の retry は `rate-limited` class のみで、**HTTP 503 は retry されない**。2026-09-08 の 5.5k page 規模の外部 project `acquire` は 503 で 35 page を失った。`acquire` は namespace 置換なので、この 35 page を埋めるには 5,500 page の再取得が要る。wrapper 側で 502/503/504 も retry したところ 15,311 page で 0 失敗。`classify_cosense_cli_failure` の retryable class に transient 5xx を足すのが backlog 候補。
 - **2026-11-03 追記: transient 5xx retry は `1.14.3`（commit `e6c4e62`）で実装済み** — 上の項の「503 は retry されない」は 1.14.3 より前の状態。現行の `classify_cosense_cli_failure` は HTTP 502 / 503 / 504（と bad gateway / service unavailable / gateway timeout）を `transient-server-error` class として返し、`_run_json` は `RETRYABLE_ERROR_CLASSES` = {`rate-limited`, `transient-server-error`} を同じ指数 backoff で retry する（`grasp/cosense_cli.py`）。残る穴は connection-level transient（`socket hang up` / `ECONNRESET`）で、これは `command-failed` のまま retry されない（[[grasp-backlog]] の acquire 節）。proactive pacing と sync の部分コミットは引き続き未実装。
+- **2026-11-20 追記: sync の部分コミットを `1.14.6` で実装** — 上の「scope の限界」の「sync は部分コミットしない」は 1.14.5 までの状態。2026-11-19 22:20 ごろ `nishio` project（約 2.6 万 page）の `sync --limit 3000` が 517 件の差分を取る途中の 429 で落ち、1 件も書かれなかった。現行は変わった page を古い変更から順に読み、`--commit-every`（既定 50）ごとに upsert する。retry を使い切ったら書けた分を残して `complete=false` で返る（exit 1）。古い変更から書くのは、recent sync が updated 降順で最初の未変更 page に当たると走査を止めるため: 新しい変更から書くと、次の回は書いた page で止まって、それより古い書かれていない変更を見落とす。Retry-After は stderr に出ていればそれ以上待つ（`GRASP_COSENSE_RETRY_AFTER_MAX_SECONDS`=900 で上限）。cosense CLI は今も header を出さないので（`src/lib/request.ts` は `HTTP <status> <text>` と URL と body 先頭 500 字だけ）、実際には従来の指数 backoff で待つ。待ちを削る・並列を増やす変更はしていない。proactive pacing は引き続き未実装。
 
 ## 関連
 
