@@ -2064,7 +2064,7 @@ Tightened --require-cutover-thresholds: a cutover gate now requires both --min-s
 ## [2026-08-24 16:39] file-back | throughput 測定：並行 write は直列化されず~5.2×並列、lease 不要（Open Q1/Q2 解決）
 - [[parallel-write-stress-remeasure-2026-08-24]]: 10コアで 8 writer=~5.2× 実スループット（full 28 / defer 49 w/s）、消失0。defer の median latency 横ばい(103→117ms)＝SQLite write は律速でない。直列成分は cold-start と全 projection export のみで単一書き手ロックではない。claim-page lease は安全にもスループットにも不要＝役割は in-flight 可視化のみ。実装指針：高並行は --defer-projection＋batch export。
 
-## [2026-08-31 22:41] file back | Cosense fetch の 429 rate-limit 実測+mitigation(commit f4ca686) を新 concept 化、write-concurrency に cross-session lock 全喪失を追記
+## [2026-08-31 22:41] file back | Cosense fetch の 429 rate-limit 実測+mitigation(commit 55240a7) を新 concept 化、write-concurrency に cross-session lock 全喪失を追記
 新規 [[cosense-fetch-rate-limit]]: hosted 429 は分オーダーで回復・~57連続=0失敗・Retry-After非露出→_run_json blind 指数backoff retry。862p の private project が retry で0失敗完走
 [[sqlite-write-concurrency]] Updates: busy_timeout/WAL は 1.7.39 で導入済(30s)だが大 namespace-replace write が超過し、acquire は lock 負けで fetch 済み全喪失(2026-08-28 別 session の大規模 acquire chain と衝突)
 
@@ -2119,6 +2119,10 @@ Implemented [[gyazo-local-media]]: scan references, reuse local files, bounded f
 - backlog 欠落: acquire/sync の lock 負けによる fetch 済み全喪失（2026-08-28 実例）が concept 側にのみあり backlog に無かった → [[grasp-backlog]] acquire 節に転記（2026-09-09 の 5xx 転記と同型）。
 - 検証して stale でなかったもの: preflight の ahead-only 誤判定（`base_divergence_errors` は未修正、backlog 記述は current）、related confidence tiering（未実装、backlog の「次の実装候補」は current）、connection-level transient retry（未実装）。
 - 判断待ち: [[gyazo-local-media]] / [[page-cards-and-image-analysis]] は本文が英語（wiki 規約は日本語）。本 lint の作業 branch は `codex/gyazo-local-media`（main でない）で、grasp write-first（preflight --base HEAD）経由で書いた。
+
+## [2026-08-31 22:41] file back | Cosense fetch の 429 rate-limit 実測+mitigation(commit f4ca686) を新 concept 化、write-concurrency に cross-session lock 全喪失を追記
+新規 [[cosense-fetch-rate-limit]]: hosted 429 は分オーダーで回復・~57連続=0失敗・Retry-After非露出→_run_json blind 指数backoff retry。862p の private project が retry で0失敗完走
+[[sqlite-write-concurrency]] Updates: busy_timeout/WAL は 1.7.39 で導入済(30s)だが大 namespace-replace write が超過し、acquire は lock 負けで fetch 済み全喪失(2026-08-28 別 session の大規模 acquire chain と衝突)
 
 ## [2026-11-03 02:07] lint+file back | Wiki と現状の食い違いを修正（pipx 導線・PyPI 名衝突・1.14.3 の反映漏れ・dangling SHA・壊れたリンク）
 - 現実との食い違い: commit `2e8b895`（README / SKILL を pipx 推奨に）は wiki に未反映だった。[[grasp-v1-implemented]] の delivery に install 導線を追記、[[language-and-distribution]] に `## Updates`（PyPI の `grasp` は別 project で衝突確定＝決定 2 の `pipx install grasp` はそのままでは別物を入れる、repo からの pipx install が README 推奨）を追記し Open Q に注記、[[grasp-backlog]] Packaging の 2 項目を現状に合わせた。PyPI 側は JSON API で `grasp` 0.3.2（別 author）を確認。
