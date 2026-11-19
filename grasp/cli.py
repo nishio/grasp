@@ -1689,7 +1689,8 @@ def build_parser() -> argparse.ArgumentParser:
         returns=(
             "project_url, mode, dry_run, sync_allowed, inspected, manifest_count, changed, updated, "
             "missing_local, renamed, deleted, skipped_nonpersistent[], stopped_at|null, changed_pages[], "
-            "missing_local_pages[], renamed_pages[], deleted_pages[], tombstoned_pages[], line_id_policy, diagnostic|null"
+            "missing_local_pages[], renamed_pages[], deleted_pages[], tombstoned_pages[], complete, commit_every, fetch_order, "
+            "interrupted|null, retries|null, line_id_policy, diagnostic|null"
         ),
         examples=[
             "grasp sync https://scrapbox.io/nishio/ --limit 20 --dry-run",
@@ -1702,6 +1703,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Global --store selects the local store to update.",
             "sync is for full hosted mirrors. Partial acquisition namespaces should be refreshed by rerunning acquire with the same criteria.",
             "Hosted lines[].id is stored separately as lines.external_line_id and is never mixed into local lines.line_id.",
+            "Changed pages are fetched oldest change first and committed every --commit-every pages. If a read still fails after the retry budget (HTTP 429 / 5xx), sync keeps the committed pages, returns complete=false with a sync_interrupted diagnostic, and exits 1; rerunning resumes from the oldest uncommitted change.",
+            "Retry waits use exponential backoff (GRASP_COSENSE_MAX_RETRIES / GRASP_COSENSE_RETRY_BASE_SECONDS / GRASP_COSENSE_RETRY_MAX_SECONDS), and honor a Retry-After hint if the cosense CLI prints one (capped by GRASP_COSENSE_RETRY_AFTER_MAX_SECONDS).",
         ],
     )
     sync_parser.add_argument("project_url", help="Hosted Cosense/Scrapbox project URL, e.g. https://scrapbox.io/nishio/.")
@@ -1710,6 +1713,7 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser.add_argument("--cosense-command", default="cosense", help="cosense CLI binary.")
     sync_parser.add_argument("--dry-run", action="store_true", help="List changed pages without fetching/upserting them.")
     sync_parser.add_argument("--full-reconcile", action="store_true", help="Walk the full hosted manifest and reconcile missing, renamed, and deleted pages.")
+    sync_parser.add_argument("--commit-every", type=int, default=50, help="Commit fetched pages to the store every N pages, so an interrupted sync keeps its progress.")
 
     refresh_page_parser = add_command_parser(
         subparsers,
@@ -8056,6 +8060,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.command == "write-status" and args.strict and not result.get("strict_ok"):
         return 1
+    if args.command == "sync" and result.get("complete") is False:
+        return 1
     return 0
 
 
@@ -8806,6 +8812,7 @@ def run_command(store: SQLiteStore, args: argparse.Namespace) -> Any:
             batch_size=args.batch_size,
             dry_run=args.dry_run,
             full_reconcile=args.full_reconcile,
+            commit_every=args.commit_every,
         )
     if args.command == "refresh-page":
         return refresh_page_from_cosense(
@@ -11207,6 +11214,7 @@ def format_sync(result: dict[str, Any]) -> str:
         f"mode: {result.get('mode', 'recent')}\n",
         f"dry_run: {result['dry_run']}\n",
         f"sync_allowed: {result.get('sync_allowed', True)}\n",
+        f"complete: {result.get('complete', True)}\n",
         f"inspected: {result['inspected']}\n",
         f"manifest_count: {result.get('manifest_count')}\n",
         f"changed: {result['changed']}\n",
@@ -11215,6 +11223,9 @@ def format_sync(result: dict[str, Any]) -> str:
         f"renamed: {result.get('renamed', 0)}\n",
         f"deleted: {result.get('deleted', 0)}\n",
     ]
+    retries = result.get("retries")
+    if retries and retries.get("count"):
+        parts.append(f"retries: {retries['count']} (waited {retries.get('waited_seconds')}s)\n")
     diagnostic = result.get("diagnostic")
     if diagnostic:
         parts.append("\n## Diagnostic\n")

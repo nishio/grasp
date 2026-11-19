@@ -55,7 +55,7 @@ v1 stable scope 外:
 
 ## store
 
-- current public compatibility version は `1.14.5`。release / store compatibility の履歴と bump rule は [[history]]。
+- current public compatibility version は `1.14.6`。release / store compatibility の履歴と bump rule は [[history]]。
 - store default: `$GRASP_STORE` → `$GRASP_HOME/grasp.sqlite` → `~/.grasp/grasp.sqlite`。
 - authoring SSoT substrate 用の canonical store path helper は `$GRASP_CANONICAL_STORE` → `<repo>/.grasp/authority.sqlite` → `$GRASP_HOME/authority.sqlite` → `~/.grasp/authority.sqlite`。これは Phase 0/1 helper であり、既存 default read/import store path とは分ける。
 - project default: `$GRASP_PROJECT`。retrieval verbs は project 未指定なら whole-store source scope、write/import/source update 系は project-targeted。
@@ -130,6 +130,7 @@ v1 stable scope 外:
 - `1.8.82` 以降、hosted rename detection は page id を主キーにし、same id / changed title を `renamed_pages[]` として返す。実 upsert 時は旧 hosted title を `page_handles.handle_source=hosted-rename-alias` として残すため、旧 title surface は同じ page id に解決する。
 - `1.8.82` 以降、hosted delete は active graph から page row を削除し、`project.<project>.sync_tombstones` metadata に tombstone（id/title/last_updated/deleted_at/reason）を残す。これにより deleted page は backlinks / related / unresolved rebuild から外れ、physical delete と区別できる最小 audit が残る。認証済み REST の `/api/deleted-pages` / stream event 補強は未実装。
 - `1.8.82` 以降、partial acquisition namespace（`stats.acquisition.coverage != full-list`）に対する `sync` は mutation せず `diagnostic.type=partial_acquisition_not_syncable` を返す。partial corpus の freshness は同じ `acquire` criteria の再実行で扱い、full mirror maintenance は export seed または full-list acquisition namespace に限る。
+- `1.14.6` 以降、`sync` は変わった page を古い変更から順に fetch し、`--commit-every`（既定 50）page ごとに upsert する。read が retry を使い切って失敗したら、それまでの分を残して `complete=false`・`interrupted`・`diagnostic.type=sync_interrupted` を返し、CLI は exit 1。recent sync は updated 降順で最初の未変更 page で止まるので、書かれた分は常に「最も古い変更から連続した塊」で、次の回は書かれていない変更を全部見て続きから取る。`--full-reconcile` は manifest 順のまま chunk commit し、途中で止まったら tombstone しない。metadata に `last_sync_complete` / `last_sync_committed`。retry の待ちは stderr の `Retry-After` 秒を下限にする（上限 `GRASP_COSENSE_RETRY_AFTER_MAX_SECONDS`）。result の `retries` は待った回数と秒数。
 - hosted `readPage` が返す `lines[].id` は `sync` result の `line_id_policy` で external source metadata と明示し、SQLite `lines.external_line_id` に保存する。現行 local `line_id` は `page.id:line-index` 由来の grasp-managed locator のままで、hosted id と local id は混ぜない。
 - `1.14.1` 以降、`refresh-page <page-url>` は exact URL を `cosense readPage` で取得する。remote page id/title/updated/line count と local manifest を比較し、本文 line text の SHA-256 hash も照合するため、同一 timestamp の本文変更も `content_changed` として検出する。remote hosted line ids が local に無い時も `hosted_line_ids_missing` として upsertする。`cosense v1.4.4 readPage` が分精度 timestamp を返す時は `remote.updated_precision_seconds=60` とし、同じ分内の local 秒精度値を conflict にせず、本文・identity同一のline-id enrichmentではその精密値を保持する。精度区間を越えてlocalが新しい時だけ `local-newer-conflict` で上書きしない。
 - `refresh-page` JSON result は `action=cache-hit|upserted|would-upsert|blocked|local-newer-conflict`、`page_freshness`、`store_current`、`remote_checked_at`、`remote` / `local_before`、`read_after_refresh.args` を返す。`updated=1` の時はlocal graphを再読してから回答を確定する。`neighborhood_freshness.status=cached` は、exact page refreshが別page由来backlinks/relatedのhosted現在状態を保証しない境界。

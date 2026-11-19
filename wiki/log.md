@@ -2142,3 +2142,9 @@ Implemented [[gyazo-local-media]]: scan references, reuse local files, bounded f
 
 ## [2026-11-09 13:55] decision | Markdown と Cosense の hashtag のドットの扱いの違いを受容し、先回り実装しない
 - Cosense では `#1.2` は `1.2` へのリンクだが、PR #111 以降の Markdown では `1` になる。nishio 判断: この挙動差は既知として受容し、困るという意見が出るまで数字ドットの例外などを先回りで実装しない。[[markdown-obsidian-indexed-mirror]] の 2026-11-09 Update に追記。
+
+## [2026-11-20 00:05] implementation+file back | sync の部分コミット（1.14.6）と、Gyazo branch への origin/main の取り込み
+- 動機: 2026-11-19 22:20 ごろ `nishio` project の `sync --limit 3000` が 517 件の差分を取る途中の HTTP 429 で落ち、1 件も書かれなかった（[[cosense-fetch-rate-limit]] の「scope の限界」にあった「sync は部分コミットしない」そのもの）。
+- 実装: `sync_from_cosense` は変わった page を古い変更から順に読み、`--commit-every`（既定 50）page ごとに upsert する。retry を使い切ったら書けた分を残して `complete=false` / `diagnostic.type=sync_interrupted` を返し、CLI は exit 1。古い変更から書くのは、recent sync が updated 降順で最初の未変更 page に当たると走査を止めるため。Retry-After は stderr にあれば下限にする（現行 cosense CLI は出さない）。待ちを削る・並列を増やす変更はしていない。テスト 8 件追加。[[grasp-v1-implemented]] の sync facts、[[history]] の `1.14.6`、[[grasp-backlog]] を更新。
+- 取り込み: Mac の作業 branch `codex/gyazo-local-media`（072e737・d99ec0a・e4322ac・caaa4be、origin に無い）に origin/main（PR #111・#112 ほか 10 commit）を merge した。衝突は wiki の Markdown だけで、両側が同じ 1.14.3 の事実を別々に書いていた（branch 側は引けない SHA `55240a7` のまま）。main 側の文を採り、branch 側にだけあった「connection-level transient の retry は未実装」と backlog の lock 負けの項を残した。log は両側を日付順に並べた。
+- direct Markdown patch fallback: 共有の `.grasp/file-back.sqlite` は別の checkout（Mac の primary worktree）にあり、そこは動いている grasp なので書かなかった。この worktree には写しを置いて `reconcile-markdown --dry-run` で blocker 0 を確かめた。merge する側は primary の store で `reconcile-markdown --dry-run` → reconcile を行うこと。

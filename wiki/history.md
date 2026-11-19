@@ -59,6 +59,7 @@ v1 系では public version を `1.x.y` とする。
 
 2026-06-23 の同日 MVP churn を、v1 互換性履歴として後付けで整理したもの。git tag / PyPI release の履歴ではなく、store compatibility ledger。`更新` は各 entry 行を最後に更新した commit の committer time（JST, 分まで）。
 
+- `1.14.6`（更新: 2026-11-20、store: schema `14`、compat: schema `14` compatible）: `sync` が取れた分を残すようにした。変わった page を古い変更から順に `readPage` し、`--commit-every`（既定 50）page ごとに upsert する。retry を使い切って read が失敗したら、それまでの分を残して `complete=false` と `diagnostic.type=sync_interrupted` を返し exit 1。recent sync は updated 降順で最初の未変更 page で走査を止めるので、古い変更から書けば次の回は書かれていない新しい変更の上で止まり、続きから取れる。`--full-reconcile` が途中で止まった時は tombstone しない。retry の待ちは cosense CLI の stderr に `Retry-After` があればそれ以上待つ（上限 `GRASP_COSENSE_RETRY_AFTER_MAX_SECONDS`=900。現行 CLI は出さないので通常は従来の指数 backoff）。result に `complete` / `commit_every` / `fetch_order` / `interrupted` / `retries`。動機は 2026-11-19 の `nishio` project の sync で、517 件の差分を取る途中の 429 で落ちて 1 件も書かれなかったこと。[[cosense-fetch-rate-limit]]
 - `1.14.5`（更新: 2026-09-18、store: schema `14`、compat: schema `14` compatible）: ページカード・プロジェクトを保持したリンク・同一図参照・VT構造分析snapshotの接続を追加。[[page-cards-and-image-analysis]]。
 - `1.14.4`（更新: 2026-09-18、store: schema `14`、compat: schema `14` compatible）: `images scan|fetch|list|status` を追加。Gyazo参照と保存画像を独立sidecarへ保持し、本文storeを変更しない。[[gyazo-local-media]]に契約と制約。
 - `1.14.3`（更新: 2026-09-09 14:57、store: schema `14`、compat: schema `14` compatible）: hosted Cosense fetch の retry 対象に transient 5xx を追加した。`classify_cosense_cli_failure` は HTTP 502 / 503 / 504（および `bad gateway` / `service unavailable` / `gateway timeout`）を `transient-server-error` class として返し、`_run_json` は `RETRYABLE_ERROR_CLASSES`（`rate-limited` + `transient-server-error`）を同じ指数 backoff で retry する。retry を使い切った場合は `transient-server-error` として上がり、`acquire` の next_actions にも 専用の案内が出る。判定は `http 5xx` 前置きと phrase に限定し、page 本文中の裸の数字を誤判定しない。動機は 2026-09-08 の 5.5k page 規模の外部 project `acquire --full-list` で、単発 503 により 35 page を失った事例（`acquire` は namespace 置換なので 5,500 page 再取得が必要になる）。schema は不変
@@ -237,6 +238,6 @@ v1 系では public version を `1.x.y` とする。
 
 ## Current state
 
-- Current public compatibility version: `1.14.5`
+- Current public compatibility version: `1.14.6`
 - Current internal `SCHEMA_VERSION`: `14`
-- Current package metadata should match `1.14.5`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
+- Current package metadata should match `1.14.6`; pre-policy `0.1.0` は release compatibility を表す番号として使わない。
