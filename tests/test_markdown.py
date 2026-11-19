@@ -42,6 +42,24 @@ class MarkdownParsingTests(unittest.TestCase):
             ["Page", "Page", "Other", "Embed", "Std", "Block", "Space Page", "tag", "2024"],
         )
 
+    def test_parse_markdown_links_keeps_dots_in_page_names(self):
+        text = "[[Board Rev.2 design]] [[Folder/v1.5 notes.md#Heading]] [std](Ver.3%20plan.md)"
+
+        self.assertEqual(
+            parse_markdown_links(text),
+            ["Board Rev.2 design", "v1.5 notes", "Ver.3 plan"],
+        )
+
+    def test_parse_markdown_links_ignores_attachment_wikilinks(self):
+        text = "![[Diagram.png]] [[raw/scan.PDF]] ![[clip.mp4|320]] ![[Note]] [[Spec v1.2]]"
+
+        self.assertEqual(parse_markdown_links(text), ["Note", "Spec v1.2"])
+
+    def test_parse_markdown_links_ends_tags_at_punctuation(self):
+        text = "#3の具体化。詳細は #tag、次 #a/b-c_d. Customer #,Description #タグ"
+
+        self.assertEqual(parse_markdown_links(text), ["3の具体化", "tag", "a/b-c_d", "タグ"])
+
     def test_markdown_mirror_skips_fenced_code_links(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

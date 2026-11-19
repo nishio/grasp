@@ -4,7 +4,7 @@ summary: Codex 実装指示書。`grasp read` の related（2-hop）を co-citat
 sources:
   - wiki/entities/false-negative-recall-benchmark-2026-08-24.md（precision/density/falsification の実測 SSoT）
   - grasp/cosense.py:604 `related()` / :636 `_related_missing_target()`（score = co-citation Counter、既に計算済み）
-  - grasp/cli.py:664 `--related-limit`（read, default 20）/ :10505 `format_related_items`（`score` を既に表示）
+  - grasp/cli.py:685 `--related-limit`（read, default 20）/ :10541 `format_related_items`（`score` を既に表示）
   - session labels 2026-08-24: 8 query × grep 不可視 top-20 related の core/tangential/noise 判定（validation set）
 id: 89e70c8b3a0fabf4d7b0efd6
 title: related-confidence-tiering-plan
@@ -50,8 +50,8 @@ grasp が既に計算している related `score`（= Q と候補ページの**�
    - `--related-weak`（既定 off）: weak tier も本体に列挙する。旧来の flat 挙動が要る時用。
    - `STRONG_MIN` を上書きする `--related-strong-min N`（既定 2）。0 にすると全 related が strong 扱い＝旧挙動と等価（後方互換のエスケープハッチ）。
    - 既存 `--related-limit` は strong/weak 合算の上限として維持。strong だけの上限が要るなら別途 `--related-strong-limit` を検討（初期は不要）。
-5. `format_related_items`（`cli.py:10505`）を tier 対応にする。text では strong を現行フォーマットで、weak は `--related-weak` 時のみ `(weak, single-bridge)` marker 付きで出す。JSON の related item に `tier` を、result 直下に `related_confidence` を追加する。
-6. スタンドアロン `grasp related` verb（`cli.py:809`）にも同じ `tier` / `related_confidence` / `--related-weak` / `--related-strong-min` を通す。
+5. `format_related_items`（`cli.py:10541`）を tier 対応にする。text では strong を現行フォーマットで、weak は `--related-weak` 時のみ `(weak, single-bridge)` marker 付きで出す。JSON の related item に `tier` を、result 直下に `related_confidence` を追加する。
+6. スタンドアロン `grasp related` verb（`cli.py:830`）にも同じ `tier` / `related_confidence` / `--related-weak` / `--related-strong-min` を通す。
 
 ### 非目標 / ガード
 
